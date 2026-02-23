@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.so
+
+# Virtual environment
+.venv/
+.cache/
+env/
+venv/
+
+# uv
+.uv/
+
+# Distribution
+*.tar.gz
+*.whl
+
+# Environment secrets
+.env
+.env.local
+.env.*.local
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Session registry (local data, not for version control)
+~/.summon/
+
+# Scratch files
+_inspect_sdk.py
+_inspect_sdk2.py
+
+# Serena MCP
+.serena/
+
+# Project memory (cross-session notes, not for version control)
+hack/
