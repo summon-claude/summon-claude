@@ -21,6 +21,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from summon_claude._formatting import format_file_references
 from summon_claude.auth import SessionAuth, generate_session_token, verify_short_code
 from summon_claude.channel_manager import ChannelManager
+from summon_claude.commands import CommandContext, CommandRegistry, build_registry
 from summon_claude.config import SummonConfig, discover_installed_plugins
 from summon_claude.content_display import ContentDisplay
 from summon_claude.mcp_tools import create_summon_mcp_server
@@ -100,9 +101,12 @@ class SummonSession:
         self._permission_handler: PermissionHandler | None = None
         self._channel_id: str | None = None
         self._auth: SessionAuth | None = None
+        self._provider: SlackChatProvider | None = None
+        self._command_registry: CommandRegistry = build_registry()
+        self._session_start_time: datetime = datetime.now(UTC)
 
         # Message queue: Slack user messages -> Claude
-        self._message_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._message_queue: asyncio.Queue[tuple[str, str | None]] = asyncio.Queue()
 
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
@@ -252,6 +256,7 @@ class SummonSession:
         assert self._client is not None
 
         provider = SlackChatProvider(self._client)
+        self._provider = provider
         channel_manager = ChannelManager(provider, self._config.channel_prefix)
         channel_id, channel_name = await channel_manager.create_session_channel(self._name)
         self._channel_id = channel_id
@@ -342,6 +347,7 @@ class SummonSession:
 
         async with ClaudeSDKClient(options) as claude:
             # Store Claude session ID if available
+            server_info = None
             try:
                 server_info = await claude.get_server_info()
                 if server_info:
@@ -353,18 +359,28 @@ class SummonSession:
             except Exception as e:
                 logger.debug("Could not retrieve Claude session ID: %s", e)
 
+            # Initialize command registry with passthrough commands from SDK
+            self._command_registry = build_registry()
+            if server_info:
+                commands = server_info.get("commands", [])
+                if commands:
+                    self._command_registry.set_passthrough_commands(commands)
+
             while not self._shutdown_event.is_set():
                 try:
-                    user_message = await asyncio.wait_for(
+                    item = await asyncio.wait_for(
                         self._message_queue.get(), timeout=_QUEUE_POLL_INTERVAL_S
                     )
                 except TimeoutError:
                     continue
 
+                user_message, thread_ts = item
                 if not user_message:
                     continue
 
-                await self._handle_user_message(claude, router, streamer, provider, user_message)
+                await self._handle_user_message(
+                    claude, router, streamer, provider, user_message, thread_ts
+                )
 
     async def _handle_user_message(
         self,
@@ -373,6 +389,7 @@ class SummonSession:
         streamer: ResponseStreamer,
         provider: SlackChatProvider,
         message: str,
+        _thread_ts: str | None = None,
     ) -> None:
         """Forward a single user message to Claude and stream the response."""
         assert self._registry is not None
@@ -584,7 +601,95 @@ class SummonSession:
             if file_context:
                 full_text = f"{text}\n\n{file_context}"
 
-        await self._message_queue.put(full_text)
+        thread_ts = event.get("ts")
+
+        # Check for command prefix
+        parsed = self._command_registry.parse(full_text)
+        if parsed is not None:
+            await self._dispatch_command(parsed[0], parsed[1], user_id, thread_ts)
+            return
+
+        await self._message_queue.put((full_text, None))
+
+    async def _dispatch_command(
+        self,
+        name: str,
+        args: list[str],
+        user_id: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Dispatch a !-prefixed command and post the result as a threaded reply."""
+        assert self._channel_id is not None
+        assert self._provider is not None
+
+        ctx = CommandContext(
+            channel_id=self._channel_id,
+            thread_ts=thread_ts,
+            user_id=user_id,
+            provider=self._provider,
+            turns=self._total_turns,
+            cost_usd=self._total_cost,
+            start_time=self._session_start_time,
+            model=self._model,
+            session_id=self._session_id,
+            metadata={"registry": self._command_registry},
+        )
+
+        try:
+            result = await self._command_registry.dispatch(name, args, ctx)
+        except Exception as e:
+            logger.exception("Command dispatch error for !%s: %s", name, e)
+            try:
+                await self._provider.post_message(
+                    self._channel_id,
+                    f":warning: Error executing `!{name}`.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.warning("Failed to post command error: %s", e2)
+            return
+
+        # Handle model change from !model
+        if "new_model" in result.metadata:
+            self._model = result.metadata["new_model"]
+
+        # Handle shutdown signal from !end/!quit/!exit/!logout
+        if result.metadata.get("shutdown"):
+            if result.text:
+                try:
+                    await self._provider.post_message(
+                        self._channel_id, result.text, thread_ts=thread_ts
+                    )
+                except Exception as e:
+                    logger.warning("Failed to post shutdown message: %s", e)
+            self._shutdown_event.set()
+            self._message_queue.put_nowait(("", None))
+            return
+
+        # Pass-through: translate !cmd args -> /cmd args and enqueue
+        if not result.suppress_queue:
+            slash_message = f"/{name}" + (" " + " ".join(args) if args else "")
+            if len(slash_message) > _MAX_USER_MESSAGE_CHARS:
+                slash_message = slash_message[:_MAX_USER_MESSAGE_CHARS]
+            try:
+                await self._provider.post_message(
+                    self._channel_id,
+                    f":gear: Running `{slash_message}`...",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.warning("Failed to post passthrough ack: %s", e)
+            await self._message_queue.put((slash_message, None))
+            return
+
+        # Post the response text in thread
+        if result.text:
+            try:
+                await self._provider.post_message(
+                    self._channel_id, result.text, thread_ts=thread_ts
+                )
+            except Exception as e:
+                logger.warning("Failed to post command response: %s", e)
 
     async def _on_permission_action(self, ack, action, body) -> None:
         """Handle permission approve/deny button clicks."""
@@ -616,5 +721,5 @@ class SummonSession:
         logger.info("Received shutdown signal")
         self._shutdown_event.set()
         # Put a sentinel to unblock the message queue
-        self._message_queue.put_nowait("")
+        self._message_queue.put_nowait(("", None))
 

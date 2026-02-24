@@ -183,7 +183,7 @@ class TestSessionSignalHandler:
         session = SummonSession(config, make_options())
         session._handle_signal()
         item = await asyncio.wait_for(session._message_queue.get(), timeout=1.0)
-        assert item == ""
+        assert item == ("", None)
 
     async def test_handle_signal_second_signal_force_exits(self):
         """Second signal call should trigger os._exit(1) when event already set."""
