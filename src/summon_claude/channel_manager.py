@@ -33,6 +33,14 @@ class ChannelManager:
         logger.info("Created session channel %s (id=%s)", channel_name, channel_id)
         return channel_id, channel_name
 
+    async def invite_user_to_channel(self, channel_id: str, user_id: str) -> None:
+        """Invite a user to a session channel."""
+        try:
+            await self._provider.invite_user(channel_id, user_id)
+            logger.info("Invited user %s to channel %s", user_id, channel_id)
+        except Exception as e:
+            logger.warning("Failed to invite user %s to channel %s: %s", user_id, channel_id, e)
+
     async def archive_session_channel(self, channel_id: str) -> None:
         """Post a closing message and archive the channel."""
         try:
@@ -101,7 +109,7 @@ class ChannelManager:
                 name = f"{trimmed}{suffix}"
 
             try:
-                ref = await self._provider.create_channel(name)
+                ref = await self._provider.create_channel(name, is_private=True)
                 return ref.channel_id, ref.name
             except Exception as e:
                 err_str = str(e)

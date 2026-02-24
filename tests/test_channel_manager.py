@@ -24,6 +24,13 @@ class TestChannelManagerCreateChannel:
         assert channel_name == "summon-test-0101"
         provider.create_channel.assert_called_once()
 
+    async def test_create_channel_is_private(self):
+        provider = make_mock_provider()
+        mgr = ChannelManager(provider)
+        await mgr.create_session_channel("test")
+        call_kwargs = provider.create_channel.call_args[1]
+        assert call_kwargs["is_private"] is True
+
     async def test_channel_name_includes_prefix(self):
         provider = make_mock_provider()
         mgr = ChannelManager(provider, channel_prefix="sc")
@@ -83,6 +90,21 @@ class TestChannelManagerCreateChannel:
         mgr = ChannelManager(provider)
         with pytest.raises(Exception, match="not_authed"):
             await mgr.create_session_channel("test")
+
+
+class TestChannelManagerInviteUser:
+    async def test_invite_calls_provider(self):
+        provider = make_mock_provider()
+        mgr = ChannelManager(provider)
+        await mgr.invite_user_to_channel("C_TEST", "U_USER")
+        provider.invite_user.assert_called_once_with("C_TEST", "U_USER")
+
+    async def test_invite_error_is_swallowed(self):
+        provider = make_mock_provider()
+        provider.invite_user = AsyncMock(side_effect=Exception("already_in_channel"))
+        mgr = ChannelManager(provider)
+        # Should not raise
+        await mgr.invite_user_to_channel("C_TEST", "U_USER")
 
 
 class TestChannelManagerArchive:

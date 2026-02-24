@@ -83,6 +83,9 @@ class SlackChatProvider:
         channel = resp.get("channel") or {}
         return ChannelRef(channel_id=channel["id"], name=channel.get("name", name))
 
+    async def invite_user(self, channel: str, user_id: str) -> None:
+        await self._client.conversations_invite(channel=channel, users=[user_id])
+
     async def archive_channel(self, channel_id: str) -> None:
         try:
             await self._client.conversations_archive(channel=channel_id)

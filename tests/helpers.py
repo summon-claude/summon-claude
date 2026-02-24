@@ -19,5 +19,6 @@ def make_mock_provider():
     provider.create_channel = AsyncMock(
         return_value=ChannelRef(channel_id="C_NEW", name="test-channel")
     )
+    provider.invite_user = AsyncMock()
     provider.archive_channel = AsyncMock()
     return provider

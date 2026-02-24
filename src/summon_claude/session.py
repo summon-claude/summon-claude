@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import signal
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,6 +38,10 @@ _AUTH_POLL_INTERVAL_S = 1.0
 _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
+_CLEANUP_TIMEOUT_S = 10.0
+
+# Patterns that may appear in exception messages and should not be stored in the audit log
+_SECRET_PATTERN = re.compile(r"xoxb-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
 
 _SYSTEM_PROMPT = {
     "type": "preset",
@@ -103,6 +108,8 @@ class SummonSession:
         self._shutdown_event = asyncio.Event()
         self._authenticated_event = asyncio.Event()
         self._authenticated_user_id: str | None = None
+        # Tracks whether _shutdown() completed successfully
+        self._shutdown_completed: bool = False
 
         # Session stats
         self._total_cost: float = 0.0
@@ -140,53 +147,71 @@ class SummonSession:
         async with SessionRegistry() as registry:
             self._registry = registry
 
-            # Set up Slack app
-            self._client = AsyncWebClient(token=self._config.slack_bot_token)
-            self._app = self._build_slack_app()
-            self._socket_handler = AsyncSocketModeHandler(self._app, self._config.slack_app_token)
-
-            # Install signal handlers
-            loop = asyncio.get_running_loop()
-            for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
-                loop.add_signal_handler(sig, self._handle_signal)
-
-            logger.info("Waiting for Slack authentication...")
-
-            auth_task = asyncio.create_task(self._wait_for_auth())
-            socket_task = asyncio.create_task(self._socket_handler.start_async())
-            done, pending = await asyncio.wait(
-                {auth_task, socket_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            # Cancel any still-running tasks
-            for task in pending:
-                task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):
-                    pass
-            # Re-raise unexpected exceptions from auth_task
-            for task in done:
-                if task is auth_task and not task.cancelled():
-                    exc = task.exception()
-                    if exc is not None:
-                        raise exc
-
-            if not self._authenticated_event.is_set():
-                logger.error("Authentication failed or timed out")
-                await registry.update_status(
-                    self._session_id, "errored", error_message="Authentication timed out"
+            try:
+                # Set up Slack app
+                self._client = AsyncWebClient(token=self._config.slack_bot_token)
+                self._app = self._build_slack_app()
+                self._socket_handler = AsyncSocketModeHandler(
+                    self._app, self._config.slack_app_token
                 )
-                await registry.log_event(
-                    "session_errored",
-                    session_id=self._session_id,
-                    details={"reason": "Authentication timed out"},
-                )
-                return False
 
-            # Auth succeeded — create channel and run session
-            await self._run_session()
-            return True
+                # Install signal handlers
+                loop = asyncio.get_running_loop()
+                for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                    loop.add_signal_handler(sig, self._handle_signal)
+
+                logger.info("Waiting for Slack authentication...")
+
+                auth_task = asyncio.create_task(self._wait_for_auth())
+                socket_task = asyncio.create_task(self._socket_handler.start_async())
+                done, pending = await asyncio.wait(
+                    {auth_task, socket_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                # Cancel any still-running tasks
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                # Re-raise unexpected exceptions from auth_task
+                for task in done:
+                    if task is auth_task and not task.cancelled():
+                        exc = task.exception()
+                        if exc is not None:
+                            raise exc
+
+                if not self._authenticated_event.is_set():
+                    logger.error("Authentication failed or timed out")
+                    await registry.update_status(
+                        self._session_id, "errored", error_message="Authentication timed out"
+                    )
+                    await registry.log_event(
+                        "session_errored",
+                        session_id=self._session_id,
+                        details={"reason": "Authentication timed out"},
+                    )
+                    self._shutdown_completed = True
+                    return False
+
+                # Auth succeeded — create channel and run session
+                await self._run_session()
+                return True
+            except asyncio.CancelledError:
+                logger.info("Session task cancelled during startup")
+                raise
+            finally:
+                if not self._shutdown_completed:
+                    try:
+                        await registry.update_status(
+                            self._session_id,
+                            "errored",
+                            error_message="Session terminated unexpectedly",
+                            ended_at=datetime.now(UTC).isoformat(),
+                        )
+                    except Exception as e:
+                        logger.warning("Failed to update registry on unexpected termination: %s", e)
 
     async def _wait_for_auth(self) -> None:
         """Poll until auth is confirmed, timed out, or shutdown is requested."""
@@ -231,6 +256,10 @@ class SummonSession:
         channel_id, channel_name = await channel_manager.create_session_channel(self._name)
         self._channel_id = channel_id
         logger.info("Authenticated! Session channel: #%s", channel_name)
+
+        # Invite the authenticating user to the private channel
+        if self._authenticated_user_id:
+            await channel_manager.invite_user_to_channel(channel_id, self._authenticated_user_id)
 
         await self._registry.update_status(
             self._session_id,
@@ -278,8 +307,12 @@ class SummonSession:
             heartbeat_task.cancel()
             try:
                 await heartbeat_task
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, Exception):
                 pass
+
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling() > 0:
+                current_task.uncancel()
 
             await self._shutdown(channel_manager, channel_id)
 
@@ -368,7 +401,7 @@ class SummonSession:
                 session_id=self._session_id,
                 details={
                     "error_type": error_type,
-                    "error": f"{error_type}: {str(e)[:200]}",
+                    "error": _SECRET_PATTERN.sub("***", f"{error_type}: {str(e)[:200]}"),
                 },
             )
             try:
@@ -401,36 +434,58 @@ class SummonSession:
         # Post session summary to channel
         try:
             provider = SlackChatProvider(self._client)
-            await provider.post_message(
-                channel_id,
-                (
-                    f":wave: Session ending.\n"
-                    f"Turns: {self._total_turns} | "
-                    f"Cost: ${self._total_cost:.4f}"
+            await asyncio.wait_for(
+                provider.post_message(
+                    channel_id,
+                    (
+                        f":wave: Session ending.\n"
+                        f"Turns: {self._total_turns} | "
+                        f"Cost: ${self._total_cost:.4f}"
+                    ),
                 ),
+                timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
             logger.warning("Failed to post session summary: %s", e)
 
         # Archive channel
-        await channel_manager.archive_session_channel(channel_id)
+        try:
+            await asyncio.wait_for(
+                channel_manager.archive_session_channel(channel_id),
+                timeout=_CLEANUP_TIMEOUT_S,
+            )
+        except Exception as e:
+            logger.warning("Failed to archive session channel: %s", e)
 
         # Update registry
-        await self._registry.update_status(
-            self._session_id,
-            "completed",
-            ended_at=datetime.now(UTC).isoformat(),
-        )
-        await self._registry.log_event(
-            "session_ended",
-            session_id=self._session_id,
-            details={"total_turns": self._total_turns, "total_cost_usd": self._total_cost},
-        )
+        try:
+            await asyncio.wait_for(
+                self._registry.update_status(
+                    self._session_id,
+                    "completed",
+                    ended_at=datetime.now(UTC).isoformat(),
+                ),
+                timeout=_CLEANUP_TIMEOUT_S,
+            )
+            self._shutdown_completed = True
+            await asyncio.wait_for(
+                self._registry.log_event(
+                    "session_ended",
+                    session_id=self._session_id,
+                    details={"total_turns": self._total_turns, "total_cost_usd": self._total_cost},
+                ),
+                timeout=_CLEANUP_TIMEOUT_S,
+            )
+        except Exception as e:
+            logger.warning("Failed to update registry on shutdown: %s", e)
 
         # Disconnect Socket Mode
         if self._socket_handler:
             try:
-                await self._socket_handler.close_async()
+                await asyncio.wait_for(
+                    self._socket_handler.close_async(),
+                    timeout=_CLEANUP_TIMEOUT_S,
+                )
             except Exception as e:
                 logger.debug("Socket Mode cleanup error: %s", e)
 
@@ -552,6 +607,14 @@ class SummonSession:
 
     def _handle_signal(self) -> None:
         """Signal handler for SIGINT/SIGTERM — triggers graceful shutdown."""
+        if self._shutdown_event.is_set():
+            logger.warning("Received second shutdown signal — forcing exit")
+            # Best-effort flush before hard exit (os._exit skips finally/atexit)
+            import sys  # noqa: PLC0415
+
+            sys.stdout.flush()
+            sys.stderr.flush()
+            os._exit(1)
         logger.info("Received shutdown signal")
         self._shutdown_event.set()
         # Put a sentinel to unblock the message queue

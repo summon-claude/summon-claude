@@ -277,6 +277,22 @@ class TestSlackChatProviderCreateChannel:
         assert ref.name == "test-channel"
 
 
+class TestSlackChatProviderInviteUser:
+    """SlackChatProvider.invite_user tests."""
+
+    async def test_invite_user_calls_conversations_invite(self):
+        """invite_user should delegate to client.conversations_invite."""
+        client = make_mock_slack_client()
+        client.conversations_invite = AsyncMock(return_value={"ok": True})
+        provider = SlackChatProvider(client)
+
+        await provider.invite_user("C_TEST", "U_USER123")
+
+        client.conversations_invite.assert_called_once_with(
+            channel="C_TEST", users=["U_USER123"]
+        )
+
+
 class TestSlackChatProviderArchiveChannel:
     """SlackChatProvider.archive_channel tests."""
 
