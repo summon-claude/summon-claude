@@ -1,0 +1,6 @@
+{
+  "name": "summon-claude",
+  "version": "1.0.0",
+  "description": "Bridge Claude Code sessions to Slack channels",
+  "skills": ["skills/summon/SKILL.md"]
+}

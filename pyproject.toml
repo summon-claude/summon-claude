@@ -1,0 +1,177 @@
+[project]
+name = "summon-claude"
+version = "0.1.0"
+description = "Bridge Claude Code sessions to Slack channels"
+license = "MIT"
+authors = [{name = "Will Gordon"}]
+keywords = ["claude", "slack", "ai", "cli", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "aiohttp>=3.9.0",  # required by slack-sdk's AsyncWebClient
+    "aiosqlite>=0.20.0",
+    "click>=8.1",
+    "claude-agent-sdk>=0.1.39",
+    "pydantic-settings>=2.0",
+    "python-daemon>=3.0",
+    "slack-bolt>=1.21.0",
+    "slack-sdk>=3.33.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/wgordon17/summon-claude"
+Repository = "https://github.com/wgordon17/summon-claude"
+"Bug Tracker" = "https://github.com/wgordon17/summon-claude/issues"
+
+[project.scripts]
+summon = "summon_claude.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/summon_claude"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pyright>=1.1.400",
+    "ruff>=0.15.2",
+]
+
+# ============================================================================
+# RUFF
+# ============================================================================
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+cache-dir = ".cache/ruff"
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "UP",    # pyupgrade
+    "T10",   # flake8-debugger (catch debugger/breakpoint)
+    "T20",   # flake8-print (catch print statements)
+    "S",     # flake8-bandit (security checks)
+    "DTZ",   # flake8-datetimez (timezone-aware datetimes)
+    "RUF",   # Ruff-specific rules
+    "SIM",   # flake8-simplify
+    "PIE",   # flake8-pie (misc lints)
+    "PT",    # flake8-pytest-style
+    "A",     # flake8-builtins (shadowing builtins)
+    "ASYNC", # async-specific checks
+    "ARG",   # flake8-unused-arguments
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise (better exception raising)
+    "TID",   # flake8-tidy-imports (banned imports)
+    "ISC",   # flake8-implicit-str-concat
+    "PTH",   # flake8-use-pathlib (use Path instead of os.path)
+    "PL",    # Pylint rules
+    "SLF",   # flake8-self (private member access)
+]
+ignore = [
+    "RUF012",  # Mutable class attributes (common pattern with frozenset)
+    "PLR2004", # Allow magic values - buffer sizes and limits are self-documenting
+]
+
+[tool.ruff.lint.per-file-ignores]
+# CLI: click.echo for output; slack handler unused args
+"src/summon_claude/cli.py" = ["ARG001"]
+# Session: asserts in private methods; slack handler signatures
+"src/summon_claude/session.py" = ["S101", "SIM105", "ARG001", "ARG002", "PLR0913", "RET504"]
+# Permissions: action_id is part of public API signature (reserved for future routing)
+"src/summon_claude/permissions.py" = ["ARG002"]
+# Registry: dynamic SET clause is safe (column names from allowlist); SIM105
+"src/summon_claude/registry.py" = ["S608", "SIM105"]
+# Channel manager: git subprocess is intentional
+"src/summon_claude/channel_manager.py" = ["S607", "PLW1510"]
+# Streamer: best-effort Slack operations; PLR0911 multiple return paths
+"src/summon_claude/streamer.py" = ["SIM105", "PLR0911", "F841"]
+# Tests: asserts, magic values, hardcoded tokens, subprocess calls, random, deferred imports, asyncio tasks
+"tests/**/*.py" = [
+    "S101",    # assert is standard in tests
+    "S105", "S106",  # hardcoded passwords/tokens are test fixtures
+    "S108",    # temp file paths in tests
+    "S311",    # random.random() fine in tests
+    "S607",    # partial subprocess path fine in tests
+    "PLR2004", # magic values are readable in tests
+    "PLW1510", # subprocess.run check= fine in tests
+    "PLC0415", # deferred imports acceptable in tests
+    "ARG",     # unused args (fixtures, parametrize)
+    "T201",    # print acceptable in tests
+    "SLF001",  # private access needed in tests
+    "RUF059",  # unused unpack in mock tuples
+    "RUF006",  # asyncio.create_task without storing ref (fire-and-forget in tests)
+    "ASYNC",   # blocking I/O in async tests is fine for trivial setup
+    "PT",      # pytest style (we use class-based tests)
+    "C408",    # dict() calls in tests are readable
+    "RET504",  # unnecessary assignment before return in fixtures
+    "F401",    # unused imports sometimes kept for re-export
+]
+"tests/conftest.py" = [
+    "S101", "S105", "S106", "S108", "PLR2004", "ARG", "SLF001", "RET504",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["summon_claude", "helpers"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"
+
+# ============================================================================
+# PYRIGHT
+# ============================================================================
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+include = ["src"]
+exclude = [
+    "**/__pycache__",
+    "**/tests",
+]
+reportMissingImports = false       # claude_agent_sdk has no py.typed marker
+reportMissingTypeStubs = false     # slack_sdk, slack_bolt don't ship stubs
+
+# ============================================================================
+# PYTEST
+# ============================================================================
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+pythonpath = ["tests"]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+    "-p", "no:pastebin",
+    "-p", "no:junitxml",
+]
+cache_dir = ".cache/pytest"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+norecursedirs = [".cache", ".git"]
