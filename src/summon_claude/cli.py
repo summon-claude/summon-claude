@@ -12,11 +12,14 @@ import logging
 import os
 import pathlib
 import re
-import resource
 import signal
 import sys
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from daemon import DaemonContext
 
 import click
 from slack_sdk.web.async_client import AsyncWebClient
@@ -126,56 +129,40 @@ def cmd_start(
     _print_auth_banner(short_code)
 
     # Phase 2: Daemonize if requested (after banner is shown)
+    daemon_ctx: DaemonContext | contextlib.nullcontext[None] = contextlib.nullcontext()
     if background:
+        if sys.platform == "win32":
+            click.echo("Background mode is not supported on Windows.", err=True)
+            sys.exit(1)
+
         log_dir = get_data_dir() / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"{session_id}.log"
-        _daemonize(log_file)
+        click.echo(f"Session started in background. Log: {log_file}")
+
+        import daemon  # noqa: PLC0415  # lazy: unix-only, only needed for --background
+
+        log_fh = log_file.open("a")
+        daemon_ctx = daemon.DaemonContext(
+            working_directory=resolved_cwd,
+            umask=0o022,
+            stdout=log_fh,
+            stderr=log_fh,
+            signal_map={signal.SIGHUP: signal.SIG_IGN},
+        )
 
     # Phase 3: Run session (bolt + auth wait + message loop)
-    try:
-        success = asyncio.run(session.start())
-        if not success:
+    with daemon_ctx:
+        try:
+            success = asyncio.run(session.start())
+            if not success:
+                sys.exit(1)
+        except KeyboardInterrupt:
+            click.echo("\nInterrupted.")
+        except Exception as e:
+            logger.exception("Session error: %s", e)
+            click.echo(f"Error: {e}", err=True)
             sys.exit(1)
-    except KeyboardInterrupt:
-        click.echo("\nInterrupted.")
-    except Exception as e:
-        logger.exception("Session error: %s", e)
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
-
-
-def _daemonize(log_file: pathlib.Path) -> None:
-    """Fork the process into the background, redirecting stdout/stderr to log_file."""
-    # First fork
-    pid = os.fork()
-    if pid > 0:
-        click.echo(f"Session started in background. Log: {log_file}")
-        sys.exit(0)
-
-    # Decouple from parent environment
-    os.setsid()
-    os.umask(0o022)
-
-    # Second fork to prevent zombie processes
-    pid = os.fork()
-    if pid > 0:
-        sys.exit(0)
-
-    # Close inherited file descriptors (except stdin/stdout/stderr)
-    maxfd = resource.getrlimit(resource.RLIMIT_NOFILE)[0]
-    for fd in range(3, min(maxfd, 1024)):
-        with contextlib.suppress(OSError):
-            os.close(fd)
-
-    # Redirect stdin to /dev/null, stdout/stderr to log file
-    os.dup2(os.open(os.devnull, os.O_RDONLY), sys.stdin.fileno())
-    sys.stdout.flush()
-    sys.stderr.flush()
-    log_fd = os.open(str(log_file), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    os.dup2(log_fd, sys.stdout.fileno())
-    os.dup2(log_fd, sys.stderr.fileno())
-    os.close(log_fd)
 
 
 @cli.command("status")
