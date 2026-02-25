@@ -77,3 +77,13 @@ repo-hooks-install: ## Install git hooks (prek)
 repo-hooks-clean: ## Remove git hooks and cache
 	uvx prek uninstall || true
 	uvx prek cache clean
+
+repo-branches-clean: ## Clean up unused development branches and worktrees except current
+	@echo "Removing worktrees..."
+	git worktree list --porcelain | grep "^worktree" | cut -d" " -f2 | grep -v "^"$$(git rev-parse --show-toplevel)"$$" | xargs -I {} git worktree remove {}
+	@echo "Removing local branches..."
+	git branch | grep -v "main" | grep -v "$(CURRENT_BRANCH)" | grep -v "^\*" | xargs -I {} git branch -D {}
+	@echo "Syncing remote branch state..."
+	git fetch --all --prune
+	@echo "Removing remote-origin branches..."
+	git branch -r | grep "origin/" | grep -v "origin/main" | grep -v "origin/$(CURRENT_BRANCH)" | grep -v "origin/HEAD" | sed 's|origin/||' | xargs -I {} git push origin --delete {}

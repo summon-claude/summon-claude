@@ -12,7 +12,6 @@ from summon_claude.cli import (
     _print_auth_banner,
     _print_session_detail,
     _print_session_table,
-    _truncate,
     cli,
 )
 
@@ -177,6 +176,13 @@ class TestCLICommands:
         result = runner.invoke(cli, ["--help"])
         assert "-v" in result.output or "--verbose" in result.output
 
+    def test_short_help_flag(self):
+        """Test that -h works as a shorthand for --help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-h"])
+        assert result.exit_code == 0
+        assert "Usage" in result.output
+
     def test_old_toplevel_commands_removed(self):
         """Test that old top-level status/stop/sessions/logs/cleanup are gone."""
         runner = CliRunner()
@@ -220,14 +226,14 @@ class TestPrintSessionTable:
                 "session_name": "my-session",
                 "slack_channel_name": "summon-my-session-0222",
                 "cwd": "/tmp",
-                "total_turns": 5,
-                "total_cost_usd": 0.0123,
             }
         ]
         _print_session_table(sessions)
         captured = capsys.readouterr()
-        assert "active" in captured.out or "STATUS" in captured.out
-        assert "5" in captured.out
+        assert "STATUS" in captured.out
+        assert "active" in captured.out
+        assert "my-session" in captured.out
+        assert "/tmp" in captured.out
 
     def test_handles_none_values(self, capsys):
         sessions = [
@@ -237,8 +243,6 @@ class TestPrintSessionTable:
                 "session_name": None,
                 "slack_channel_name": None,
                 "cwd": "/home",
-                "total_turns": 0,
-                "total_cost_usd": 0.0,
             }
         ]
         _print_session_table(sessions)
@@ -278,26 +282,6 @@ class TestPrintSessionDetail:
         assert "Connection failed" in captured.out
 
 
-class TestTruncate:
-    def test_short_string_not_truncated(self):
-        result = _truncate("hello", 10)
-        assert result == "hello"
-
-    def test_long_string_truncated(self):
-        result = _truncate("hello world this is long", 10)
-        assert len(result) <= 10
-        assert "..." in result
-
-    def test_exactly_at_limit(self):
-        result = _truncate("hello", 5)
-        assert result == "hello"
-
-    def test_one_over_limit(self):
-        result = _truncate("hello!", 5)
-        assert len(result) <= 5
-        assert "..." in result
-
-
 class TestFormatTs:
     def test_valid_iso_timestamp(self):
         result = _format_ts("2025-02-22T10:30:45+00:00")
@@ -333,7 +317,6 @@ class TestSessionList:
         assert result.exit_code == 0
         assert "active" in result.output
         assert "my-proj" in result.output
-        assert "12" in result.output  # total_turns
 
     def test_list_no_active_sessions(self):
         mock_ctx = _mock_registry(active=[])
@@ -384,7 +367,7 @@ class TestSessionList:
             result = runner.invoke(cli, ["session", "list"])
         assert "STATUS" in result.output
         assert "NAME" in result.output
-        assert "COST" in result.output
+        assert "CWD" in result.output
 
 
 class TestSessionInfo:

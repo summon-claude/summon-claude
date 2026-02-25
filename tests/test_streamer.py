@@ -19,7 +19,6 @@ def make_config(**overrides) -> SummonConfig:
         "slack_bot_token": "xoxb-t",
         "slack_app_token": "xapp-t",
         "slack_signing_secret": "s",
-        "allowed_user_ids": ["U1"],
         "max_inline_chars": 2500,
     }
     defaults.update(overrides)

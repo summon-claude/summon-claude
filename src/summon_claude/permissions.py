@@ -258,11 +258,6 @@ class PermissionHandler:
 
         Must be called AFTER ack() (the 3-second deadline is the caller's responsibility).
         """
-        # Verify the clicking user is authorized
-        if self._config.allowed_user_ids and user_id not in self._config.allowed_user_ids:
-            logger.warning("Unauthorized user %s tried to approve/deny permissions", user_id)
-            return
-
         if value.startswith("approve:"):
             batch_id = value[len("approve:") :]
             approved = True

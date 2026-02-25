@@ -17,7 +17,6 @@ def _make_config(**overrides) -> SummonConfig:
         "slack_bot_token": "xoxb-test-token",
         "slack_app_token": "xapp-test-token",
         "slack_signing_secret": "test-secret",
-        "allowed_user_ids": ["U123456"],
     }
     defaults.update(overrides)
     # Prevent pydantic-settings from reading any .env file during tests
@@ -75,11 +74,6 @@ class TestSummonConfigValidate:
         with pytest.raises(ValueError, match="SUMMON_SLACK_SIGNING_SECRET"):
             cfg.validate()
 
-    def test_empty_allowed_users_raises(self):
-        cfg = _make_config(allowed_user_ids=[])
-        with pytest.raises(ValueError, match="SUMMON_ALLOWED_USER_IDS"):
-            cfg.validate()
-
     def test_multiple_errors_reported_together(self):
         cfg = _make_config(slack_bot_token="", slack_signing_secret="")
         with pytest.raises(ValueError) as exc_info:
@@ -87,34 +81,6 @@ class TestSummonConfigValidate:
         msg = str(exc_info.value)
         assert "SUMMON_SLACK_BOT_TOKEN" in msg
         assert "SUMMON_SLACK_SIGNING_SECRET" in msg
-
-
-class TestSummonConfigAllowedUserIdsParsing:
-    def test_list_passthrough(self):
-        cfg = _make_config(allowed_user_ids=["U1", "U2", "U3"])
-        assert cfg.allowed_user_ids == ["U1", "U2", "U3"]
-
-    def test_comma_separated_string_parsed(self):
-        cfg = SummonConfig.model_validate(
-            {
-                "slack_bot_token": "xoxb-t",
-                "slack_app_token": "xapp-t",
-                "slack_signing_secret": "s",
-                "allowed_user_ids": "U1,U2,U3",
-            }
-        )
-        assert cfg.allowed_user_ids == ["U1", "U2", "U3"]
-
-    def test_comma_separated_with_spaces(self):
-        cfg = SummonConfig.model_validate(
-            {
-                "slack_bot_token": "xoxb-t",
-                "slack_app_token": "xapp-t",
-                "slack_signing_secret": "s",
-                "allowed_user_ids": " U1 , U2 , U3 ",
-            }
-        )
-        assert cfg.allowed_user_ids == ["U1", "U2", "U3"]
 
 
 class TestDiscoverInstalledPlugins:

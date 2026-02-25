@@ -172,14 +172,6 @@ class SummonSession:
                         )
                         return
 
-                    allowed = self._config.allowed_user_ids
-                    if allowed and user_id not in allowed:
-                        await respond(
-                            text="You are not authorized to use summon.",
-                            response_type="ephemeral",
-                        )
-                        return
-
                     text = command.get("text", "").strip()
                     if not text:
                         await respond(
@@ -395,10 +387,6 @@ class SummonSession:
             if subtype or not text or not user_id:
                 return
             if event_channel_id != rt.channel_id:
-                return
-
-            if self._config.allowed_user_ids and user_id not in self._config.allowed_user_ids:
-                logger.debug("Ignoring message from unauthorized user %s", user_id)
                 return
 
             if len(text) > _MAX_USER_MESSAGE_CHARS:

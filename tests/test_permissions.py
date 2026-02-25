@@ -15,24 +15,23 @@ from summon_claude.providers.base import MessageRef
 from summon_claude.thread_router import ThreadRouter
 
 
-def make_config(allowed_user_ids=None, debounce_ms=10):
+def make_config(debounce_ms=10):
     """Build a minimal SummonConfig with fast debounce for tests."""
     return SummonConfig.model_validate(
         {
             "slack_bot_token": "xoxb-t",
             "slack_app_token": "xapp-t",
             "slack_signing_secret": "s",
-            "allowed_user_ids": allowed_user_ids or ["U_ALLOWED"],
             "permission_debounce_ms": debounce_ms,
         }
     )
 
 
-def make_handler(allowed_user_ids=None, debounce_ms=10):
+def make_handler(debounce_ms=10):
     """Create a PermissionHandler with a mocked ThreadRouter."""
     provider = make_mock_provider()
     router = ThreadRouter(provider, "C123")
-    config = make_config(allowed_user_ids=allowed_user_ids, debounce_ms=debounce_ms)
+    config = make_config(debounce_ms=debounce_ms)
     return PermissionHandler(router, config), provider, router
 
 
@@ -194,23 +193,6 @@ class TestHandleAction:
 
         assert handler._batch.decisions.get(batch_id) is False
         assert event.is_set()
-
-    async def test_unauthorized_user_ignored(self):
-        handler, provider, _ = make_handler(allowed_user_ids=["U_ALLOWED"])
-        batch_id = "test-batch-789"
-        event = asyncio.Event()
-        handler._batch.events[batch_id] = event
-
-        await handler.handle_action(
-            action_id="permission_approve",
-            value=f"approve:{batch_id}",
-            user_id="U_UNAUTHORIZED",
-            channel_id="C123",
-            message_ts="111.001",
-        )
-
-        assert not event.is_set()
-        assert batch_id not in handler._batch.decisions
 
     async def test_action_updates_message(self):
         handler, provider, _ = make_handler()

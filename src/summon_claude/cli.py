@@ -95,20 +95,13 @@ class AliasedGroup(click.Group):
         return super().resolve_command(ctx, [canonical, *args[1:]])
 
 
-@click.group(cls=AliasedGroup)
+@click.group(cls=AliasedGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="summon")
 @click.option(
     "-v", "--verbose", is_eager=True, is_flag=True, default=False, help="Enable verbose logging"
 )
 @click.option("-q", "--quiet", is_flag=True, default=False, help="Suppress non-essential output")
 @click.option("--no-color", is_flag=True, default=False, help="Disable colored output")
-@click.option(
-    "-o",
-    "--output",
-    type=click.Choice(["json", "table"]),
-    default="table",
-    help="Output format",
-)
 @click.option(
     "--config",
     "config_path",
@@ -122,7 +115,6 @@ def cli(
     verbose: bool,
     quiet: bool,
     no_color: bool,
-    output: str,
     config_path: str | None,
 ) -> None:
     """Bridge Claude Code sessions to Slack channels."""
@@ -138,13 +130,19 @@ def cli(
     ctx.obj["quiet"] = quiet
     ctx.obj["verbose"] = verbose
     ctx.obj["no_color"] = no_color or bool(os.environ.get("NO_COLOR", ""))
-    ctx.obj["output"] = output
     ctx.obj["config_path"] = config_path
 
 
 @cli.command("version")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
-def cmd_version(ctx: click.Context) -> None:
+def cmd_version(ctx: click.Context, output: str) -> None:
     """Show extended version and environment information."""
     config_file = get_config_file(ctx.obj.get("config_path"))
     data_dir = get_data_dir()
@@ -159,7 +157,7 @@ def cmd_version(ctx: click.Context) -> None:
         "db_path": str(db_path),
     }
 
-    if ctx.obj.get("output") == "json":
+    if output == "json":
         click.echo(json.dumps(info, indent=2))
     else:
         click.echo(f"summon, version {__version__}")
@@ -284,13 +282,20 @@ def cmd_session() -> None:
     default=False,
     help="Show all recent sessions (not just active)",
 )
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
-def session_list(ctx: click.Context, show_all: bool) -> None:
+def session_list(ctx: click.Context, show_all: bool, output: str) -> None:
     """List sessions. Shows active sessions by default; use --all for all recent."""
-    asyncio.run(_async_session_list(ctx, show_all))
+    asyncio.run(_async_session_list(ctx, show_all, output))
 
 
-async def _async_session_list(ctx: click.Context, show_all: bool) -> None:
+async def _async_session_list(ctx: click.Context, show_all: bool, output: str) -> None:
     async with SessionRegistry() as registry:
         if show_all:
             sessions = await registry.list_all(limit=50)
@@ -299,7 +304,6 @@ async def _async_session_list(ctx: click.Context, show_all: bool) -> None:
         if not sessions:
             _echo("No sessions found." if show_all else "No active sessions.", ctx)
             return
-        output = ctx.obj.get("output", "table") if ctx.obj else "table"
         if output == "json":
             click.echo(_format_json(sessions))
         else:
@@ -308,19 +312,25 @@ async def _async_session_list(ctx: click.Context, show_all: bool) -> None:
 
 @cmd_session.command("info")
 @click.argument("session_id")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
 @click.pass_context
-def session_info(ctx: click.Context, session_id: str) -> None:
+def session_info(ctx: click.Context, session_id: str, output: str) -> None:
     """Show detailed information for a specific session."""
-    asyncio.run(_async_session_info(ctx, session_id))
+    asyncio.run(_async_session_info(session_id, output))
 
 
-async def _async_session_info(ctx: click.Context, session_id: str) -> None:
+async def _async_session_info(session_id: str, output: str) -> None:
     async with SessionRegistry() as registry:
         session = await registry.get_session(session_id)
         if not session:
             click.echo(f"Session not found: {session_id}")
             return
-        output = ctx.obj.get("output", "table") if ctx.obj else "table"
         if output == "json":
             click.echo(_format_json(session))
         else:
@@ -462,18 +472,17 @@ def cmd_init(ctx: click.Context) -> None:
     click.echo("Setting up summon-claude configuration...")
     click.echo()
 
-    bot_token = click.prompt("  Slack Bot Token (xoxb-...)")
+    bot_token = click.prompt("  Slack Bot Token (xoxb-...)", hide_input=True)
     while not bot_token.startswith("xoxb-"):
         click.echo("  Error: Bot token must start with 'xoxb-'")
-        bot_token = click.prompt("  Slack Bot Token (xoxb-...)")
+        bot_token = click.prompt("  Slack Bot Token (xoxb-...)", hide_input=True)
 
-    app_token = click.prompt("  Slack App Token (xapp-...)")
+    app_token = click.prompt("  Slack App Token (xapp-...)", hide_input=True)
     while not app_token.startswith("xapp-"):
         click.echo("  Error: App token must start with 'xapp-'")
-        app_token = click.prompt("  Slack App Token (xapp-...)")
+        app_token = click.prompt("  Slack App Token (xapp-...)", hide_input=True)
 
-    signing_secret = click.prompt("  Slack Signing Secret")
-    allowed_users = click.prompt("  Allowed User IDs (comma-separated)")
+    signing_secret = click.prompt("  Slack Signing Secret", hide_input=True)
 
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
     if config_path_override:
@@ -488,7 +497,6 @@ def cmd_init(ctx: click.Context) -> None:
         f"SUMMON_SLACK_BOT_TOKEN={bot_token}",
         f"SUMMON_SLACK_APP_TOKEN={app_token}",
         f"SUMMON_SLACK_SIGNING_SECRET={signing_secret}",
-        f"SUMMON_ALLOWED_USER_IDS={allowed_users}",
     ]
     config_file.write_text("\n".join(lines) + "\n")
     # Restrict config file to owner-only access (0600)
@@ -559,7 +567,7 @@ def _print_session_table(sessions: list[dict]) -> None:
     if not sessions:
         return
 
-    headers = ["STATUS", "NAME", "CHANNEL", "CWD", "TURNS", "COST"]
+    headers = ["STATUS", "NAME", "CHANNEL", "CWD"]
     rows: list[list[str]] = []
     for s in sessions:
         rows.append(
@@ -567,18 +575,18 @@ def _print_session_table(sessions: list[dict]) -> None:
                 s.get("status", "?"),
                 s.get("session_name") or "-",
                 s.get("slack_channel_name") or "-",
-                _truncate(s.get("cwd", ""), 30),
-                str(s.get("total_turns", 0)),
-                f"${s.get('total_cost_usd', 0.0) or 0.0:.4f}",
+                s.get("cwd", ""),
             ]
         )
 
-    col_widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
-    fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
-    click.echo(fmt.format(*headers))
-    click.echo("  ".join("-" * w for w in col_widths))
+    # Fixed-width for all columns except CWD (last), which wraps freely
+    fixed = headers[:-1]
+    col_widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(fixed)]
+    prefix_fmt = "  ".join(f"{{:<{w}}}" for w in col_widths)
+    click.echo(f"{prefix_fmt.format(*fixed)}  {headers[-1]}")
+    click.echo("  ".join("-" * w for w in col_widths) + "  " + "-" * len(headers[-1]))
     for row in rows:
-        click.echo(fmt.format(*row))
+        click.echo(f"{prefix_fmt.format(*row[:-1])}  {row[-1]}")
 
 
 def _print_session_detail(session: dict) -> None:
@@ -616,10 +624,6 @@ def _format_ts(ts: str | None) -> str:
         return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return ts
-
-
-def _truncate(s: str, n: int) -> str:
-    return s if len(s) <= n else "..." + s[-(n - 3) :]
 
 
 def _pid_uid_from_proc(pid: int) -> int | None:

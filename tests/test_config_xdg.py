@@ -127,7 +127,6 @@ class TestConfigLoadsFromXdg:
             "SUMMON_SLACK_BOT_TOKEN=xoxb-from-xdg\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-from-xdg\n"
             "SUMMON_SLACK_SIGNING_SECRET=secret-from-xdg\n"
-            "SUMMON_ALLOWED_USER_IDS=U_XDG_USER\n"
         )
 
         # Need to reload config module so get_config_file() picks up new XDG var
