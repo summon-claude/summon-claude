@@ -626,10 +626,6 @@ def _format_ts(ts: str | None) -> str:
         return ts
 
 
-def _truncate(s: str, n: int) -> str:
-    return s if len(s) <= n else "..." + s[-(n - 3) :]
-
-
 def _pid_uid_from_proc(pid: int) -> int | None:
     """Read the real UID of *pid* from /proc (Linux only)."""
     stat_file = pathlib.Path(f"/proc/{pid}/status")

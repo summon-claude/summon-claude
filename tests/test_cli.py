@@ -12,7 +12,6 @@ from summon_claude.cli import (
     _print_auth_banner,
     _print_session_detail,
     _print_session_table,
-    _truncate,
     cli,
 )
 
@@ -177,6 +176,13 @@ class TestCLICommands:
         result = runner.invoke(cli, ["--help"])
         assert "-v" in result.output or "--verbose" in result.output
 
+    def test_short_help_flag(self):
+        """Test that -h works as a shorthand for --help."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["-h"])
+        assert result.exit_code == 0
+        assert "Usage" in result.output
+
     def test_old_toplevel_commands_removed(self):
         """Test that old top-level status/stop/sessions/logs/cleanup are gone."""
         runner = CliRunner()
@@ -274,26 +280,6 @@ class TestPrintSessionDetail:
         _print_session_detail(session)
         captured = capsys.readouterr()
         assert "Connection failed" in captured.out
-
-
-class TestTruncate:
-    def test_short_string_not_truncated(self):
-        result = _truncate("hello", 10)
-        assert result == "hello"
-
-    def test_long_string_truncated(self):
-        result = _truncate("hello world this is long", 10)
-        assert len(result) <= 10
-        assert "..." in result
-
-    def test_exactly_at_limit(self):
-        result = _truncate("hello", 5)
-        assert result == "hello"
-
-    def test_one_over_limit(self):
-        result = _truncate("hello!", 5)
-        assert len(result) <= 5
-        assert "..." in result
 
 
 class TestFormatTs:
