@@ -50,6 +50,7 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pyright>=1.1.400",
+    "pyyaml>=6.0",
     "ruff>=0.15.2",
 ]
 

@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   build:
@@ -37,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: testpypi
+    permissions:
+      id-token: write
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
@@ -54,6 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: pypi
+    permissions:
+      id-token: write
     steps:
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:

@@ -27,6 +27,8 @@ lint: py-lint ## Run all linters (auto-fix + verify)
 
 test: py-test ## Run all tests
 
+build: py-build ## Build sdist and wheel
+
 clean: py-clean repo-hooks-clean ## Remove all build artifacts
 
 all: py-all ## Complete workflow: install → lint → test
