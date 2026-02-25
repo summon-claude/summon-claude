@@ -92,9 +92,9 @@ class TestVersionCommand:
         assert "Platform" in result.output or "platform" in result.output.lower()
 
     def test_version_command_json_output(self):
-        """Test that summon -o json version outputs valid JSON."""
+        """Test that summon version -o json outputs valid JSON."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["-o", "json", "version"])
+        result = runner.invoke(cli, ["version", "-o", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert isinstance(data, dict)
@@ -105,7 +105,7 @@ class TestVersionCommand:
     def test_version_command_contains_all_fields(self):
         """Test that version command includes all expected fields."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["-o", "json", "version"])
+        result = runner.invoke(cli, ["version", "-o", "json"])
         assert result.exit_code == 0
         data = json.loads(result.output)
         expected_fields = ["version", "python", "platform", "config_file", "data_dir", "db_path"]
@@ -184,7 +184,7 @@ class TestOutputFlag:
         sessions = [_ACTIVE_SESSION]
         mock_ctx = _mock_registry(active=sessions)
         with patch("summon_claude.cli.SessionRegistry", return_value=mock_ctx):
-            result = runner.invoke(cli, ["-o", "json", "session", "list"])
+            result = runner.invoke(cli, ["session", "list", "-o", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert isinstance(data, list)
@@ -196,7 +196,7 @@ class TestOutputFlag:
         runner = CliRunner()
         mock_ctx = _mock_registry(session=_ACTIVE_SESSION)
         with patch("summon_claude.cli.SessionRegistry", return_value=mock_ctx):
-            result = runner.invoke(cli, ["-o", "json", "session", "info", "test-id"])
+            result = runner.invoke(cli, ["session", "info", "test-id", "-o", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert isinstance(data, dict)
@@ -216,7 +216,7 @@ class TestOutputFlag:
     def test_output_invalid_choice_rejected(self):
         """Test that invalid output choice is rejected."""
         runner = CliRunner()
-        result = runner.invoke(cli, ["-o", "invalid", "version"])
+        result = runner.invoke(cli, ["version", "-o", "invalid"])
         assert result.exit_code != 0
         assert "invalid" in result.output.lower() or "choice" in result.output.lower()
 
@@ -252,8 +252,8 @@ class TestConfigFlag:
         with patch("summon_claude.cli_config.get_config_file", return_value=custom_config):
             result = runner.invoke(cli, ["--config", str(custom_config), "config", "show"])
             assert result.exit_code == 0
-            # Should show the content from custom config
-            assert "xoxb-test" in result.output or "..." in result.output
+            # Secret values should show as 'configured', not the raw token
+            assert "SUMMON_SLACK_BOT_TOKEN=configured" in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +272,6 @@ class TestConfigCheck:
             "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
             "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
-            "SUMMON_ALLOWED_USER_IDS=U123,U456\n"
         )
 
         with (
@@ -302,7 +301,6 @@ class TestConfigCheck:
             "SUMMON_SLACK_BOT_TOKEN=invalid-token\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-token\n"
             "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
-            "SUMMON_ALLOWED_USER_IDS=U123\n"
         )
 
         with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
@@ -318,7 +316,6 @@ class TestConfigCheck:
             "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
             "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
-            "SUMMON_ALLOWED_USER_IDS=U123,U456\n"
         )
 
         with (
@@ -350,7 +347,6 @@ class TestConfigCheck:
             "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
             "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
-            "SUMMON_ALLOWED_USER_IDS=U123,U456\n"
         )
 
         with (
@@ -377,7 +373,7 @@ class TestCLIStandardsIntegration:
         sessions = [_ACTIVE_SESSION]
         mock_ctx = _mock_registry(active=sessions)
         with patch("summon_claude.cli.SessionRegistry", return_value=mock_ctx):
-            result = runner.invoke(cli, ["--quiet", "-o", "json", "session", "list"])
+            result = runner.invoke(cli, ["--quiet", "session", "list", "-o", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert isinstance(data, list)

@@ -220,14 +220,14 @@ class TestPrintSessionTable:
                 "session_name": "my-session",
                 "slack_channel_name": "summon-my-session-0222",
                 "cwd": "/tmp",
-                "total_turns": 5,
-                "total_cost_usd": 0.0123,
             }
         ]
         _print_session_table(sessions)
         captured = capsys.readouterr()
-        assert "active" in captured.out or "STATUS" in captured.out
-        assert "5" in captured.out
+        assert "STATUS" in captured.out
+        assert "active" in captured.out
+        assert "my-session" in captured.out
+        assert "/tmp" in captured.out
 
     def test_handles_none_values(self, capsys):
         sessions = [
@@ -237,8 +237,6 @@ class TestPrintSessionTable:
                 "session_name": None,
                 "slack_channel_name": None,
                 "cwd": "/home",
-                "total_turns": 0,
-                "total_cost_usd": 0.0,
             }
         ]
         _print_session_table(sessions)
@@ -333,7 +331,6 @@ class TestSessionList:
         assert result.exit_code == 0
         assert "active" in result.output
         assert "my-proj" in result.output
-        assert "12" in result.output  # total_turns
 
     def test_list_no_active_sessions(self):
         mock_ctx = _mock_registry(active=[])
@@ -384,7 +381,7 @@ class TestSessionList:
             result = runner.invoke(cli, ["session", "list"])
         assert "STATUS" in result.output
         assert "NAME" in result.output
-        assert "COST" in result.output
+        assert "CWD" in result.output
 
 
 class TestSessionInfo:

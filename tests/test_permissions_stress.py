@@ -21,7 +21,6 @@ def make_config(debounce_ms: int = 50) -> SummonConfig:
             "slack_bot_token": "xoxb-t",
             "slack_app_token": "xapp-t",
             "slack_signing_secret": "s",
-            "allowed_user_ids": ["U_ALLOWED"],
             "permission_debounce_ms": debounce_ms,
         }
     )

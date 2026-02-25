@@ -35,10 +35,6 @@ summon start
 | App Token (`xapp-...`) | **Settings** → **Basic Information** → App-Level Tokens → Generate one with `connections:write` scope |
 | Signing Secret | **Settings** → **Basic Information** → App Credentials |
 
-### Find your Slack User ID
-
-In Slack: click your profile picture → **Profile** → click the three-dot menu → **Copy member ID**. This is the `U...` ID to put in `SUMMON_ALLOWED_USER_IDS`.
-
 ## Auth Flow
 
 1. Run `summon start` in your terminal
@@ -91,11 +87,14 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 
 | Flag | Description |
 |------|-------------|
+| `-h`, `--help` | Show help message and exit |
+| `--version` | Show version and exit |
 | `-v`, `--verbose` | Enable verbose logging |
 | `-q`, `--quiet` | Suppress non-essential output (mutually exclusive with `--verbose`) |
 | `--no-color` | Disable colored output (respects `NO_COLOR` environment variable) |
-| `-o`, `--output {json\|table}` | Output format for `session list` and `session info` (default: table) |
 | `--config PATH` | Override config file location (default: XDG-aware path) |
+
+`-o`, `--output {json|table}` is available on `version`, `session list`, and `session info` (default: table).
 
 ## In-Session Commands
 
@@ -138,7 +137,6 @@ Use `summon config path` to see which path is active. Use `summon init` to creat
 | `SUMMON_SLACK_BOT_TOKEN` | Bot token (`xoxb-...`) from OAuth & Permissions |
 | `SUMMON_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode |
 | `SUMMON_SLACK_SIGNING_SECRET` | Signing secret from Basic Information |
-| `SUMMON_ALLOWED_USER_IDS` | Comma-separated Slack user IDs allowed to use the bot |
 
 ### Optional variables
 
@@ -193,7 +191,7 @@ All Slack API calls go through a `ChatProvider` protocol, enabling future suppor
 
 | Module | Purpose |
 |--------|---------|
-| `cli.py` | CLI entry point: global flags (--version, --quiet, --no-color, --output, --config), subcommands |
+| `cli.py` | CLI entry point: global flags (--version, --quiet, --no-color, --config), subcommands |
 | `cli_config.py` | Config subcommand handlers: show, path, edit, set, check |
 | `config.py` | pydantic-settings config with XDG path resolution and plugin discovery |
 | `auth.py` | 8-char hex short codes with 5-min TTL, brute-force protection (5 attempts) |
@@ -222,18 +220,12 @@ All Slack API calls go through a `ChatProvider` protocol, enabling future suppor
 4. Code expires after 5 minutes; locked after 5 failed attempts
 5. `/summon` has a 2-second per-user rate limit
 
-### Authorization
-
-- Only Slack user IDs in `SUMMON_ALLOWED_USER_IDS` can authenticate or send messages
-- The `/summon` slash command rejects unauthorized users before checking the code
-
 ### Permission handling
 
 - **Auto-approved tools**: `Read`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `LSP`, and other read-only operations
 - **User-approved tools**: `Write`, `Edit`, `Bash`, and other destructive operations
 - Approval requests are debounced (default 500ms) and batched into a single Slack message
 - **Timeout**: 5 minutes — unanswered permission requests are denied automatically
-- Only users in `SUMMON_ALLOWED_USER_IDS` can click approve/deny buttons
 
 ### Audit logging
 

@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import shutil
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -231,16 +231,11 @@ class SessionRegistry:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
-    async def list_stale(self, max_age_hours: int = 24) -> list[dict]:
-        """Return sessions with dead PIDs without modifying them.
-
-        Only considers sessions started within the last `max_age_hours` hours.
-        """
+    async def list_stale(self) -> list[dict]:
+        """Return sessions with status pending_auth/active whose PIDs are dead."""
         db = self._check_connected()
-        cutoff = (datetime.now(UTC) - timedelta(hours=max_age_hours)).isoformat()
         async with db.execute(
-            "SELECT * FROM sessions WHERE status IN ('pending_auth', 'active') AND started_at >= ?",
-            (cutoff,),
+            "SELECT * FROM sessions WHERE status IN ('pending_auth', 'active')"
         ) as cursor:
             rows = await cursor.fetchall()
 

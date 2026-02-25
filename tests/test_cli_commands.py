@@ -63,7 +63,6 @@ class TestCmdInit:
                 "xoxb-valid-bot-token",  # bot token (valid)
                 "xapp-valid-app-token",  # app token (valid)
                 "mysecret",  # signing secret
-                "U123,U456",  # allowed user IDs
             ]
         )
 
@@ -79,7 +78,6 @@ class TestCmdInit:
         assert "xoxb-valid-bot-token" in content
         assert "xapp-valid-app-token" in content
         assert "mysecret" in content
-        assert "U123,U456" in content
 
     def test_init_validates_bot_token_prefix(self, tmp_path):
         """init should reject bot tokens that don't start with xoxb-."""
@@ -93,7 +91,6 @@ class TestCmdInit:
                 "xoxb-correct-token",  # correct
                 "xapp-app-token",
                 "mysecret",
-                "U123",
             ]
         )
 
@@ -118,7 +115,6 @@ class TestCmdInit:
                 "invalid-app-token",  # wrong prefix
                 "xapp-correct-app",  # correct
                 "mysecret",
-                "U123",
             ]
         )
 
@@ -133,68 +129,47 @@ class TestCmdInit:
 
 
 class TestConfigShow:
-    def test_config_show_masks_bot_token(self, tmp_path, capsys):
-        """config show should mask SUMMON_SLACK_BOT_TOKEN after first 8 chars."""
+    def test_config_show_hides_secrets(self, tmp_path, capsys):
+        """config show should show 'configured' instead of secret values."""
         config_file = tmp_path / "config.env"
         config_file.write_text(
             "SUMMON_SLACK_BOT_TOKEN=xoxb-secret-should-not-appear\n"
             "SUMMON_SLACK_APP_TOKEN=xapp-another-secret\n"
             "SUMMON_SLACK_SIGNING_SECRET=mysecretvalue12345\n"
-            "SUMMON_ALLOWED_USER_IDS=U123\n"
         )
 
         with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
             config_show()
 
         captured = capsys.readouterr()
-        # Full token should NOT appear
         assert "xoxb-secret-should-not-appear" not in captured.out
-        # First 8 chars + "..." should appear
-        assert "xoxb-sec..." in captured.out
+        assert "xapp-another-secret" not in captured.out
+        assert "mysecretvalue12345" not in captured.out
+        assert "SUMMON_SLACK_BOT_TOKEN=configured" in captured.out
+        assert "SUMMON_SLACK_APP_TOKEN=configured" in captured.out
+        assert "SUMMON_SLACK_SIGNING_SECRET=configured" in captured.out
 
-    def test_config_show_masks_app_token(self, tmp_path, capsys):
+    def test_config_show_missing_secret(self, tmp_path, capsys):
+        """config show should show 'missing' for empty secret values."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=\n")
+
+        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
+            config_show()
+
+        captured = capsys.readouterr()
+        assert "SUMMON_SLACK_BOT_TOKEN=missing" in captured.out
+
+    def test_config_show_non_secret_values_shown(self, tmp_path, capsys):
         config_file = tmp_path / "config.env"
         config_file.write_text(
-            "SUMMON_SLACK_BOT_TOKEN=xoxb-testtest\n"
-            "SUMMON_SLACK_APP_TOKEN=xapp-supersecrettoken\n"
-            "SUMMON_SLACK_SIGNING_SECRET=signingkey\n"
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-testtest\nSUMMON_DEFAULT_MODEL=claude-opus-4-6\n"
         )
 
         with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
             config_show()
 
         captured = capsys.readouterr()
-        assert "xapp-supersecrettoken" not in captured.out
-        assert "xapp-sup..." in captured.out
-
-    def test_config_show_masks_signing_secret(self, tmp_path, capsys):
-        config_file = tmp_path / "config.env"
-        config_file.write_text(
-            "SUMMON_SLACK_BOT_TOKEN=xoxb-testtest\n"
-            "SUMMON_SLACK_APP_TOKEN=xapp-testtest\n"
-            "SUMMON_SLACK_SIGNING_SECRET=secretsigningkeyvalue\n"
-        )
-
-        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
-            config_show()
-
-        captured = capsys.readouterr()
-        assert "secretsigningkeyvalue" not in captured.out
-        assert "secretsi..." in captured.out
-
-    def test_config_show_non_token_values_not_masked(self, tmp_path, capsys):
-        config_file = tmp_path / "config.env"
-        config_file.write_text(
-            "SUMMON_SLACK_BOT_TOKEN=xoxb-testtest\n"
-            "SUMMON_ALLOWED_USER_IDS=U123,U456\n"
-            "SUMMON_DEFAULT_MODEL=claude-opus-4-6\n"
-        )
-
-        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
-            config_show()
-
-        captured = capsys.readouterr()
-        assert "U123,U456" in captured.out
         assert "claude-opus-4-6" in captured.out
 
     def test_config_show_no_file_prints_message(self, tmp_path, capsys):
@@ -211,7 +186,7 @@ class TestConfigSet:
     def test_config_set_updates_existing_value(self, tmp_path):
         """config set should update an existing key in config.env."""
         config_file = tmp_path / "config.env"
-        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-old\nSUMMON_ALLOWED_USER_IDS=U1\n")
+        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-old\n")
 
         with (
             patch("summon_claude.config.get_config_dir", return_value=tmp_path),
@@ -226,7 +201,7 @@ class TestConfigSet:
     def test_config_set_adds_new_key(self, tmp_path):
         """config set should add a new key if it doesn't exist."""
         config_file = tmp_path / "config.env"
-        config_file.write_text("SUMMON_ALLOWED_USER_IDS=U1\n")
+        config_file.write_text("SUMMON_DEFAULT_MODEL=claude-opus-4-6\n")
 
         with (
             patch("summon_claude.config.get_config_dir", return_value=tmp_path),
@@ -256,18 +231,18 @@ class TestConfigSet:
     def test_config_set_preserves_other_lines(self, tmp_path):
         """config set should not modify other lines in the file."""
         config_file = tmp_path / "config.env"
-        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-keep\nSUMMON_ALLOWED_USER_IDS=U1,U2\n")
+        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-keep\nSUMMON_CHANNEL_PREFIX=test\n")
 
         with (
             patch("summon_claude.config.get_config_dir", return_value=tmp_path),
             patch("summon_claude.config.get_config_file", return_value=config_file),
         ):
-            config_set("SUMMON_ALLOWED_USER_IDS", "U3,U4")
+            config_set("SUMMON_CHANNEL_PREFIX", "new-prefix")
 
         content = config_file.read_text()
         assert "xoxb-keep" in content
-        assert "U3,U4" in content
-        assert "U1,U2" not in content
+        assert "new-prefix" in content
+        assert "SUMMON_CHANNEL_PREFIX=test" not in content
 
 
 class TestConfigPath:

@@ -12,14 +12,11 @@ import click
 
 from summon_claude.config import get_config_file, get_data_dir
 
-_TOKEN_MASK_THRESHOLD = 8
-
 _SETTABLE_KEYS = frozenset(
     {
         "SUMMON_SLACK_BOT_TOKEN",
         "SUMMON_SLACK_APP_TOKEN",
         "SUMMON_SLACK_SIGNING_SECRET",
-        "SUMMON_ALLOWED_USER_IDS",
         "SUMMON_DEFAULT_MODEL",
         "SUMMON_CHANNEL_PREFIX",
         "SUMMON_PERMISSION_DEBOUNCE_MS",
@@ -47,7 +44,7 @@ def config_show(override: str | None = None) -> None:
     if config_file is None:
         return
 
-    token_keys = {
+    secret_keys = {
         "SUMMON_SLACK_BOT_TOKEN",
         "SUMMON_SLACK_APP_TOKEN",
         "SUMMON_SLACK_SIGNING_SECRET",
@@ -56,15 +53,15 @@ def config_show(override: str | None = None) -> None:
     for raw_line in config_file.read_text().splitlines():
         stripped = raw_line.strip()
         if not stripped or stripped.startswith("#"):
-            click.echo(raw_line)
             continue
         if "=" in stripped:
             k, _, v = stripped.partition("=")
             k = k.strip()
             v = v.strip()
-            if k in token_keys and len(v) > _TOKEN_MASK_THRESHOLD:
-                v = v[:_TOKEN_MASK_THRESHOLD] + "..."
-            click.echo(f"{k}={v}")
+            if k in secret_keys:
+                click.echo(f"{k}={'configured' if v else 'missing'}")
+            else:
+                click.echo(f"{k}={v}")
         else:
             click.echo(raw_line)
 
@@ -121,7 +118,6 @@ _REQUIRED_KEYS = (
     "SUMMON_SLACK_BOT_TOKEN",
     "SUMMON_SLACK_APP_TOKEN",
     "SUMMON_SLACK_SIGNING_SECRET",
-    "SUMMON_ALLOWED_USER_IDS",
 )
 
 

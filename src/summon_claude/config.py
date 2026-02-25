@@ -108,9 +108,6 @@ class SummonConfig(BaseSettings):
     slack_app_token: str  # Socket Mode app-level token (xapp-)
     slack_signing_secret: str
 
-    # Authorization
-    allowed_user_ids: list[str] = []
-
     # Claude model
     default_model: str | None = None
 
@@ -122,14 +119,6 @@ class SummonConfig(BaseSettings):
 
     # Content display
     max_inline_chars: int = 2500
-
-    @field_validator("allowed_user_ids", mode="before")
-    @classmethod
-    def parse_user_ids(cls, v: str | list[str]) -> list[str]:
-        """Parse comma-separated string or list of user IDs."""
-        if isinstance(v, str):
-            return [uid.strip() for uid in v.split(",") if uid.strip()]
-        return v
 
     @field_validator("slack_bot_token")
     @classmethod
@@ -166,9 +155,6 @@ class SummonConfig(BaseSettings):
 
         if not self.slack_signing_secret:
             errors.append("SUMMON_SLACK_SIGNING_SECRET is required")
-
-        if not self.allowed_user_ids:
-            errors.append("SUMMON_ALLOWED_USER_IDS is required (comma-separated Slack user IDs)")
 
         if errors:
             raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
