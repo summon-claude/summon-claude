@@ -90,6 +90,20 @@ summon session logs <SESSION_ID>
 summon s list
 ```
 
+## In-session commands
+
+Once a session is active in Slack, users can type `!`-prefixed commands to control the session:
+
+| Command | Description |
+|---------|-------------|
+| `!help` | Show all available commands |
+| `!status` | Show session status (model, turns, cost, uptime) |
+| `!end` | End the current session |
+| `!model` | Show the active model |
+| `!model <name>` | Switch model (takes effect on next session start) |
+
+`!quit`, `!exit`, and `!logout` are aliases for `!end`. Claude SDK slash commands are available as `!` equivalents (e.g., `!compact`, `!clear`) and forwarded to the SDK.
+
 ## Config management
 
 ```bash

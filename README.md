@@ -90,6 +90,26 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 |------|-------------|
 | `-v`, `--verbose` | Enable verbose logging |
 
+## In-Session Commands
+
+Once a session is active in Slack, type `!`-prefixed commands to control the session without reaching Claude:
+
+| Command | Description |
+|---------|-------------|
+| `!help` | Show all available commands |
+| `!status` | Show session status (model, turns, cost, uptime) |
+| `!end` | End the current session |
+| `!model` | Show the active model |
+| `!model <name>` | Switch model (takes effect on next session start) |
+
+**Aliases:** `!quit`, `!exit`, and `!logout` all map to `!end`.
+
+**Passthrough commands:** Claude SDK slash commands (e.g., `/compact`, `/clear`) are also available as `!compact`, `!clear`, etc. — they are forwarded to the SDK as their `/` equivalents.
+
+**Blocked commands:** `!login` is blocked in Slack sessions.
+
+Use `!help` in a session to see the full list, including any passthrough commands discovered from the SDK.
+
 ## Configuration
 
 Config is loaded in priority order: environment variables → config file → local `.env`.
@@ -175,6 +195,7 @@ All Slack API calls go through a `ChatProvider` protocol, enabling future suppor
 | `content_display.py` | Hybrid inline/file upload display with diff formatting |
 | `streamer.py` | Claude response streaming to Slack with threaded routing |
 | `thread_router.py` | Routes content to main channel, turn threads, and subagent threads |
+| `commands.py` | `!`-prefixed command dispatch: local handlers, passthrough, blocking, aliasing |
 | `session.py` | Core orchestrator: ties all modules together |
 | `mcp_tools.py` | In-process MCP server: `slack_upload_file`, `slack_create_thread`, `slack_react`, `slack_post_snippet` |
 | `providers/base.py` | ChatProvider protocol and message/channel abstractions |
