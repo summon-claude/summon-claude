@@ -95,7 +95,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 # CLI: click.echo for output; slack handler unused args
-"src/summon_claude/cli.py" = ["ARG001"]
+"src/summon_claude/cli.py" = ["ARG001", "PLR0913"]
+# cli_config: config_check has many validation branches by design
+"src/summon_claude/cli_config.py" = ["PLR0912", "PLR0915"]
 # Session: asserts in private methods; slack handler signatures
 "src/summon_claude/session.py" = ["S101", "SIM105", "ARG001", "ARG002", "PLR0913", "RET504"]
 # Permissions: action_id is part of public API signature (reserved for future routing)
