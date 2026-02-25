@@ -234,10 +234,16 @@ All session events (`session_created`, `auth_attempted`, `auth_succeeded`, `auth
 ## Development
 
 ```bash
-make install   # uv sync with dev dependencies
-make lint      # ruff check + format (auto-fix), then pyright
-make test      # pytest with asyncio
-make all       # install → lint → test
+make install            # uv sync + install git hooks
+make lint               # ruff check + format (auto-fix)
+make test               # pytest with asyncio
+make build              # build sdist and wheel
+make clean              # remove build artifacts and cache
+make all                # install → lint → test
+make py-typecheck       # pyright type checking
+make py-test-quick      # fast tests (exclude slow, fail-fast)
+make repo-hooks-install # install prek pre-commit hooks
+make repo-hooks-clean   # remove hooks and cache
 ```
 
 ## License

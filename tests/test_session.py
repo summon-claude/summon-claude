@@ -194,7 +194,8 @@ class TestSlashCommandHandler:
             auth = await generate_session_token(registry, "sess-1")
 
             session = SummonSession(
-                config, make_options(session_id="sess-1"),
+                config,
+                make_options(session_id="sess-1"),
                 auth=make_auth(session_id="sess-1"),
             )
 
@@ -218,7 +219,8 @@ class TestSlashCommandHandler:
             await registry.register("sess-2", 1234, "/tmp")
 
             session = SummonSession(
-                config, make_options(session_id="sess-2"),
+                config,
+                make_options(session_id="sess-2"),
                 auth=make_auth(session_id="sess-2"),
             )
 
@@ -263,7 +265,8 @@ class TestSessionShutdownSummary:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-sd"),
+                config,
+                make_options(session_id="sess-sd"),
                 auth=make_auth(session_id="sess-sd"),
             )
             session._total_turns = 3
@@ -307,7 +310,8 @@ class TestSessionShutdownSummary:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-arch"),
+                config,
+                make_options(session_id="sess-arch"),
                 auth=make_auth(session_id="sess-arch"),
             )
 
@@ -344,7 +348,8 @@ class TestSessionShutdownSummary:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-comp"),
+                config,
+                make_options(session_id="sess-comp"),
                 auth=make_auth(session_id="sess-comp"),
             )
 
@@ -386,7 +391,8 @@ class TestSessionShutdown:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-flag"),
+                config,
+                make_options(session_id="sess-flag"),
                 auth=make_auth(session_id="sess-flag"),
             )
             assert session._shutdown_completed is False
@@ -424,7 +430,8 @@ class TestSessionShutdown:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-fail"),
+                config,
+                make_options(session_id="sess-fail"),
                 auth=make_auth(session_id="sess-fail"),
             )
             assert session._shutdown_completed is False
@@ -432,6 +439,7 @@ class TestSessionShutdown:
             # Mock registry.update_status to raise an exception
             async def failing_update(*args, **kwargs):
                 raise RuntimeError("Registry update failed")
+
             registry.update_status = failing_update
 
             rt = _SessionRuntime(
@@ -468,7 +476,8 @@ class TestSessionShutdown:
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-arch-fail"),
+                config,
+                make_options(session_id="sess-arch-fail"),
                 auth=make_auth(session_id="sess-arch-fail"),
             )
 
@@ -505,16 +514,19 @@ class TestSessionShutdown:
             await registry.register("sess-timeout", 1234, "/tmp")
 
             mock_client = AsyncMock()
+
             # Make post_message hang forever (simulating timeout)
             async def hanging_post(*args, **kwargs):
                 await asyncio.sleep(999)
+
             mock_client.chat_postMessage = AsyncMock(side_effect=hanging_post)
 
             mock_permission_handler = AsyncMock()
             mock_socket_handler = AsyncMock()
 
             session = SummonSession(
-                config, make_options(session_id="sess-timeout"),
+                config,
+                make_options(session_id="sess-timeout"),
                 auth=make_auth(session_id="sess-timeout"),
             )
 
@@ -551,7 +563,8 @@ class TestSessionStartGuard:
             await registry.register("sess-finally", 1234, "/tmp")
 
             session = SummonSession(
-                config, make_options(session_id="sess-finally"),
+                config,
+                make_options(session_id="sess-finally"),
                 auth=make_auth(session_id="sess-finally"),
             )
             assert session._shutdown_completed is False
@@ -572,6 +585,7 @@ class TestSessionStartGuard:
                         )
                     except Exception as e:
                         import logging
+
                         logging.getLogger().warning("Failed to update registry: %s", e)
 
             # Verify registry was updated to errored
@@ -587,7 +601,8 @@ class TestSessionStartGuard:
             await registry.register("sess-skip-final", 1234, "/tmp")
 
             session = SummonSession(
-                config, make_options(session_id="sess-skip-final"),
+                config,
+                make_options(session_id="sess-skip-final"),
                 auth=make_auth(session_id="sess-skip-final"),
             )
             session._shutdown_completed = True  # Already completed
@@ -635,8 +650,6 @@ class TestAuditEventsLogged:
             assert any(e["event_type"] == "session_created" for e in log)
 
 
-
-
 class TestAuthCountdown:
     """Test auth countdown and token cleanup (BUG-021)."""
 
@@ -653,7 +666,8 @@ class TestAuthCountdown:
             )
 
             _session = SummonSession(
-                config, make_options(session_id="sess-timeout"),
+                config,
+                make_options(session_id="sess-timeout"),
                 auth=make_auth(session_id="sess-timeout"),
             )
 
@@ -677,7 +691,8 @@ class TestAuthCountdown:
             )
 
             session = SummonSession(
-                config, make_options(session_id="sess-shutdown"),
+                config,
+                make_options(session_id="sess-shutdown"),
                 auth=make_auth(session_id="sess-shutdown"),
             )
 
@@ -690,5 +705,3 @@ class TestAuthCountdown:
             # Token should be cleaned up
             entry = await registry._get_pending_token("shutdown")
             assert entry is None
-
-

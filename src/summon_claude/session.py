@@ -198,8 +198,7 @@ class SummonSession:
                         await registry.log_event("auth_failed", user_id=user_id)
                         await respond(
                             text=(
-                                ":x: Invalid or expired code."
-                                " Run `summon start` to get a new code."
+                                ":x: Invalid or expired code. Run `summon start` to get a new code."
                             ),
                             response_type="ephemeral",
                         )
@@ -567,9 +566,7 @@ class SummonSession:
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
 
-    async def _shutdown(
-        self, rt: _SessionRuntime, channel_manager: ChannelManager
-    ) -> None:
+    async def _shutdown(self, rt: _SessionRuntime, channel_manager: ChannelManager) -> None:
         """Gracefully shut down the session."""
         logger.info(
             "Session ended. Turns: %d, Total cost: $%.4f", self._total_turns, self._total_cost
@@ -675,9 +672,7 @@ class SummonSession:
         if result.metadata.get("shutdown"):
             if result.text:
                 try:
-                    await rt.provider.post_message(
-                        rt.channel_id, result.text, thread_ts=thread_ts
-                    )
+                    await rt.provider.post_message(rt.channel_id, result.text, thread_ts=thread_ts)
                 except Exception as e:
                     logger.warning("Failed to post shutdown message: %s", e)
             self._shutdown_event.set()
@@ -703,9 +698,7 @@ class SummonSession:
         # Post the response text in thread
         if result.text:
             try:
-                await rt.provider.post_message(
-                    rt.channel_id, result.text, thread_ts=thread_ts
-                )
+                await rt.provider.post_message(rt.channel_id, result.text, thread_ts=thread_ts)
             except Exception as e:
                 logger.warning("Failed to post command response: %s", e)
 

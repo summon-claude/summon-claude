@@ -67,7 +67,6 @@ class TestVerifyShortCode:
         await registry.store_pending_token(
             short_code=auth.short_code,
             session_id="sess-exp",
-
             expires_at=past,
         )
         result = await verify_short_code(registry, auth.short_code)
@@ -79,7 +78,6 @@ class TestVerifyShortCode:
         await registry.store_pending_token(
             short_code=auth.short_code,
             session_id="sess-del",
-
             expires_at=past,
         )
         await verify_short_code(registry, auth.short_code)

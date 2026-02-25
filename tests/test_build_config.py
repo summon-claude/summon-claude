@@ -62,9 +62,9 @@ class TestPyprojectTomlStructure:
         assert "version" in hatch_config, "Missing [tool.hatch.version] section"
         version_config = hatch_config["version"]
         assert "source" in version_config, "Missing 'source' in [tool.hatch.version]"
-        assert (
-            version_config["source"] == "vcs"
-        ), f"Expected source='vcs', got {version_config['source']}"
+        assert version_config["source"] == "vcs", (
+            f"Expected source='vcs', got {version_config['source']}"
+        )
 
 
 class TestInitVersion:
@@ -85,6 +85,7 @@ class TestInitVersion:
         )
         assert summon_claude.__version__, "__version__ must not be empty"
 
+
 class TestLicenseFile:
     """Validate LICENSE file presence and content."""
 
@@ -98,17 +99,13 @@ class TestLicenseFile:
         """Verify that LICENSE contains 'MIT License'."""
         license_path = repo_root() / "LICENSE"
         content = license_path.read_text()
-        assert (
-            "MIT License" in content
-        ), "LICENSE file does not contain 'MIT License'"
+        assert "MIT License" in content, "LICENSE file does not contain 'MIT License'"
 
     def test_license_contains_author(self) -> None:
         """Verify that LICENSE contains 'Will Gordon'."""
         license_path = repo_root() / "LICENSE"
         content = license_path.read_text()
-        assert (
-            "Will Gordon" in content
-        ), "LICENSE file does not contain 'Will Gordon'"
+        assert "Will Gordon" in content, "LICENSE file does not contain 'Will Gordon'"
 
 
 class TestMakefileTargets:
@@ -175,15 +172,11 @@ class TestMakefileTargets:
 
     def test_repo_hooks_install_exists(self, makefile_content: str) -> None:
         """Verify repo-hooks-install target exists."""
-        assert "repo-hooks-install:" in makefile_content, (
-            "Missing repo-hooks-install target"
-        )
+        assert "repo-hooks-install:" in makefile_content, "Missing repo-hooks-install target"
 
     def test_repo_hooks_clean_exists(self, makefile_content: str) -> None:
         """Verify repo-hooks-clean target exists."""
-        assert "repo-hooks-clean:" in makefile_content, (
-            "Missing repo-hooks-clean target"
-        )
+        assert "repo-hooks-clean:" in makefile_content, "Missing repo-hooks-clean target"
 
 
 class TestWorkflowFiles:
@@ -227,9 +220,7 @@ class TestWorkflowFiles:
         """Verify publish.yaml has id-token: write permission."""
         path = repo_root() / ".github" / "workflows" / "publish.yaml"
         content = path.read_text()
-        assert (
-            "id-token: write" in content
-        ), "publish.yaml missing 'id-token: write' permission"
+        assert "id-token: write" in content, "publish.yaml missing 'id-token: write' permission"
 
     def test_publish_yaml_has_testpypi_environment(self) -> None:
         """Verify publish.yaml references testpypi environment."""
@@ -241,17 +232,13 @@ class TestWorkflowFiles:
         """Verify publish.yaml references pypi environment."""
         path = repo_root() / ".github" / "workflows" / "publish.yaml"
         content = path.read_text()
-        assert (
-            "environment: pypi" in content
-        ), "publish.yaml does not reference 'environment: pypi'"
+        assert "environment: pypi" in content, "publish.yaml does not reference 'environment: pypi'"
 
     def test_ci_yaml_has_contents_read_permission(self) -> None:
         """Verify ci.yaml has contents: read permission."""
         path = repo_root() / ".github" / "workflows" / "ci.yaml"
         content = path.read_text()
-        assert (
-            "contents: read" in content
-        ), "ci.yaml missing 'contents: read' permission"
+        assert "contents: read" in content, "ci.yaml missing 'contents: read' permission"
 
 
 class TestPrekToml:
@@ -280,9 +267,7 @@ class TestPrekToml:
 
     def test_prek_fail_fast_true(self, prek_data: dict) -> None:
         """Verify fail_fast = true in prek.toml."""
-        assert (
-            prek_data.get("fail_fast") is True
-        ), "prek.toml must have fail_fast = true"
+        assert prek_data.get("fail_fast") is True, "prek.toml must have fail_fast = true"
 
     def test_prek_has_trufflehog_repo(self, prek_data: dict) -> None:
         """Verify trufflehog repo is configured in prek.toml."""
@@ -290,9 +275,7 @@ class TestPrekToml:
         assert isinstance(repos, list), "repos must be a list"
         trufflehog_found = False
         for repo in repos:
-            if isinstance(repo, dict) and "trufflesecurity/trufflehog" in repo.get(
-                "repo", ""
-            ):
+            if isinstance(repo, dict) and "trufflesecurity/trufflehog" in repo.get("repo", ""):
                 trufflehog_found = True
                 break
         assert trufflehog_found, "trufflehog repo not found in prek.toml"
