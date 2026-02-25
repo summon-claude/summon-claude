@@ -414,9 +414,7 @@ class TestSessionInfo:
         mock_ctx = _mock_registry(session=errored)
         with patch("summon_claude.cli.SessionRegistry", return_value=mock_ctx):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "info", "bbbb1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "info", "bbbb1111-2222-3333-4444-555566667777"])
         assert "Process 123 died" in result.output
 
     def test_info_shows_cost(self):
@@ -442,9 +440,7 @@ class TestSessionStop:
         mock_ctx = _mock_registry(session=_COMPLETED_SESSION)
         with patch("summon_claude.cli.SessionRegistry", return_value=mock_ctx):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "stop", "bbbb1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "stop", "bbbb1111-2222-3333-4444-555566667777"])
         assert "is not active" in result.output
 
     def test_stop_sends_sigterm(self):
@@ -455,9 +451,7 @@ class TestSessionStop:
             patch("summon_claude.cli.os.kill") as mock_kill,
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"])
         assert result.exit_code == 0
         assert "Sent SIGTERM" in result.output
         mock_kill.assert_called_once()
@@ -470,9 +464,7 @@ class TestSessionStop:
             patch("summon_claude.cli.os.kill", side_effect=ProcessLookupError),
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"])
         assert "not found" in result.output
         assert "may have already ended" in result.output
 
@@ -483,9 +475,7 @@ class TestSessionStop:
             patch("summon_claude.cli._pid_owned_by_current_user", return_value=False),
         ):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "stop", "aaaa1111-2222-3333-4444-555566667777"])
         assert "not owned by the current user" in result.output
 
 
@@ -542,9 +532,7 @@ class TestSessionLogs:
         log_dir.mkdir()
         with patch("summon_claude.cli.get_data_dir", return_value=tmp_path):
             runner = CliRunner()
-            result = runner.invoke(
-                cli, ["session", "logs", "aaaa1111-2222-3333-4444-555566667777"]
-            )
+            result = runner.invoke(cli, ["session", "logs", "aaaa1111-2222-3333-4444-555566667777"])
         assert result.exit_code == 0
         assert "No log file found for session" in result.output
 

@@ -87,9 +87,7 @@ class CommandRegistry:
         args = parts[1:]
         return command, args
 
-    async def dispatch(
-        self, name: str, args: list[str], context: CommandContext
-    ) -> CommandResult:
+    async def dispatch(self, name: str, args: list[str], context: CommandContext) -> CommandResult:
         """Dispatch a command: remap -> blocked -> local -> passthrough -> unknown."""
         # Remap aliases to !end
         if name in self._REMAP_TO_END:
@@ -98,9 +96,7 @@ class CommandRegistry:
         # Blocked commands
         if name in self._BLOCKED_COMMANDS:
             reason = self._BLOCKED_COMMANDS[name]
-            return CommandResult(
-                text=f":no_entry: `!{name}` is not available: {reason}"
-            )
+            return CommandResult(text=f":no_entry: `!{name}` is not available: {reason}")
 
         # Local commands
         if name in self._local:
@@ -191,9 +187,7 @@ async def _handle_end(_args: list[str], _ctx: CommandContext) -> CommandResult:
 async def _handle_model(args: list[str], ctx: CommandContext) -> CommandResult:
     if not args:
         current = ctx.model or "default"
-        return CommandResult(
-            text=f"Current model: `{current}`\nTo switch: `!model <model-name>`"
-        )
+        return CommandResult(text=f"Current model: `{current}`\nTo switch: `!model <model-name>`")
 
     model_arg = args[0]
     if not _MODEL_NAME_RE.match(model_arg):

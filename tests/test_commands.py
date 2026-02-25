@@ -548,8 +548,10 @@ class TestDispatchEdgeCases:
     async def test_passthrough_descriptions_from_dicts(self, make_context):
         """Passthrough commands from dicts should preserve descriptions."""
         registry = CommandRegistry()
-        registry.set_passthrough_commands([
-            {"name": "compact", "description": "Compress conversation history"},
-        ])
+        registry.set_passthrough_commands(
+            [
+                {"name": "compact", "description": "Compress conversation history"},
+            ]
+        )
         commands = registry.all_commands()
         assert commands["compact"] == "Compress conversation history"

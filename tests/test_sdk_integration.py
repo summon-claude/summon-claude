@@ -113,15 +113,13 @@ async def test_can_use_tool_callback():
         )
         async with ClaudeSDKClient(options) as client:
             await client.query(
-                "Read the file secret.txt in the current directory "
-                "and tell me its exact contents."
+                "Read the file secret.txt in the current directory and tell me its exact contents."
             )
             async for msg in client.receive_response():
                 msg_type = type(msg).__name__
                 if isinstance(msg, AssistantMessage):
                     blocks = [
-                        f"{type(b).__name__}({getattr(b, 'name', '')}"
-                        f"{getattr(b, 'text', '')[:80]})"
+                        f"{type(b).__name__}({getattr(b, 'name', '')}{getattr(b, 'text', '')[:80]})"
                         for b in msg.content
                     ]
                     received_messages.append(f"{msg_type}: {blocks}")

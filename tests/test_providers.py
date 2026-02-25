@@ -288,9 +288,7 @@ class TestSlackChatProviderInviteUser:
 
         await provider.invite_user("C_TEST", "U_USER123")
 
-        client.conversations_invite.assert_called_once_with(
-            channel="C_TEST", users=["U_USER123"]
-        )
+        client.conversations_invite.assert_called_once_with(channel="C_TEST", users=["U_USER123"])
 
 
 class TestSlackChatProviderArchiveChannel:
