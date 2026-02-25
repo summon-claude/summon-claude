@@ -60,6 +60,8 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 
 | Command | Description |
 |---------|-------------|
+| `summon --version` | Show CLI version |
+| `summon version` | Show version and environment info (Python, platform, paths) |
 | `summon init` | Interactive setup wizard — creates config file with your tokens |
 | `summon start` | Start a new session (prints auth code, waits for `/summon` in Slack) |
 | `summon session list` | Show active sessions (use `--all` for all recent) |
@@ -71,6 +73,7 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config set KEY VALUE` | Set a single config value |
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
+| `summon config check` | Validate config file (keys, token format, DB writability, Slack API connectivity) |
 
 > **Alias:** `summon s` is shorthand for `summon session` (e.g., `summon s list`).
 
@@ -89,6 +92,10 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | Flag | Description |
 |------|-------------|
 | `-v`, `--verbose` | Enable verbose logging |
+| `-q`, `--quiet` | Suppress non-essential output (mutually exclusive with `--verbose`) |
+| `--no-color` | Disable colored output (respects `NO_COLOR` environment variable) |
+| `-o`, `--output {json\|table}` | Output format for `session list` and `session info` (default: table) |
+| `--config PATH` | Override config file location (default: XDG-aware path) |
 
 ## In-Session Commands
 
@@ -186,7 +193,8 @@ All Slack API calls go through a `ChatProvider` protocol, enabling future suppor
 
 | Module | Purpose |
 |--------|---------|
-| `cli.py` | CLI entry point: start/status/stop/sessions/cleanup/init/config |
+| `cli.py` | CLI entry point: global flags (--version, --quiet, --no-color, --output, --config), subcommands |
+| `cli_config.py` | Config subcommand handlers: show, path, edit, set, check |
 | `config.py` | pydantic-settings config with XDG path resolution and plugin discovery |
 | `auth.py` | 8-char hex short codes with 5-min TTL, brute-force protection (5 attempts) |
 | `registry.py` | SQLite session registry with WAL mode, heartbeat, audit log |

@@ -44,7 +44,9 @@ def get_data_dir() -> Path:
     return _xdg_dir("XDG_DATA_HOME", ".local/share/summon", "summon")
 
 
-def get_config_file() -> Path:
+def get_config_file(override: str | None = None) -> Path:
+    if override is not None:
+        return Path(override)
     return get_config_dir() / "config.env"
 
 
@@ -144,6 +146,12 @@ class SummonConfig(BaseSettings):
         if v and not v.startswith("xapp-"):
             raise ValueError("SUMMON_SLACK_APP_TOKEN must start with 'xapp-'")
         return v
+
+    @classmethod
+    def from_file(cls, config_path: str | None = None) -> SummonConfig:
+        if config_path:
+            return cls(_env_file=config_path)
+        return cls()
 
     def validate(self) -> None:
         """Validate required configuration fields and raise with clear errors."""

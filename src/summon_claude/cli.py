@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import pathlib
@@ -21,9 +22,10 @@ import click
 import daemon
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude import __version__
 from summon_claude.auth import SessionAuth, generate_session_token
 from summon_claude.channel_manager import ChannelManager
-from summon_claude.cli_config import config_edit, config_path, config_set, config_show
+from summon_claude.cli_config import config_check, config_edit, config_path, config_set, config_show
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.registry import SessionRegistry
@@ -64,6 +66,15 @@ def _setup_logging(verbose: bool) -> None:
         logging.getLogger("asyncio").setLevel(logging.ERROR)
 
 
+def _echo(msg: str, ctx: click.Context, err: bool = False) -> None:
+    if err or not ctx.obj.get("quiet"):
+        click.echo(msg, err=err)
+
+
+def _format_json(data: list[dict] | dict) -> str:
+    return json.dumps(data, indent=2, default=str)
+
+
 class AliasedGroup(click.Group):
     """Click group with command alias support."""
 
@@ -85,12 +96,78 @@ class AliasedGroup(click.Group):
 
 
 @click.group(cls=AliasedGroup)
+@click.version_option(version=__version__, prog_name="summon")
 @click.option(
     "-v", "--verbose", is_eager=True, is_flag=True, default=False, help="Enable verbose logging"
 )
-def cli(verbose: bool) -> None:
+@click.option("-q", "--quiet", is_flag=True, default=False, help="Suppress non-essential output")
+@click.option("--no-color", is_flag=True, default=False, help="Disable colored output")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Override config file path",
+)
+@click.pass_context
+def cli(
+    ctx: click.Context,
+    verbose: bool,
+    quiet: bool,
+    no_color: bool,
+    output: str,
+    config_path: str | None,
+) -> None:
     """Bridge Claude Code sessions to Slack channels."""
+    if verbose and quiet:
+        raise click.UsageError("--verbose and --quiet are mutually exclusive")
+
     _setup_logging(verbose)
+
+    if no_color or os.environ.get("NO_COLOR", ""):
+        ctx.color = False
+
+    ctx.ensure_object(dict)
+    ctx.obj["quiet"] = quiet
+    ctx.obj["verbose"] = verbose
+    ctx.obj["no_color"] = no_color or bool(os.environ.get("NO_COLOR", ""))
+    ctx.obj["output"] = output
+    ctx.obj["config_path"] = config_path
+
+
+@cli.command("version")
+@click.pass_context
+def cmd_version(ctx: click.Context) -> None:
+    """Show extended version and environment information."""
+    config_file = get_config_file(ctx.obj.get("config_path"))
+    data_dir = get_data_dir()
+    db_path = data_dir / "registry.db"
+
+    info = {
+        "version": __version__,
+        "python": sys.version,
+        "platform": sys.platform,
+        "config_file": str(config_file),
+        "data_dir": str(data_dir),
+        "db_path": str(db_path),
+    }
+
+    if ctx.obj.get("output") == "json":
+        click.echo(json.dumps(info, indent=2))
+    else:
+        click.echo(f"summon, version {__version__}")
+        click.echo(f"Python:      {sys.version}")
+        click.echo(f"Platform:    {sys.platform}")
+        click.echo(f"Config file: {config_file}")
+        click.echo(f"Data dir:    {data_dir}")
+        click.echo(f"DB path:     {db_path}")
 
 
 @cli.command("start")
@@ -112,7 +189,9 @@ def cli(verbose: bool) -> None:
     default=False,
     help="Run session as a background daemon process",
 )
+@click.pass_context
 def cmd_start(
+    ctx: click.Context,
     cwd: str | None,
     resume: str | None,
     name: str | None,
@@ -120,8 +199,9 @@ def cmd_start(
     background: bool,
 ) -> None:
     """Start a new summon session."""
+    config_path = ctx.obj.get("config_path") if ctx.obj else None
     try:
-        config = SummonConfig()
+        config = SummonConfig.from_file(config_path)
         config.validate()
     except Exception as e:
         click.echo(f"Configuration error: {e}", err=True)
@@ -204,37 +284,47 @@ def cmd_session() -> None:
     default=False,
     help="Show all recent sessions (not just active)",
 )
-def session_list(show_all: bool) -> None:
+@click.pass_context
+def session_list(ctx: click.Context, show_all: bool) -> None:
     """List sessions. Shows active sessions by default; use --all for all recent."""
-    asyncio.run(_async_session_list(show_all))
+    asyncio.run(_async_session_list(ctx, show_all))
 
 
-async def _async_session_list(show_all: bool) -> None:
+async def _async_session_list(ctx: click.Context, show_all: bool) -> None:
     async with SessionRegistry() as registry:
         if show_all:
             sessions = await registry.list_all(limit=50)
         else:
             sessions = await registry.list_active()
         if not sessions:
-            click.echo("No sessions found." if show_all else "No active sessions.")
+            _echo("No sessions found." if show_all else "No active sessions.", ctx)
             return
-        _print_session_table(sessions)
+        output = ctx.obj.get("output", "table") if ctx.obj else "table"
+        if output == "json":
+            click.echo(_format_json(sessions))
+        else:
+            _print_session_table(sessions)
 
 
 @cmd_session.command("info")
 @click.argument("session_id")
-def session_info(session_id: str) -> None:
+@click.pass_context
+def session_info(ctx: click.Context, session_id: str) -> None:
     """Show detailed information for a specific session."""
-    asyncio.run(_async_session_info(session_id))
+    asyncio.run(_async_session_info(ctx, session_id))
 
 
-async def _async_session_info(session_id: str) -> None:
+async def _async_session_info(ctx: click.Context, session_id: str) -> None:
     async with SessionRegistry() as registry:
         session = await registry.get_session(session_id)
         if not session:
             click.echo(f"Session not found: {session_id}")
             return
-        _print_session_detail(session)
+        output = ctx.obj.get("output", "table") if ctx.obj else "table"
+        if output == "json":
+            click.echo(_format_json(session))
+        else:
+            _print_session_detail(session)
 
 
 @cmd_session.command("stop")
@@ -314,16 +404,17 @@ def session_logs(session_id: str | None, tail: int) -> None:
 
 
 @cmd_session.command("cleanup")
-def session_cleanup() -> None:
+@click.pass_context
+def session_cleanup(ctx: click.Context) -> None:
     """Mark sessions with dead processes as errored."""
-    asyncio.run(_async_cleanup())
+    asyncio.run(_async_cleanup(ctx))
 
 
-async def _async_cleanup() -> None:
+async def _async_cleanup(ctx: click.Context) -> None:
     async with SessionRegistry() as registry:
         stale = await registry.list_stale()
         if not stale:
-            click.echo("No stale sessions found.")
+            _echo("No stale sessions found.", ctx)
             return
 
         # Try to construct a Slack client for archiving channels (best-effort)
@@ -365,7 +456,8 @@ async def _async_cleanup() -> None:
 
 
 @cli.command("init")
-def cmd_init() -> None:
+@click.pass_context
+def cmd_init(ctx: click.Context) -> None:
     """Interactive setup wizard for summon-claude configuration."""
     click.echo("Setting up summon-claude configuration...")
     click.echo()
@@ -383,9 +475,14 @@ def cmd_init() -> None:
     signing_secret = click.prompt("  Slack Signing Secret")
     allowed_users = click.prompt("  Allowed User IDs (comma-separated)")
 
-    config_dir = get_config_dir()
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_file = get_config_file()
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    if config_path_override:
+        config_file = pathlib.Path(config_path_override)
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        config_dir = get_config_dir()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_file = get_config_file()
 
     lines = [
         f"SUMMON_SLACK_BOT_TOKEN={bot_token}",
@@ -408,29 +505,48 @@ def cmd_config() -> None:
 
 
 @cmd_config.command("show")
-def config_show_cmd() -> None:
+@click.pass_context
+def config_show_cmd(ctx: click.Context) -> None:
     """Show current configuration (tokens masked)."""
-    config_show()
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    config_show(config_path_override)
 
 
 @cmd_config.command("path")
-def config_path_cmd() -> None:
+@click.pass_context
+def config_path_cmd(ctx: click.Context) -> None:
     """Print the config file path."""
-    config_path()
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    config_path(config_path_override)
+
+
+@cmd_config.command("check")
+@click.pass_context
+def config_check_cmd(ctx: click.Context) -> None:
+    """Validate configuration and check connectivity."""
+    quiet = ctx.obj.get("quiet", False) if ctx.obj else False
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    all_pass = config_check(quiet=quiet, config_path=config_path_override)
+    if not all_pass:
+        sys.exit(1)
 
 
 @cmd_config.command("edit")
-def config_edit_cmd() -> None:
+@click.pass_context
+def config_edit_cmd(ctx: click.Context) -> None:
     """Open config file in $EDITOR."""
-    config_edit()
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    config_edit(config_path_override)
 
 
 @cmd_config.command("set")
 @click.argument("key")
 @click.argument("value")
-def config_set_cmd(key: str, value: str) -> None:
+@click.pass_context
+def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
     """Set a configuration value (e.g. SUMMON_SLACK_BOT_TOKEN)."""
-    config_set(key, value)
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    config_set(key, value, config_path_override)
 
 
 # ---------------------------------------------------------------------------

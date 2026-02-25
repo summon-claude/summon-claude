@@ -290,9 +290,9 @@ Migrated CLI framework
 
 ```
 src/summon_claude/
-├── cli.py              # CLI entry point (argparse subcommands)
-├── cli_config.py       # Config subcommands (show, set, path, edit)
-├── config.py           # SummonConfig (pydantic-settings)
+├── cli.py              # CLI entry point with global flags (--version, --quiet, --no-color, --output, --config)
+├── cli_config.py       # Config subcommands (show, set, path, edit, check)
+├── config.py           # SummonConfig (pydantic-settings) with validation
 ├── auth.py             # Session auth tokens and short codes
 ├── session.py          # Session orchestrator (Claude SDK + Slack)
 ├── registry.py         # SQLite session storage (WAL mode)
