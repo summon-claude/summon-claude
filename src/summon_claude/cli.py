@@ -437,34 +437,42 @@ def session_logs(session_id: str | None, tail: int) -> None:
 
 
 @cmd_session.command("cleanup")
+@click.option(
+    "--archive",
+    is_flag=True,
+    default=False,
+    help="Archive Slack channels of stale sessions (channels are preserved by default)",
+)
 @click.pass_context
-def session_cleanup(ctx: click.Context) -> None:
+def session_cleanup(ctx: click.Context, archive: bool) -> None:
     """Mark sessions with dead processes as errored."""
-    asyncio.run(_async_cleanup(ctx))
+    asyncio.run(_async_cleanup(ctx, archive=archive))
 
 
-async def _async_cleanup(ctx: click.Context) -> None:
+async def _async_cleanup(ctx: click.Context, *, archive: bool = False) -> None:
     async with SessionRegistry() as registry:
         stale = await registry.list_stale()
         if not stale:
             _echo("No stale sessions found.", ctx)
             return
 
-        # Try to construct a Slack client for archiving channels (best-effort)
+        # Try to construct a Slack client for archiving channels (best-effort, only if --archive)
         slack_client = None
-        try:
-            config = SummonConfig()
-            slack_client = AsyncWebClient(token=config.slack_bot_token)
-        except Exception as e:
-            logger.debug("Could not initialize Slack client for cleanup: %s", e)
+        if archive:
+            try:
+                config_path: str | None = ctx.obj.get("config_path") if ctx.obj else None
+                config = SummonConfig.from_file(config_path)
+                slack_client = AsyncWebClient(token=config.slack_bot_token)
+            except Exception as e:
+                logger.debug("Could not initialize Slack client for cleanup: %s", e)
 
         for session in stale:
             session_id = session["session_id"]
             channel_id = session.get("slack_channel_id")
             pid = session["pid"]
 
-            # Archive the Slack channel if we have a client and channel ID
-            if slack_client and channel_id:
+            # Archive the Slack channel only if --archive flag was passed
+            if archive and slack_client and channel_id:
                 try:
                     provider = SlackChatProvider(slack_client)
                     channel_manager = ChannelManager(provider, "summon")

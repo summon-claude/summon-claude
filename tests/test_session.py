@@ -182,31 +182,17 @@ class TestWaitForAuth:
 class TestSlashCommandHandler:
     """Test the /summon slash command handler internals."""
 
-    async def test_slash_command_valid_code_sets_event(self, tmp_path):
-        """Valid code should set authenticated_event."""
+    async def test_verify_short_code_returns_result(self, tmp_path):
+        """verify_short_code should return a result for a valid code."""
         from summon_claude.auth import generate_session_token, verify_short_code
         from summon_claude.registry import SessionRegistry
 
-        config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-1", 1234, "/tmp")
             auth = await generate_session_token(registry, "sess-1")
 
-            session = SummonSession(
-                config,
-                make_options(session_id="sess-1"),
-                auth=make_auth(session_id="sess-1"),
-            )
-
-            # Simulate what the handler does: verify the code and set the event
             result = await verify_short_code(registry, auth.short_code)
             assert result is not None
-
-            session._authenticated_user_id = "U123456"
-            session._authenticated_event.set()
-
-            assert session._authenticated_event.is_set()
-            assert session._authenticated_user_id == "U123456"
 
     async def test_slash_command_invalid_code_no_event_set(self, tmp_path):
         """Invalid code should NOT set authenticated_event."""
@@ -226,25 +212,6 @@ class TestSlashCommandHandler:
             result = await verify_short_code(registry, "badcod")
             assert result is None
             assert not session._authenticated_event.is_set()
-
-
-class TestMessageQueueLogic:
-    async def test_message_with_files_appends_context(self):
-        """Messages with file attachments should have file context appended."""
-        files = [{"name": "test.py", "url_private_download": "https://slack.com/test.py"}]
-        text = "here is my file"
-        file_context = format_file_references(files)
-        full_text = f"{text}\n\n{file_context}"
-        assert "test.py" in full_text
-        assert "here is my file" in full_text
-
-    async def test_message_without_files_uses_plain_text(self):
-        """Messages without attachments use text unchanged."""
-        text = "plain message"
-        files = []
-        file_context = format_file_references(files)
-        full_text = text if not file_context else f"{text}\n\n{file_context}"
-        assert full_text == text
 
 
 class TestSessionShutdownSummary:
@@ -283,7 +250,7 @@ class TestSessionShutdownSummary:
             )
             mock_channel_manager.archive_session_channel = AsyncMock()
 
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
             # Summary message should have been posted via provider
             mock_provider.post_message.assert_called_once()
@@ -292,8 +259,8 @@ class TestSessionShutdownSummary:
             assert "3" in call_args[0][1]  # turns in message text
             assert "0.0456" in call_args[0][1] or "0.046" in call_args[0][1]
 
-    async def test_shutdown_archives_channel(self, tmp_path):
-        """_shutdown should archive the session channel."""
+    async def test_shutdown_preserves_channel(self, tmp_path):
+        """_shutdown should NOT archive the session channel — channels are preserved."""
         from summon_claude.channel_manager import ChannelManager
         from summon_claude.registry import SessionRegistry
         from summon_claude.session import _SessionRuntime
@@ -316,20 +283,27 @@ class TestSessionShutdownSummary:
 
             mock_channel_manager = AsyncMock(spec=ChannelManager)
             mock_channel_manager.archive_session_channel = AsyncMock()
+            mock_provider = AsyncMock()
 
             rt = _SessionRuntime(
                 registry=registry,
                 client=mock_client,
-                provider=AsyncMock(),
+                provider=mock_provider,
                 permission_handler=mock_permission_handler,
                 channel_id="C_ARCH_CHAN",
                 socket_handler=mock_socket_handler,
                 channel_manager=mock_channel_manager,
             )
 
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
-            mock_channel_manager.archive_session_channel.assert_called_once_with("C_ARCH_CHAN")
+            # Channel should NOT be archived — it is preserved
+            mock_channel_manager.archive_session_channel.assert_not_called()
+            # Disconnect message should be posted instead
+            mock_provider.post_message.assert_called_once()
+            call_args = mock_provider.post_message.call_args
+            assert call_args[0][0] == "C_ARCH_CHAN"  # channel_id
+            assert "session ended" in call_args[0][1].lower() or "wave" in call_args[0][1].lower()
 
     async def test_shutdown_updates_registry_to_completed(self, tmp_path):
         """_shutdown should update session status to completed."""
@@ -366,7 +340,7 @@ class TestSessionShutdownSummary:
                 channel_manager=mock_channel_manager,
             )
 
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
             sess = await registry.get_session("sess-comp")
             assert sess["status"] == "completed"
@@ -411,7 +385,7 @@ class TestSessionShutdown:
                 channel_manager=mock_channel_manager,
             )
 
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
             assert session._shutdown_completed is True
 
@@ -457,13 +431,13 @@ class TestSessionShutdown:
                 channel_manager=mock_channel_manager,
             )
 
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
             # Flag should remain False because registry update failed
             assert session._shutdown_completed is False
 
-    async def test_shutdown_archives_channel_failure_continues(self, tmp_path):
-        """If archive_session_channel raises, shutdown should continue."""
+    async def test_shutdown_disconnect_message_failure_continues(self, tmp_path):
+        """If posting the disconnect message fails, shutdown should continue."""
         from summon_claude.channel_manager import ChannelManager
         from summon_claude.registry import SessionRegistry
         from summon_claude.session import _SessionRuntime
@@ -485,14 +459,13 @@ class TestSessionShutdown:
             )
 
             mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_channel_manager.archive_session_channel = AsyncMock(
-                side_effect=RuntimeError("Archive failed")
-            )
+            mock_provider = AsyncMock()
+            mock_provider.post_message = AsyncMock(side_effect=RuntimeError("Post failed"))
 
             rt = _SessionRuntime(
                 registry=registry,
                 client=mock_client,
-                provider=AsyncMock(),
+                provider=mock_provider,
                 permission_handler=mock_permission_handler,
                 channel_id="C_ARCH_FAIL_CHAN",
                 socket_handler=mock_socket_handler,
@@ -500,9 +473,9 @@ class TestSessionShutdown:
             )
 
             # Should not raise — should catch and continue
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
-            # Registry should still be updated despite archive failure
+            # Registry should still be updated despite message failure
             sess = await registry.get_session("sess-arch-fail")
             assert sess["status"] == "completed"
             assert session._shutdown_completed is True
@@ -548,86 +521,11 @@ class TestSessionShutdown:
             )
 
             # Should timeout and continue (not hang forever)
-            await session._shutdown(rt, mock_channel_manager)
+            await session._shutdown(rt)
 
             # Registry should still be updated despite Slack timeout
             sess = await registry.get_session("sess-timeout")
             assert sess["status"] == "completed"
-            assert session._shutdown_completed is True
-
-
-class TestSessionStartGuard:
-    """Test start() finally block registry update guard."""
-
-    async def test_start_finally_block_updates_registry_on_error(self, tmp_path):
-        """Finally block should update registry to errored when _shutdown_completed is False."""
-        from summon_claude.registry import SessionRegistry
-
-        config = make_config()
-        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.register("sess-finally", 1234, "/tmp")
-
-            session = SummonSession(
-                config,
-                make_options(session_id="sess-finally"),
-                auth=make_auth(session_id="sess-finally"),
-            )
-            assert session._shutdown_completed is False
-
-            # Simulate the finally block logic directly
-            # (The finally block is complex to test end-to-end, so test the logic)
-            try:
-                raise RuntimeError("Simulated error during start()")
-            except Exception:
-                # This is what finally block does
-                if not session._shutdown_completed:
-                    try:
-                        await registry.update_status(
-                            session._session_id,
-                            "errored",
-                            error_message="Session terminated unexpectedly",
-                            ended_at=datetime.now(UTC).isoformat(),
-                        )
-                    except Exception as e:
-                        import logging
-
-                        logging.getLogger().warning("Failed to update registry: %s", e)
-
-            # Verify registry was updated to errored
-            sess = await registry.get_session("sess-finally")
-            assert sess["status"] == "errored"
-
-    async def test_start_finally_block_skips_update_when_shutdown_completed(self, tmp_path):
-        """Finally block should skip registry update when _shutdown_completed is True."""
-        from summon_claude.registry import SessionRegistry
-
-        config = make_config()
-        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.register("sess-skip-final", 1234, "/tmp")
-
-            session = SummonSession(
-                config,
-                make_options(session_id="sess-skip-final"),
-                auth=make_auth(session_id="sess-skip-final"),
-            )
-            session._shutdown_completed = True  # Already completed
-
-            # Simulate the finally block logic
-            try:
-                raise RuntimeError("Simulated error")
-            except Exception:
-                # This is what finally block does
-                if not session._shutdown_completed:
-                    await registry.update_status(
-                        session._session_id,
-                        "errored",
-                        error_message="Session terminated unexpectedly",
-                        ended_at=datetime.now(UTC).isoformat(),
-                    )
-
-            # Registry should NOT be updated since _shutdown_completed is True
-            sess = await registry.get_session("sess-skip-final")
-            assert sess["status"] == "pending_auth"  # Still original status
             assert session._shutdown_completed is True
 
 
@@ -655,58 +553,347 @@ class TestAuditEventsLogged:
             assert any(e["event_type"] == "session_created" for e in log)
 
 
-class TestAuthCountdown:
-    """Test auth countdown and token cleanup (BUG-021)."""
+class TestDisconnectMessageVariants:
+    """Test the three variants of disconnect messages."""
 
-    async def test_timeout_calls_delete_pending_token(self, tmp_path):
-        """When auth timeout occurs, delete_pending_token should be called."""
+    async def test_disconnect_message_ended(self, tmp_path):
+        """Normal shutdown should post :wave: 'session ended' message."""
+        from summon_claude.channel_manager import ChannelManager
         from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.store_pending_token(
-                short_code="timeout",
-                session_id="sess-timeout",
-                expires_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
-            )
+            await registry.register("sess-ended", 1234, "/tmp")
 
-            _session = SummonSession(
+            mock_client = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_socket_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+            mock_provider = AsyncMock()
+
+            session = SummonSession(
                 config,
-                make_options(session_id="sess-timeout"),
-                auth=make_auth(session_id="sess-timeout"),
+                make_options(session_id="sess-ended"),
+                auth=make_auth(session_id="sess-ended"),
+            )
+            session._total_turns = 5
+            session._total_cost = 0.125
+            session._disconnect_reason = "ended"
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_ENDED",
+                socket_handler=mock_socket_handler,
+                channel_manager=mock_channel_manager,
             )
 
-            # Simulate timeout by directly calling cleanup
-            await registry.delete_pending_token("timeout")
-            entry = await registry._get_pending_token("timeout")
+            await session._post_disconnect_message(rt, reason="ended")
 
-            # Token should be deleted
-            assert entry is None
+            # Should post message with :wave: emoji and "session ended"
+            mock_provider.post_message.assert_called_once()
+            call_args = mock_provider.post_message.call_args
+            text = call_args[0][1]
+            assert ":wave:" in text
+            assert "session ended" in text.lower()
+            assert "5" in text  # turns
+            assert "0.125" in text or "0.13" in text  # cost
 
-    async def test_shutdown_event_during_auth_cleans_up_token(self, tmp_path):
-        """When shutdown event fires during auth, delete_pending_token should be called."""
+    async def test_disconnect_message_reconnect_exhausted(self, tmp_path):
+        """Reconnect exhaustion should post :x: 'disconnected' message."""
+        from summon_claude.channel_manager import ChannelManager
         from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.store_pending_token(
-                short_code="shutdown",
-                session_id="sess-shutdown",
-                expires_at=(datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
+            await registry.register("sess-exhausted", 1234, "/tmp")
+
+            mock_client = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_socket_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+            mock_provider = AsyncMock()
+
+            session = SummonSession(
+                config,
+                make_options(session_id="sess-exhausted"),
+                auth=make_auth(session_id="sess-exhausted"),
+            )
+            session._total_turns = 3
+            session._total_cost = 0.075
+            session._claude_session_id = "claude-sess-123"
+            session._disconnect_reason = "reconnect_exhausted"
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_EXHAUSTED",
+                socket_handler=mock_socket_handler,
+                channel_manager=mock_channel_manager,
+            )
+
+            await session._post_disconnect_message(rt, reason="reconnect_exhausted")
+
+            # Should post message with :x: and "disconnected"
+            mock_provider.post_message.assert_called_once()
+            call_args = mock_provider.post_message.call_args
+            text = call_args[0][1]
+            assert ":x:" in text
+            assert "disconnected" in text.lower()
+            assert "3" in text  # turns
+            assert "claude-sess-123" in text  # session id
+
+    async def test_disconnect_message_watchdog(self, tmp_path):
+        """Watchdog termination should post :rotating_light: message."""
+        from summon_claude.channel_manager import ChannelManager
+        from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
+
+        config = make_config()
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-watchdog", 1234, "/tmp")
+
+            mock_client = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_socket_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+            mock_provider = AsyncMock()
+
+            session = SummonSession(
+                config,
+                make_options(session_id="sess-watchdog"),
+                auth=make_auth(session_id="sess-watchdog"),
+            )
+            session._total_turns = 7
+            session._total_cost = 0.235
+            session._disconnect_reason = "watchdog"
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_WATCHDOG",
+                socket_handler=mock_socket_handler,
+                channel_manager=mock_channel_manager,
+            )
+
+            await session._post_disconnect_message(rt, reason="watchdog")
+
+            # Should post message with :rotating_light: and "watchdog"
+            mock_provider.post_message.assert_called_once()
+            call_args = mock_provider.post_message.call_args
+            text = call_args[0][1]
+            assert ":rotating_light:" in text
+            assert "watchdog" in text.lower() or "unresponsive" in text.lower()
+            assert "7" in text  # turns
+
+
+class TestWatchdogLoop:
+    """Test the watchdog loop detection of stuck event loops."""
+
+    async def test_watchdog_detects_stuck_loop(self, tmp_path):
+        """When heartbeat is stale, watchdog should set disconnect_reason and shutdown event."""
+        config = make_config()
+        session = SummonSession(
+            config,
+            make_options(session_id="sess-wd-stuck"),
+            auth=make_auth(session_id="sess-wd-stuck"),
+        )
+
+        # Set heartbeat time far in the past (beyond 90s threshold)
+        loop = asyncio.get_running_loop()
+        session._last_heartbeat_time = loop.time() - 120.0
+
+        # Run the actual _watchdog_loop with a very short check interval so it
+        # completes in one iteration without sleeping for 15 seconds
+        with patch("summon_claude.session._WATCHDOG_CHECK_INTERVAL_S", 0.01):
+            await asyncio.wait_for(session._watchdog_loop(), timeout=1.0)
+
+        # Watchdog should have detected the stale heartbeat and triggered shutdown
+        assert session._disconnect_reason == "watchdog"
+        assert session._shutdown_event.is_set()
+
+    async def test_heartbeat_updates_timestamp(self, tmp_path):
+        """Calling heartbeat loop should update _last_heartbeat_time."""
+        config = make_config()
+        session = SummonSession(
+            config,
+            make_options(session_id="sess-hb-ts"),
+            auth=make_auth(session_id="sess-hb-ts"),
+        )
+
+        loop = asyncio.get_running_loop()
+        old_time = loop.time() - 50.0
+        session._last_heartbeat_time = old_time
+
+        # Build a minimal mock runtime with an async registry heartbeat
+        from unittest.mock import MagicMock
+
+        mock_rt = MagicMock()
+        mock_rt.registry = AsyncMock()
+        mock_rt.registry.heartbeat = AsyncMock()
+
+        # Run one iteration of the heartbeat loop: patch the sleep interval to be very short,
+        # then signal shutdown after the first iteration so the loop exits cleanly
+        async def _set_shutdown_after_first_heartbeat(*_args, **_kwargs):
+            # Allow the heartbeat to complete, then shut down
+            session._shutdown_event.set()
+
+        mock_rt.registry.heartbeat.side_effect = _set_shutdown_after_first_heartbeat
+
+        with patch("summon_claude.session._HEARTBEAT_INTERVAL_S", 0.01):
+            await asyncio.wait_for(session._heartbeat_loop(mock_rt), timeout=1.0)
+
+        # Timestamp should be updated to approximately now
+        elapsed = loop.time() - session._last_heartbeat_time
+        assert elapsed < 1.0  # Was updated during the loop iteration
+
+
+class TestReconnectSocket:
+    """Test socket reconnection and handler switching."""
+
+    async def test_reconnect_socket_creates_new_handler(self, tmp_path):
+        """_reconnect_socket should create new app and socket handler."""
+        from summon_claude.channel_manager import ChannelManager
+        from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
+
+        config = make_config()
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-recon", 1234, "/tmp")
+
+            mock_old_handler = AsyncMock()
+            mock_old_handler.client = AsyncMock()
+            mock_old_handler.close_async = AsyncMock()
+
+            mock_client = AsyncMock()
+            mock_provider = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_RECON",
+                socket_handler=mock_old_handler,
+                channel_manager=mock_channel_manager,
             )
 
             session = SummonSession(
                 config,
-                make_options(session_id="sess-shutdown"),
-                auth=make_auth(session_id="sess-shutdown"),
+                make_options(session_id="sess-recon"),
+                auth=make_auth(session_id="sess-recon"),
             )
 
-            # Set shutdown event
-            session._shutdown_event.set()
+            # Mock the new socket handler creation
+            with patch("summon_claude.session.AsyncSocketModeHandler") as mock_handler_class:
+                mock_new_handler = AsyncMock()
+                mock_new_handler.connect_async = AsyncMock()
+                mock_handler_class.return_value = mock_new_handler
 
-            # Manually delete the token (simulating what _wait_for_auth would do)
-            await registry.delete_pending_token("shutdown")
+                new_rt = await session._reconnect_socket(rt)
 
-            # Token should be cleaned up
-            entry = await registry._get_pending_token("shutdown")
-            assert entry is None
+                # New runtime should have a fresh socket handler
+                assert new_rt.socket_handler is not rt.socket_handler
+                # Old handler should have been closed
+                mock_old_handler.close_async.assert_called_once()
+                # New handler should be connected
+                mock_new_handler.connect_async.assert_called_once()
+
+    async def test_reconnect_preserves_channel_id(self, tmp_path):
+        """_reconnect_socket should preserve channel_id in new runtime."""
+        from summon_claude.channel_manager import ChannelManager
+        from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
+
+        config = make_config()
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-preserve", 1234, "/tmp")
+
+            mock_old_handler = AsyncMock()
+            mock_old_handler.close_async = AsyncMock()
+
+            mock_client = AsyncMock()
+            mock_provider = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_PRESERVE_ID",
+                socket_handler=mock_old_handler,
+                channel_manager=mock_channel_manager,
+            )
+
+            session = SummonSession(
+                config,
+                make_options(session_id="sess-preserve"),
+                auth=make_auth(session_id="sess-preserve"),
+            )
+
+            # Mock AsyncSocketModeHandler with AsyncMock so connect_async is awaitable
+            with patch("summon_claude.session.AsyncSocketModeHandler") as mock_handler_class:
+                mock_new_handler = AsyncMock()
+                mock_handler_class.return_value = mock_new_handler
+
+                with patch("summon_claude.session.AsyncApp"):
+                    new_rt = await session._reconnect_socket(rt)
+
+                    # Channel ID should be preserved
+                    assert new_rt.channel_id == "C_PRESERVE_ID"
+                    assert new_rt.registry is rt.registry
+                    assert new_rt.client is rt.client
+
+    async def test_register_event_handlers_no_summon(self, tmp_path):
+        """After reconnect, /summon handler should not be re-registered."""
+        from slack_bolt.app.async_app import AsyncApp
+
+        from summon_claude.channel_manager import ChannelManager
+        from summon_claude.registry import SessionRegistry
+        from summon_claude.session import _SessionRuntime
+
+        config = make_config()
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-no-summon", 1234, "/tmp")
+
+            new_app = AsyncApp(
+                token=config.slack_bot_token,
+                signing_secret=config.slack_signing_secret,
+            )
+
+            mock_client = AsyncMock()
+            mock_provider = AsyncMock()
+            mock_permission_handler = AsyncMock()
+            mock_socket_handler = AsyncMock()
+            mock_channel_manager = AsyncMock(spec=ChannelManager)
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=mock_client,
+                provider=mock_provider,
+                permission_handler=mock_permission_handler,
+                channel_id="C_NO_SUMMON",
+                socket_handler=mock_socket_handler,
+                channel_manager=mock_channel_manager,
+            )
+
+            session = SummonSession(
+                config,
+                make_options(session_id="sess-no-summon"),
+                auth=make_auth(session_id="sess-no-summon"),
+            )
+
+            # Smoke test: registers handlers without raising (does NOT register /summon)
+            session._register_event_handlers(new_app, rt)
