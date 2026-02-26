@@ -59,6 +59,20 @@ class _BatchState:
     channels: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class _AskUserState:
+    """Tracks in-flight AskUserQuestion requests awaiting user answers."""
+
+    events: dict[str, asyncio.Event] = field(default_factory=dict)
+    questions: dict[str, list[dict]] = field(default_factory=dict)
+    answers: dict[str, dict[str, str]] = field(default_factory=dict)
+    expected: dict[str, int] = field(default_factory=dict)
+    # For "Other" free-text input: (request_id, question_index)
+    pending_other: tuple[str, int] | None = None
+    # For multi-select: toggled selections per question keyed by (request_id, question_idx)
+    multi_selections: dict[tuple[str, int], list[str]] = field(default_factory=dict)
+
+
 class PermissionHandler:
     """Handles tool permission requests with 500ms debouncing and Slack interactive buttons.
 
@@ -89,6 +103,9 @@ class PermissionHandler:
         # Per-batch tracking (events, decisions, channels)
         self._batch = _BatchState()
 
+        # AskUserQuestion tracking
+        self._ask_user = _AskUserState()
+
     async def handle(
         self,
         tool_name: str,
@@ -96,6 +113,10 @@ class PermissionHandler:
         context: ToolPermissionContext | None,
     ) -> PermissionResultAllow | PermissionResultDeny:
         """Main entry point for the can_use_tool callback."""
+        # 0. Intercept AskUserQuestion — route to Slack interactive UI
+        if tool_name == "AskUserQuestion":
+            return await self._handle_ask_user_question(input_data)
+
         # 1. Check SDK suggestions for deny — always honor denials unconditionally
         if context is not None:
             for suggestion in getattr(context, "suggestions", []) or []:
@@ -306,6 +327,322 @@ class PermissionHandler:
             )
         except Exception as e:
             logger.warning("Failed to post timeout message: %s", e)
+
+    # ------------------------------------------------------------------
+    # AskUserQuestion handling
+    # ------------------------------------------------------------------
+
+    async def _handle_ask_user_question(
+        self, input_data: dict[str, Any]
+    ) -> PermissionResultAllow | PermissionResultDeny:
+        """Render AskUserQuestion as Slack interactive buttons and wait for answers."""
+        questions = input_data.get("questions", [])
+        if not questions:
+            return PermissionResultAllow(updated_input=input_data)
+
+        request_id = str(uuid.uuid4())
+        event = asyncio.Event()
+
+        self._ask_user.events[request_id] = event
+        self._ask_user.questions[request_id] = questions
+        self._ask_user.answers[request_id] = {}
+        self._ask_user.expected[request_id] = len(questions)
+
+        blocks = _build_ask_user_blocks(request_id, questions)
+        try:
+            await self._router.post_permission(
+                "Claude has a question for you",
+                blocks,
+            )
+        except Exception as e:
+            logger.error("Failed to post AskUserQuestion message: %s", e)
+            self._cleanup_ask_user(request_id)
+            return PermissionResultDeny(message="Failed to display question")
+
+        try:
+            await asyncio.wait_for(event.wait(), timeout=_PERMISSION_TIMEOUT_S)
+        except TimeoutError:
+            logger.warning("AskUserQuestion timed out")
+            self._cleanup_ask_user(request_id)
+            return PermissionResultDeny(message="Question timed out (5 minutes)")
+
+        answers = dict(self._ask_user.answers.get(request_id, {}))
+        self._cleanup_ask_user(request_id)
+
+        return PermissionResultAllow(
+            updated_input={
+                "questions": questions,
+                "answers": answers,
+            }
+        )
+
+    async def handle_ask_user_action(
+        self,
+        value: str,
+        user_id: str,
+        channel_id: str,
+        message_ts: str,
+    ) -> None:
+        """Handle a Slack button click for an AskUserQuestion option.
+
+        Value format: ``{request_id}|{question_idx}|{option_idx_or_other_or_done}``
+        """
+        parsed = _parse_ask_user_value(value)
+        if parsed is None:
+            return
+
+        request_id, q_idx, opt_val = parsed
+
+        if request_id not in self._ask_user.events:
+            return
+
+        questions = self._ask_user.questions.get(request_id, [])
+        if q_idx >= len(questions):
+            return
+
+        question = questions[q_idx]
+
+        if opt_val == "other":
+            await self._handle_ask_other(request_id, q_idx, question)
+        elif opt_val == "done":
+            await self._handle_ask_done(request_id, q_idx, question)
+        else:
+            await self._handle_ask_option(request_id, q_idx, question, opt_val)
+
+    async def _handle_ask_other(self, request_id: str, q_idx: int, question: dict) -> None:
+        """Handle 'Other' button — set pending flag for free-text capture."""
+        self._ask_user.pending_other = (request_id, q_idx)
+        q_text = sanitize_for_mrkdwn(question.get("question", ""))
+        await _post_quietly(self._router, f":pencil: Type your answer for: _{q_text}_")
+
+    async def _handle_ask_done(self, request_id: str, q_idx: int, question: dict) -> None:
+        """Handle 'Done' button for multi-select — finalize toggled selections."""
+        key = (request_id, q_idx)
+        selections = self._ask_user.multi_selections.pop(key, [])
+        answer = ", ".join(selections) if selections else ""
+        q_text = question.get("question", "")
+        header = sanitize_for_mrkdwn(question.get("header", ""))
+        self._ask_user.answers[request_id][q_text] = answer
+        await _post_quietly(
+            self._router,
+            f":white_check_mark: *{header}*: {sanitize_for_mrkdwn(answer)}",
+        )
+        self._check_ask_user_complete(request_id)
+
+    async def _handle_ask_option(
+        self, request_id: str, q_idx: int, question: dict, opt_val: str
+    ) -> None:
+        """Handle a numbered option button click."""
+        try:
+            opt_idx = int(opt_val)
+        except ValueError:
+            return
+
+        options = question.get("options", [])
+        if opt_idx >= len(options):
+            return
+
+        label = options[opt_idx].get("label", "")
+        q_text = question.get("question", "")
+        header = sanitize_for_mrkdwn(question.get("header", ""))
+
+        if question.get("multiSelect", False):
+            await self._toggle_multi_select(request_id, q_idx, label, header)
+        else:
+            self._ask_user.answers[request_id][q_text] = label
+            await _post_quietly(
+                self._router,
+                f":white_check_mark: *{header}*: {sanitize_for_mrkdwn(label)}",
+            )
+            self._check_ask_user_complete(request_id)
+
+    async def _toggle_multi_select(
+        self, request_id: str, q_idx: int, label: str, header: str
+    ) -> None:
+        """Toggle a multi-select option and post feedback."""
+        key = (request_id, q_idx)
+        selections = self._ask_user.multi_selections.setdefault(key, [])
+        safe_label = sanitize_for_mrkdwn(label)
+        if label in selections:
+            selections.remove(label)
+            await _post_quietly(
+                self._router,
+                f":heavy_minus_sign: *{header}*: deselected _{safe_label}_",
+            )
+        else:
+            selections.append(label)
+            await _post_quietly(
+                self._router,
+                f":heavy_plus_sign: *{header}*: selected _{safe_label}_",
+            )
+
+    def has_pending_text_input(self) -> bool:
+        """Return True if we're waiting for free-text input from the user (Other)."""
+        return self._ask_user.pending_other is not None
+
+    async def receive_text_input(self, text: str) -> None:
+        """Receive free-text input from the user for an 'Other' answer."""
+        if not self._ask_user.pending_other:
+            return
+
+        request_id, q_idx = self._ask_user.pending_other
+        self._ask_user.pending_other = None
+
+        questions = self._ask_user.questions.get(request_id, [])
+        if q_idx >= len(questions):
+            return
+
+        question = questions[q_idx]
+        question_text = question.get("question", "")
+        header = question.get("header", "")
+
+        self._ask_user.answers[request_id][question_text] = text
+        safe_header = sanitize_for_mrkdwn(header)
+        await _post_quietly(
+            self._router,
+            f":white_check_mark: *{safe_header}*: {sanitize_for_mrkdwn(text)}",
+        )
+
+        self._check_ask_user_complete(request_id)
+
+    def _check_ask_user_complete(self, request_id: str) -> None:
+        """If all questions for a request are answered, signal the waiting coroutine."""
+        answers = self._ask_user.answers.get(request_id, {})
+        expected = self._ask_user.expected.get(request_id, 0)
+        if len(answers) >= expected:
+            event = self._ask_user.events.get(request_id)
+            if event:
+                event.set()
+
+    def _cleanup_ask_user(self, request_id: str) -> None:
+        """Remove all state for a completed or timed-out ask_user request."""
+        self._ask_user.events.pop(request_id, None)
+        questions = self._ask_user.questions.pop(request_id, [])
+        self._ask_user.answers.pop(request_id, None)
+        self._ask_user.expected.pop(request_id, None)
+        if self._ask_user.pending_other and self._ask_user.pending_other[0] == request_id:
+            self._ask_user.pending_other = None
+        # Clean up multi-select state for all questions in this request
+        for i in range(len(questions)):
+            self._ask_user.multi_selections.pop((request_id, i), None)
+
+
+def _parse_ask_user_value(value: str) -> tuple[str, int, str] | None:
+    """Parse an ask_user action value into (request_id, question_idx, opt_val)."""
+    parts = value.split("|")
+    if len(parts) != 3:
+        logger.warning("Invalid ask_user action value: %r", value)
+        return None
+    request_id, q_idx_str, opt_val = parts
+    try:
+        q_idx = int(q_idx_str)
+    except ValueError:
+        return None
+    return request_id, q_idx, opt_val
+
+
+async def _post_quietly(router: ThreadRouter, text: str) -> None:
+    """Post to the turn thread, swallowing errors."""
+    try:
+        await router.post_to_turn_thread(text)
+    except Exception as e:
+        logger.debug("Failed to post ask_user feedback: %s", e)
+
+
+def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]:
+    """Build Slack Block Kit blocks for AskUserQuestion rendering."""
+    blocks: list[dict] = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": ":question: *Claude has a question for you*"},
+        },
+        {"type": "divider"},
+    ]
+
+    for i, q in enumerate(questions):
+        header = q.get("header", "")
+        question_text = q.get("question", "")
+        options = q.get("options", [])
+        multi_select = q.get("multiSelect", False)
+
+        # Question text (with multi-select hint)
+        q_text = f"*{sanitize_for_mrkdwn(header)}*\n{sanitize_for_mrkdwn(question_text)}"
+        if multi_select:
+            q_text += "\n_Select multiple, then click Done_"
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": q_text}})
+
+        # Option descriptions + markdown previews as context
+        desc_parts = []
+        for opt in options:
+            label = opt.get("label", "")
+            desc = opt.get("description", "")
+            md_preview = opt.get("markdown", "")
+            if desc:
+                desc_parts.append(
+                    f"\u2022 *{sanitize_for_mrkdwn(label)}*: {sanitize_for_mrkdwn(desc)}"
+                )
+            if md_preview:
+                # Render markdown preview as a code block (monospace)
+                # Escape backticks to prevent breaking out of the code block
+                safe_preview = md_preview.strip().replace("`", "\u2019")
+                preview_lines = safe_preview.splitlines()
+                # Truncate long previews to keep Slack message manageable
+                if len(preview_lines) > 8:
+                    preview_lines = [*preview_lines[:8], "..."]
+                preview_text = "\n".join(preview_lines)
+                desc_parts.append(f"```{preview_text}```")
+        if desc_parts:
+            blocks.append(
+                {
+                    "type": "context",
+                    "elements": [{"type": "mrkdwn", "text": "\n".join(desc_parts)}],
+                }
+            )
+
+        # Option buttons
+        elements = []
+        for j, opt in enumerate(options):
+            label = opt.get("label", f"Option {j + 1}")
+            elements.append(
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": label[:75]},
+                    "action_id": f"ask_user_{i}_{j}",
+                    "value": f"{request_id}|{i}|{j}",
+                }
+            )
+
+        # "Other" button
+        elements.append(
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "Other"},
+                "action_id": f"ask_user_{i}_other",
+                "value": f"{request_id}|{i}|other",
+            }
+        )
+
+        # "Done" button for multi-select
+        if multi_select:
+            elements.append(
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Done"},
+                    "style": "primary",
+                    "action_id": f"ask_user_{i}_done",
+                    "value": f"{request_id}|{i}|done",
+                }
+            )
+
+        blocks.append(
+            {
+                "type": "actions",
+                "block_id": f"ask_user_{request_id[:8]}_{i}",
+                "elements": elements,
+            }
+        )
+
+    return blocks
 
 
 def _format_request_summary(req: PendingRequest) -> str:

@@ -137,6 +137,56 @@ async def test_can_use_tool_callback():
     )
 
 
+async def test_ask_user_question_callback():
+    """AskUserQuestion tool should be intercepted by can_use_tool and receive answers."""
+    captured_input: list[dict] = []
+
+    async def _handle_tools(tool_name: str, input_data: dict, context):
+        from claude_agent_sdk import PermissionResultAllow
+
+        if tool_name == "AskUserQuestion":
+            captured_input.append(input_data)
+            questions = input_data.get("questions", [])
+            answers = {}
+            for q in questions:
+                # Auto-select the first option for each question
+                options = q.get("options", [])
+                if options:
+                    answers[q["question"]] = options[0]["label"]
+            return PermissionResultAllow(updated_input={"questions": questions, "answers": answers})
+        return PermissionResultAllow()
+
+    with tempfile.TemporaryDirectory() as cwd:
+        options = ClaudeAgentOptions(
+            cwd=cwd,
+            max_turns=3,
+            permission_mode="plan",
+            can_use_tool=_handle_tools,
+            **_COMMON_OPTS,
+        )
+        async with ClaudeSDKClient(options) as client:
+            # Prompt that triggers AskUserQuestion
+            await client.query(
+                "Ask me a question using the AskUserQuestion tool. "
+                "Ask what programming language I prefer with options: Python, Rust, Go. "
+                "Use the AskUserQuestion tool, do not just type the question."
+            )
+            result_msg = None
+            async for msg in client.receive_response():
+                if isinstance(msg, ResultMessage):
+                    result_msg = msg
+
+    assert result_msg is not None, "Expected a ResultMessage"
+    assert len(captured_input) >= 1, (
+        "Expected AskUserQuestion to be intercepted by can_use_tool callback"
+    )
+    # Verify the captured input has the expected structure
+    first = captured_input[0]
+    assert "questions" in first
+    assert len(first["questions"]) >= 1
+    assert "options" in first["questions"][0]
+
+
 async def test_passthrough_command_populates_result():
     """Passthrough slash commands like /cost should complete and produce a ResultMessage."""
     with tempfile.TemporaryDirectory() as cwd:

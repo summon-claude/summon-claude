@@ -75,3 +75,29 @@ class TestSplitText:
         chunks = _split_text(text, 3000)
         for chunk in chunks:
             assert len(chunk) <= 3000
+
+    def test_code_block_split_closes_and_reopens(self):
+        """When splitting inside a ``` code block, close it and reopen in next chunk."""
+        text = "before\n```\n" + "x\n" * 500 + "```\nafter"
+        chunks = _split_text(text, 200)
+        # The first chunk that opens ``` should also close it
+        for chunk in chunks[:-1]:
+            fence_count = chunk.count("```")
+            assert fence_count % 2 == 0, (
+                f"Chunk has unclosed code fence ({fence_count} fences): {chunk[:80]}..."
+            )
+
+    def test_code_block_not_broken_when_no_split_needed(self):
+        """Short text with code blocks should not be modified."""
+        text = "hello\n```\ncode\n```\nbye"
+        chunks = _split_text(text, 3000)
+        assert len(chunks) == 1
+        assert chunks[0] == text
+
+    def test_even_fence_count_not_modified(self):
+        """Chunks with even fence counts (closed blocks) should not be touched."""
+        text = "```a```\n" * 50 + "\n" + "```b```\n" * 50
+        chunks = _split_text(text, 200)
+        for chunk in chunks:
+            fence_count = chunk.count("```")
+            assert fence_count % 2 == 0

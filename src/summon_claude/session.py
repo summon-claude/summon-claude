@@ -433,6 +433,11 @@ class SummonSession:
 
             thread_ts = event.get("ts")
 
+            # Check for pending AskUserQuestion "Other" text input
+            if rt.permission_handler.has_pending_text_input():
+                await rt.permission_handler.receive_text_input(text)
+                return
+
             # Check for command prefix
             parsed = self._command_registry.parse(full_text)
             if parsed is not None:
@@ -455,9 +460,23 @@ class SummonSession:
                 message_ts=message.get("ts", ""),
             )
 
+        async def _on_ask_user_action(ack, action, body) -> None:
+            await ack()
+            value = action.get("value", "")
+            action_user_id = body.get("user", {}).get("id", "")
+            action_channel_id = body.get("channel", {}).get("id", rt.channel_id)
+            message = body.get("message", {})
+            await rt.permission_handler.handle_ask_user_action(
+                value=value,
+                user_id=action_user_id,
+                channel_id=action_channel_id,
+                message_ts=message.get("ts", ""),
+            )
+
         app.event("message")(_on_message_event)
         app.action("permission_approve")(_on_permission_action)
         app.action("permission_deny")(_on_permission_action)
+        app.action(re.compile(r"ask_user_\d+_.+"))(_on_ask_user_action)
 
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(rt))
         try:
@@ -596,6 +615,17 @@ class SummonSession:
                     self._last_context = stream_result.context
                 if stream_result.model is not None:
                     self._last_model_seen = stream_result.model
+                try:
+                    git_branch = _get_git_branch(self._cwd)
+                    await rt.channel_manager.set_session_topic(
+                        rt.channel_id,
+                        model=self._last_model_seen or self._model,
+                        cwd=self._cwd,
+                        git_branch=git_branch,
+                        context=self._last_context,
+                    )
+                except Exception:
+                    logger.debug("Post-turn topic update failed")
         except Exception as e:
             logger.exception("Error during Claude response: %s", e)
             error_type = type(e).__name__
@@ -616,25 +646,13 @@ class SummonSession:
                 logger.warning("Failed to post error notification: %s", e2)
 
     async def _heartbeat_loop(self, rt: _SessionRuntime) -> None:
-        """Update registry heartbeat and channel topic every 30 seconds."""
+        """Update registry heartbeat every 30 seconds."""
         while not self._shutdown_event.is_set():
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
             try:
                 await rt.registry.heartbeat(self._session_id)
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
-            if self._last_context is not None:
-                try:
-                    git_branch = _get_git_branch(self._cwd)
-                    await rt.channel_manager.set_session_topic(
-                        rt.channel_id,
-                        model=self._last_model_seen or self._model,
-                        cwd=self._cwd,
-                        git_branch=git_branch,
-                        context=self._last_context,
-                    )
-                except Exception as e:
-                    logger.debug("Heartbeat topic update failed: %s", e)
 
     async def _shutdown(self, rt: _SessionRuntime, channel_manager: ChannelManager) -> None:
         """Gracefully shut down the session."""
