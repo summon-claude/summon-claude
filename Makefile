@@ -7,7 +7,7 @@
 CURRENT_BRANCH := $(shell git branch --show-current)
 
 .PHONY: help
-.PHONY: install lint test build clean all
+.PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
 
@@ -87,3 +87,40 @@ repo-branches-clean: ## Clean up unused development branches and worktrees excep
 	git fetch --all --prune
 	@echo "Removing remote-origin branches..."
 	git branch -r | grep "origin/" | grep -v "origin/main" | grep -v "origin/$(CURRENT_BRANCH)" | grep -v "origin/HEAD" | sed 's|origin/||' | xargs -I {} git push origin --delete {}
+
+release: ## Tag and publish a new release (interactive, main branch only)
+	@set -e; \
+	GIT_DIR=$$(git rev-parse --git-dir); \
+	if [ "$$GIT_DIR" != ".git" ]; then \
+		echo "ERROR: Cannot release from a worktree. Run from the repo root."; \
+		exit 1; \
+	fi; \
+	BRANCH=$$(git branch --show-current); \
+	if [ "$$BRANCH" != "main" ]; then \
+		echo "ERROR: Must be on main branch (currently on $$BRANCH)."; \
+		exit 1; \
+	fi; \
+	git fetch --tags; \
+	LATEST=$$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0"); \
+	LATEST_CLEAN=$${LATEST#v}; \
+	echo "Current version: $$LATEST"; \
+	read -p "New version (X.Y.Z): " VERSION; \
+	if ! echo "$$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$$'; then \
+		echo "ERROR: Invalid semver format. Expected X.Y.Z (e.g., 1.2.3)."; \
+		exit 1; \
+	fi; \
+	IFS='.' read -r MAJOR MINOR PATCH <<< "$$VERSION"; \
+	IFS='.' read -r L_MAJ L_MIN L_PAT <<< "$$LATEST_CLEAN"; \
+	if [ "$$VERSION" = "$$LATEST_CLEAN" ]; then \
+		echo "ERROR: Version $$VERSION already exists (duplicate)."; \
+		exit 1; \
+	fi; \
+	if [ "$$MAJOR" -lt "$$L_MAJ" ] || \
+	   ([ "$$MAJOR" -eq "$$L_MAJ" ] && [ "$$MINOR" -lt "$$L_MIN" ]) || \
+	   ([ "$$MAJOR" -eq "$$L_MAJ" ] && [ "$$MINOR" -eq "$$L_MIN" ] && [ "$$PATCH" -lt "$$L_PAT" ]); then \
+		echo "ERROR: Version $$VERSION would be a downgrade from $$LATEST_CLEAN."; \
+		exit 1; \
+	fi; \
+	git tag -a "v$$VERSION" -m "Release v$$VERSION"; \
+	git push origin "v$$VERSION"; \
+	gh release create "v$$VERSION" --generate-notes --title "v$$VERSION"
