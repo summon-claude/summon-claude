@@ -32,6 +32,7 @@ from summon_claude.permissions import PermissionHandler
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.rate_limiter import RateLimiter
 from summon_claude.registry import SessionRegistry
+from summon_claude.socket_health import SocketHealthMonitor
 from summon_claude.streamer import ResponseStreamer
 from summon_claude.thread_router import ThreadRouter
 
@@ -43,6 +44,9 @@ _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
 _CLEANUP_TIMEOUT_S = 10.0
+_WATCHDOG_CHECK_INTERVAL_S = 15
+_WATCHDOG_THRESHOLD_S = 90
+_OS_WATCHDOG_TIMEOUT_S = 120
 
 # Patterns that may appear in exception messages and should not be stored in the audit log
 _SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
@@ -132,6 +136,13 @@ class SummonSession:
 
         # Rate limiter for /summon slash command
         self._rate_limiter = RateLimiter()
+
+        # Socket resilience state
+        self._active_socket_handler: AsyncSocketModeHandler | None = None
+        self._disconnect_reason: str | None = None  # one-way latch: set once, read in _shutdown
+        self._claude_session_id: str | None = None
+        self._last_heartbeat_time: float = 0.0
+        self._health_monitor: SocketHealthMonitor | None = None
 
     async def start(self) -> bool:  # noqa: PLR0912, PLR0915
         """Main entry point. Runs the full session lifecycle."""
@@ -407,8 +418,64 @@ class SummonSession:
             socket_handler=socket_handler,
             channel_manager=channel_manager,
         )
+        self._active_socket_handler = socket_handler
 
-        # Register post-auth callbacks as closures capturing rt
+        # Register post-auth event handlers
+        self._register_event_handlers(app, rt)
+
+        # Reconnect callback — uses nonlocal rt so closures see the updated runtime
+        async def _on_reconnect_needed() -> None:
+            nonlocal rt
+            new_rt = await self._reconnect_socket(rt)
+            rt = new_rt
+            health_monitor.update_handler(new_rt.socket_handler)
+
+        # Exhaustion callback — sets shutdown event + reason (runs synchronously in health task)
+        def _on_exhausted() -> None:
+            self._disconnect_reason = "reconnect_exhausted"
+            self._shutdown_event.set()
+            self._message_queue.put_nowait(("", None))
+
+        health_monitor = SocketHealthMonitor(
+            socket_handler=socket_handler,
+            on_reconnect_needed=_on_reconnect_needed,
+            on_exhausted=_on_exhausted,
+        )
+        self._health_monitor = health_monitor
+
+        # Start OS-level watchdog
+        self._start_os_watchdog()
+        self._last_heartbeat_time = asyncio.get_running_loop().time()
+
+        heartbeat_task = asyncio.create_task(self._heartbeat_loop(rt))
+        health_task = asyncio.create_task(health_monitor.run())
+        watchdog_task = asyncio.create_task(self._watchdog_loop())
+        try:
+            await self._run_message_loop(rt, router, provider)
+        finally:
+            health_task.cancel()
+            heartbeat_task.cancel()
+            watchdog_task.cancel()
+            for task in (health_task, heartbeat_task, watchdog_task):
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception) as e:
+                    logger.debug("Task cleanup: %s", e)
+
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling() > 0:
+                # uncancel() allows the _shutdown() awaits below to complete even if
+                # this task was cancelled (e.g., by signal handling or asyncio cleanup).
+                # Without this, awaiting _shutdown() would immediately re-raise
+                # CancelledError before cleanup can finish.
+                current_task.uncancel()
+
+            # Use latest rt (may have been updated by reconnect callback)
+            await self._shutdown(rt)
+
+    def _register_event_handlers(self, app: AsyncApp, rt: _SessionRuntime) -> None:
+        """Register all Slack event handlers on the given app."""
+
         async def _on_message_event(event, say) -> None:
             event_channel_id = event.get("channel", "")
             user_id = event.get("user", "")
@@ -445,6 +512,9 @@ class SummonSession:
                 return
 
             await self._message_queue.put((full_text, None))
+            # A successfully queued message means the socket is alive — reset failure counter
+            if self._health_monitor is not None:
+                self._health_monitor.mark_healthy()
 
         async def _on_permission_action(ack, action, body) -> None:
             await ack()
@@ -478,21 +548,44 @@ class SummonSession:
         app.action("permission_deny")(_on_permission_action)
         app.action(re.compile(r"ask_user_\d+_.+"))(_on_ask_user_action)
 
-        heartbeat_task = asyncio.create_task(self._heartbeat_loop(rt))
+    async def _reconnect_socket(self, rt: _SessionRuntime) -> _SessionRuntime:
+        """Replace the socket handler with a fresh connection.
+
+        Returns a new _SessionRuntime with the updated socket_handler.
+        """
+        # Close old socket (best-effort)
         try:
-            await self._run_message_loop(rt, router, provider)
-        finally:
-            heartbeat_task.cancel()
-            try:
-                await heartbeat_task
-            except (asyncio.CancelledError, Exception) as e:
-                logger.debug("Heartbeat task cleanup: %s", e)
+            await asyncio.wait_for(rt.socket_handler.close_async(), timeout=5.0)
+        except Exception as e:
+            logger.debug("Old socket cleanup failed (expected on dead connection): %s", e)
 
-            current_task = asyncio.current_task()
-            if current_task is not None and current_task.cancelling() > 0:
-                current_task.uncancel()
+        # Create new app + socket handler (no /summon — already authenticated)
+        new_app = AsyncApp(
+            token=self._config.slack_bot_token,
+            signing_secret=self._config.slack_signing_secret,
+        )
+        new_socket_handler = AsyncSocketModeHandler(new_app, self._config.slack_app_token)
 
-            await self._shutdown(rt, channel_manager)
+        # Build new runtime preserving all non-socket state
+        new_rt = _SessionRuntime(
+            registry=rt.registry,
+            client=rt.client,
+            provider=rt.provider,
+            permission_handler=rt.permission_handler,
+            channel_id=rt.channel_id,
+            socket_handler=new_socket_handler,
+            channel_manager=rt.channel_manager,
+        )
+
+        # Re-register event handlers on the new app
+        self._register_event_handlers(new_app, new_rt)
+
+        # Start new socket connection
+        await new_socket_handler.connect_async()
+        self._active_socket_handler = new_socket_handler
+
+        logger.info("Socket reconnected successfully")
+        return new_rt
 
     async def _run_message_loop(
         self, rt: _SessionRuntime, router: ThreadRouter, provider: SlackChatProvider
@@ -516,13 +609,14 @@ class SummonSession:
         streamer = ResponseStreamer(router=router, display=display)
 
         async with ClaudeSDKClient(options) as claude:
-            # Store Claude session ID if available
-            server_info = None
+            # Initialize from server info: session ID, command registry
+            self._command_registry = build_registry()
             try:
                 server_info = await claude.get_server_info()
                 if server_info:
                     claude_session_id = server_info.get("session_id", "")
                     if claude_session_id:
+                        self._claude_session_id = claude_session_id
                         await rt.registry.update_status(
                             self._session_id, "active", claude_session_id=claude_session_id
                         )
@@ -547,15 +641,11 @@ class SummonSession:
                             )
                         except Exception as e2:
                             logger.debug("Failed to post Claude session ID: %s", e2)
+                    commands = server_info.get("commands", [])
+                    if commands:
+                        self._command_registry.set_passthrough_commands(commands)
             except Exception as e:
-                logger.debug("Could not retrieve Claude session ID: %s", e)
-
-            # Initialize command registry with passthrough commands from SDK
-            self._command_registry = build_registry()
-            if server_info:
-                commands = server_info.get("commands", [])
-                if commands:
-                    self._command_registry.set_passthrough_commands(commands)
+                logger.debug("Could not retrieve server info: %s", e)
 
             # Discover resolved model name via /model query
             try:
@@ -651,39 +741,54 @@ class SummonSession:
             await asyncio.sleep(_HEARTBEAT_INTERVAL_S)
             try:
                 await rt.registry.heartbeat(self._session_id)
+                self._last_heartbeat_time = asyncio.get_running_loop().time()
+                self._pet_os_watchdog()
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", e)
 
-    async def _shutdown(self, rt: _SessionRuntime, channel_manager: ChannelManager) -> None:
+    async def _watchdog_loop(self) -> None:
+        """Detect stuck event loop. If heartbeat hasn't updated in 90s, force recovery."""
+        while not self._shutdown_event.is_set():
+            await asyncio.sleep(_WATCHDOG_CHECK_INTERVAL_S)
+            if self._shutdown_event.is_set():
+                break
+            elapsed = asyncio.get_running_loop().time() - self._last_heartbeat_time
+            if elapsed > _WATCHDOG_THRESHOLD_S:
+                logger.critical(
+                    "Watchdog: event loop appears stuck (%.0fs since last heartbeat). "
+                    "Forcing shutdown.",
+                    elapsed,
+                )
+                self._disconnect_reason = "watchdog"
+                self._shutdown_event.set()
+                self._message_queue.put_nowait(("", None))
+                break
+
+    def _start_os_watchdog(self) -> None:
+        """Set a SIGALRM timer as last-resort watchdog for fully stuck event loops."""
+        if not hasattr(signal, "SIGALRM"):
+            return  # Windows does not support SIGALRM
+
+        def _alarm_handler(signum, frame) -> None:
+            logger.critical("OS watchdog fired — event loop unresponsive. Forcing exit.")
+            os._exit(2)
+
+        signal.signal(signal.SIGALRM, _alarm_handler)
+        signal.alarm(_OS_WATCHDOG_TIMEOUT_S)
+
+    def _pet_os_watchdog(self) -> None:
+        """Reset the OS watchdog timer. Called from heartbeat on each successful beat."""
+        if hasattr(signal, "SIGALRM"):
+            signal.alarm(_OS_WATCHDOG_TIMEOUT_S)
+
+    async def _shutdown(self, rt: _SessionRuntime) -> None:
         """Gracefully shut down the session."""
         logger.info(
             "Session ended. Turns: %d, Total cost: $%.4f", self._total_turns, self._total_cost
         )
 
-        # Post session summary to channel
-        try:
-            await asyncio.wait_for(
-                rt.provider.post_message(
-                    rt.channel_id,
-                    (
-                        f":wave: Session ending.\n"
-                        f"Turns: {self._total_turns} | "
-                        f"Cost: ${self._total_cost:.4f}"
-                    ),
-                ),
-                timeout=_CLEANUP_TIMEOUT_S,
-            )
-        except Exception as e:
-            logger.warning("Failed to post session summary: %s", e)
-
-        # Archive channel
-        try:
-            await asyncio.wait_for(
-                channel_manager.archive_session_channel(rt.channel_id),
-                timeout=_CLEANUP_TIMEOUT_S,
-            )
-        except Exception as e:
-            logger.warning("Failed to archive session channel: %s", e)
+        # Post disconnect message (channel is preserved, not archived)
+        await self._post_disconnect_message(rt, reason=self._disconnect_reason or "ended")
 
         # Update registry
         try:
@@ -707,14 +812,53 @@ class SummonSession:
         except Exception as e:
             logger.warning("Failed to update registry on shutdown: %s", e)
 
-        # Disconnect Socket Mode
+        # Disconnect Socket Mode (use most recent handler — may have been replaced by reconnect)
+        handler_to_close = self._active_socket_handler or rt.socket_handler
         try:
             await asyncio.wait_for(
-                rt.socket_handler.close_async(),
+                handler_to_close.close_async(),
                 timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
             logger.debug("Socket Mode cleanup error: %s", e)
+
+    async def _post_disconnect_message(self, rt: _SessionRuntime, reason: str = "ended") -> None:
+        """Post a clear disconnect notice to the channel."""
+        if reason == "reconnect_exhausted":
+            text = (
+                ":x: *Claude session disconnected*\n"
+                "Connection to Slack lost and could not be re-established.\n"
+                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
+                f"Claude session: `{self._claude_session_id or 'unknown'}`\n"
+                "Resume with: `claude --resume <session-id>`"
+            )
+        elif reason == "watchdog":
+            text = (
+                ":rotating_light: *Claude session terminated by watchdog*\n"
+                "The session process became unresponsive and was terminated.\n"
+                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}"
+            )
+        else:
+            text = (
+                ":wave: *Claude session ended*\n"
+                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
+                "Channel preserved — you can review the conversation history."
+            )
+
+        blocks = [
+            {"type": "divider"},
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": text},
+            },
+        ]
+        try:
+            await asyncio.wait_for(
+                rt.provider.post_message(rt.channel_id, text, blocks=blocks),
+                timeout=_CLEANUP_TIMEOUT_S,
+            )
+        except Exception as e:
+            logger.warning("Failed to post disconnect message: %s", e)
 
     async def _post_clear_delineation(self, rt: _SessionRuntime) -> None:
         """Post a visual delineation block to mark conversation history cleared."""
