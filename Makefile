@@ -50,9 +50,9 @@ py-typecheck: ## Run pyright type checking
 	@echo "Running pyright..."
 	uv run pyright
 
-py-test: ## Run full Python test suite (excludes slack integration)
+py-test: ## Run full Python test suite
 	@echo "Running pytest..."
-	uv run pytest tests/ -v -m "not slack"
+	uv run pytest tests/ -v
 
 py-test-slack: ## Run Slack integration tests (requires credentials)
 	@echo "Running Slack integration tests..."
