@@ -84,10 +84,7 @@ class SlackChatProvider:
         return ChannelRef(channel_id=channel["id"], name=channel.get("name", name))
 
     async def invite_user(self, channel: str, user_id: str) -> None:
-        try:
-            await self._client.conversations_invite(channel=channel, users=[user_id])
-        except Exception as e:
-            logger.debug("Failed to invite user %s to %s: %s", user_id, channel, e)
+        await self._client.conversations_invite(channel=channel, users=[user_id])
 
     async def archive_channel(self, channel_id: str) -> None:
         try:

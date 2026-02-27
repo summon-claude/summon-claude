@@ -75,10 +75,11 @@ class TestErrorHandling:
     async def test_archive_nonexistent_channel(self, slack_provider):
         await slack_provider.archive_channel("C000NONEXISTENT")
 
-    async def test_invite_self(self, slack_provider, test_channel, slack_harness):
-        """Provider should swallow cant_invite_self error."""
+    async def test_invite_self_raises(self, slack_provider, test_channel, slack_harness):
+        """Provider is transparent — cant_invite_self propagates to caller."""
         bot_id = await slack_harness.resolve_bot_user_id()
-        await slack_provider.invite_user(test_channel, bot_id)
+        with pytest.raises(Exception, match="cant_invite_self"):
+            await slack_provider.invite_user(test_channel, bot_id)
 
     async def test_add_reaction_duplicate(self, slack_provider, test_channel):
         ref = await slack_provider.post_message(test_channel, "Duplicate reaction test")
