@@ -86,7 +86,6 @@ def _setup_logging(verbose: bool = False, log_file: pathlib.Path | None = None) 
             root.addHandler(fh)
 
     if not verbose:
-        logging.getLogger("slack_sdk").setLevel(logging.WARNING)
         logging.getLogger("asyncio").setLevel(logging.WARNING)
 
 
