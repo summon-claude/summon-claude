@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from summon_claude.thread_router import ThreadRouter
+
+pytestmark = [pytest.mark.slack]
 
 
 class TestThreadRouter:

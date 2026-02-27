@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from summon_claude.channel_manager import ChannelManager
+
+pytestmark = [pytest.mark.slack]
 
 
 class TestChannelLifecycle:

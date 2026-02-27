@@ -13,8 +13,6 @@ from summon_claude.channel_manager import ChannelManager
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.thread_router import ThreadRouter
 
-pytestmark = [pytest.mark.slack]
-
 
 class SlackTestHarness:
     """Manages Slack workspace state for integration tests."""

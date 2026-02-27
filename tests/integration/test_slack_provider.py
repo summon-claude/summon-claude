@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
+pytestmark = [pytest.mark.slack]
+
 
 class TestChannelOperations:
     """Test SlackChatProvider channel operations."""
