@@ -1,4 +1,9 @@
-"""Integration tests for ChannelManager against real Slack API."""
+"""Integration tests for ChannelManager against real Slack API.
+
+Basic channel lifecycle (create, topic, archive) is exercised
+transitively by the shared test_channel fixture. Tests here focus
+on ChannelManager-specific orchestration logic.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +15,7 @@ pytestmark = [pytest.mark.slack]
 
 
 class TestChannelLifecycle:
-    """Test ChannelManager channel creation and lifecycle."""
-
-    async def test_create_session_channel(self, channel_manager, slack_harness):
-        channel_id, channel_name = await channel_manager.create_session_channel("my-feature")
-        assert channel_id
-        assert "my-feature" in channel_name
-        await slack_harness.cleanup_channels([channel_id])
+    """Test ChannelManager orchestration logic."""
 
     async def test_create_channel_name_collision(self, slack_provider, slack_harness):
         """Two channels with same session name get different suffixes."""
@@ -31,7 +30,6 @@ class TestChannelLifecycle:
         """Special characters in name should be slugified."""
         channel_id, channel_name = await channel_manager.create_session_channel("My Feature! @v2")
         assert channel_id
-        # Verify no special chars remain (Slack channel names are lowercase, alphanumeric + dashes)
         assert all(c.isalnum() or c == "-" for c in channel_name)
         await slack_harness.cleanup_channels([channel_id])
 
@@ -43,9 +41,8 @@ class TestChannelLifecycle:
         }
         ts = await channel_manager.post_session_header(test_channel, session_info)
         assert ts
-        # Verify message posted
-        history = await slack_harness.client.conversations_history(channel=test_channel, limit=1)
-        assert len(history["messages"]) > 0
+        history = await slack_harness.client.conversations_history(channel=test_channel, limit=5)
+        assert any(m["ts"] == ts for m in history["messages"])
 
 
 class TestTopicManagement:
@@ -65,21 +62,6 @@ class TestTopicManagement:
         assert "main" in topic
 
     async def test_update_topic(self, channel_manager, test_channel, slack_harness):
-        await channel_manager.update_topic(test_channel, "First topic")
-        info = await slack_harness.client.conversations_info(channel=test_channel)
-        assert info["channel"]["topic"]["value"] == "First topic"
-
         await channel_manager.update_topic(test_channel, "Updated topic")
         info = await slack_harness.client.conversations_info(channel=test_channel)
         assert info["channel"]["topic"]["value"] == "Updated topic"
-
-
-class TestArchive:
-    """Test ChannelManager archive operations."""
-
-    async def test_archive_session_channel(self, channel_manager, slack_harness):
-        # Create a dedicated channel for archiving
-        channel_id, _ = await channel_manager.create_session_channel("archive-test")
-        await channel_manager.archive_session_channel(channel_id)
-        info = await slack_harness.client.conversations_info(channel=channel_id)
-        assert info["channel"]["is_archived"] is True
