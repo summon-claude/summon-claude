@@ -368,8 +368,8 @@ class TestFormatTopic:
         )
         assert "gpt-4o" in topic
 
-    def test_none_model_shows_default(self):
-        """When model is None, should show 'default'."""
+    def test_none_model_shows_unknown(self):
+        """When model is None, should show 'unknown'."""
         provider = make_mock_provider()
         mgr = ChannelManager(provider)
         topic = mgr.format_topic(
@@ -378,7 +378,7 @@ class TestFormatTopic:
             git_branch=None,
             context=None,
         )
-        assert "default" in topic
+        assert "unknown" in topic
 
     def test_context_percentage_formatting(self):
         """Percentage should be formatted without decimal places (42% not 42.0%)."""

@@ -141,6 +141,8 @@ class SessionManager:
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
 
+        # Intentionally idempotent — safe to call even if event is already set.
+        # Ensures shutdown() is self-contained for direct callers outside daemon_main().
         self._shutdown_event.set()
         logger.info("SessionManager: shutdown complete")
 

@@ -68,7 +68,7 @@ class ChannelManager:
     async def post_session_header(self, channel_id: str, session_info: dict) -> str:
         """Post an initial message block with session metadata. Returns message timestamp."""
         cwd = session_info.get("cwd", "unknown")
-        model = session_info.get("model") or "default"
+        model = session_info.get("model") or "unknown"
         session_id = session_info.get("session_id", "")
         git_branch = _get_git_branch(cwd)
 
@@ -113,7 +113,7 @@ class ChannelManager:
         if model and model.startswith("claude-"):
             model_short = model[len("claude-") :]
         else:
-            model_short = model or "default"
+            model_short = model or "unknown"
 
         # CWD: use ~ for home directory
         try:

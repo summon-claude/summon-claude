@@ -206,7 +206,10 @@ class SummonSession:
             logger.info("Session %s: shutdown requested", self._session_id)
             self._shutdown_event.set()
             # Unblock the message queue poll
-            self._message_queue.put_nowait(("", None))
+            try:
+                self._message_queue.put_nowait(("", None))
+            except asyncio.QueueFull:
+                logger.debug("Shutdown sentinel dropped (queue full); shutdown_event is set")
 
     def authenticate(self, user_id: str) -> None:
         """Authenticate the session for *user_id* (called by SessionManager).
@@ -820,7 +823,10 @@ class SummonSession:
                 except Exception as e:
                     logger.warning("Failed to post shutdown message: %s", e)
             self._shutdown_event.set()
-            self._message_queue.put_nowait(("", None))
+            try:
+                self._message_queue.put_nowait(("", None))
+            except asyncio.QueueFull:
+                logger.debug("Shutdown sentinel dropped (queue full); shutdown_event is set")
             return
 
         # Handle !stop — abort the current Claude turn
