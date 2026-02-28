@@ -21,12 +21,12 @@ from datetime import UTC, datetime
 import click
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude import __version__
+from summon_claude import __version__, daemon_client
 from summon_claude.auth import SessionAuth, generate_session_token
 from summon_claude.channel_manager import ChannelManager
 from summon_claude.cli_config import config_check, config_edit, config_path, config_set, config_show
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
-from summon_claude.ipc import recv_msg, send_msg
+from summon_claude.daemon_client import DaemonError
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.registry import SessionRegistry
 from summon_claude.session import SessionOptions
@@ -299,34 +299,20 @@ def _ensure_daemon(config: SummonConfig) -> None:
 
 async def _create_session_in_daemon(options: SessionOptions, auth: SessionAuth) -> None:
     """Send a create_session request to the daemon and await the response."""
-    from summon_claude.daemon import connect_to_daemon  # noqa: PLC0415
-
-    reader, writer = await connect_to_daemon()
-    try:
-        msg = {
-            "type": "create_session",
-            "options": {
-                "session_id": options.session_id,
-                "cwd": options.cwd,
-                "name": options.name,
-                "model": options.model,
-                "resume": options.resume,
-            },
-            "auth": {
-                "short_code": auth.short_code,
-                "session_id": auth.session_id,
-                "expires_at": auth.expires_at.isoformat(),
-            },
-        }
-        await send_msg(writer, msg)
-        response = await recv_msg(reader)
-        if response.get("type") != "session_created":
-            raise RuntimeError(f"Unexpected daemon response: {response}")
-        logger.debug("Session created: %s", response.get("session_id"))
-    finally:
-        writer.close()
-        with contextlib.suppress(Exception):
-            await writer.wait_closed()
+    await daemon_client.create_session(
+        options={
+            "session_id": options.session_id,
+            "cwd": options.cwd,
+            "name": options.name,
+            "model": options.model,
+            "resume": options.resume,
+        },
+        auth={
+            "short_code": auth.short_code,
+            "session_id": auth.session_id,
+            "expires_at": auth.expires_at.isoformat(),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -350,60 +336,33 @@ def cmd_stop(ctx: click.Context, session_id: str | None, stop_all: bool) -> None
     if not session_id and not stop_all:
         click.echo("Provide SESSION_ID or --all.", err=True)
         ctx.exit(1)
-    asyncio.run(_async_cmd_stop(session_id, stop_all))
+    asyncio.run(_async_cmd_stop(ctx, session_id, stop_all))
 
 
-async def _async_cmd_stop(session_id: str | None, stop_all: bool) -> None:
-    from summon_claude.daemon import connect_to_daemon, is_daemon_running  # noqa: PLC0415
+async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: bool) -> None:
+    from summon_claude.daemon import is_daemon_running  # noqa: PLC0415
 
     if not is_daemon_running():
         click.echo("Daemon is not running.")
         return
 
-    reader, writer = await connect_to_daemon()
     try:
         if stop_all:
-            # Query status to get session list
-            await send_msg(writer, {"type": "status"})
-            status = await recv_msg(reader)
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
-
-            sessions = status.get("sessions", [])
-            if not sessions:
+            results = await daemon_client.stop_all_sessions()
+            if not results:
                 click.echo("No active sessions.")
                 return
-
-            for sess in sessions:
-                sid = sess.get("session_id", "")
-                if not sid:
-                    continue
-                r2, w2 = await connect_to_daemon()
-                try:
-                    await send_msg(w2, {"type": "stop_session", "session_id": sid})
-                    resp = await recv_msg(r2)
-                    found = resp.get("found", False)
-                    click.echo(f"Stop requested for {sid}: {'sent' if found else 'not found'}")
-                finally:
-                    w2.close()
-                    with contextlib.suppress(Exception):
-                        await w2.wait_closed()
+            for sid, found in results:
+                click.echo(f"Stop requested for {sid}: {'sent' if found else 'not found'}")
         else:
-            await send_msg(writer, {"type": "stop_session", "session_id": session_id})
-            resp = await recv_msg(reader)
-            if resp.get("found"):
+            found = await daemon_client.stop_session(session_id)  # type: ignore[arg-type]
+            if found:
                 click.echo(f"Stop requested for session {session_id}")
             else:
                 click.echo(f"Session {session_id} not found in daemon")
-            writer.close()
-            with contextlib.suppress(Exception):
-                await writer.wait_closed()
-    except Exception as exc:
-        writer.close()
-        with contextlib.suppress(Exception):
-            await writer.wait_closed()
+    except (DaemonError, Exception) as exc:
         click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -439,19 +398,14 @@ def session_list(ctx: click.Context, show_all: bool, output: str) -> None:
 
 
 async def _async_session_list(ctx: click.Context, show_all: bool, output: str) -> None:
-    from summon_claude.daemon import connect_to_daemon, is_daemon_running  # noqa: PLC0415
+    from summon_claude.daemon import is_daemon_running  # noqa: PLC0415
 
     # Print daemon status header (table mode only)
     if output == "table" and not ctx.obj.get("quiet"):
         if is_daemon_running():
             # Query daemon for live status
             try:
-                reader, writer = await connect_to_daemon()
-                await send_msg(writer, {"type": "status"})
-                status = await recv_msg(reader)
-                writer.close()
-                with contextlib.suppress(Exception):
-                    await writer.wait_closed()
+                status = await daemon_client.get_status()
                 pid = status.get("pid", "?")
                 uptime_s = status.get("uptime", 0)
                 uptime_str = _format_uptime(uptime_s)

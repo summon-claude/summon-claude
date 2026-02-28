@@ -421,35 +421,6 @@ class TestSessionInfo:
 class TestSessionStop:
     """Behavior tests for top-level 'stop' command."""
 
-    def _mock_daemon_stop(self, found: bool = True):
-        """Return a patch context that mocks the daemon stop IPC."""
-        import json
-        import struct
-        from contextlib import ExitStack
-
-        stack = ExitStack()
-        stack.enter_context(patch("summon_claude.daemon.is_daemon_running", return_value=True))
-        mock_reader = AsyncMock()
-        mock_writer = MagicMock()
-        mock_writer.drain = AsyncMock()
-        mock_writer.wait_closed = AsyncMock()
-        mock_reader.readexactly = AsyncMock()
-
-        resp = {"type": "session_stopped", "found": found}
-        resp_bytes = json.dumps(resp).encode()
-        mock_reader.readexactly.side_effect = [
-            struct.pack(">I", len(resp_bytes)),
-            resp_bytes,
-        ]
-
-        stack.enter_context(
-            patch(
-                "summon_claude.daemon.connect_to_daemon",
-                return_value=(mock_reader, mock_writer),
-            )
-        )
-        return stack
-
     def test_stop_daemon_not_running(self):
         with patch("summon_claude.daemon.is_daemon_running", return_value=False):
             runner = CliRunner()
@@ -458,14 +429,26 @@ class TestSessionStop:
         assert "not running" in result.output
 
     def test_stop_session_found(self):
-        with self._mock_daemon_stop(found=True):
+        with (
+            patch("summon_claude.daemon.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.stop_session",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
             runner = CliRunner()
             result = runner.invoke(cli, ["stop", "aaaa1111-2222-3333-4444-555566667777"])
         assert result.exit_code == 0
         assert "Stop requested" in result.output
 
     def test_stop_session_not_found(self):
-        with self._mock_daemon_stop(found=False):
+        with (
+            patch("summon_claude.daemon.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.stop_session",
+                new=AsyncMock(return_value=False),
+            ),
+        ):
             runner = CliRunner()
             result = runner.invoke(cli, ["stop", "aaaa1111-2222-3333-4444-555566667777"])
         assert result.exit_code == 0
