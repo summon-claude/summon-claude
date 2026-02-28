@@ -109,9 +109,9 @@ class SessionOptions:
     The CLI passes an empty string as a placeholder; the daemon overwrites it.
     """
 
-    session_id: str
     cwd: str
     name: str
+    session_id: str = ""
     model: str | None = None
     resume: str | None = None
 

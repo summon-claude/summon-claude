@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING
 from summon_claude.auth import generate_session_token, verify_short_code
 from summon_claude.ipc import recv_msg, send_msg
 from summon_claude.registry import SessionRegistry
-from summon_claude.session import SessionOptions, SummonSession
+from summon_claude.session import _SECRET_PATTERN, SessionOptions, SummonSession
 
 if TYPE_CHECKING:
     from summon_claude.bolt_router import BoltRouter
@@ -249,7 +249,10 @@ class SessionManager:
         """Route a control message to the appropriate handler and return a response."""
         match msg.get("type"):
             case "create_session":
-                options = SessionOptions(**msg["options"])
+                try:
+                    options = SessionOptions(**msg["options"])
+                except (TypeError, KeyError) as e:
+                    return {"type": "error", "message": f"Invalid session options: {e}"}
                 sid, short_code = await self.create_session(options)
                 return {
                     "type": "session_created",
@@ -319,9 +322,12 @@ class SessionManager:
                     channel_id = getattr(session, "channel_id", None)
                     if channel_id:
                         with contextlib.suppress(Exception):
+                            safe_msg = _SECRET_PATTERN.sub(
+                                "***", f":x: Session terminated unexpectedly: {e}"
+                            )
                             await self._bolt_router.provider.post_message(
                                 channel_id,
-                                f":x: Session terminated unexpectedly: {e}",
+                                safe_msg,
                             )
                     break
 

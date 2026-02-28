@@ -184,13 +184,23 @@ class TestCreateSession:
     async def test_create_multiple_sessions(self):
         manager, _, _ = _make_manager()
 
+        # Track session_ids returned by each create call
+        created_ids = []
         for i in range(3):
+            sid = f"s{i}"
             stub = _StubSession()
-            _patch_session(manager, stub)
-            await manager.create_session(make_options(f"s{i}"))
+            _patch_session(manager, stub, session_id=sid)
+            returned_sid, _ = await manager.create_session(make_options(sid))
+            created_ids.append(returned_sid)
 
-        assert len(manager._sessions) <= 3  # tasks may finish quickly
+        # Each call returned a distinct session_id
+        assert created_ids == ["s0", "s1", "s2"]
+
+        # All tasks complete cleanly
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+        await asyncio.sleep(0)  # allow _on_task_done callbacks to fire
+        # After tasks complete, sessions dict is cleaned up by _on_task_done
+        assert len(manager._sessions) == 0
 
 
 class TestStopSession:
