@@ -101,9 +101,8 @@ async def daemon_main(config: SummonConfig) -> None:
     dispatcher = EventDispatcher()
     session_manager = SessionManager(config, bolt_router, dispatcher)
 
-    # Wire dispatcher + session manager into BoltRouter
-    bolt_router.set_dispatcher(dispatcher)
-    bolt_router.set_session_manager(session_manager)
+    bolt_router.dispatcher = dispatcher
+    bolt_router.session_manager = session_manager
 
     await bolt_router.start()
     logger.info("BoltRouter started")
@@ -127,7 +126,7 @@ async def daemon_main(config: SummonConfig) -> None:
 
     # Layer 1: Socket health monitor (BoltRouter-owned)
     # Register shutdown callback so health monitor can trigger daemon shutdown on exhaustion
-    bolt_router.set_shutdown_callback(session_manager.shutdown_event.set)
+    bolt_router.shutdown_callback = session_manager.shutdown_event.set
     health_task = bolt_router.start_health_monitor()
 
     # Layer 2: Daemon-level event loop watchdog
@@ -310,18 +309,6 @@ def run_daemon(config: SummonConfig) -> None:
 # ---------------------------------------------------------------------------
 # Auto-start helpers (called from CLI)
 # ---------------------------------------------------------------------------
-
-
-def _pid_alive(pid: int) -> bool:
-    """Return True if the process with *pid* is alive (same user or root)."""
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        # Process exists but owned by another user (PID recycled).
-        return False
 
 
 def is_daemon_running() -> bool:

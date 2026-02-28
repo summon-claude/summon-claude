@@ -109,7 +109,7 @@ def _patch_session(manager: SessionManager, stub: _StubSession, session_id: str 
         if manager._grace_timer is not None:
             manager._grace_timer.cancel()
             manager._grace_timer = None
-        return session_id, "test-code"
+        return "test-code"
 
     manager.create_session = patched_create  # type: ignore[method-assign]
 
@@ -155,14 +155,47 @@ class TestCreateSession:
         _patch_session(manager, stub)
 
         options = make_options("s1")
-        sid, short_code = await manager.create_session(options)
+        short_code = await manager.create_session(options)
 
-        assert sid == "s1"
         assert short_code == "test-code"
         assert "s1" in manager._tasks
         assert "s1" in manager._sessions
 
         # Let the task finish
+        await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+
+    async def test_create_session_generates_auth(self):
+        """Real create_session path generates uuid + auth token via SessionRegistry."""
+        manager, _, _ = _make_manager()
+        mock_auth = SessionAuth(
+            short_code="XY123456",
+            session_id="placeholder",
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+
+        with (
+            patch("summon_claude.session_manager.SessionRegistry") as mock_registry_cls,
+            patch(
+                "summon_claude.session_manager.generate_session_token",
+                return_value=mock_auth,
+            ) as mock_gen,
+            patch("summon_claude.session_manager.SummonSession") as mock_session_cls,
+        ):
+            mock_registry = AsyncMock()
+            mock_registry_cls.return_value.__aenter__ = AsyncMock(return_value=mock_registry)
+            mock_registry_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_session_cls.return_value = MagicMock()
+            mock_session_cls.return_value.start = AsyncMock()
+
+            result = await manager.create_session(make_options(""))
+
+        assert result == "XY123456"
+        mock_gen.assert_awaited_once()
+        # Verify a uuid4 session_id was passed (36 chars with dashes)
+        call_args = mock_gen.call_args
+        session_id_arg = call_args[0][1]
+        assert len(session_id_arg) == 36 and "-" in session_id_arg
+        # Cleanup
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
 
     async def test_create_session_cancels_grace_timer(self):
@@ -190,8 +223,8 @@ class TestCreateSession:
             sid = f"s{i}"
             stub = _StubSession()
             _patch_session(manager, stub, session_id=sid)
-            returned_sid, _ = await manager.create_session(make_options(sid))
-            created_ids.append(returned_sid)
+            await manager.create_session(make_options(sid))
+            created_ids.append(sid)
 
         # Each call returned a distinct session_id
         assert created_ids == ["s0", "s1", "s2"]
@@ -212,13 +245,13 @@ class TestStopSession:
         _patch_session(manager, stub)
         await manager.create_session(make_options("s1"))
 
-        result = await manager.stop_session("s1")
+        result = manager.stop_session("s1")
         assert result is True
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
 
     async def test_stop_unknown_session_returns_false(self):
         manager, _, _ = _make_manager()
-        result = await manager.stop_session("nonexistent")
+        result = manager.stop_session("nonexistent")
         assert result is False
 
     async def test_stop_calls_request_shutdown(self):
@@ -228,7 +261,7 @@ class TestStopSession:
         await manager.create_session(make_options("s1"))
 
         # Stop before task runs
-        await manager.stop_session("s1")
+        manager.stop_session("s1")
         assert stub._shutdown_requested is True
 
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)

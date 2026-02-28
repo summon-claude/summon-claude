@@ -144,7 +144,6 @@ class TestDispatchAction:
         ph.handle_action.assert_awaited_once_with(
             value="approve:batch-1",
             user_id="U001",
-            channel_id="C001",
             response_url="https://hooks.slack.com/actions/...",
         )
 
@@ -161,7 +160,6 @@ class TestDispatchAction:
         ph.handle_action.assert_awaited_once_with(
             value="deny:batch-2",
             user_id="U001",
-            channel_id="C001",
             response_url="",
         )
 

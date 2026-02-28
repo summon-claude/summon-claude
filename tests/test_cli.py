@@ -422,7 +422,7 @@ class TestSessionStop:
     """Behavior tests for top-level 'stop' command."""
 
     def test_stop_daemon_not_running(self):
-        with patch("summon_claude.daemon.is_daemon_running", return_value=False):
+        with patch("summon_claude.cli.is_daemon_running", return_value=False):
             runner = CliRunner()
             result = runner.invoke(cli, ["stop", "some-session-id"])
         assert result.exit_code == 0
@@ -430,7 +430,7 @@ class TestSessionStop:
 
     def test_stop_session_found(self):
         with (
-            patch("summon_claude.daemon.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.is_daemon_running", return_value=True),
             patch(
                 "summon_claude.cli.daemon_client.stop_session",
                 new=AsyncMock(return_value=True),
@@ -443,7 +443,7 @@ class TestSessionStop:
 
     def test_stop_session_not_found(self):
         with (
-            patch("summon_claude.daemon.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.is_daemon_running", return_value=True),
             patch(
                 "summon_claude.cli.daemon_client.stop_session",
                 new=AsyncMock(return_value=False),
@@ -567,12 +567,11 @@ def _start_patches(update_info=None):
         patch("summon_claude.cli.SummonConfig.from_file", return_value=_mock_config())
     )
     # Patch daemon interaction so tests don't try to fork/connect.
-    # _create_session_in_daemon now returns (session_id, short_code) from the daemon.
     stack.enter_context(patch("summon_claude.cli._ensure_daemon", return_value=None))
     stack.enter_context(
         patch(
-            "summon_claude.cli._create_session_in_daemon",
-            AsyncMock(return_value=("test-session-id", "ABCD1234")),
+            "summon_claude.daemon_client.create_session",
+            AsyncMock(return_value="ABCD1234"),
         )
     )
     stack.enter_context(

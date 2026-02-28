@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 _ASK_USER_PATTERN = re.compile(r"ask_user_\d+_.+")
 
 _HEALTH_CHECK_INTERVAL_S = 10.0
-_MAX_RECONNECT_ATTEMPTS = 5
+_MAX_RECONNECT_ATTEMPTS = 10
 
 
 class BoltRouter:
@@ -61,90 +61,66 @@ class BoltRouter:
 
     def __init__(self, config: SummonConfig) -> None:
         self._config = config
-        self._dispatcher: EventDispatcher | None = None
-        self._session_manager: SessionManager | None = None
+        self.dispatcher: EventDispatcher | None = None
+        self.session_manager: SessionManager | None = None
         self._rate_limiter = RateLimiter()
 
         # Shared web client — stays alive across reconnects
         self._client = AsyncWebClient(token=config.slack_bot_token)
-        self._provider = SlackChatProvider(self._client)
+        self.provider = SlackChatProvider(self._client)
 
-        # Initial Bolt app + socket handler
-        self._app, self._socket_handler = self._build_app()
-        self._register_handlers(self._app)
-
-        # Cached from auth_test() at start() time
-        self._bot_user_id: str | None = None
+        # Set by start()
+        self._app: AsyncApp | None = None
+        self._socket_handler: AsyncSocketModeHandler | None = None
+        self.bot_user_id: str | None = None
 
         # Health monitor — created by start_health_monitor()
         self._health_monitor: SocketHealthMonitor | None = None
         self._exhausted_notice_task: asyncio.Task[None] | None = None
         self._health_monitor_task: asyncio.Task[None] | None = None
-        self._shutdown_callback: Callable[[], None] | None = None
-
-    # ------------------------------------------------------------------
-    # Deferred wiring
-    # ------------------------------------------------------------------
-
-    def set_dispatcher(self, dispatcher: EventDispatcher) -> None:
-        """Wire the ``EventDispatcher``.  Must be called before ``start()``."""
-        self._dispatcher = dispatcher
-
-    def set_session_manager(self, session_manager: SessionManager) -> None:
-        """Wire the ``SessionManager`` for ``/summon`` auth.  Must be called before ``start()``."""
-        self._session_manager = session_manager
+        self.shutdown_callback: Callable[[], None] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def start(self) -> None:
-        """Connect the Socket Mode handler to Slack."""
-        logger.info("BoltRouter: connecting socket handler")
-        await self._socket_handler.connect_async()
-        resp = await self._client.auth_test()
-        self._bot_user_id = resp["user_id"]
-        logger.debug("BoltRouter: bot_user_id cached as %s", self._bot_user_id)
-
-    async def stop(self) -> None:
-        """Gracefully close the Socket Mode connection."""
-        logger.info("BoltRouter: closing socket handler")
-        self.stop_health_monitor()
-        try:
-            await self._socket_handler.close_async()
-        except Exception as e:
-            logger.debug("BoltRouter: socket close error (expected on dead connection): %s", e)
-
-    async def reconnect(self) -> None:
-        """Replace the current ``AsyncApp`` + handler with a fresh connection.
-
-        Closes the old socket (best-effort), creates a new ``AsyncApp``,
-        re-registers all handlers, and connects.  Notifies the health monitor
-        so it resets its failure counter and tracks the new handler.
-        """
-        logger.info("BoltRouter: reconnecting socket")
-        try:
-            await self._socket_handler.close_async()
-        except Exception as e:
-            logger.debug("BoltRouter: old socket close error (expected): %s", e)
-
+        """Build the Bolt app, register handlers, and connect to Slack."""
+        logger.info("BoltRouter: starting")
         self._app, self._socket_handler = self._build_app()
         self._register_handlers(self._app)
         await self._socket_handler.connect_async()
+        resp = await self._client.auth_test()
+        self.bot_user_id = resp["user_id"]
+        logger.debug("BoltRouter: bot_user_id cached as %s", self.bot_user_id)
 
-        # Inform health monitor about the new handler so it resets failure count
-        if self._health_monitor is not None:
-            self._health_monitor.update_handler(self._socket_handler)
+    async def stop(self) -> None:
+        """Gracefully close the Socket Mode connection and health monitor."""
+        logger.info("BoltRouter: stopping")
+        self.stop_health_monitor()
+        await self._close_socket()
 
-        logger.info("BoltRouter: socket reconnected successfully")
+    async def reconnect(self) -> None:
+        """Close the old socket and start a fresh connection.
 
-    def set_shutdown_callback(self, callback: Callable[[], None]) -> None:
-        """Register a zero-argument callable invoked when reconnection is exhausted.
-
-        The daemon calls this after construction so that the health monitor can
-        trigger daemon shutdown without a direct reference to the daemon.
+        The health monitor survives reconnects — it is notified about the
+        new handler so it resets its failure counter.
         """
-        self._shutdown_callback = callback
+        logger.info("BoltRouter: reconnecting")
+        await self._close_socket()
+        await self.start()
+        if self._health_monitor is not None and self._socket_handler is not None:
+            self._health_monitor.update_handler(self._socket_handler)
+        logger.info("BoltRouter: reconnected")
+
+    async def _close_socket(self) -> None:
+        """Close the socket handler (best-effort, swallows errors)."""
+        if self._socket_handler is None:
+            return
+        try:
+            await self._socket_handler.close_async()
+        except Exception as e:
+            logger.debug("BoltRouter: socket close error (expected): %s", e)
 
     def start_health_monitor(self) -> asyncio.Task[None]:
         """Create a ``SocketHealthMonitor`` and launch it as an asyncio task.
@@ -153,11 +129,13 @@ class BoltRouter:
         reset via ``reconnect()``.  On exhaustion (5 failed attempts):
 
         1. Post a disconnect notice to every active session channel.
-        2. Invoke the registered shutdown callback (``set_shutdown_callback``).
+        2. Invoke ``shutdown_callback`` if set.
 
         Returns the created task so the caller (daemon) can cancel it on clean
         shutdown.
         """
+        if self._socket_handler is None:
+            raise RuntimeError("start() must be called before start_health_monitor()")
         self._health_monitor = SocketHealthMonitor(
             socket_handler=self._socket_handler,
             on_reconnect_needed=self.reconnect,
@@ -189,15 +167,18 @@ class BoltRouter:
             "BoltRouter: socket reconnection exhausted — posting to sessions and shutting down"
         )
         # Trigger daemon shutdown via registered callback
-        if self._shutdown_callback is None:
+        if self.shutdown_callback is None:
             logger.warning("BoltRouter: no shutdown callback registered — daemon will hang")
         else:
-            self._shutdown_callback()
+            try:
+                self.shutdown_callback()
+            except Exception:
+                logger.exception("BoltRouter: shutdown callback raised")
         # Post disconnect notice to all active session channels (best-effort).
         # Stored in a task so notifications are awaited with a timeout before
         # the event loop exits, preventing fire-and-forget loss on fast shutdown.
-        if self._dispatcher is not None:
-            channel_ids = self._dispatcher.all_channel_ids()
+        if self.dispatcher is not None:
+            channel_ids = self.dispatcher.all_channel_ids()
             if channel_ids:
 
                 async def _send_notices() -> None:
@@ -215,26 +196,12 @@ class BoltRouter:
     async def _post_exhausted_notice(self, channel_id: str) -> None:
         """Post a permanent disconnect notice to a single channel."""
         with contextlib.suppress(Exception):
-            await self._provider.post_message(
+            await self.provider.post_message(
                 channel_id,
                 ":x: *Slack connection lost permanently.*\n"
-                "The daemon could not reconnect after 5 attempts.\n"
+                f"The daemon could not reconnect after {_MAX_RECONNECT_ATTEMPTS} attempts.\n"
                 "All sessions are terminating. Restart with `summon start`.",
             )
-
-    # ------------------------------------------------------------------
-    # Shared provider
-    # ------------------------------------------------------------------
-
-    @property
-    def provider(self) -> SlackChatProvider:
-        """Return the shared ``SlackChatProvider`` (backed by the shared web client)."""
-        return self._provider
-
-    @property
-    def bot_user_id(self) -> str | None:
-        """Return the bot's Slack user ID, cached after ``start()`` calls ``auth_test()``."""
-        return self._bot_user_id
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -279,7 +246,7 @@ class BoltRouter:
             )
             return
 
-        if self._session_manager is None:
+        if self.session_manager is None:
             logger.warning("BoltRouter: /summon received but session_manager not set")
             await respond(
                 text=":x: Service not ready. Please try again shortly.",
@@ -288,21 +255,21 @@ class BoltRouter:
             return
 
         # Delegate auth to session_manager
-        await self._session_manager.handle_summon_command(
+        await self.session_manager.handle_summon_command(
             user_id=user_id,
             code=text,
             respond=respond,
         )
 
     async def _on_message(self, event, say) -> None:  # noqa: ARG002
-        if self._dispatcher is not None:
-            await self._dispatcher.dispatch_message(event)
+        if self.dispatcher is not None:
+            await self.dispatcher.dispatch_message(event)
 
     async def _on_reaction_added(self, event) -> None:
-        if self._dispatcher is not None:
-            await self._dispatcher.dispatch_reaction(event)
+        if self.dispatcher is not None:
+            await self.dispatcher.dispatch_reaction(event)
 
     async def _on_dispatch_action(self, ack, action, body) -> None:
         await ack()
-        if self._dispatcher is not None:
-            await self._dispatcher.dispatch_action(action, body)
+        if self.dispatcher is not None:
+            await self.dispatcher.dispatch_action(action, body)

@@ -141,7 +141,6 @@ class EventDispatcher:
             await handle.permission_handler.handle_action(
                 value=value,
                 user_id=user_id,
-                channel_id=channel_id,
                 response_url=response_url,
             )
 

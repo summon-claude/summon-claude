@@ -23,32 +23,6 @@ def _patch_data_dir(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# _pid_alive
-# ---------------------------------------------------------------------------
-
-
-class TestPidAlive:
-    def test_own_pid_is_alive(self):
-        from summon_claude.daemon import _pid_alive
-
-        assert _pid_alive(os.getpid()) is True
-
-    def test_nonexistent_pid_returns_false(self):
-        from summon_claude.daemon import _pid_alive
-
-        # PID 0 is the swapper/idle process — os.kill(0, 0) sends to the
-        # process group, not a specific process. Use a very high PID instead.
-        with patch("os.kill", side_effect=ProcessLookupError):
-            assert _pid_alive(99999999) is False
-
-    def test_permission_error_returns_false(self):
-        from summon_claude.daemon import _pid_alive
-
-        with patch("os.kill", side_effect=PermissionError):
-            assert _pid_alive(1) is False
-
-
-# ---------------------------------------------------------------------------
 # is_daemon_running
 # ---------------------------------------------------------------------------
 
@@ -269,9 +243,7 @@ class TestDaemonMain:
         mock_bolt = AsyncMock()
         mock_bolt.start = AsyncMock()
         mock_bolt.stop = AsyncMock()
-        mock_bolt.set_dispatcher = MagicMock()
-        mock_bolt.set_session_manager = MagicMock()
-        mock_bolt.set_shutdown_callback = MagicMock()
+        mock_bolt.shutdown_callback = None
 
         # start_health_monitor is sync and returns an awaitable Task; create a
         # pre-cancelled real task so daemon_main can await it without error.
@@ -316,3 +288,7 @@ class TestDaemonMain:
         mock_bolt.start.assert_awaited_once()
         mock_bolt.stop.assert_awaited_once()
         mock_session_manager.shutdown.assert_awaited_once()
+        # CR-007: verify the critical shutdown callback wiring
+        # Verify shutdown callback wiring — calling it should set the event
+        mock_bolt.shutdown_callback()
+        assert shutdown_event.is_set()

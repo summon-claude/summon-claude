@@ -30,7 +30,7 @@ from summon_claude import __version__, daemon_client
 from summon_claude.channel_manager import ChannelManager
 from summon_claude.cli_config import config_check, config_edit, config_path, config_set, config_show
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
-from summon_claude.daemon_client import DaemonError
+from summon_claude.daemon import is_daemon_running, start_daemon
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.registry import SessionRegistry
 from summon_claude.session import SessionOptions
@@ -267,7 +267,6 @@ async def _async_cmd_start(
 ) -> None:
     """Orchestrate daemon startup, session creation, and auth banner display."""
     options = SessionOptions(
-        session_id="",  # assigned by daemon
         cwd=cwd,
         name=name,
         model=model or config.default_model,
@@ -283,7 +282,7 @@ async def _async_cmd_start(
 
     # Phase 2: Send create_session to daemon; daemon generates session_id + auth
     try:
-        _session_id, short_code = await _create_session_in_daemon(options)
+        short_code = await daemon_client.create_session(options)
     except Exception as e:
         click.echo(f"Error communicating with daemon: {e}", err=True)
         raise SystemExit(1) from e
@@ -294,29 +293,11 @@ async def _async_cmd_start(
 
 def _ensure_daemon(config: SummonConfig) -> None:
     """Start the daemon if it is not already running."""
-    from summon_claude.daemon import is_daemon_running, start_daemon  # noqa: PLC0415
-
     if not is_daemon_running():
         logger.debug("Daemon not running — starting")
         start_daemon(config)
     else:
         logger.debug("Daemon already running")
-
-
-async def _create_session_in_daemon(options: SessionOptions) -> tuple[str, str]:
-    """Send a create_session request to the daemon.
-
-    Returns ``(session_id, short_code)`` assigned by the daemon.
-    """
-    return await daemon_client.create_session(
-        options={
-            "session_id": "",  # daemon assigns real ID
-            "cwd": options.cwd,
-            "name": options.name,
-            "model": options.model,
-            "resume": options.resume,
-        },
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -344,8 +325,6 @@ def cmd_stop(ctx: click.Context, session_id: str | None, stop_all: bool) -> None
 
 
 async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: bool) -> None:
-    from summon_claude.daemon import is_daemon_running  # noqa: PLC0415
-
     if not is_daemon_running():
         click.echo("Daemon is not running.")
         return
@@ -364,7 +343,7 @@ async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: 
                 click.echo(f"Stop requested for session {session_id}")
             else:
                 click.echo(f"Session {session_id} not found in daemon")
-    except (DaemonError, Exception) as exc:
+    except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
 
@@ -402,8 +381,6 @@ def session_list(ctx: click.Context, show_all: bool, output: str) -> None:
 
 
 async def _async_session_list(ctx: click.Context, show_all: bool, output: str) -> None:
-    from summon_claude.daemon import is_daemon_running  # noqa: PLC0415
-
     # Print daemon status header (table mode only)
     if output == "table" and not ctx.obj.get("quiet"):
         if is_daemon_running():

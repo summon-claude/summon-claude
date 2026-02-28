@@ -29,28 +29,47 @@ def _mock_app() -> MagicMock:
 
 
 def _make_router(config: SummonConfig | None = None):
-    """Return a BoltRouter with all Slack SDK constructors patched out."""
+    """Return a BoltRouter with all Slack SDK constructors patched out.
+
+    The returned router has NOT been started — call ``await router.start()``
+    to build the app and register handlers.  The patches are stored on the
+    router so callers can inspect mocks after ``start()``.
+    """
+    from contextlib import ExitStack
+
     from summon_claude.bolt_router import BoltRouter
 
     cfg = config or make_config()
-    with (
-        patch("summon_claude.bolt_router.AsyncApp") as patched_app_cls,
-        patch("summon_claude.bolt_router.AsyncWebClient"),
-        patch("summon_claude.bolt_router.AsyncSocketModeHandler") as patched_handler_cls,
-    ):
-        mock_a = _mock_app()
-        patched_app_cls.return_value = mock_a
+    stack = ExitStack()
+    patched_app_cls = stack.enter_context(patch("summon_claude.bolt_router.AsyncApp"))
+    stack.enter_context(patch("summon_claude.bolt_router.AsyncWebClient"))
+    patched_handler_cls = stack.enter_context(
+        patch("summon_claude.bolt_router.AsyncSocketModeHandler")
+    )
 
-        mock_h = AsyncMock()
-        patched_handler_cls.return_value = mock_h
+    mock_a = _mock_app()
+    patched_app_cls.return_value = mock_a
 
-        router = BoltRouter(cfg)
-        # Expose the mocks for inspection
-        router._mock_app = mock_a  # type: ignore[attr-defined]
-        router._mock_handler = mock_h  # type: ignore[attr-defined]
+    mock_h = AsyncMock()
+    mock_h.connect_async = AsyncMock()
+    mock_h.close_async = AsyncMock()
+    patched_handler_cls.return_value = mock_h
+
+    router = BoltRouter(cfg)
+    # Store stack so patches persist through start()
+    router._patch_stack = stack  # type: ignore[attr-defined]
+    router._mock_app_factory = mock_a  # type: ignore[attr-defined]
+    router._mock_handler_factory = mock_h  # type: ignore[attr-defined]
 
     # Make auth_test() awaitable so start() works in tests
     router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+    return router
+
+
+async def _make_started_router(config: SummonConfig | None = None):
+    """Return a BoltRouter that has been started (app built, handlers registered)."""
+    router = _make_router(config)
+    await router.start()
     return router
 
 
@@ -70,49 +89,56 @@ class TestBoltRouterInit:
         assert router.provider is router.provider
 
     def test_dispatcher_starts_as_none(self):
-        """dispatcher is None until set_dispatcher() is called."""
+        """dispatcher is None before wiring."""
         router = _make_router()
-        assert router._dispatcher is None
+        assert router.dispatcher is None
 
     def test_session_manager_starts_as_none(self):
-        """session_manager is None until set_session_manager() is called."""
+        """session_manager is None before wiring."""
         router = _make_router()
-        assert router._session_manager is None
+        assert router.session_manager is None
 
-    def test_handlers_registered_at_construction(self):
-        """Handler registration methods are called during __init__."""
+    def test_app_is_none_before_start(self):
+        """_app is None until start() is called."""
         router = _make_router()
-        app = router._mock_app  # type: ignore[attr-defined]
-        app.command.assert_called_with("/summon")
-        assert app.event.call_count >= 2  # message + reaction_added
-        assert app.action.call_count >= 3  # permission_approve, permission_deny, ask_user pattern
+        assert router._app is None
+
+    async def test_handlers_registered_at_start(self):
+        """Handler registration happens during start(), not __init__."""
+        router = _make_router()
+        await router.start()
+        app = router._app
+        assert app is not None
+        app.command.assert_called_with("/summon")  # type: ignore[union-attr]
+        assert app.event.call_count >= 2  # type: ignore[union-attr]
+        assert app.action.call_count >= 3  # type: ignore[union-attr]
 
 
 class TestDeferredWiring:
-    """Tests for set_dispatcher() and set_session_manager()."""
+    """Tests for dispatcher/session_manager property setters."""
 
-    def test_set_dispatcher(self):
-        """set_dispatcher stores the dispatcher."""
+    def test_dispatcher_setter(self):
+        """dispatcher property stores the dispatcher."""
         router = _make_router()
         mock_dispatcher = MagicMock()
-        router.set_dispatcher(mock_dispatcher)
-        assert router._dispatcher is mock_dispatcher
+        router.dispatcher = mock_dispatcher
+        assert router.dispatcher is mock_dispatcher
 
-    def test_set_session_manager(self):
-        """set_session_manager stores the session manager."""
+    def test_session_manager_setter(self):
+        """session_manager property stores the session manager."""
         router = _make_router()
         mock_sm = MagicMock()
-        router.set_session_manager(mock_sm)
-        assert router._session_manager is mock_sm
+        router.session_manager = mock_sm
+        assert router.session_manager is mock_sm
 
-    def test_set_dispatcher_replaces_previous(self):
-        """set_dispatcher overwrites a previous value."""
+    def test_dispatcher_replaces_previous(self):
+        """dispatcher setter overwrites a previous value."""
         router = _make_router()
         first = MagicMock()
         second = MagicMock()
-        router.set_dispatcher(first)
-        router.set_dispatcher(second)
-        assert router._dispatcher is second
+        router.dispatcher = first
+        router.dispatcher = second
+        assert router.dispatcher is second
 
 
 class TestLifecycle:
@@ -127,13 +153,21 @@ class TestLifecycle:
     async def test_stop_calls_close_async(self):
         """stop() calls close_async() on the socket handler."""
         router = _make_router()
+        await router.start()
+        router._socket_handler.close_async.reset_mock()
         await router.stop()
         router._socket_handler.close_async.assert_awaited_once()
 
     async def test_stop_tolerates_close_error(self):
         """stop() does not propagate exceptions from close_async()."""
         router = _make_router()
+        await router.start()
         router._socket_handler.close_async.side_effect = RuntimeError("already closed")
+        await router.stop()  # must not raise
+
+    async def test_stop_before_start_is_safe(self):
+        """stop() is safe to call even if start() was never called."""
+        router = _make_router()
         await router.stop()  # must not raise
 
 
@@ -145,10 +179,8 @@ class TestReconnect:
         from summon_claude.bolt_router import BoltRouter
 
         cfg = make_config()
-        mock_a1 = _mock_app()
-        mock_a2 = _mock_app()
-        mock_h1 = AsyncMock()
-        mock_h2 = AsyncMock()
+        mock_a1, mock_a2 = _mock_app(), _mock_app()
+        mock_h1, mock_h2 = AsyncMock(), AsyncMock()
 
         with (
             patch("summon_claude.bolt_router.AsyncApp") as patched_app_cls,
@@ -159,21 +191,22 @@ class TestReconnect:
             patched_handler_cls.side_effect = [mock_h1, mock_h2]
 
             router = BoltRouter(cfg)
+            router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+            await router.start()
             assert router._app is mock_a1
 
             await router.reconnect()
 
-        mock_h1.close_async.assert_awaited_once()
-        assert router._app is mock_a2
-        mock_h2.connect_async.assert_awaited_once()
+            mock_h1.close_async.assert_awaited_once()
+            assert router._app is mock_a2
+            mock_h2.connect_async.assert_awaited_once()
 
     async def test_reconnect_re_registers_handlers(self):
         """reconnect() registers handlers on the new app."""
         from summon_claude.bolt_router import BoltRouter
 
         cfg = make_config()
-        mock_a1 = _mock_app()
-        mock_a2 = _mock_app()
+        mock_a1, mock_a2 = _mock_app(), _mock_app()
 
         with (
             patch("summon_claude.bolt_router.AsyncApp") as patched_app_cls,
@@ -184,6 +217,8 @@ class TestReconnect:
             patched_handler_cls.return_value = AsyncMock()
 
             router = BoltRouter(cfg)
+            router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+            await router.start()
             await router.reconnect()
 
         assert mock_a2.event.call_count >= 2
@@ -195,7 +230,6 @@ class TestReconnect:
 
         cfg = make_config()
         mock_h1 = AsyncMock()
-        mock_h1.close_async.side_effect = RuntimeError("dead")
         mock_h2 = AsyncMock()
 
         with (
@@ -207,6 +241,9 @@ class TestReconnect:
             patched_handler_cls.side_effect = [mock_h1, mock_h2]
 
             router = BoltRouter(cfg)
+            router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+            await router.start()
+            mock_h1.close_async.side_effect = RuntimeError("dead")
             await router.reconnect()  # must not raise
 
         mock_h2.connect_async.assert_awaited_once()
@@ -258,7 +295,7 @@ class TestSummonCommandHandler:
     async def test_summon_no_session_manager_responds_not_ready(self):
         """/summon without session_manager wired responds with 'not ready' message."""
         router = _make_router()
-        assert router._session_manager is None
+        assert router.session_manager is None
         result = await self._invoke_summon(router, {"user_id": "U001", "text": "abc123"})
         text = result["respond"].call_args.kwargs.get("text", "")
         assert "not ready" in text.lower() or ":x:" in text
@@ -268,7 +305,7 @@ class TestSummonCommandHandler:
         router = _make_router()
         mock_sm = MagicMock()
         mock_sm.handle_summon_command = AsyncMock()
-        router.set_session_manager(mock_sm)
+        router.session_manager = mock_sm
 
         result = await self._invoke_summon(router, {"user_id": "U001", "text": "mycode"})
 
@@ -334,7 +371,7 @@ class TestMessageHandlerRouting:
         router = _make_router()
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_message = AsyncMock()
-        router.set_dispatcher(mock_dispatcher)
+        router.dispatcher = mock_dispatcher
 
         handler = self._extract_event_handler(router, "message")
         assert handler is not None
@@ -349,7 +386,7 @@ class TestMessageHandlerRouting:
         router = _make_router()
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_reaction = AsyncMock()
-        router.set_dispatcher(mock_dispatcher)
+        router.dispatcher = mock_dispatcher
 
         handler = self._extract_event_handler(router, "reaction_added")
         assert handler is not None
@@ -362,7 +399,7 @@ class TestMessageHandlerRouting:
     async def test_message_without_dispatcher_does_not_raise(self):
         """message events are silently dropped when dispatcher is not set."""
         router = _make_router()
-        assert router._dispatcher is None
+        assert router.dispatcher is None
 
         handler = self._extract_event_handler(router, "message")
         await handler(event={"type": "message", "channel": "C001"}, say=AsyncMock())
@@ -372,7 +409,7 @@ class TestMessageHandlerRouting:
         router = _make_router()
         mock_dispatcher = MagicMock()
         mock_dispatcher.dispatch_action = AsyncMock()
-        router.set_dispatcher(mock_dispatcher)
+        router.dispatcher = mock_dispatcher
 
         handler = self._extract_action_handler(router, "permission_approve")
         assert handler is not None
@@ -384,3 +421,45 @@ class TestMessageHandlerRouting:
 
         ack.assert_awaited_once()
         mock_dispatcher.dispatch_action.assert_awaited_once_with(action, body)
+
+
+class TestReconnectExhausted:
+    """Tests for _on_reconnect_exhausted bound method."""
+
+    async def test_calls_shutdown_callback(self):
+        """Exhaustion invokes the registered shutdown callback."""
+        router = _make_router()
+        cb = MagicMock()
+        router.shutdown_callback = cb
+        await router._on_reconnect_exhausted()
+        cb.assert_called_once()
+
+    async def test_warns_when_no_callback(self):
+        """Logs warning when no shutdown callback is registered."""
+        router = _make_router()
+        assert router.shutdown_callback is None
+        # Should not raise
+        await router._on_reconnect_exhausted()
+
+    async def test_posts_notices_to_all_channels(self):
+        """Posts disconnect notice to every channel from the dispatcher."""
+        router = _make_router()
+        router.shutdown_callback = MagicMock()
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.all_channel_ids.return_value = ["C001", "C002"]
+        router.dispatcher = mock_dispatcher
+        router.provider.post_message = AsyncMock()
+
+        await router._on_reconnect_exhausted()
+        # Wait for the fire-and-forget notice task
+        if router._exhausted_notice_task is not None:
+            await router._exhausted_notice_task
+
+        assert router.provider.post_message.await_count == 2
+
+    async def test_no_crash_when_dispatcher_is_none(self):
+        """No crash when dispatcher is not set (no channels to notify)."""
+        router = _make_router()
+        router.shutdown_callback = MagicMock()
+        assert router.dispatcher is None
+        await router._on_reconnect_exhausted()

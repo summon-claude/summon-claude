@@ -144,7 +144,6 @@ class TestHandleAction:
         await handler.handle_action(
             value=f"approve:{batch_id}",
             user_id="U_TEST",
-            channel_id="C123",
         )
 
         assert handler._batch.decisions.get(batch_id) is True
@@ -159,7 +158,6 @@ class TestHandleAction:
         await handler.handle_action(
             value=f"deny:{batch_id}",
             user_id="U_TEST",
-            channel_id="C123",
         )
 
         assert handler._batch.decisions.get(batch_id) is False
@@ -175,7 +173,6 @@ class TestHandleAction:
         await handler.handle_action(
             value=f"approve:{batch_id}",
             user_id="U_TEST",
-            channel_id="C123",
         )
 
         # Should NOT update the ephemeral message
@@ -186,7 +183,6 @@ class TestHandleAction:
         await handler.handle_action(
             value="unknown_value",
             user_id="U_TEST",
-            channel_id="C123",
         )
 
     async def test_unauthorized_user_rejected(self):
@@ -199,7 +195,6 @@ class TestHandleAction:
         await handler.handle_action(
             value=f"approve:{batch_id}",
             user_id="U_INTRUDER",
-            channel_id="C123",
         )
 
         # Decision should NOT have been set
@@ -317,7 +312,6 @@ class TestPermissionEphemeral:
         await handler.handle_action(
             value=f"approve:{batch_id}",
             user_id="U_TEST",
-            channel_id="C123",
         )
 
         assert handler._batch.decisions.get(batch_id) is True

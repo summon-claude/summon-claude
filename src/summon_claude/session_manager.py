@@ -23,7 +23,7 @@ import uuid
 from functools import partial
 from typing import TYPE_CHECKING
 
-from summon_claude.auth import generate_session_token, verify_short_code
+from summon_claude.auth import SessionAuth, generate_session_token, verify_short_code
 from summon_claude.ipc import recv_msg, send_msg
 from summon_claude.registry import SessionRegistry
 from summon_claude.session import _SECRET_PATTERN, SessionOptions, SummonSession
@@ -72,15 +72,14 @@ class SessionManager:
         """Event that is set when the daemon should stop."""
         return self._shutdown_event
 
-    async def create_session(self, options: SessionOptions) -> tuple[str, str]:
+    async def create_session(self, options: SessionOptions) -> str:
         """Create and start a supervised session task.
 
         Generates a new ``session_id`` and auth token internally so the CLI
         does not need to touch the SQLite registry.
 
         Returns:
-            ``(session_id, short_code)`` — the short code is printed by the CLI
-            so the user can authenticate via ``/summon <code>`` in Slack.
+            The short code for the user to authenticate via ``/summon`` in Slack.
         """
         # Cancel grace timer — a new session has arrived
         if self._grace_timer is not None:
@@ -88,9 +87,7 @@ class SessionManager:
             self._grace_timer = None
 
         session_id = str(uuid.uuid4())
-        # Generate auth token in the daemon (single process owns the registry)
-        async with SessionRegistry() as registry:
-            auth = await generate_session_token(registry, session_id)
+        auth = await self._generate_auth(session_id)
 
         full_options = SessionOptions(
             session_id=session_id,
@@ -116,9 +113,24 @@ class SessionManager:
         task.add_done_callback(partial(self._on_task_done, session_id=session_id))
         self._tasks[session_id] = task
         logger.info("SessionManager: created session %s", session_id)
-        return session_id, auth.short_code
+        return auth.short_code
 
-    async def stop_session(self, session_id: str) -> bool:
+    @staticmethod
+    async def _generate_auth(session_id: str) -> SessionAuth:
+        """Open a short-lived registry and generate an auth token.
+
+        Uses a dedicated ``SessionRegistry`` context so the connection is
+        closed before the session task is spawned.  The session's ``start()``
+        opens its own registry later for ``register()`` / heartbeat.
+        """
+        auth: SessionAuth | None = None
+        async with SessionRegistry() as registry:
+            auth = await generate_session_token(registry, session_id)
+        if auth is None:  # pragma: no cover — SessionRegistry never suppresses
+            raise RuntimeError("Auth generation failed silently")
+        return auth
+
+    def stop_session(self, session_id: str) -> bool:
         """Signal a specific session to shut down.  Returns ``True`` if found."""
         session = self._sessions.get(session_id)
         if session is not None:
@@ -253,15 +265,11 @@ class SessionManager:
                     options = SessionOptions(**msg["options"])
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
-                sid, short_code = await self.create_session(options)
-                return {
-                    "type": "session_created",
-                    "session_id": sid,
-                    "short_code": short_code,
-                }
+                short_code = await self.create_session(options)
+                return {"type": "session_created", "short_code": short_code}
 
             case "stop_session":
-                found = await self.stop_session(msg["session_id"])
+                found = self.stop_session(msg["session_id"])
                 return {"type": "session_stopped", "found": found}
 
             case "status":

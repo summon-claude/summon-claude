@@ -69,7 +69,6 @@ class _BatchState:
 
     events: dict[str, asyncio.Event] = field(default_factory=dict)
     decisions: dict[str, bool] = field(default_factory=dict)
-    channels: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -115,7 +114,7 @@ class PermissionHandler:
         self._batch_task: asyncio.Task | None = None
         self._batch_lock = asyncio.Lock()
 
-        # Per-batch tracking (events, decisions, channels)
+        # Per-batch tracking (events, decisions)
         self._batch = _BatchState()
 
         # AskUserQuestion tracking
@@ -204,7 +203,6 @@ class PermissionHandler:
         batch_id = str(uuid.uuid4())
         batch_event = asyncio.Event()
         self._batch.events[batch_id] = batch_event
-        self._batch.channels[batch_id] = self._router.channel_id
 
         await self._post_approval_message(batch_id, batch)
 
@@ -224,7 +222,6 @@ class PermissionHandler:
         # Cleanup
         self._batch.events.pop(batch_id, None)
         self._batch.decisions.pop(batch_id, None)
-        self._batch.channels.pop(batch_id, None)
 
     async def _post_approval_message(self, batch_id: str, batch: dict[str, PendingRequest]) -> None:
         """Post the Slack interactive approval message for a batch of requests."""
@@ -287,12 +284,12 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
-        channel_id: str,
         response_url: str = "",
     ) -> None:
         """Handle a Slack interactive button click for permission approval/denial.
 
         Must be called AFTER ack() (the 3-second deadline is the caller's responsibility).
+        Channel routing is handled by ``EventDispatcher.dispatch_action``.
         """
         if self._authenticated_user_id and user_id != self._authenticated_user_id:
             logger.warning(
@@ -310,12 +307,6 @@ class PermissionHandler:
             approved = False
         else:
             logger.warning("Unknown permission action value: %r", value)
-            return
-
-        # Validate the action came from the correct channel
-        expected_channel = self._batch.channels.get(batch_id)
-        if expected_channel and channel_id != expected_channel:
-            logger.warning("Permission action channel mismatch for batch %s", batch_id)
             return
 
         self._batch.decisions[batch_id] = approved

@@ -9,8 +9,13 @@ Raises ``DaemonError`` when the daemon returns ``{"type": "error", ...}``.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import dataclasses
 import logging
+from typing import Any
+
+from summon_claude.session import SessionOptions
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +24,7 @@ class DaemonError(Exception):
     """Raised when the daemon returns an error response."""
 
 
-async def _request(msg: dict) -> dict:  # type: ignore[type-arg]
+async def _request(msg: dict[str, Any]) -> dict[str, Any]:
     """Send *msg* to the daemon and return the response dict.
 
     Opens a fresh Unix socket connection, sends the message via ``send_msg``,
@@ -46,25 +51,20 @@ async def _request(msg: dict) -> dict:  # type: ignore[type-arg]
     return response
 
 
-async def create_session(options: dict) -> tuple[str, str]:  # type: ignore[type-arg]
+async def create_session(options: SessionOptions) -> str:
     """Send a ``create_session`` request to the daemon.
 
     The daemon generates the session ID and auth token internally.
 
-    Args:
-        options: Serialised ``SessionOptions`` dict (cwd, name, model, resume).
-
     Returns:
-        ``(session_id, short_code)`` — the short code is shown to the user so
-        they can authenticate via ``/summon <code>`` in Slack.
+        The short code for the user to authenticate via ``/summon <code>`` in Slack.
     """
-    response = await _request({"type": "create_session", "options": options})
+    response = await _request({"type": "create_session", "options": dataclasses.asdict(options)})
     if response.get("type") != "session_created":
         raise DaemonError(f"Unexpected daemon response: {response}")
-    session_id: str = response["session_id"]
     short_code: str = response["short_code"]
-    logger.debug("Session created: %s (code: %s)", session_id, short_code)
-    return session_id, short_code
+    logger.debug("Session created (code: %s)", short_code)
+    return short_code
 
 
 async def stop_session(session_id: str) -> bool:
@@ -79,33 +79,37 @@ async def stop_session(session_id: str) -> bool:
     return found
 
 
-async def get_status() -> dict:  # type: ignore[type-arg]
+async def get_status() -> dict[str, Any]:
     """Request the daemon status and return the raw response dict."""
     return await _request({"type": "status"})
 
 
-async def list_sessions() -> list[dict]:  # type: ignore[type-arg]
-    """Return the list of active sessions from the daemon status response."""
+async def list_sessions() -> list[dict[str, Any]]:
+    """Return the list of active sessions from the daemon status response.
+
+    Returns sparse dicts from the daemon (session_id, channel_id only),
+    not full registry records.
+    """
     status = await get_status()
-    sessions: list[dict] = status.get("sessions", [])  # type: ignore[type-arg]
+    sessions: list[dict[str, Any]] = status.get("sessions", [])
     return sessions
 
 
 async def stop_all_sessions() -> list[tuple[str, bool]]:
     """Stop every active session reported by the daemon.
 
-    Queries ``get_status()`` for the current session list, then calls
-    ``stop_session()`` for each one.
+    Queries ``get_status()`` for the current session list, then stops each
+    session concurrently.  Each ``stop_session()`` call opens its own
+    connection — this is intentional: the daemon IPC protocol is stateless
+    one-shot, and separate connections avoid the double-close bug from the
+    previous implementation.
 
     Returns:
         List of ``(session_id, was_found)`` tuples — one per session.
     """
     sessions = await list_sessions()
-    results: list[tuple[str, bool]] = []
-    for sess in sessions:
-        sid = sess.get("session_id", "")
-        if not sid:
-            continue
-        found = await stop_session(sid)
-        results.append((sid, found))
-    return results
+    sids = [s.get("session_id", "") for s in sessions if s.get("session_id")]
+    if not sids:
+        return []
+    results = await asyncio.gather(*(stop_session(sid) for sid in sids))
+    return list(zip(sids, results, strict=True))

@@ -16,8 +16,10 @@ import pytest
 class TestBoltRouterReconnect:
     """BoltRouter reconnect replaces the socket handler and re-registers handlers."""
 
-    def _make_bolt_router(self):
-        """Build a BoltRouter with all Slack calls mocked out."""
+    async def _make_bolt_router(self):
+        """Build and start a BoltRouter with all Slack calls mocked out."""
+        from contextlib import ExitStack
+
         from summon_claude.bolt_router import BoltRouter
 
         mock_config = MagicMock()
@@ -30,19 +32,27 @@ class TestBoltRouterReconnect:
         mock_handler.close_async = AsyncMock()
 
         mock_app = MagicMock()
+        mock_app.command = MagicMock(return_value=lambda f: f)
+        mock_app.event = MagicMock(return_value=lambda f: f)
+        mock_app.action = MagicMock(return_value=lambda f: f)
 
-        with (
-            patch("summon_claude.bolt_router.AsyncApp", return_value=mock_app),
-            patch("summon_claude.bolt_router.AsyncSocketModeHandler", return_value=mock_handler),
-            patch("summon_claude.bolt_router.AsyncWebClient"),
-        ):
-            router = BoltRouter(mock_config)
+        stack = ExitStack()
+        stack.enter_context(patch("summon_claude.bolt_router.AsyncApp", return_value=mock_app))
+        stack.enter_context(
+            patch("summon_claude.bolt_router.AsyncSocketModeHandler", return_value=mock_handler)
+        )
+        stack.enter_context(patch("summon_claude.bolt_router.AsyncWebClient"))
+
+        router = BoltRouter(mock_config)
+        router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+        router._patch_stack = stack  # keep patches alive
+        await router.start()
 
         return router, mock_config, mock_handler, mock_app
 
     async def test_reconnect_closes_old_and_connects_new(self):
         """reconnect() should close old handler and connect new one."""
-        router, mock_config, old_handler, _ = self._make_bolt_router()
+        router, mock_config, old_handler, _ = await self._make_bolt_router()
 
         new_handler = AsyncMock()
         new_handler.connect_async = AsyncMock()
@@ -60,7 +70,7 @@ class TestBoltRouterReconnect:
 
     async def test_reconnect_updates_health_monitor_handler(self):
         """After reconnect, health monitor should track the new socket handler."""
-        router, mock_config, old_handler, _ = self._make_bolt_router()
+        router, mock_config, old_handler, _ = await self._make_bolt_router()
 
         # Set up a health monitor
         mock_monitor = MagicMock()
@@ -80,7 +90,7 @@ class TestBoltRouterReconnect:
 
     async def test_reconnect_no_health_monitor_does_not_crash(self):
         """reconnect() should work even if health monitor hasn't been started."""
-        router, mock_config, old_handler, _ = self._make_bolt_router()
+        router, mock_config, old_handler, _ = await self._make_bolt_router()
         assert router._health_monitor is None
 
         new_handler = AsyncMock()
@@ -95,7 +105,7 @@ class TestBoltRouterReconnect:
 
     async def test_stop_signals_health_monitor(self):
         """stop() should signal health monitor to stop."""
-        router, _, _, _ = self._make_bolt_router()
+        router, _, _, _ = await self._make_bolt_router()
 
         mock_monitor = MagicMock()
         router._health_monitor = mock_monitor
@@ -114,7 +124,9 @@ class TestBoltRouterReconnect:
 class TestBoltRouterHealthMonitor:
     """start_health_monitor() wires SocketHealthMonitor and returns a task."""
 
-    def _make_minimal_router(self):
+    async def _make_minimal_router(self):
+        from contextlib import ExitStack
+
         from summon_claude.bolt_router import BoltRouter
 
         mock_config = MagicMock()
@@ -124,19 +136,28 @@ class TestBoltRouterHealthMonitor:
 
         mock_handler = AsyncMock()
         mock_app = MagicMock()
+        mock_app.command = MagicMock(return_value=lambda f: f)
+        mock_app.event = MagicMock(return_value=lambda f: f)
+        mock_app.action = MagicMock(return_value=lambda f: f)
 
-        with (
-            patch("summon_claude.bolt_router.AsyncApp", return_value=mock_app),
-            patch("summon_claude.bolt_router.AsyncSocketModeHandler", return_value=mock_handler),
-            patch("summon_claude.bolt_router.AsyncWebClient"),
-        ):
-            return BoltRouter(mock_config)
+        stack = ExitStack()
+        stack.enter_context(patch("summon_claude.bolt_router.AsyncApp", return_value=mock_app))
+        stack.enter_context(
+            patch("summon_claude.bolt_router.AsyncSocketModeHandler", return_value=mock_handler)
+        )
+        stack.enter_context(patch("summon_claude.bolt_router.AsyncWebClient"))
+
+        router = BoltRouter(mock_config)
+        router._client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+        router._patch_stack = stack  # keep patches alive
+        await router.start()
+        return router
 
     async def test_start_health_monitor_returns_task(self):
         """start_health_monitor() should return a running asyncio Task."""
-        router = self._make_minimal_router()
+        router = await self._make_minimal_router()
         shutdown_event = asyncio.Event()
-        router.set_shutdown_callback(shutdown_event.set)
+        router.shutdown_callback = shutdown_event.set
 
         # Patch SocketHealthMonitor.run to a no-op coroutine
         with patch("summon_claude.bolt_router.SocketHealthMonitor.run", new=AsyncMock()):
@@ -149,14 +170,14 @@ class TestBoltRouterHealthMonitor:
 
     async def test_exhaustion_sets_shutdown_event(self):
         """When reconnection is exhausted, shutdown_event should be set."""
-        router = self._make_minimal_router()
+        router = await self._make_minimal_router()
         shutdown_event = asyncio.Event()
-        router.set_shutdown_callback(shutdown_event.set)
+        router.shutdown_callback = shutdown_event.set
 
         # Set up dispatcher so all_channel_ids() returns empty list (no posts)
         mock_dispatcher = MagicMock()
         mock_dispatcher.all_channel_ids.return_value = []
-        router._dispatcher = mock_dispatcher
+        router.dispatcher = mock_dispatcher
 
         # Manually trigger the exhaustion callback that start_health_monitor wires
         # by accessing the monitor after creation
