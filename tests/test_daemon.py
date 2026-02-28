@@ -54,56 +54,45 @@ class TestPidAlive:
 
 
 class TestIsDaemonRunning:
-    def test_returns_false_when_lock_not_held(self, tmp_path):
+    def test_returns_false_when_socket_absent(self, tmp_path):
+        """No socket file → daemon is not running."""
         with _patch_data_dir(tmp_path):
             from summon_claude.daemon import is_daemon_running
 
             assert is_daemon_running() is False
 
-    def test_returns_false_when_pid_file_missing(self, tmp_path):
-        """Lock held but PID file absent → treat as not running."""
-        from filelock import FileLock
+    def test_returns_false_when_socket_exists_but_refused(self, tmp_path):
+        """Socket file present but connection refused → daemon not running."""
+        import socket as _socket
 
         with _patch_data_dir(tmp_path):
-            lock_path = tmp_path / "daemon.lock"
-            lock = FileLock(str(lock_path))
-            with lock:
+            sock_path = tmp_path / "daemon.sock"
+            sock_path.touch()
+
+            with patch("summon_claude.daemon.socket.socket") as mock_sock_cls:
+                mock_sock = MagicMock()
+                mock_sock.connect.side_effect = ConnectionRefusedError
+                mock_sock_cls.return_value = mock_sock
+
                 from summon_claude.daemon import is_daemon_running
 
-                # No PID file written
                 assert is_daemon_running() is False
 
-    def test_returns_false_when_pid_is_dead(self, tmp_path):
-        """Lock held, PID file present, but process dead → False."""
-        from filelock import FileLock
-
+    def test_returns_true_when_socket_accepts_connection(self, tmp_path):
+        """Socket exists and accepts connection → daemon is running."""
         with _patch_data_dir(tmp_path):
-            lock_path = tmp_path / "daemon.lock"
-            pid_path = tmp_path / "daemon.pid"
-            pid_path.write_text("99999999")
+            sock_path = tmp_path / "daemon.sock"
+            sock_path.touch()
 
-            with patch("summon_claude.daemon._pid_alive", return_value=False):
-                lock = FileLock(str(lock_path))
-                with lock:
-                    from summon_claude.daemon import is_daemon_running
+            with patch("summon_claude.daemon.socket.socket") as mock_sock_cls:
+                mock_sock = MagicMock()
+                mock_sock_cls.return_value = mock_sock
 
-                    assert is_daemon_running() is False
+                from summon_claude.daemon import is_daemon_running
 
-    def test_returns_true_when_lock_held_and_pid_alive(self, tmp_path):
-        """Lock held, PID file present, process alive → True."""
-        from filelock import FileLock
-
-        with _patch_data_dir(tmp_path):
-            lock_path = tmp_path / "daemon.lock"
-            pid_path = tmp_path / "daemon.pid"
-            pid_path.write_text(str(os.getpid()))
-
-            with patch("summon_claude.daemon._pid_alive", return_value=True):
-                lock = FileLock(str(lock_path))
-                with lock:
-                    from summon_claude.daemon import is_daemon_running
-
-                    assert is_daemon_running() is True
+                assert is_daemon_running() is True
+                mock_sock.connect.assert_called_once_with(str(sock_path))
+                mock_sock.close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -150,17 +139,22 @@ class TestRunDaemon:
 
     def test_raises_if_lock_already_held(self, tmp_path):
         """run_daemon should raise DaemonAlreadyRunningError if lock is held."""
-        from filelock import FileLock
+        import fcntl
 
         from summon_claude.daemon import DaemonAlreadyRunningError
 
-        with _patch_data_dir(tmp_path):
-            lock = FileLock(str(tmp_path / "daemon.lock"))
-            with lock, pytest.raises(DaemonAlreadyRunningError):
+        lock_path = tmp_path / "daemon.lock"
+        lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            with _patch_data_dir(tmp_path), pytest.raises(DaemonAlreadyRunningError):
                 from summon_claude.daemon import run_daemon
 
                 mock_config = MagicMock()
                 run_daemon(mock_config)
+        finally:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            os.close(lock_fd)
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +205,8 @@ class TestWaitForSocket:
 
 
 class TestClearStaleFiles:
-    def test_removes_all_daemon_files(self, tmp_path):
+    def test_removes_pid_and_socket_files(self, tmp_path):
+        """_clear_stale_daemon_files removes PID and socket but preserves lock."""
         from summon_claude.daemon import _clear_stale_daemon_files
 
         with _patch_data_dir(tmp_path):
@@ -221,7 +216,8 @@ class TestClearStaleFiles:
 
             _clear_stale_daemon_files()
 
-        assert not (tmp_path / "daemon.lock").exists()
+        # Lock file is intentionally preserved — fcntl handles release
+        assert (tmp_path / "daemon.lock").exists()
         assert not (tmp_path / "daemon.pid").exists()
         assert not (tmp_path / "daemon.sock").exists()
 

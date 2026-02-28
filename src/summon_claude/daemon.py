@@ -8,21 +8,21 @@ Public API
 - ``daemon_main(config)``   — async entry point; runs until shutdown.
 - ``run_daemon(config)``    — acquire lock, write PID, call asyncio.run().
 - ``start_daemon(config)``  — fork daemon in background, wait for socket.
-- ``is_daemon_running()``   — True if lock held and PID is alive.
+- ``is_daemon_running()``   — True if daemon socket exists and accepts connections.
 - ``connect_to_daemon()``   — open Unix socket connection to running daemon.
 """
 
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import os
 import signal
+import socket
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
-
-from filelock import FileLock, Timeout
 
 from summon_claude.bolt_router import BoltRouter
 from summon_claude.config import get_data_dir
@@ -274,18 +274,23 @@ def run_daemon(config: SummonConfig) -> None:
     Raises ``DaemonAlreadyRunningError`` if the lock is already held by another
     process.  This function never returns normally — it exits when the asyncio
     event loop completes.
+
+    Uses ``fcntl.flock`` rather than a third-party file-lock library so the
+    lock is automatically released by the kernel when the process exits,
+    eliminating stale-lock races during fork.
     """
     pid_path = _daemon_pid()
     lock_path = _daemon_lock()
     log_path = _daemon_log()
 
-    lock = FileLock(str(lock_path), timeout=0)
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
     try:
-        lock.acquire()
-    except Timeout as exc:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        os.close(lock_fd)
         raise DaemonAlreadyRunningError(pid_path) from exc
 
-    pid_path.parent.mkdir(parents=True, exist_ok=True)
     pid_path.write_text(str(os.getpid()))
     pid_path.chmod(0o600)
 
@@ -296,7 +301,8 @@ def run_daemon(config: SummonConfig) -> None:
         asyncio.run(daemon_main(config))
     finally:
         # Best-effort cleanup if asyncio.run() exits early (e.g., exception)
-        lock.release()
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
         pid_path.unlink(missing_ok=True)
         _daemon_socket().unlink(missing_ok=True)
 
@@ -319,31 +325,28 @@ def _pid_alive(pid: int) -> bool:
 
 
 def is_daemon_running() -> bool:
-    """Return True if the daemon lock is held and the recorded PID is alive."""
-    lock_path = _daemon_lock()
-    pid_path = _daemon_pid()
-
-    lock = FileLock(str(lock_path), timeout=0)
-    try:
-        lock.acquire()
-        # Lock acquired — no other process holds it
-        lock.release()
+    """Return True if the daemon socket exists and accepts connections."""
+    sock_path = _daemon_socket()
+    if not sock_path.exists():
         return False
-    except Timeout:
-        pass  # Lock is held by someone
-
-    # Lock is held — verify PID is alive
     try:
-        pid = int(pid_path.read_text().strip())
-        return _pid_alive(pid)
-    except (OSError, ValueError):
-        # PID file missing or corrupt — treat as stale
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(str(sock_path))
+        s.close()
+        return True
+    except (ConnectionRefusedError, FileNotFoundError, OSError):
         return False
 
 
 def _clear_stale_daemon_files() -> None:
-    """Remove lock/PID/socket files left by a dead daemon."""
-    for path in (_daemon_lock(), _daemon_pid(), _daemon_socket()):
+    """Remove PID and socket files left by a dead daemon.
+
+    The lock file is intentionally preserved — fcntl.flock() locks are
+    advisory and tied to the file descriptor, not the file path, so there
+    is no risk of a stale lock persisting across daemon restarts.
+    """
+    for path in (_daemon_pid(), _daemon_socket()):
         path.unlink(missing_ok=True)
 
 
