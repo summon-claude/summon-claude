@@ -1,4 +1,4 @@
-"""Single shared Bolt instance for the daemon architecture.
+"""BoltRouter — single shared Bolt instance for the daemon architecture.
 
 ``BoltRouter`` owns exactly one ``AsyncApp`` + ``AsyncSocketModeHandler`` pair
 for the lifetime of the daemon.  All Slack events are received here and
@@ -25,16 +25,13 @@ import asyncio
 import contextlib
 import logging
 import re
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.web.async_client import AsyncWebClient
-
-from summon_claude.providers.slack import SlackChatProvider
-from summon_claude.rate_limiter import RateLimiter
-from summon_claude.socket_health import SocketHealthMonitor
 
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
@@ -49,6 +46,124 @@ _HEALTH_CHECK_INTERVAL_S = 10.0
 _MAX_RECONNECT_ATTEMPTS = 10
 
 
+# ---------------------------------------------------------------------------
+# _RateLimiter — inlined from rate_limiter.py
+# ---------------------------------------------------------------------------
+
+
+class _RateLimiter:
+    """Simple per-key rate limiter with automatic cleanup.
+
+    Safe for single-threaded asyncio (no await inside check/cleanup).
+    """
+
+    _CLEANUP_EVERY = 100
+
+    def __init__(self, cooldown_seconds: float = 2.0) -> None:
+        self._cooldown = cooldown_seconds
+        self._last_attempt: dict[str, float] = {}
+        self._call_count = 0
+
+    def check(self, key: str) -> bool:
+        """Return True if the request is allowed."""
+        now = time.monotonic()
+        self._call_count += 1
+        if self._call_count >= self._CLEANUP_EVERY:
+            self._call_count = 0
+            self._cleanup()
+        last = self._last_attempt.get(key, 0.0)
+        if now - last < self._cooldown:
+            return False
+        self._last_attempt[key] = now
+        return True
+
+    def _cleanup(self, max_age: float = 300.0) -> None:
+        """Remove entries older than max_age."""
+        now = time.monotonic()
+        self._last_attempt = {k: v for k, v in self._last_attempt.items() if now - v < max_age}
+
+
+# ---------------------------------------------------------------------------
+# _HealthMonitor — inlined from socket_health.py
+# ---------------------------------------------------------------------------
+
+
+class _HealthMonitor:
+    """Monitors slack-sdk socket client health and triggers reconnection."""
+
+    def __init__(
+        self,
+        socket_handler: AsyncSocketModeHandler,
+        on_reconnect_needed: Callable[[], Awaitable[None]],
+        on_exhausted: Callable[[], Awaitable[None]],
+        check_interval: float = 10.0,
+        max_reconnect_attempts: int = 5,
+    ) -> None:
+        self._socket_handler = socket_handler
+        self._on_reconnect_needed = on_reconnect_needed
+        self._on_exhausted = on_exhausted
+        self._check_interval = check_interval
+        self._max_reconnect_attempts = max_reconnect_attempts
+        self._consecutive_failures = 0
+        self._stop_event = asyncio.Event()
+
+    def update_handler(self, socket_handler: AsyncSocketModeHandler) -> None:
+        """Switch to a new socket handler after reconnection."""
+        self._socket_handler = socket_handler
+        self._consecutive_failures = 0
+        logger.debug("_HealthMonitor: handler updated, failure counter reset")
+
+    def mark_healthy(self) -> None:
+        """Called when a message is successfully received; resets failure counter."""
+        self._consecutive_failures = 0
+
+    def stop(self) -> None:
+        """Signal the monitoring loop to stop."""
+        self._stop_event.set()
+
+    async def run(self) -> None:
+        """Main monitoring loop. Runs as an asyncio task."""
+        while not self._stop_event.is_set():
+            await asyncio.sleep(self._check_interval)
+            if not self._stop_event.is_set() and not await self._is_healthy():
+                await self._handle_unhealthy()
+
+    async def _is_healthy(self) -> bool:
+        """Check if the socket client is connected and responsive."""
+        try:
+            client = self._socket_handler.client
+            return await client.is_connected()
+        except Exception as e:
+            logger.debug("_HealthMonitor: health check exception: %s", e)
+            return False
+
+    async def _handle_unhealthy(self) -> None:
+        """Attempt recovery when socket is unhealthy."""
+        self._consecutive_failures += 1
+        if self._consecutive_failures <= self._max_reconnect_attempts:
+            logger.warning(
+                "Socket unhealthy (attempt %d/%d), triggering reconnect",
+                self._consecutive_failures,
+                self._max_reconnect_attempts,
+            )
+            try:
+                await self._on_reconnect_needed()
+            except Exception as e:
+                logger.error("Reconnect callback raised: %s", e)
+        else:
+            logger.error(
+                "Socket reconnection failed after %d attempts — signalling exhaustion",
+                self._max_reconnect_attempts,
+            )
+            self._stop_event.set()
+            await self._on_exhausted()
+
+
+# ---------------------------------------------------------------------------
+# BoltRouter
+# ---------------------------------------------------------------------------
+
+
 class BoltRouter:
     """Owns the single Bolt ``AsyncApp`` and routes events to ``EventDispatcher``.
 
@@ -59,11 +174,11 @@ class BoltRouter:
     def __init__(self, config: SummonConfig, dispatcher: EventDispatcher) -> None:
         self._config = config
         self._dispatcher = dispatcher
-        self._rate_limiter = RateLimiter()
+        self._rate_limiter = _RateLimiter()
 
         # Shared web client — stays alive across reconnects
         self._client = AsyncWebClient(token=config.slack_bot_token)
-        self.provider = SlackChatProvider(self._client)
+        self.web_client = self._client  # public attribute — no provider abstraction
 
         # Set by start()
         self._app: AsyncApp | None = None
@@ -71,7 +186,7 @@ class BoltRouter:
         self.bot_user_id: str | None = None
 
         # Health monitor — created by start_health_monitor()
-        self._health_monitor: SocketHealthMonitor | None = None
+        self._health_monitor: _HealthMonitor | None = None
         self._exhausted_notice_task: asyncio.Task[None] | None = None
         self._health_monitor_task: asyncio.Task[None] | None = None
         self.shutdown_callback: Callable[[], None] | None = None
@@ -119,10 +234,10 @@ class BoltRouter:
             logger.debug("BoltRouter: socket close error (expected): %s", e)
 
     def start_health_monitor(self) -> asyncio.Task[None]:
-        """Create a ``SocketHealthMonitor`` and launch it as an asyncio task.
+        """Create a ``_HealthMonitor`` and launch it as an asyncio task.
 
         On successful reconnection the health monitor's failure counter is
-        reset via ``reconnect()``.  On exhaustion (5 failed attempts):
+        reset via ``reconnect()``.  On exhaustion (10 failed attempts):
 
         1. Post a disconnect notice to every active session channel.
         2. Invoke ``shutdown_callback`` if set.
@@ -132,7 +247,7 @@ class BoltRouter:
         """
         if self._socket_handler is None:
             raise RuntimeError("start() must be called before start_health_monitor()")
-        self._health_monitor = SocketHealthMonitor(
+        self._health_monitor = _HealthMonitor(
             socket_handler=self._socket_handler,
             on_reconnect_needed=self.reconnect,
             on_exhausted=self._on_reconnect_exhausted,
@@ -158,7 +273,7 @@ class BoltRouter:
     # ------------------------------------------------------------------
 
     async def _on_reconnect_exhausted(self) -> None:
-        """Called by SocketHealthMonitor when all reconnect attempts are exhausted."""
+        """Called by _HealthMonitor when all reconnect attempts are exhausted."""
         logger.error(
             "BoltRouter: socket reconnection exhausted — posting to sessions and shutting down"
         )
@@ -191,11 +306,15 @@ class BoltRouter:
     async def _post_exhausted_notice(self, channel_id: str) -> None:
         """Post a permanent disconnect notice to a single channel."""
         with contextlib.suppress(Exception):
-            await self.provider.post_message(
-                channel_id,
-                ":x: *Slack connection lost permanently.*\n"
-                f"The daemon could not reconnect after {_MAX_RECONNECT_ATTEMPTS} attempts.\n"
-                "All sessions are terminating. Restart with `summon start`.",
+            # Raw web_client call — accepted exception to single-output-path rule.
+            # These are last-resort crash-path messages sent before SlackClient exists.
+            await self._client.chat_postMessage(
+                channel=channel_id,
+                text=(
+                    ":x: *Slack connection lost permanently.*\n"
+                    f"The daemon could not reconnect after {_MAX_RECONNECT_ATTEMPTS} attempts.\n"
+                    "All sessions are terminating. Restart with `summon start`."
+                ),
             )
 
     # ------------------------------------------------------------------

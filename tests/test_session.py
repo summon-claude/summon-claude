@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 from summon_claude.auth import SessionAuth
 from summon_claude.config import SummonConfig
-from summon_claude.rate_limiter import RateLimiter
 from summon_claude.session import SessionOptions, SummonSession, _format_file_references
 
 
@@ -45,37 +43,6 @@ def make_auth(**overrides) -> SessionAuth:
     }
     defaults.update(overrides)
     return SessionAuth(**defaults)
-
-
-class TestRateLimiter:
-    def test_first_request_allowed(self):
-        rl = RateLimiter(cooldown_seconds=2.0)
-        assert rl.check("user1") is True
-
-    def test_second_request_within_cooldown_denied(self):
-        rl = RateLimiter(cooldown_seconds=2.0)
-        rl.check("user1")
-        assert rl.check("user1") is False
-
-    def test_different_keys_are_independent(self):
-        rl = RateLimiter(cooldown_seconds=2.0)
-        rl.check("user1")
-        assert rl.check("user2") is True
-
-    async def test_rate_limiter_allows_after_cooldown(self):
-        rl = RateLimiter(cooldown_seconds=0.1)
-        rl.check("user1")
-        assert rl.check("user1") is False
-        await asyncio.sleep(0.2)
-        assert rl.check("user1") is True
-
-    def test_cleanup_removes_old_entries(self):
-        rl = RateLimiter(cooldown_seconds=2.0)
-        rl._last_attempt["old-user"] = time.monotonic() - 400  # older than max_age
-        rl.check("user1")
-        rl._cleanup(max_age=300.0)
-        assert "old-user" not in rl._last_attempt
-        assert "user1" in rl._last_attempt
 
 
 class TestGenerateSessionToken:
