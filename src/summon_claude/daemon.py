@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from summon_claude.config import get_data_dir
 from summon_claude.event_dispatcher import EventDispatcher
 from summon_claude.ipc import MAX_MESSAGE_SIZE
-from summon_claude.session_manager import SessionManager
+from summon_claude.sessions.manager import SessionManager
 from summon_claude.slack.bolt import BoltRouter
 
 if TYPE_CHECKING:
@@ -108,7 +108,7 @@ async def daemon_main(config: SummonConfig) -> None:
         raise RuntimeError("BoltRouter.start() did not set bot_user_id")
     session_manager = SessionManager(
         config=config,
-        provider=bolt_router.web_client,  # type: ignore[arg-type]  # fixed in Task 2.4
+        web_client=bolt_router.web_client,
         bot_user_id=bolt_router.bot_user_id,
         dispatcher=dispatcher,
     )

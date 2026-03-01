@@ -23,6 +23,8 @@ import uuid
 from functools import partial
 from typing import TYPE_CHECKING
 
+from slack_sdk.web.async_client import AsyncWebClient
+
 from summon_claude.ipc import recv_msg, send_msg
 from summon_claude.session import _SECRET_PATTERN, SessionOptions, SummonSession
 from summon_claude.sessions.auth import SessionAuth, generate_session_token, verify_short_code
@@ -31,7 +33,6 @@ from summon_claude.sessions.registry import SessionRegistry
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
     from summon_claude.event_dispatcher import EventDispatcher
-    from summon_claude.providers.slack import SlackChatProvider
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,12 @@ class SessionManager:
     def __init__(
         self,
         config: SummonConfig,
-        provider: SlackChatProvider,
+        web_client: AsyncWebClient,
         bot_user_id: str,
         dispatcher: EventDispatcher,
     ) -> None:
         self._config = config
-        self._provider = provider
+        self._web_client = web_client
         self._bot_user_id = bot_user_id
         self._dispatcher = dispatcher
         self._tasks: dict[str, asyncio.Task] = {}  # session_id → task
@@ -102,7 +103,7 @@ class SessionManager:
             config=self._config,
             options=full_options,
             auth=auth,
-            shared_provider=self._provider,
+            shared_provider=self._web_client,  # type: ignore[arg-type]  # fixed in Task 2.5
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
         )
@@ -335,9 +336,9 @@ class SessionManager:
                             safe_msg = _SECRET_PATTERN.sub(
                                 "***", f":x: Session terminated unexpectedly: {e}"
                             )
-                            await self._provider.post_message(
-                                channel_id,
-                                safe_msg,
+                            await self._web_client.chat_postMessage(
+                                channel=channel_id,
+                                text=safe_msg,
                             )
                     break
 

@@ -1,4 +1,4 @@
-"""Tests for summon_claude.session_manager — SessionManager lifecycle."""
+"""Tests for summon_claude.sessions.manager — SessionManager lifecycle."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ import pytest
 from summon_claude.config import SummonConfig
 from summon_claude.ipc import recv_msg, send_msg
 from summon_claude.session import SessionOptions
-from summon_claude.session_manager import _GRACE_SECONDS, SessionManager
 from summon_claude.sessions.auth import SessionAuth
+from summon_claude.sessions.manager import _GRACE_SECONDS, SessionManager
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,11 +81,12 @@ def _make_manager(
     cfg = make_config()
     mock_provider = MagicMock()
     mock_provider.post_message = AsyncMock()
+    mock_provider.chat_postMessage = AsyncMock()
     mock_dispatcher = MagicMock()
     mock_dispatcher.unregister = MagicMock()
 
     manager = SessionManager(
-        config=cfg, provider=mock_provider, bot_user_id="UBOT", dispatcher=mock_dispatcher
+        config=cfg, web_client=mock_provider, bot_user_id="UBOT", dispatcher=mock_dispatcher
     )
 
     if stub_session is not None:
@@ -176,12 +177,12 @@ class TestCreateSession:
         )
 
         with (
-            patch("summon_claude.session_manager.SessionRegistry") as mock_registry_cls,
+            patch("summon_claude.sessions.manager.SessionRegistry") as mock_registry_cls,
             patch(
-                "summon_claude.session_manager.generate_session_token",
+                "summon_claude.sessions.manager.generate_session_token",
                 return_value=mock_auth,
             ) as mock_gen,
-            patch("summon_claude.session_manager.SummonSession") as mock_session_cls,
+            patch("summon_claude.sessions.manager.SummonSession") as mock_session_cls,
         ):
             mock_registry = AsyncMock()
             mock_registry_cls.return_value.__aenter__ = AsyncMock(return_value=mock_registry)
@@ -347,10 +348,10 @@ class TestSupervisedSession:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             await manager._supervised_session(stub, "s1")  # type: ignore[arg-type]
 
-        mock_provider.post_message.assert_awaited()
-        call_args = mock_provider.post_message.call_args
-        assert call_args[0][0] == "C001"
-        assert ":x:" in call_args[0][1]
+        mock_provider.chat_postMessage.assert_awaited()
+        call_args = mock_provider.chat_postMessage.call_args
+        assert call_args[1]["channel"] == "C001"
+        assert ":x:" in call_args[1]["text"]
 
 
 # ---------------------------------------------------------------------------
