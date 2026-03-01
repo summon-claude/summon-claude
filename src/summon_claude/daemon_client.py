@@ -15,7 +15,7 @@ import dataclasses
 import logging
 from typing import Any
 
-from summon_claude.session import SessionOptions
+from summon_claude.sessions.session import SessionOptions
 
 logger = logging.getLogger(__name__)
 

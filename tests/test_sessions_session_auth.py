@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import pytest
 
-from summon_claude.session import SummonSession
+from summon_claude.sessions.session import SummonSession
 
 
 def _capture_session_logs() -> tuple[logging.Handler, list[str]]:
@@ -20,7 +20,7 @@ def _capture_session_logs() -> tuple[logging.Handler, list[str]]:
             messages.append(record.getMessage())
 
     handler = _CapturingHandler()
-    session_logger = logging.getLogger("summon_claude.session")
+    session_logger = logging.getLogger("summon_claude.sessions.session")
     session_logger.addHandler(handler)
     session_logger.setLevel(logging.DEBUG)
     return handler, messages
@@ -48,13 +48,13 @@ class TestAuthCountdown:
         handler, log_messages = _capture_session_logs()
         try:
             with (
-                patch("summon_claude.session._AUTH_TIMEOUT_S", 20),
-                patch("summon_claude.session._AUTH_POLL_INTERVAL_S", 1.0),
+                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 20),
+                patch("summon_claude.sessions.session._AUTH_POLL_INTERVAL_S", 1.0),
                 patch("asyncio.sleep", side_effect=fake_sleep),
             ):
                 result = await session._wait_for_auth()
         finally:
-            session_logger = logging.getLogger("summon_claude.session")
+            session_logger = logging.getLogger("summon_claude.sessions.session")
             session_logger.removeHandler(handler)
             session_logger.setLevel(logging.NOTSET)
 
@@ -80,13 +80,13 @@ class TestAuthCountdown:
         handler, log_messages = _capture_session_logs()
         try:
             with (
-                patch("summon_claude.session._AUTH_TIMEOUT_S", 45),
-                patch("summon_claude.session._AUTH_POLL_INTERVAL_S", 1.0),
+                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 45),
+                patch("summon_claude.sessions.session._AUTH_POLL_INTERVAL_S", 1.0),
                 patch("asyncio.sleep", side_effect=fake_sleep),
             ):
                 await session._wait_for_auth()
         finally:
-            session_logger = logging.getLogger("summon_claude.session")
+            session_logger = logging.getLogger("summon_claude.sessions.session")
             session_logger.removeHandler(handler)
             session_logger.setLevel(logging.NOTSET)
 

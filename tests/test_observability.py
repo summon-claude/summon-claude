@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from summon_claude.session import SessionIdFilter, _session_id_var
+from summon_claude.sessions.session import SessionIdFilter, _session_id_var
 
 # ---------------------------------------------------------------------------
 # Queue backpressure
@@ -20,8 +20,8 @@ class TestQueueBackpressure:
         """SummonSession._message_queue must have maxsize=100 for backpressure."""
         from unittest.mock import MagicMock
 
-        from summon_claude.session import SessionOptions, SummonSession
         from summon_claude.sessions.auth import SessionAuth
+        from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock()
         options = SessionOptions(session_id="test-bp", cwd="/tmp", name="test")
@@ -116,8 +116,8 @@ class TestSessionIdFilter:
 
     async def test_session_start_sets_contextvar(self):
         """SummonSession.start() sets _session_id_var before registry work."""
-        from summon_claude.session import SessionOptions, SummonSession
         from summon_claude.sessions.auth import SessionAuth
+        from summon_claude.sessions.session import SessionOptions, SummonSession
 
         captured_sid: list[str] = []
 
@@ -139,7 +139,7 @@ class TestSessionIdFilter:
         mock_registry.update_status = AsyncMock()
         mock_registry.delete_pending_token = AsyncMock()
 
-        with patch("summon_claude.session.SessionRegistry", return_value=mock_registry):
+        with patch("summon_claude.sessions.session.SessionRegistry", return_value=mock_registry):
             await session.start()
 
         assert captured_sid == ["ctx-test-session"]
@@ -155,15 +155,15 @@ class TestPerSessionLogFile:
 
     def test_install_creates_log_file(self, tmp_path):
         """_install_session_log_handler creates a log file for the session."""
-        from summon_claude.session import SessionOptions, SummonSession
         from summon_claude.sessions.auth import SessionAuth
+        from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock()
         options = SessionOptions(session_id="log-test-session", cwd="/tmp", name="test")
         auth = MagicMock(spec=SessionAuth)
         session = SummonSession(config=config, options=options, auth=auth)
 
-        with patch("summon_claude.session.get_data_dir", return_value=tmp_path):
+        with patch("summon_claude.sessions.session.get_data_dir", return_value=tmp_path):
             handler = session._install_session_log_handler()
 
         assert handler is not None
@@ -176,15 +176,15 @@ class TestPerSessionLogFile:
 
     def test_handler_filters_by_session_id(self, tmp_path):
         """Only log records from the matching session task are written."""
-        from summon_claude.session import SessionOptions, SummonSession
         from summon_claude.sessions.auth import SessionAuth
+        from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock()
         options = SessionOptions(session_id="filter-test", cwd="/tmp", name="test")
         auth = MagicMock(spec=SessionAuth)
         session = SummonSession(config=config, options=options, auth=auth)
 
-        with patch("summon_claude.session.get_data_dir", return_value=tmp_path):
+        with patch("summon_claude.sessions.session.get_data_dir", return_value=tmp_path):
             handler = session._install_session_log_handler()
 
         assert handler is not None
@@ -218,15 +218,15 @@ class TestPerSessionLogFile:
 
     def test_remove_handler_cleans_up(self, tmp_path):
         """_remove_session_log_handler removes the handler from root logger."""
-        from summon_claude.session import SessionOptions, SummonSession
         from summon_claude.sessions.auth import SessionAuth
+        from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock()
         options = SessionOptions(session_id="cleanup-test", cwd="/tmp", name="test")
         auth = MagicMock(spec=SessionAuth)
         session = SummonSession(config=config, options=options, auth=auth)
 
-        with patch("summon_claude.session.get_data_dir", return_value=tmp_path):
+        with patch("summon_claude.sessions.session.get_data_dir", return_value=tmp_path):
             handler = session._install_session_log_handler()
 
         assert handler in logging.getLogger().handlers
@@ -235,6 +235,6 @@ class TestPerSessionLogFile:
 
     def test_remove_none_handler_is_noop(self):
         """_remove_session_log_handler(None) does not raise."""
-        from summon_claude.session import SummonSession
+        from summon_claude.sessions.session import SummonSession
 
         SummonSession._remove_session_log_handler(None)  # must not raise

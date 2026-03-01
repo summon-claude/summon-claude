@@ -26,9 +26,9 @@ from typing import TYPE_CHECKING
 from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.ipc import recv_msg, send_msg
-from summon_claude.session import _SECRET_PATTERN, SessionOptions, SummonSession
 from summon_claude.sessions.auth import SessionAuth, generate_session_token, verify_short_code
 from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.session import _SECRET_PATTERN, SessionOptions, SummonSession
 
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
@@ -103,7 +103,7 @@ class SessionManager:
             config=self._config,
             options=full_options,
             auth=auth,
-            shared_provider=self._web_client,  # type: ignore[arg-type]  # fixed in Task 2.5
+            web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
         )

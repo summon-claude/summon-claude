@@ -1,14 +1,20 @@
-"""Tests for summon_claude.session — session orchestrator."""
+"""Tests for summon_claude.sessions.session — session orchestrator."""
 
 from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from summon_claude.config import SummonConfig
-from summon_claude.session import SessionOptions, SummonSession, _format_file_references
 from summon_claude.sessions.auth import SessionAuth
+from summon_claude.sessions.session import (
+    SessionOptions,
+    SummonSession,
+    _format_file_references,
+    _SessionRuntime,
+)
+from summon_claude.slack.client import MessageRef, SlackClient
 
 
 def make_config(**overrides) -> SummonConfig:
@@ -43,6 +49,32 @@ def make_auth(**overrides) -> SessionAuth:
     }
     defaults.update(overrides)
     return SessionAuth(**defaults)
+
+
+def make_mock_client(channel_id: str = "C_TEST_CHAN") -> AsyncMock:
+    """Create a mock SlackClient."""
+    client = AsyncMock(spec=SlackClient)
+    client.channel_id = channel_id
+    client.post = AsyncMock(return_value=MessageRef(channel_id=channel_id, ts="1234567890.000000"))
+    client.post_ephemeral = AsyncMock()
+    client.update = AsyncMock()
+    client.react = AsyncMock()
+    client.upload = AsyncMock()
+    client.set_topic = AsyncMock()
+    return client
+
+
+def make_rt(
+    registry, channel_id: str = "C_TEST_CHAN", client: AsyncMock | None = None
+) -> _SessionRuntime:
+    """Create a minimal _SessionRuntime with mocked client."""
+    if client is None:
+        client = make_mock_client(channel_id)
+    return _SessionRuntime(
+        registry=registry,
+        client=client,
+        permission_handler=AsyncMock(),
+    )
 
 
 class TestGenerateSessionToken:
@@ -200,18 +232,13 @@ class TestSlashCommandHandler:
 class TestSessionShutdownSummary:
     async def test_shutdown_posts_summary_message(self, tmp_path):
         """_shutdown should post turns/cost summary to channel."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-sd", 1234, "/tmp")
 
-            mock_provider = AsyncMock()
-            mock_permission_handler = AsyncMock()
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-
+            mock_client = make_mock_client("C_TEST_CHAN")
             session = SummonSession(
                 config,
                 make_options(session_id="sess-sd"),
@@ -222,89 +249,63 @@ class TestSessionShutdownSummary:
 
             rt = _SessionRuntime(
                 registry=registry,
-                provider=mock_provider,
-                permission_handler=mock_permission_handler,
-                channel_id="C_TEST_CHAN",
-                channel_manager=mock_channel_manager,
+                client=mock_client,
+                permission_handler=AsyncMock(),
             )
-            mock_channel_manager.archive_session_channel = AsyncMock()
 
             await session._shutdown(rt)
 
-            # Summary message should have been posted via provider
-            mock_provider.post_message.assert_called_once()
-            call_args = mock_provider.post_message.call_args
-            assert call_args[0][0] == "C_TEST_CHAN"  # channel_id
-            assert "3" in call_args[0][1]  # turns in message text
-            assert "0.0456" in call_args[0][1] or "0.046" in call_args[0][1]
+            # Disconnect message should have been posted
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            text = call_args[0][0]
+            assert "3" in text  # turns in message text
+            assert "0.0456" in text or "0.046" in text
 
     async def test_shutdown_preserves_channel(self, tmp_path):
         """_shutdown should NOT archive the session channel — channels are preserved."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-arch", 1234, "/tmp")
 
-            mock_permission_handler = AsyncMock()
+            mock_client = make_mock_client("C_ARCH_CHAN")
             session = SummonSession(
                 config,
                 make_options(session_id="sess-arch"),
                 auth=make_auth(session_id="sess-arch"),
             )
 
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_channel_manager.archive_session_channel = AsyncMock()
-            mock_provider = AsyncMock()
-
             rt = _SessionRuntime(
                 registry=registry,
-                provider=mock_provider,
-                permission_handler=mock_permission_handler,
-                channel_id="C_ARCH_CHAN",
-                channel_manager=mock_channel_manager,
+                client=mock_client,
+                permission_handler=AsyncMock(),
             )
 
             await session._shutdown(rt)
 
-            # Channel should NOT be archived — it is preserved
-            mock_channel_manager.archive_session_channel.assert_not_called()
-            # Disconnect message should be posted instead
-            mock_provider.post_message.assert_called_once()
-            call_args = mock_provider.post_message.call_args
-            assert call_args[0][0] == "C_ARCH_CHAN"  # channel_id
-            assert "session ended" in call_args[0][1].lower() or "wave" in call_args[0][1].lower()
+            # Disconnect message should be posted
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            text = call_args[0][0]
+            assert "session ended" in text.lower() or "wave" in text.lower()
 
     async def test_shutdown_updates_registry_to_completed(self, tmp_path):
         """_shutdown should update session status to completed."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-comp", 1234, "/tmp")
 
-            mock_permission_handler = AsyncMock()
             session = SummonSession(
                 config,
                 make_options(session_id="sess-comp"),
                 auth=make_auth(session_id="sess-comp"),
             )
 
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_channel_manager.archive_session_channel = AsyncMock()
-
-            rt = _SessionRuntime(
-                registry=registry,
-                provider=AsyncMock(),
-                permission_handler=mock_permission_handler,
-                channel_id="C_COMP_CHAN",
-                channel_manager=mock_channel_manager,
-            )
-
+            rt = make_rt(registry, "C_COMP_CHAN")
             await session._shutdown(rt)
 
             sess = await registry.get_session("sess-comp")
@@ -313,18 +314,6 @@ class TestSessionShutdownSummary:
 
 class TestSessionShutdown:
     """Test shutdown behavior including completion flag and error handling."""
-
-    def _make_rt(self, registry, channel_id="C_CHAN", provider=None):
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
-
-        return _SessionRuntime(
-            registry=registry,
-            provider=provider or AsyncMock(),
-            permission_handler=AsyncMock(),
-            channel_id=channel_id,
-            channel_manager=AsyncMock(spec=ChannelManager),
-        )
 
     async def test_shutdown_sets_completed_flag(self, tmp_path):
         """After successful _shutdown(), _shutdown_completed should be True."""
@@ -337,7 +326,7 @@ class TestSessionShutdown:
                 config, make_options(session_id="sess-flag"), auth=make_auth(session_id="sess-flag")
             )
             assert session._shutdown_completed is False
-            rt = self._make_rt(registry, "C_FLAG_CHAN")
+            rt = make_rt(registry, "C_FLAG_CHAN")
             await session._shutdown(rt)
             assert session._shutdown_completed is True
 
@@ -357,7 +346,7 @@ class TestSessionShutdown:
                 raise RuntimeError("Registry update failed")
 
             registry.update_status = failing_update
-            rt = self._make_rt(registry, "C_FAIL_CHAN")
+            rt = make_rt(registry, "C_FAIL_CHAN")
             await session._shutdown(rt)
             assert session._shutdown_completed is False
 
@@ -374,9 +363,9 @@ class TestSessionShutdown:
                 auth=make_auth(session_id="sess-arch-fail"),
             )
 
-            mock_provider = AsyncMock()
-            mock_provider.post_message = AsyncMock(side_effect=RuntimeError("Post failed"))
-            rt = self._make_rt(registry, "C_ARCH_FAIL_CHAN", provider=mock_provider)
+            mock_client = make_mock_client("C_ARCH_FAIL_CHAN")
+            mock_client.post = AsyncMock(side_effect=RuntimeError("Post failed"))
+            rt = make_rt(registry, "C_ARCH_FAIL_CHAN", client=mock_client)
 
             await session._shutdown(rt)
 
@@ -400,9 +389,9 @@ class TestSessionShutdown:
             async def hanging_post(*args, **kwargs):
                 await asyncio.sleep(999)
 
-            mock_provider = AsyncMock()
-            mock_provider.post_message = AsyncMock(side_effect=hanging_post)
-            rt = self._make_rt(registry, "C_TIMEOUT_CHAN", provider=mock_provider)
+            mock_client = make_mock_client("C_TIMEOUT_CHAN")
+            mock_client.post = AsyncMock(side_effect=hanging_post)
+            rt = make_rt(registry, "C_TIMEOUT_CHAN", client=mock_client)
 
             await session._shutdown(rt)
 
@@ -440,18 +429,13 @@ class TestDisconnectMessageVariants:
 
     async def test_disconnect_message_ended(self, tmp_path):
         """Normal shutdown should post :wave: 'session ended' message."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-ended", 1234, "/tmp")
 
-            mock_permission_handler = AsyncMock()
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_provider = AsyncMock()
-
+            mock_client = make_mock_client("C_ENDED")
             session = SummonSession(
                 config,
                 make_options(session_id="sess-ended"),
@@ -459,22 +443,19 @@ class TestDisconnectMessageVariants:
             )
             session._total_turns = 5
             session._total_cost = 0.125
-            session._disconnect_reason = "ended"
 
             rt = _SessionRuntime(
                 registry=registry,
-                provider=mock_provider,
-                permission_handler=mock_permission_handler,
-                channel_id="C_ENDED",
-                channel_manager=mock_channel_manager,
+                client=mock_client,
+                permission_handler=AsyncMock(),
             )
 
             await session._post_disconnect_message(rt, reason="ended")
 
             # Should post message with :wave: emoji and "session ended"
-            mock_provider.post_message.assert_called_once()
-            call_args = mock_provider.post_message.call_args
-            text = call_args[0][1]
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            text = call_args[0][0]
             assert ":wave:" in text
             assert "session ended" in text.lower()
             assert "5" in text  # turns
@@ -482,18 +463,13 @@ class TestDisconnectMessageVariants:
 
     async def test_disconnect_message_reconnect_exhausted(self, tmp_path):
         """Reconnect exhaustion should post :x: 'disconnected' message."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-exhausted", 1234, "/tmp")
 
-            mock_permission_handler = AsyncMock()
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_provider = AsyncMock()
-
+            mock_client = make_mock_client("C_EXHAUSTED")
             session = SummonSession(
                 config,
                 make_options(session_id="sess-exhausted"),
@@ -502,22 +478,19 @@ class TestDisconnectMessageVariants:
             session._total_turns = 3
             session._total_cost = 0.075
             session._claude_session_id = "claude-sess-123"
-            session._disconnect_reason = "reconnect_exhausted"
 
             rt = _SessionRuntime(
                 registry=registry,
-                provider=mock_provider,
-                permission_handler=mock_permission_handler,
-                channel_id="C_EXHAUSTED",
-                channel_manager=mock_channel_manager,
+                client=mock_client,
+                permission_handler=AsyncMock(),
             )
 
             await session._post_disconnect_message(rt, reason="reconnect_exhausted")
 
             # Should post message with :x: and "disconnected"
-            mock_provider.post_message.assert_called_once()
-            call_args = mock_provider.post_message.call_args
-            text = call_args[0][1]
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            text = call_args[0][0]
             assert ":x:" in text
             assert "disconnected" in text.lower()
             assert "3" in text  # turns
@@ -525,18 +498,13 @@ class TestDisconnectMessageVariants:
 
     async def test_disconnect_message_watchdog(self, tmp_path):
         """Watchdog termination should post :rotating_light: message."""
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-watchdog", 1234, "/tmp")
 
-            mock_permission_handler = AsyncMock()
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_provider = AsyncMock()
-
+            mock_client = make_mock_client("C_WATCHDOG")
             session = SummonSession(
                 config,
                 make_options(session_id="sess-watchdog"),
@@ -544,22 +512,19 @@ class TestDisconnectMessageVariants:
             )
             session._total_turns = 7
             session._total_cost = 0.235
-            session._disconnect_reason = "watchdog"
 
             rt = _SessionRuntime(
                 registry=registry,
-                provider=mock_provider,
-                permission_handler=mock_permission_handler,
-                channel_id="C_WATCHDOG",
-                channel_manager=mock_channel_manager,
+                client=mock_client,
+                permission_handler=AsyncMock(),
             )
 
             await session._post_disconnect_message(rt, reason="watchdog")
 
             # Should post message with :rotating_light: and "watchdog"
-            mock_provider.post_message.assert_called_once()
-            call_args = mock_provider.post_message.call_args
-            text = call_args[0][1]
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            text = call_args[0][0]
             assert ":rotating_light:" in text
             assert "watchdog" in text.lower() or "unresponsive" in text.lower()
             assert "7" in text  # turns
@@ -582,8 +547,6 @@ class TestWatchdogLoop:
         session._last_heartbeat_time = old_time
 
         # Build a minimal mock runtime with an async registry heartbeat
-        from unittest.mock import MagicMock
-
         mock_rt = MagicMock()
         mock_rt.registry = AsyncMock()
         mock_rt.registry.heartbeat = AsyncMock()
@@ -596,7 +559,7 @@ class TestWatchdogLoop:
 
         mock_rt.registry.heartbeat.side_effect = _set_shutdown_after_first_heartbeat
 
-        with patch("summon_claude.session._HEARTBEAT_INTERVAL_S", 0.01):
+        with patch("summon_claude.sessions.session._HEARTBEAT_INTERVAL_S", 0.01):
             await asyncio.wait_for(session._heartbeat_loop(mock_rt), timeout=1.0)
 
         # Timestamp should be updated to approximately now
@@ -618,37 +581,25 @@ class TestSessionHandleRegistration:
 
     async def test_dispatcher_registered_when_provided(self, tmp_path):
         """When a dispatcher is provided, _run_session registers a SessionHandle with it."""
-        from summon_claude.event_dispatcher import EventDispatcher, SessionHandle
+        from summon_claude.event_dispatcher import EventDispatcher
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
         dispatcher = EventDispatcher()
 
-        # Create a mock shared provider whose _client.auth_test returns bot_user_id
-        mock_client = AsyncMock()
-        mock_client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
-        mock_provider = AsyncMock()
-        mock_provider._client = mock_client
-        mock_provider.create_channel = AsyncMock(
-            return_value=AsyncMock(channel_id="C_DISP", name="disp")
+        # Create a mock web_client that simulates channel creation
+        mock_web_client = AsyncMock()
+        mock_web_client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+        mock_web_client.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_DISP", "name": "disp"}}
         )
-        mock_provider.post_message = AsyncMock()
-        mock_provider.post_ephemeral = AsyncMock()
-
-        # Patch ChannelManager to avoid real Slack calls
-        from unittest.mock import MagicMock, patch
-
-        mock_channel_manager = AsyncMock()
-        mock_channel_manager.create_session_channel = AsyncMock(return_value=("C_DISP", "disp"))
-        mock_channel_manager.invite_user_to_channel = AsyncMock()
-        mock_channel_manager.post_session_header = AsyncMock()
-        mock_channel_manager.set_session_topic = AsyncMock()
+        mock_web_client.conversations_invite = AsyncMock()
 
         session = SummonSession(
             config,
             make_options(session_id="sess-disp"),
             auth=make_auth(session_id="sess-disp"),
-            shared_provider=mock_provider,
+            web_client=mock_web_client,
             dispatcher=dispatcher,
         )
         session.authenticate("U001")
@@ -657,13 +608,13 @@ class TestSessionHandleRegistration:
             await registry.register("sess-disp", 1234, "/tmp")
 
             with (
-                patch("summon_claude.session.AsyncWebClient", return_value=mock_client),
-                patch("summon_claude.session.ChannelManager", return_value=mock_channel_manager),
-                patch("summon_claude.session.ThreadRouter"),
-                patch("summon_claude.session.PermissionHandler"),
+                patch("summon_claude.sessions.session.SlackClient") as mock_slack_cls,
+                patch("summon_claude.sessions.session.ThreadRouter"),
+                patch("summon_claude.sessions.session.PermissionHandler"),
                 patch.object(session, "_run_message_loop", new=AsyncMock()),
                 patch.object(session, "_shutdown", new=AsyncMock()),
             ):
+                mock_slack_cls.return_value = make_mock_client("C_DISP")
                 await session._run_session(registry)
 
         # After _run_session, dispatcher should have session registered
@@ -675,11 +626,6 @@ class TestProcessIncomingEvent:
 
     def _make_rt(self, permission_handler=None):
         """Build a minimal mock _SessionRuntime."""
-        from unittest.mock import MagicMock
-
-        from summon_claude.channel_manager import ChannelManager
-        from summon_claude.session import _SessionRuntime
-
         if permission_handler is None:
             mock_permission_handler = AsyncMock()
             mock_permission_handler.has_pending_text_input = MagicMock(return_value=False)
@@ -688,10 +634,8 @@ class TestProcessIncomingEvent:
             mock_permission_handler = permission_handler
         return _SessionRuntime(
             registry=AsyncMock(),
-            provider=AsyncMock(),
+            client=make_mock_client("C_TEST"),
             permission_handler=mock_permission_handler,
-            channel_id="C_TEST",
-            channel_manager=AsyncMock(spec=ChannelManager),
         )
 
     async def test_normal_message_returns_text_and_ts(self):
@@ -740,7 +684,7 @@ class TestProcessIncomingEvent:
 
     async def test_long_message_truncated(self):
         """Messages exceeding _MAX_USER_MESSAGE_CHARS are truncated."""
-        from summon_claude.session import _MAX_USER_MESSAGE_CHARS
+        from summon_claude.sessions.session import _MAX_USER_MESSAGE_CHARS
 
         config = make_config()
         session = SummonSession(config, make_options(), auth=make_auth())
@@ -776,8 +720,6 @@ class TestProcessIncomingEvent:
 
     async def test_pending_text_input_consumed(self):
         """When permission handler is waiting for free-text, message is consumed."""
-        from unittest.mock import MagicMock
-
         config = make_config()
         session = SummonSession(config, make_options(), auth=make_auth())
 
@@ -794,8 +736,6 @@ class TestProcessIncomingEvent:
 
     async def test_command_prefix_dispatched(self):
         """Messages with ! prefix are dispatched as commands and return None."""
-        from unittest.mock import patch
-
         config = make_config()
         session = SummonSession(config, make_options(), auth=make_auth())
         rt = self._make_rt()

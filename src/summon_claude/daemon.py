@@ -256,7 +256,7 @@ def _setup_daemon_logging(log_file: Path) -> None:
     record emitted within a session task is tagged with ``session_id``.
     The format includes ``%(session_id)s`` when non-empty.
     """
-    from summon_claude.session import SessionIdFilter  # noqa: PLC0415
+    from summon_claude.sessions.session import SessionIdFilter  # noqa: PLC0415
 
     log_file.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()

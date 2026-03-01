@@ -267,10 +267,9 @@ class TestCleanupCommand:
         assert result.exit_code == 0
 
     async def test_cleanup_archives_session_channel(self, tmp_path):
-        """Test that cleanup with stale sessions calls archive_session_channel."""
-        from unittest.mock import AsyncMock, patch
+        """Test that cleanup with stale sessions archives channel via web_client."""
+        from unittest.mock import AsyncMock
 
-        from summon_claude.channel_manager import ChannelManager
         from summon_claude.sessions.registry import SessionRegistry
 
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
@@ -279,9 +278,9 @@ class TestCleanupCommand:
             await registry.register("sess-stale", dead_pid, "/tmp")
             await registry.update_status("sess-stale", "pending_auth", slack_channel_id="C_STALE")
 
-            # Mock the Slack client and ChannelManager
-            mock_channel_manager = AsyncMock(spec=ChannelManager)
-            mock_channel_manager.archive_session_channel = AsyncMock()
+            # Mock conversations_archive directly
+            mock_web_client = AsyncMock()
+            mock_web_client.conversations_archive = AsyncMock()
 
             # Manually run cleanup logic
             stale = await registry.list_stale()
@@ -289,8 +288,8 @@ class TestCleanupCommand:
 
             for session in stale:
                 channel_id = session.get("slack_channel_id")
-                if channel_id and mock_channel_manager:
-                    await mock_channel_manager.archive_session_channel(channel_id)
+                if channel_id and mock_web_client:
+                    await mock_web_client.conversations_archive(channel=channel_id)
 
             # Verify archive was called
-            mock_channel_manager.archive_session_channel.assert_called_once_with("C_STALE")
+            mock_web_client.conversations_archive.assert_called_once_with(channel="C_STALE")

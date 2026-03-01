@@ -10,16 +10,17 @@ import contextvars
 import logging
 import os
 import re
+import secrets
+import subprocess
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, TextBlock
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude.channel_manager import ChannelManager, _get_git_branch
 from summon_claude.config import SummonConfig, discover_installed_plugins, get_data_dir
-from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.sessions.auth import SessionAuth
 from summon_claude.sessions.commands import CommandContext, CommandRegistry, build_registry
 from summon_claude.sessions.context import ContextUsage
@@ -27,6 +28,7 @@ from summon_claude.sessions.permissions import PermissionHandler
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.sessions.response import ResponseStreamer
 from summon_claude.sessions.response import split_text as _split_text
+from summon_claude.slack.client import SlackClient
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 
@@ -91,7 +93,7 @@ class _SessionLogFilter(logging.Filter):
         super().__init__()
         self._session_id = session_id
 
-    def filter(self, record: logging.LogRecord) -> bool:
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: ARG002
         return _session_id_var.get() == self._session_id
 
 
@@ -101,6 +103,7 @@ _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
 _CLEANUP_TIMEOUT_S = 10.0
+_MAX_CHANNEL_NAME_LEN = 80
 
 # Patterns that may appear in exception messages and should not be stored in the audit log
 _SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
@@ -115,6 +118,135 @@ _SYSTEM_PROMPT = {
 }
 
 AuthResult = Literal["authenticated", "timed_out", "shutdown"]
+
+
+# ---------------------------------------------------------------------------
+# Inlined from channel_manager.py
+# ---------------------------------------------------------------------------
+
+
+def _slugify(text: str) -> str:
+    """Convert text to a Slack-safe channel name slug."""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\-]", "-", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip("-") or "session"
+
+
+def _make_channel_name(prefix: str, session_name: str) -> str:
+    """Build a slugified channel name with prefix, date, and hex suffix."""
+    date_suffix = datetime.now(UTC).strftime("%m%d")
+    hex_suffix = secrets.token_hex(3)
+    slug = _slugify(session_name) if session_name else "session"
+    name = f"{prefix}-{slug}-{date_suffix}-{hex_suffix}"
+    return name[:_MAX_CHANNEL_NAME_LEN].lower()
+
+
+def _get_git_branch(cwd: str) -> str | None:
+    """Return the current git branch for the given directory, or None if not in a repo.
+
+    Uses GIT_CEILING_DIRECTORIES to prevent git from discovering
+    repositories in parent directories above cwd.
+    """
+    cwd_path = Path(cwd)
+    if not cwd_path.is_absolute() or not cwd_path.is_dir():
+        return None
+    resolved = str(cwd_path.resolve())
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE")}
+    env["GIT_CEILING_DIRECTORIES"] = resolved
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],  # noqa: S607
+            cwd=resolved,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env=env,
+            check=False,
+        )
+        if result.returncode == 0:
+            branch = result.stdout.strip()
+            return branch if branch != "HEAD" else None
+    except Exception as e:
+        logger.debug("Git branch detection failed: %s", e)
+    return None
+
+
+def _format_topic(
+    *,
+    model: str | None,
+    cwd: str,
+    git_branch: str | None,
+    context: ContextUsage | None,
+) -> str:
+    """Build the channel topic string with session metadata."""
+    # Model: strip 'claude-' prefix for brevity
+    if model and model.startswith("claude-"):
+        model_short = model[len("claude-") :]
+    else:
+        model_short = model or "unknown"
+
+    # CWD: use ~ for home directory
+    try:
+        cwd_display = "~/" + str(Path(cwd).relative_to(Path.home()))
+    except ValueError:
+        cwd_display = cwd
+
+    # Context usage string
+    if context is not None:
+        ctx_k = context.input_tokens // 1000
+        win_k = context.context_window // 1000
+        ctx_str = f"{ctx_k}k/{win_k}k ({context.percentage:.0f}%)"
+    else:
+        ctx_str = "--"
+
+    parts = [f"\U0001f916 {model_short}", f"\U0001f4c2 {cwd_display}"]
+    if git_branch:
+        branch_display = git_branch[:50]
+        parts.append(f"\U0001f33f {branch_display}")
+    parts.append(f"\U0001f4ca {ctx_str}")
+
+    topic = " \u00b7 ".join(parts)
+    return topic[:250]
+
+
+async def _post_session_header(
+    client: SlackClient, cwd: str, model: str | None, session_id: str
+) -> None:
+    """Post the initial session header block."""
+    git_branch = _get_git_branch(cwd)
+
+    fields = [
+        {"type": "mrkdwn", "text": f"*Directory:*\n`{cwd}`"},
+        {"type": "mrkdwn", "text": f"*Model:*\n{model or 'unknown'}"},
+    ]
+    if git_branch:
+        fields.append({"type": "mrkdwn", "text": f"*Branch:*\n`{git_branch}`"})
+    if session_id:
+        fields.append({"type": "mrkdwn", "text": f"*Session ID:*\n`{session_id[:16]}...`"})
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": "Claude Code Session",
+            },
+        },
+        {"type": "section", "fields": fields},
+        {"type": "divider"},
+    ]
+
+    await client.post(
+        f"Claude Code session started in {cwd}",
+        blocks=blocks,
+        raw=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Session data types
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,10 +267,13 @@ class SessionOptions:
 @dataclass(frozen=True, slots=True)
 class _SessionRuntime:
     registry: SessionRegistry
-    provider: SlackChatProvider
+    client: SlackClient
     permission_handler: PermissionHandler
-    channel_id: str
-    channel_manager: ChannelManager
+
+
+# ---------------------------------------------------------------------------
+# SummonSession
+# ---------------------------------------------------------------------------
 
 
 class SummonSession:
@@ -157,12 +292,12 @@ class SummonSession:
         5. Graceful shutdown on ``request_shutdown()`` or session end
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         config: SummonConfig,
         options: SessionOptions,
         auth: SessionAuth,
-        shared_provider: SlackChatProvider | None = None,
+        web_client: AsyncWebClient | None = None,
         dispatcher: EventDispatcher | None = None,
         bot_user_id: str | None = None,
     ) -> None:
@@ -177,8 +312,8 @@ class SummonSession:
         self._command_registry: CommandRegistry = build_registry()
         self._session_start_time: datetime = datetime.now(UTC)
 
-        # Shared provider and dispatcher from the daemon (None for standalone/test use)
-        self._shared_provider = shared_provider
+        # Shared web_client and dispatcher from the daemon (None for standalone/test use)
+        self._web_client = web_client
         self._dispatcher = dispatcher
         # Pre-cached bot user ID from BoltRouter.start() — avoids a per-session auth_test() call
         self._bot_user_id = bot_user_id
@@ -350,28 +485,41 @@ class SummonSession:
         self._shutdown_event.set()
         return "timed_out"
 
-    async def _run_session(self, registry: SessionRegistry) -> None:
+    async def _run_session(self, registry: SessionRegistry) -> None:  # noqa: PLR0915
         """Create channel, register with dispatcher, connect Claude, run message loop."""
-        # In daemon mode, bot_user_id is pre-cached by BoltRouter.start() — skip auth_test().
-        if self._shared_provider is not None and self._bot_user_id is not None:
-            provider = self._shared_provider
+        # In daemon mode, web_client is pre-provided by SessionManager.
+        # Standalone/test mode: create a fresh AsyncWebClient.
+        if self._web_client is not None:
+            web_client = self._web_client
             bot_user_id = self._bot_user_id
         else:
-            # Standalone/test mode: call auth_test() to discover bot_user_id
-            client = AsyncWebClient(token=self._config.slack_bot_token)
-            provider = self._shared_provider or SlackChatProvider(client)
-            bot_user_id = (await client.auth_test())["user_id"]
+            web_client = AsyncWebClient(token=self._config.slack_bot_token)
+            bot_user_id = (await web_client.auth_test())["user_id"]
 
-        channel_manager = ChannelManager(provider, self._config.channel_prefix, bot_user_id)
-        channel_id, channel_name = await channel_manager.create_session_channel(self._name)
+        # --- Pre-SlackClient: channel lifecycle via raw web_client ---
+        channel_name = _make_channel_name(self._config.channel_prefix, self._name)
+        resp = await web_client.conversations_create(name=channel_name, is_private=True)
+        channel_id = resp["channel"]["id"]
+        channel_name = resp["channel"]["name"]
         logger.info("Authenticated! Session channel: #%s", channel_name)
 
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
 
         # Invite the authenticating user to the private channel
-        if self._authenticated_user_id:
-            await channel_manager.invite_user_to_channel(channel_id, self._authenticated_user_id)
+        # Skip invite if user is the bot (bot already created the channel)
+        if self._authenticated_user_id and (
+            not bot_user_id or self._authenticated_user_id != bot_user_id
+        ):
+            try:
+                await web_client.conversations_invite(
+                    channel=channel_id, users=self._authenticated_user_id
+                )
+                logger.info(
+                    "Invited user %s to channel %s", self._authenticated_user_id, channel_id
+                )
+            except Exception as e:
+                logger.warning("Failed to invite user to channel: %s", e)
 
         await registry.update_status(
             self._session_id,
@@ -387,29 +535,27 @@ class SummonSession:
             details={"channel_id": channel_id},
         )
 
-        await channel_manager.post_session_header(
-            channel_id,
-            {
-                "cwd": self._cwd,
-                "model": self._model,
-                "session_id": self._session_id,
-            },
-        )
+        # --- NOW create the channel-bound SlackClient ---
+        client = SlackClient(web_client, channel_id)
+
+        await _post_session_header(client, self._cwd, self._model, self._session_id)
 
         git_branch = _get_git_branch(self._cwd)
-        await channel_manager.set_session_topic(
-            channel_id,
+        topic = _format_topic(
             model=self._model,
             cwd=self._cwd,
             git_branch=git_branch,
             context=None,
         )
+        try:
+            await client.set_topic(topic)
+        except Exception as e:
+            logger.debug("Failed to set initial topic: %s", e)
 
         # Notify the authenticating user
         if self._authenticated_user_id:
             try:
-                await provider.post_ephemeral(
-                    channel_id,
+                await client.post_ephemeral(
                     self._authenticated_user_id,
                     f"Session ready! Welcome to <#{channel_id}>.",
                 )
@@ -418,17 +564,15 @@ class SummonSession:
 
         logger.info("Connected to channel (id=%s)", channel_id)
 
-        router = ThreadRouter(provider, channel_id)
+        router = ThreadRouter(client)
         permission_handler = PermissionHandler(
             router, self._config, self._authenticated_user_id or ""
         )
 
         rt = _SessionRuntime(
             registry=registry,
-            provider=provider,
+            client=client,
             permission_handler=permission_handler,
-            channel_id=channel_id,
-            channel_manager=channel_manager,
         )
 
         # Register SessionHandle with the EventDispatcher so events are routed here
@@ -449,7 +593,7 @@ class SummonSession:
 
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(rt))
         try:
-            await self._run_message_loop(rt, router, provider)
+            await self._run_message_loop(rt, router)
         finally:
             heartbeat_task.cancel()
             try:
@@ -468,12 +612,10 @@ class SummonSession:
             await self._shutdown(rt)
 
     async def _run_message_loop(  # noqa: PLR0912, PLR0915
-        self, rt: _SessionRuntime, router: ThreadRouter, provider: SlackChatProvider
+        self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Listen for Slack messages and forward them to Claude."""
-        # router._client is SlackClient or _LegacyProviderClient (duck-compatible)
-        # until session.py is refactored in Task 2.5 to pass SlackClient directly
-        slack_mcp = create_summon_mcp_server(router._client)  # type: ignore[arg-type]  # noqa: SLF001
+        slack_mcp = create_summon_mcp_server(rt.client)
 
         options = ClaudeAgentOptions(
             cwd=self._cwd,
@@ -507,8 +649,7 @@ class SummonSession:
                                 self._session_id, "active", claude_session_id=claude_session_id
                             )
                             try:
-                                await rt.provider.post_message(
-                                    rt.channel_id,
+                                await rt.client.post(
                                     f"Claude session: `{claude_session_id[:16]}...`",
                                     blocks=[
                                         {
@@ -524,6 +665,7 @@ class SummonSession:
                                             ],
                                         }
                                     ],
+                                    raw=True,
                                 )
                             except Exception as e2:
                                 logger.debug("Failed to post Claude session ID: %s", e2)
@@ -571,7 +713,7 @@ class SummonSession:
                         continue
 
                     await self._handle_user_message(
-                        rt, claude, router, streamer, provider, user_message, thread_ts
+                        rt, claude, router, streamer, user_message, thread_ts
                     )
             finally:
                 # Post session summary while the client is still open
@@ -589,7 +731,6 @@ class SummonSession:
         claude: ClaudeSDKClient,
         router: ThreadRouter,
         streamer: ResponseStreamer,
-        provider: SlackChatProvider,
         message: str,
         _thread_ts: str | None = None,
     ) -> None:
@@ -618,13 +759,13 @@ class SummonSession:
                     self._last_model_seen = stream_result.model
                 try:
                     git_branch = _get_git_branch(self._cwd)
-                    await rt.channel_manager.set_session_topic(
-                        rt.channel_id,
+                    topic = _format_topic(
                         model=self._last_model_seen or self._model,
                         cwd=self._cwd,
                         git_branch=git_branch,
                         context=self._last_context,
                     )
+                    await rt.client.set_topic(topic)
                 except Exception:
                     logger.debug("Post-turn topic update failed")
 
@@ -668,8 +809,7 @@ class SummonSession:
                 },
             )
             try:
-                await provider.post_message(
-                    rt.channel_id,
+                await rt.client.post(
                     ":warning: An error occurred while processing your request.",
                 )
             except Exception as e2:
@@ -706,9 +846,9 @@ class SummonSession:
                 summary = re.sub(r"<!(?:channel|here|everyone)>", "", summary)
                 summary = re.sub(r"<@[A-Z0-9]+>", "", summary)
                 summary = summary[:3000]
-                await rt.provider.post_message(
-                    rt.channel_id,
+                await rt.client.post(
                     f":memo: *Session Summary*\n{summary}",
+                    raw=True,
                 )
         except Exception as e:
             logger.debug("Failed to generate session summary: %s", e)
@@ -777,7 +917,7 @@ class SummonSession:
         ]
         try:
             await asyncio.wait_for(
-                rt.provider.post_message(rt.channel_id, text, blocks=blocks),
+                rt.client.post(text, blocks=blocks, raw=True),
                 timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
@@ -798,7 +938,7 @@ class SummonSession:
             },
         ]
         try:
-            await rt.provider.post_message(rt.channel_id, "Conversation cleared.", blocks=blocks)
+            await rt.client.post("Conversation cleared.", blocks=blocks, raw=True)
         except Exception as e:
             logger.warning("Failed to post clear delineation: %s", e)
 
@@ -812,10 +952,9 @@ class SummonSession:
     ) -> None:
         """Dispatch a !-prefixed command and post the result as a threaded reply."""
         ctx = CommandContext(
-            channel_id=rt.channel_id,
+            channel_id=rt.client.channel_id,
             thread_ts=thread_ts,
             user_id=user_id,
-            provider=rt.provider,
             turns=self._total_turns,
             cost_usd=self._total_cost,
             start_time=self._session_start_time,
@@ -829,8 +968,7 @@ class SummonSession:
         except Exception as e:
             logger.exception("Command dispatch error for !%s: %s", name, e)
             try:
-                await rt.provider.post_message(
-                    rt.channel_id,
+                await rt.client.post(
                     f":warning: Error executing `!{name}`.",
                     thread_ts=thread_ts,
                 )
@@ -842,7 +980,7 @@ class SummonSession:
         if result.metadata.get("shutdown"):
             if result.text:
                 try:
-                    await rt.provider.post_message(rt.channel_id, result.text, thread_ts=thread_ts)
+                    await rt.client.post(result.text, thread_ts=thread_ts, raw=True)
                 except Exception as e:
                     logger.warning("Failed to post shutdown message: %s", e)
             self._shutdown_event.set()
@@ -856,7 +994,7 @@ class SummonSession:
         if result.metadata.get("stop"):
             if result.text:
                 try:
-                    await rt.provider.post_message(rt.channel_id, result.text, thread_ts=thread_ts)
+                    await rt.client.post(result.text, thread_ts=thread_ts, raw=True)
                 except Exception as e:
                     logger.warning("Failed to post stop message: %s", e)
             self._abort_current_turn()
@@ -872,10 +1010,10 @@ class SummonSession:
             if len(slash_message) > _MAX_USER_MESSAGE_CHARS:
                 slash_message = slash_message[:_MAX_USER_MESSAGE_CHARS]
             try:
-                await rt.provider.post_message(
-                    rt.channel_id,
+                await rt.client.post(
                     f":gear: Running `{slash_message}`...",
                     thread_ts=thread_ts,
+                    raw=True,
                 )
             except Exception as e:
                 logger.warning("Failed to post passthrough ack: %s", e)
@@ -887,7 +1025,7 @@ class SummonSession:
             chunks = _split_text(result.text, _MAX_USER_MESSAGE_CHARS)
             for chunk in chunks:
                 try:
-                    await rt.provider.post_message(rt.channel_id, chunk, thread_ts=thread_ts)
+                    await rt.client.post(chunk, thread_ts=thread_ts, raw=True)
                 except Exception as e:
                     logger.warning("Failed to post command response: %s", e)
                     break

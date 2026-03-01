@@ -27,13 +27,11 @@ import click
 from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude import __version__, daemon_client
-from summon_claude.channel_manager import ChannelManager
 from summon_claude.cli_config import config_check, config_edit, config_path, config_set, config_show
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
 from summon_claude.daemon import is_daemon_running, start_daemon
-from summon_claude.providers.slack import SlackChatProvider
-from summon_claude.session import SessionOptions
 from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.session import SessionOptions
 
 logger = logging.getLogger(__name__)
 
@@ -510,9 +508,7 @@ async def _async_session_cleanup(ctx: click.Context, *, archive: bool = False) -
             # Archive the Slack channel only if --archive flag was passed
             if archive and slack_client and channel_id:
                 try:
-                    provider = SlackChatProvider(slack_client)
-                    channel_manager = ChannelManager(provider, "summon")
-                    await channel_manager.archive_session_channel(channel_id)
+                    await slack_client.conversations_archive(channel=channel_id)
                     logger.info("Archived channel %s for stale session %s", channel_id, session_id)
                 except Exception as e:
                     logger.debug("Could not archive channel %s: %s", channel_id, e)
