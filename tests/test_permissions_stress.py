@@ -11,7 +11,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from helpers import make_mock_provider
 from summon_claude.config import SummonConfig
 from summon_claude.permissions import PermissionHandler
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 
 def make_config(debounce_ms: int = 50) -> SummonConfig:

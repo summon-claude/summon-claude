@@ -10,8 +10,8 @@ from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock, ToolUse
 from helpers import make_mock_provider
 from summon_claude.config import SummonConfig
 from summon_claude.content_display import _split_text
+from summon_claude.slack.router import ThreadRouter
 from summon_claude.streamer import ResponseStreamer, StreamResult, _format_tool_summary
-from summon_claude.thread_router import ThreadRouter
 
 
 def make_config(**overrides) -> SummonConfig:
@@ -197,7 +197,7 @@ class TestResponseStreamerSubagentThreads:
         ]
         await streamer.stream_with_flush(agen(messages))
         # Should have created a subagent thread
-        assert "tu_1" in router._subagent_threads
+        assert "tu_1" in router.subagent_threads
 
     async def test_text_with_parent_tool_use_id_goes_to_subagent(self):
         """Text from subagent should go to subagent thread."""

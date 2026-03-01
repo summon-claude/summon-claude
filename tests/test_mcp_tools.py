@@ -8,7 +8,7 @@ import pytest
 
 from helpers import make_mock_provider
 from summon_claude.mcp_tools import create_summon_mcp_tools
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 
 @pytest.fixture

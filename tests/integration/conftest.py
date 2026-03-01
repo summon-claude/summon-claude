@@ -20,7 +20,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.channel_manager import ChannelManager
 from summon_claude.providers.slack import SlackChatProvider
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 # Load .env file so credentials are available for local runs
 _env_file = Path(__file__).resolve().parents[2] / ".env"

@@ -23,7 +23,7 @@ from summon_claude.content_display import ContentDisplay
 from summon_claude.context import ContextUsage, compute_context_usage
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.sessions.response import split_text as _split_text
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +234,7 @@ class ResponseStreamer:
 
         if stored_ts:
             try:
-                await self._router.update_message(self._router.channel_id, stored_ts, text)
+                await self._router.update_message(stored_ts, text)
             except Exception as e:
                 logger.warning("Failed to update message: %s — posting new", e)
                 ref = await post_fn(text)
@@ -320,8 +320,7 @@ class ResponseStreamer:
         # Add a reaction to the last text message
         if self._turn.last_message_ts:
             try:
-                await self._router.add_reaction(
-                    self._router.channel_id,
+                await self._router.react(
                     self._turn.last_message_ts,
                     "white_check_mark",
                 )

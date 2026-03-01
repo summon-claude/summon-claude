@@ -12,7 +12,7 @@ from summon_claude.permissions import (
     PermissionHandler,
     _build_ask_user_blocks,
 )
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 
 def _make_config():

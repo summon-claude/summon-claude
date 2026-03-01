@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -93,11 +93,7 @@ def create_summon_mcp_tools(router: ThreadRouter) -> list[SdkMcpTool]:
             }
         text = args["text"][:_MAX_TEXT_CHARS]
         try:
-            await router.provider.post_message(
-                router.channel_id,
-                text,
-                thread_ts=parent_ts,
-            )
+            await router.post_to_main(text, thread_ts=parent_ts)
         except Exception:
             return {
                 "content": [

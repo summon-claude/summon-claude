@@ -28,8 +28,8 @@ from summon_claude.permissions import PermissionHandler
 from summon_claude.providers.slack import SlackChatProvider
 from summon_claude.registry import SessionRegistry
 from summon_claude.sessions.response import split_text as _split_text
+from summon_claude.slack.router import ThreadRouter
 from summon_claude.streamer import ResponseStreamer
-from summon_claude.thread_router import ThreadRouter
 
 if TYPE_CHECKING:
     from summon_claude.event_dispatcher import EventDispatcher

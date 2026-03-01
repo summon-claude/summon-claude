@@ -17,7 +17,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPe
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.slack.client import sanitize_for_mrkdwn
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 logger = logging.getLogger(__name__)
 

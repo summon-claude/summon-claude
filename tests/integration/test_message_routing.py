@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from summon_claude.thread_router import ThreadRouter
+from summon_claude.slack.router import ThreadRouter
 
 pytestmark = [pytest.mark.slack]
 
