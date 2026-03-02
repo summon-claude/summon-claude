@@ -89,17 +89,19 @@ def split_text(text: str, limit: int) -> list[str]:
     if len(text) <= limit:
         return [text]
 
+    # Precompute whether fences exist anywhere — avoids O(n) rescan per iteration.
+    any_fences = "```" in text
+
     chunks: list[str] = []
     while text:
         if len(text) <= limit:
             chunks.append(text)
             break
 
-        # If text contains fences, leave headroom for a potential closure suffix.
-        # Only reduce the limit when fences exist to avoid penalizing plain text.
+        # If the original text contains fences, leave headroom for a potential
+        # closure suffix. Only reduce the limit when fences exist.
         effective_limit = limit
-        has_fences = "```" in text
-        if has_fences:
+        if any_fences:
             effective_limit = max(limit - _FENCE_OVERHEAD, 1)
 
         # Try to break at a newline boundary
@@ -111,10 +113,9 @@ def split_text(text: str, limit: int) -> list[str]:
 
         # Check if we're splitting inside an open code fence.
         # Count triple-backtick fences in the chunk — odd count means unclosed.
-        if has_fences:
+        if any_fences:
             fence_count = chunk.count("```")
             if fence_count % 2 == 1:
-                # Close the code block at end of this chunk, re-open in next
                 chunk += "\n```"
                 rest = "```\n" + rest
 

@@ -224,15 +224,26 @@ class TestDispatchReaction:
         abort = MagicMock()
         dispatcher.register("C001", _make_handle(channel_id="C001", abort_callback=abort))
 
-        event = {"type": "reaction_added", "item": {"channel": "C001"}}
+        event = {"type": "reaction_added", "user": "U001", "item": {"channel": "C001"}}
         await dispatcher.dispatch_reaction(event)
 
         abort.assert_called_once()
 
+    async def test_reaction_from_wrong_user_ignored(self):
+        """dispatch_reaction ignores reactions from non-owner users."""
+        dispatcher = EventDispatcher()
+        abort = MagicMock()
+        dispatcher.register("C001", _make_handle(channel_id="C001", abort_callback=abort))
+
+        event = {"type": "reaction_added", "user": "U_INTRUDER", "item": {"channel": "C001"}}
+        await dispatcher.dispatch_reaction(event)
+
+        abort.assert_not_called()
+
     async def test_unknown_channel_silently_ignored(self):
         """dispatch_reaction for an unknown channel does not raise."""
         dispatcher = EventDispatcher()
-        event = {"type": "reaction_added", "item": {"channel": "C_UNKNOWN"}}
+        event = {"type": "reaction_added", "user": "U001", "item": {"channel": "C_UNKNOWN"}}
         await dispatcher.dispatch_reaction(event)  # must not raise
 
     async def test_does_not_call_wrong_abort(self):
@@ -243,7 +254,7 @@ class TestDispatchReaction:
         dispatcher.register("C001", _make_handle(channel_id="C001", abort_callback=abort1))
         dispatcher.register("C002", _make_handle(channel_id="C002", abort_callback=abort2))
 
-        await dispatcher.dispatch_reaction({"item": {"channel": "C002"}})
+        await dispatcher.dispatch_reaction({"user": "U001", "item": {"channel": "C002"}})
 
         abort1.assert_not_called()
         abort2.assert_called_once()

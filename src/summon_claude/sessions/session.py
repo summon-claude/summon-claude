@@ -106,7 +106,7 @@ _CLEANUP_TIMEOUT_S = 10.0
 _MAX_CHANNEL_NAME_LEN = 80
 
 # Patterns that may appear in exception messages and should not be stored in the audit log
-_SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
+_SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
 
 _SYSTEM_PROMPT = {
     "type": "preset",
@@ -211,12 +211,14 @@ async def _post_session_header(
     """Post the initial session header block."""
     git_branch = _get_git_branch(cwd)
 
+    safe_cwd = cwd.replace("`", "'")
     fields = [
-        {"type": "mrkdwn", "text": f"*Directory:*\n`{cwd}`"},
+        {"type": "mrkdwn", "text": f"*Directory:*\n`{safe_cwd}`"},
         {"type": "mrkdwn", "text": f"*Model:*\n{model or 'unknown'}"},
     ]
     if git_branch:
-        fields.append({"type": "mrkdwn", "text": f"*Branch:*\n`{git_branch}`"})
+        safe_branch = git_branch.replace("`", "'")[:80]
+        fields.append({"type": "mrkdwn", "text": f"*Branch:*\n`{safe_branch}`"})
     if session_id:
         fields.append({"type": "mrkdwn", "text": f"*Session ID:*\n`{session_id[:16]}...`"})
 
@@ -696,18 +698,16 @@ class SummonSession:
                         if result is None:
                             # Filtered out (subtype, empty, permission input handled, etc.)
                             continue
-                        user_message, thread_ts = result
+                        user_message, _ = result
                     else:
                         # Internal tuple: (text, thread_ts) from _dispatch_command passthrough
                         # or ("", None) shutdown sentinel
-                        user_message, thread_ts = item
+                        user_message, _ = item
 
                     if not user_message:
                         continue
 
-                    await self._handle_user_message(
-                        rt, claude, router, streamer, user_message, thread_ts
-                    )
+                    await self._handle_user_message(rt, claude, streamer, user_message)
             finally:
                 # Post session summary while the client is still open
                 if self._total_turns > 0:
@@ -722,10 +722,8 @@ class SummonSession:
         self,
         rt: _SessionRuntime,
         claude: ClaudeSDKClient,
-        router: ThreadRouter,
         streamer: ResponseStreamer,
         message: str,
-        _thread_ts: str | None = None,
     ) -> None:
         """Forward a single user message to Claude and stream the response."""
         logger.info("Forwarding message to Claude (%d chars)", len(message))

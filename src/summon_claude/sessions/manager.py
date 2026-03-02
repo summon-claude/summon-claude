@@ -275,7 +275,10 @@ class SessionManager:
                 return {"type": "session_created", "short_code": short_code}
 
             case "stop_session":
-                found = self.stop_session(msg["session_id"])
+                session_id = msg.get("session_id")
+                if not session_id:
+                    return {"type": "error", "message": "Missing session_id"}
+                found = self.stop_session(session_id)
                 return {"type": "session_stopped", "found": found}
 
             case "status":

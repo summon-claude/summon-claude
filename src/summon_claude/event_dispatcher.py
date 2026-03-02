@@ -178,11 +178,21 @@ class EventDispatcher:
         """Route a ``reaction_added`` event to the session's abort callback.
 
         The channel is extracted from ``event["item"]["channel"]``.  Reactions
-        on unknown channels are silently ignored.
+        on unknown channels are silently ignored.  Only the authenticated
+        session owner can trigger an abort — reactions from other users are
+        dropped to prevent cross-user interference.
         """
         channel_id = event.get("item", {}).get("channel", "")
         handle = self._sessions.get(channel_id)
         if handle is not None:
+            reactor = event.get("user", "")
+            if reactor != handle.authenticated_user_id:
+                logger.debug(
+                    "EventDispatcher: reaction from %s ignored — session owned by %s",
+                    reactor,
+                    handle.authenticated_user_id,
+                )
+                return
             handle.abort_callback()
         else:
             logger.debug(
