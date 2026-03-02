@@ -305,7 +305,7 @@ class SummonSession:
         self._resume = options.resume
 
         self._auth: SessionAuth | None = auth
-        self._command_registry: CommandRegistry | None = None
+        self._command_registry: CommandRegistry = build_registry()
         self._session_start_time: datetime = datetime.now(UTC)
 
         # Shared web_client and dispatcher from the daemon (None for standalone/test use)
