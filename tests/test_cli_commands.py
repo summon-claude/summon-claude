@@ -9,7 +9,7 @@ import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
-from summon_claude.cli_config import config_path, config_set, config_show
+from summon_claude.cli.config import config_path, config_set, config_show
 
 
 class TestCLIInitCommand:
@@ -138,7 +138,7 @@ class TestConfigShow:
             "SUMMON_SLACK_SIGNING_SECRET=mysecretvalue12345\n"
         )
 
-        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
             config_show()
 
         captured = capsys.readouterr()
@@ -154,7 +154,7 @@ class TestConfigShow:
         config_file = tmp_path / "config.env"
         config_file.write_text("SUMMON_SLACK_BOT_TOKEN=\n")
 
-        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
             config_show()
 
         captured = capsys.readouterr()
@@ -166,7 +166,7 @@ class TestConfigShow:
             "SUMMON_SLACK_BOT_TOKEN=xoxb-testtest\nSUMMON_DEFAULT_MODEL=claude-opus-4-6\n"
         )
 
-        with patch("summon_claude.cli_config.get_config_file", return_value=config_file):
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
             config_show()
 
         captured = capsys.readouterr()
@@ -175,7 +175,7 @@ class TestConfigShow:
     def test_config_show_no_file_prints_message(self, tmp_path, capsys):
         missing_file = tmp_path / "nonexistent.env"
 
-        with patch("summon_claude.cli_config.get_config_file", return_value=missing_file):
+        with patch("summon_claude.cli.config.get_config_file", return_value=missing_file):
             config_show()
 
         captured = capsys.readouterr()
@@ -250,7 +250,7 @@ class TestConfigPath:
         """config path should print the config file location."""
         expected_path = tmp_path / "summon" / "config.env"
 
-        with patch("summon_claude.cli_config.get_config_file", return_value=expected_path):
+        with patch("summon_claude.cli.config.get_config_file", return_value=expected_path):
             config_path()
 
         captured = capsys.readouterr()

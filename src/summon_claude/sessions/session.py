@@ -93,7 +93,7 @@ class _SessionLogFilter(logging.Filter):
         super().__init__()
         self._session_id = session_id
 
-    def filter(self, record: logging.LogRecord) -> bool:  # noqa: ARG002
+    def filter(self, record: logging.LogRecord) -> bool:
         return _session_id_var.get() == self._session_id
 
 
@@ -292,7 +292,7 @@ class SummonSession:
         5. Graceful shutdown on ``request_shutdown()`` or session end
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         config: SummonConfig,
         options: SessionOptions,

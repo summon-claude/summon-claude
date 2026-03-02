@@ -26,8 +26,9 @@ from datetime import UTC, datetime
 import click
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude import __version__, daemon_client
-from summon_claude.cli_config import config_check, config_edit, config_path, config_set, config_show
+from summon_claude import __version__
+from summon_claude.cli import daemon_client
+from summon_claude.cli.config import config_check, config_edit, config_path, config_set, config_show
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
 from summon_claude.daemon import is_daemon_running, start_daemon
 from summon_claude.sessions.registry import SessionRegistry
@@ -227,7 +228,7 @@ def cmd_start(
     update_result: list[str] = []
 
     def _bg_update_check() -> None:
-        from summon_claude.update_check import (  # noqa: PLC0415
+        from summon_claude.cli.update_check import (  # noqa: PLC0415
             check_for_update,
             format_update_message,
         )

@@ -570,13 +570,13 @@ def _start_patches(update_info=None):
     stack.enter_context(patch("summon_claude.cli._ensure_daemon", return_value=None))
     stack.enter_context(
         patch(
-            "summon_claude.daemon_client.create_session",
+            "summon_claude.cli.daemon_client.create_session",
             AsyncMock(return_value="ABCD1234"),
         )
     )
     stack.enter_context(
         patch(
-            "summon_claude.update_check.check_for_update",
+            "summon_claude.cli.update_check.check_for_update",
             return_value=update_info,
         )
     )
@@ -587,7 +587,7 @@ class TestUpdateCheckIntegration:
     """Test update check integration in cmd_start."""
 
     def test_start_shows_update_notification_on_stderr(self):
-        from summon_claude.update_check import UpdateInfo
+        from summon_claude.cli.update_check import UpdateInfo
 
         info = UpdateInfo(current="0.1.0", latest="0.2.0")
         with _start_patches(update_info=info):
@@ -604,7 +604,7 @@ class TestUpdateCheckIntegration:
         assert "Update available" not in result.output
 
     def test_start_quiet_suppresses_update_notification(self):
-        from summon_claude.update_check import UpdateInfo
+        from summon_claude.cli.update_check import UpdateInfo
 
         info = UpdateInfo(current="0.1.0", latest="0.2.0")
         with _start_patches(update_info=info):
@@ -627,7 +627,7 @@ class TestUpdateCheckIntegration:
 
         with _start_patches(update_info=None) as stack:
             stack.enter_context(
-                patch("summon_claude.update_check.check_for_update", side_effect=slow_check)
+                patch("summon_claude.cli.update_check.check_for_update", side_effect=slow_check)
             )
             runner = CliRunner()
             start = time.monotonic()

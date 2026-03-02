@@ -389,7 +389,7 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
-        response_url: str = "",  # noqa: ARG002
+        response_url: str = "",
     ) -> None:
         """Handle a Slack button click for an AskUserQuestion option.
 
