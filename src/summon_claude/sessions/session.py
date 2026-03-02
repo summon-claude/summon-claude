@@ -494,8 +494,8 @@ class SummonSession:
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
         channel_name = _make_channel_name(self._config.channel_prefix, self._name)
         resp = await web_client.conversations_create(name=channel_name, is_private=True)
-        channel_id = resp["channel"]["id"]
-        channel_name = resp["channel"]["name"]
+        channel_id = resp["channel"]["id"]  # type: ignore[index]
+        channel_name = resp["channel"]["name"]  # type: ignore[index]
         logger.info("Authenticated! Session channel: #%s", channel_name)
 
         # Record channel_id for SessionManager status queries
