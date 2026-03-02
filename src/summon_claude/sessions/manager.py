@@ -25,7 +25,8 @@ from typing import TYPE_CHECKING
 
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude.ipc import recv_msg, send_msg
+# recv_msg/send_msg imported lazily in handle_client to avoid circular import
+# (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
 from summon_claude.sessions.auth import SessionAuth, generate_session_token, verify_short_code
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.sessions.session import _SECRET_PATTERN, SessionOptions, SummonSession
@@ -249,6 +250,8 @@ class SessionManager:
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
         """Handle one CLI client connection on the Unix control socket."""
+        from summon_claude.daemon import recv_msg, send_msg  # noqa: PLC0415
+
         try:
             msg = await recv_msg(reader)
             response = await self._dispatch_control(msg)

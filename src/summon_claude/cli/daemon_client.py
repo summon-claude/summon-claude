@@ -33,8 +33,11 @@ async def _request(msg: dict[str, Any]) -> dict[str, Any]:
 
     Raises ``DaemonError`` if the daemon responds with ``type == "error"``.
     """
-    from summon_claude.daemon import connect_to_daemon  # noqa: PLC0415
-    from summon_claude.ipc import recv_msg, send_msg  # noqa: PLC0415
+    from summon_claude.daemon import (  # noqa: PLC0415
+        connect_to_daemon,
+        recv_msg,
+        send_msg,
+    )
 
     reader, writer = await connect_to_daemon()
     try:

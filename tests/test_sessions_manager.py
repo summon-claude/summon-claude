@@ -13,7 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from summon_claude.config import SummonConfig
-from summon_claude.ipc import recv_msg, send_msg
+from summon_claude.daemon import recv_msg, send_msg
 from summon_claude.sessions.auth import SessionAuth
 from summon_claude.sessions.manager import _GRACE_SECONDS, SessionManager
 from summon_claude.sessions.session import SessionOptions

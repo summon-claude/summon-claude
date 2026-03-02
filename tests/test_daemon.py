@@ -1,14 +1,18 @@
-"""Tests for summon_claude.daemon — PID lifecycle, stale lock, is_daemon_running."""
+"""Tests for summon_claude.daemon — PID lifecycle, stale lock, is_daemon_running, IPC."""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import socket
+import struct
 import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+from summon_claude.daemon import MAX_MESSAGE_SIZE, recv_msg, send_msg
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -292,3 +296,161 @@ class TestDaemonMain:
         # Verify shutdown callback wiring — calling it should set the event
         mock_bolt.shutdown_callback()
         assert shutdown_event.is_set()
+
+
+# ---------------------------------------------------------------------------
+# IPC framing protocol tests (absorbed from test_ipc.py)
+# ---------------------------------------------------------------------------
+
+
+class _StreamPair:
+    """Holds a connected (reader, writer) pair and keeps all transports alive."""
+
+    def __init__(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        _r_writer: asyncio.StreamWriter,
+        _w_reader: asyncio.StreamReader,
+    ) -> None:
+        self.reader = reader
+        self.writer = writer
+        self._r_writer = _r_writer
+        self._w_reader = _w_reader
+
+
+async def _make_stream_pair() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
+    """Return a (reader, writer) pair connected via an in-process socketpair."""
+    rsock, wsock = socket.socketpair()
+    reader, _r_writer = await asyncio.open_connection(sock=rsock)
+    _w_reader, writer = await asyncio.open_connection(sock=wsock)
+    pair = _StreamPair(reader, writer, _r_writer, _w_reader)
+    writer._test_pair = pair  # type: ignore[attr-defined]
+    return reader, writer
+
+
+class TestSendRecvRoundTrip:
+    """Round-trip tests: send_msg then recv_msg returns the same data."""
+
+    async def test_simple_dict(self):
+        reader, writer = await _make_stream_pair()
+        data = {"type": "hello", "session_id": "abc-123", "value": 42}
+        await send_msg(writer, data)
+        result = await recv_msg(reader)
+        assert result == data
+        writer.close()
+
+    async def test_empty_dict(self):
+        reader, writer = await _make_stream_pair()
+        await send_msg(writer, {})
+        result = await recv_msg(reader)
+        assert result == {}
+        writer.close()
+
+    async def test_nested_dict(self):
+        reader, writer = await _make_stream_pair()
+        data = {"event": "message", "payload": {"text": "Hello \u2603", "numbers": [1, 2, 3]}}
+        await send_msg(writer, data)
+        result = await recv_msg(reader)
+        assert result == data
+        writer.close()
+
+    async def test_multiple_messages_in_sequence(self):
+        reader, writer = await _make_stream_pair()
+        messages = [{"seq": 0}, {"seq": 1}, {"seq": 2}]
+        for msg in messages:
+            await send_msg(writer, msg)
+        for expected in messages:
+            result = await recv_msg(reader)
+            assert result == expected
+        writer.close()
+
+    async def test_string_with_embedded_newlines(self):
+        reader, writer = await _make_stream_pair()
+        data = {"text": "line one\nline two\r\nline three"}
+        await send_msg(writer, data)
+        result = await recv_msg(reader)
+        assert result == data
+        writer.close()
+
+    async def test_boolean_and_null_values(self):
+        reader, writer = await _make_stream_pair()
+        data = {"active": True, "done": False, "nothing": None}
+        await send_msg(writer, data)
+        result = await recv_msg(reader)
+        assert result == data
+        writer.close()
+
+    async def test_large_message_well_within_limit(self):
+        reader, writer = await _make_stream_pair()
+        data = {"payload": "x" * (50 * 1024)}
+        await send_msg(writer, data)
+        result = await recv_msg(reader)
+        assert result == data
+        writer.close()
+
+
+class TestOversizedMessageRejection:
+    """recv_msg must raise ValueError for messages claiming to exceed 64 KiB."""
+
+    async def test_oversized_header_raises_value_error(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack(">I", MAX_MESSAGE_SIZE + 1))
+        with pytest.raises(ValueError, match="Message too large"):
+            await recv_msg(reader)
+
+    async def test_exact_max_size_is_accepted(self):
+        prefix = b'{"k": "'
+        suffix = b'"}'
+        padding = b"x" * (MAX_MESSAGE_SIZE - len(prefix) - len(suffix))
+        payload = prefix + padding + suffix
+        assert len(payload) == MAX_MESSAGE_SIZE
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack(">I", MAX_MESSAGE_SIZE) + payload)
+        result = await recv_msg(reader)
+        assert result["k"] == "x" * (MAX_MESSAGE_SIZE - len(prefix) - len(suffix))
+
+    async def test_max_uint32_header_raises_value_error(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack(">I", 0xFFFFFFFF))
+        with pytest.raises(ValueError, match="Message too large"):
+            await recv_msg(reader)
+
+    async def test_error_message_includes_size_info(self):
+        reader = asyncio.StreamReader()
+        oversized = MAX_MESSAGE_SIZE + 100
+        reader.feed_data(struct.pack(">I", oversized))
+        with pytest.raises(ValueError) as exc_info:
+            await recv_msg(reader)
+        assert str(oversized) in str(exc_info.value)
+
+
+class TestEmptyPayload:
+    """Edge cases around minimal/empty JSON payloads."""
+
+    async def test_connection_closed_before_header_raises(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"\x00\x00")
+        reader.feed_eof()
+        with pytest.raises(asyncio.IncompleteReadError):
+            await recv_msg(reader)
+
+    async def test_connection_closed_before_payload_raises(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(struct.pack(">I", 10) + b"abc")
+        reader.feed_eof()
+        with pytest.raises(asyncio.IncompleteReadError):
+            await recv_msg(reader)
+
+    async def test_connection_closed_with_no_data_raises(self):
+        reader = asyncio.StreamReader()
+        reader.feed_eof()
+        with pytest.raises(asyncio.IncompleteReadError):
+            await recv_msg(reader)
+
+    async def test_connection_closed_after_3_header_bytes_raises(self):
+        reader = asyncio.StreamReader()
+        reader.feed_data(b"\x00\x00\x00")
+        reader.feed_eof()
+        with pytest.raises(asyncio.IncompleteReadError):
+            await recv_msg(reader)

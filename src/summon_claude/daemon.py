@@ -16,17 +16,18 @@ from __future__ import annotations
 
 import asyncio
 import fcntl
+import json
 import logging
 import os
 import signal
 import socket
+import struct
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from summon_claude.config import get_data_dir
 from summon_claude.event_dispatcher import EventDispatcher
-from summon_claude.ipc import MAX_MESSAGE_SIZE
 from summon_claude.sessions.manager import SessionManager
 from summon_claude.slack.bolt import BoltRouter
 
@@ -34,6 +35,43 @@ if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# IPC framing protocol (absorbed from ipc.py)
+#
+# Messages are framed with a 4-byte big-endian length prefix followed by a
+# JSON-encoded payload.  The maximum allowed message size is 64 KiB.
+# ---------------------------------------------------------------------------
+
+MAX_MESSAGE_SIZE = 65_536  # 64 KiB
+
+_RECV_TIMEOUT: float = 30.0
+"""Maximum seconds to wait for a complete IPC message."""
+
+
+async def send_msg(writer: asyncio.StreamWriter, data: dict) -> None:  # type: ignore[type-arg]
+    """Encode *data* as JSON and write it to *writer* with a 4-byte length prefix."""
+    payload: bytes = json.dumps(data).encode()
+    writer.write(struct.pack(">I", len(payload)) + payload)
+    await writer.drain()
+
+
+async def recv_msg(reader: asyncio.StreamReader) -> dict:  # type: ignore[type-arg]
+    """Read a length-prefixed message from *reader* and return the decoded dict.
+
+    Raises:
+        ValueError: If the declared message length exceeds MAX_MESSAGE_SIZE.
+        asyncio.IncompleteReadError: If the connection closes before a full
+            message is received.
+        TimeoutError: If the message is not fully received within ``_RECV_TIMEOUT``.
+    """
+    header: bytes = await asyncio.wait_for(reader.readexactly(4), timeout=_RECV_TIMEOUT)
+    length: int = struct.unpack(">I", header)[0]
+    if length > MAX_MESSAGE_SIZE:
+        raise ValueError(f"Message too large: {length} bytes (max {MAX_MESSAGE_SIZE})")
+    payload: bytes = await asyncio.wait_for(reader.readexactly(length), timeout=_RECV_TIMEOUT)
+    return json.loads(payload)  # type: ignore[no-any-return]
+
 
 # Watchdog constants — daemon-level event loop health monitoring
 _WATCHDOG_CHECK_INTERVAL_S = 15.0  # how often to check event loop progress
