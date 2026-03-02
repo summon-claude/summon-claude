@@ -85,7 +85,7 @@ class TestThreadRouterPostToMain:
         client, web = make_mock_client()
         router = ThreadRouter(client)
         blocks = [{"type": "divider"}]
-        await router.post_to_main("text", blocks=blocks, raw=True)
+        await router.post_to_main("text", blocks=blocks)
         call_kwargs = web.chat_postMessage.call_args.kwargs
         assert call_kwargs["blocks"] == blocks
 

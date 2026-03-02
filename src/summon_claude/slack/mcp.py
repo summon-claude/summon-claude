@@ -101,7 +101,7 @@ def create_summon_mcp_tools(client: SlackClient) -> list[SdkMcpTool]:
             }
         text = args["text"][:_MAX_TEXT_CHARS]
         try:
-            await client.post(text, thread_ts=parent_ts, raw=True)
+            await client.post(text, thread_ts=parent_ts)
         except Exception:
             return {
                 "content": [
@@ -184,7 +184,7 @@ def create_summon_mcp_tools(client: SlackClient) -> list[SdkMcpTool]:
             }
         ]
         try:
-            await client.post(title, blocks=blocks, raw=True)
+            await client.post(title, blocks=blocks)
         except Exception:
             return {
                 "content": [

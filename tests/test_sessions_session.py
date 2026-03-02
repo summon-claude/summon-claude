@@ -424,11 +424,11 @@ class TestAuditEventsLogged:
             assert any(e["event_type"] == "session_created" for e in log)
 
 
-class TestDisconnectMessageVariants:
-    """Test the three variants of disconnect messages."""
+class TestDisconnectMessage:
+    """Test the disconnect message."""
 
-    async def test_disconnect_message_ended(self, tmp_path):
-        """Normal shutdown should post :wave: 'session ended' message."""
+    async def test_disconnect_message(self, tmp_path):
+        """Shutdown should post :wave: 'session ended' message."""
         from summon_claude.sessions.registry import SessionRegistry
 
         config = make_config()
@@ -450,9 +450,8 @@ class TestDisconnectMessageVariants:
                 permission_handler=AsyncMock(),
             )
 
-            await session._post_disconnect_message(rt, reason="ended")
+            await session._post_disconnect_message(rt)
 
-            # Should post message with :wave: emoji and "session ended"
             mock_client.post.assert_called_once()
             call_args = mock_client.post.call_args
             text = call_args[0][0]
@@ -460,74 +459,6 @@ class TestDisconnectMessageVariants:
             assert "session ended" in text.lower()
             assert "5" in text  # turns
             assert "0.125" in text or "0.13" in text  # cost
-
-    async def test_disconnect_message_reconnect_exhausted(self, tmp_path):
-        """Reconnect exhaustion should post :x: 'disconnected' message."""
-        from summon_claude.sessions.registry import SessionRegistry
-
-        config = make_config()
-        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.register("sess-exhausted", 1234, "/tmp")
-
-            mock_client = make_mock_client("C_EXHAUSTED")
-            session = SummonSession(
-                config,
-                make_options(session_id="sess-exhausted"),
-                auth=make_auth(session_id="sess-exhausted"),
-            )
-            session._total_turns = 3
-            session._total_cost = 0.075
-            session._claude_session_id = "claude-sess-123"
-
-            rt = _SessionRuntime(
-                registry=registry,
-                client=mock_client,
-                permission_handler=AsyncMock(),
-            )
-
-            await session._post_disconnect_message(rt, reason="reconnect_exhausted")
-
-            # Should post message with :x: and "disconnected"
-            mock_client.post.assert_called_once()
-            call_args = mock_client.post.call_args
-            text = call_args[0][0]
-            assert ":x:" in text
-            assert "disconnected" in text.lower()
-            assert "3" in text  # turns
-            assert "claude-sess-123" in text  # session id
-
-    async def test_disconnect_message_watchdog(self, tmp_path):
-        """Watchdog termination should post :rotating_light: message."""
-        from summon_claude.sessions.registry import SessionRegistry
-
-        config = make_config()
-        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
-            await registry.register("sess-watchdog", 1234, "/tmp")
-
-            mock_client = make_mock_client("C_WATCHDOG")
-            session = SummonSession(
-                config,
-                make_options(session_id="sess-watchdog"),
-                auth=make_auth(session_id="sess-watchdog"),
-            )
-            session._total_turns = 7
-            session._total_cost = 0.235
-
-            rt = _SessionRuntime(
-                registry=registry,
-                client=mock_client,
-                permission_handler=AsyncMock(),
-            )
-
-            await session._post_disconnect_message(rt, reason="watchdog")
-
-            # Should post message with :rotating_light: and "watchdog"
-            mock_client.post.assert_called_once()
-            call_args = mock_client.post.call_args
-            text = call_args[0][0]
-            assert ":rotating_light:" in text
-            assert "watchdog" in text.lower() or "unresponsive" in text.lower()
-            assert "7" in text  # turns
 
 
 class TestWatchdogLoop:

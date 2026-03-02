@@ -46,20 +46,17 @@ class ThreadRouter:
         *,
         thread_ts: str | None = None,
         blocks: list[dict[str, Any]] | None = None,
-        raw: bool = False,
     ) -> MessageRef:
         """Post directly to the main channel, optionally into a thread."""
-        return await self._client.post(text, thread_ts=thread_ts, blocks=blocks, raw=raw)
+        return await self._client.post(text, thread_ts=thread_ts, blocks=blocks)
 
     async def post_to_active_thread(
-        self, text: str, *, blocks: list[dict[str, Any]] | None = None, raw: bool = False
+        self, text: str, *, blocks: list[dict[str, Any]] | None = None
     ) -> MessageRef:
         """Post to the current active thread; falls back to main if no active thread."""
         if not self.active_thread_ts:
-            return await self.post_to_main(text, blocks=blocks, raw=raw)
-        return await self._client.post(
-            text, blocks=blocks, thread_ts=self.active_thread_ts, raw=raw
-        )
+            return await self.post_to_main(text, blocks=blocks)
+        return await self._client.post(text, blocks=blocks, thread_ts=self.active_thread_ts)
 
     async def post_to_subagent_thread(
         self,
@@ -113,7 +110,6 @@ class ThreadRouter:
 
         ref = await self._client.post(
             f"\U0001f916 Subagent: {description}",
-            raw=True,
         )
         self.subagent_threads[tool_use_id] = ref.ts
         return ref.ts

@@ -30,7 +30,7 @@ class TestThreadRouter:
         from summon_claude.slack.client import MessageRef
 
         # Create a message to become the active thread
-        ref = await slack_client.post("\U0001f527 Turn 1: Processing...", raw=True)
+        ref = await slack_client.post("\U0001f527 Turn 1: Processing...")
         thread_router.set_active_thread(ref.ts, ref)
 
         reply = await thread_router.post_to_active_thread("Turn thread message")
@@ -53,11 +53,11 @@ class TestThreadRouter:
         self, thread_router, test_channel, slack_harness, slack_client
     ):
         """Messages from different turns should be in separate threads."""
-        ref1 = await slack_client.post("\U0001f527 Turn 1: Processing...", raw=True)
+        ref1 = await slack_client.post("\U0001f527 Turn 1: Processing...")
         thread_router.set_active_thread(ref1.ts, ref1)
         msg1 = await thread_router.post_to_active_thread("Turn 1 message")
 
-        ref2 = await slack_client.post("\U0001f527 Turn 2: Processing...", raw=True)
+        ref2 = await slack_client.post("\U0001f527 Turn 2: Processing...")
         thread_router.set_active_thread(ref2.ts, ref2)
         msg2 = await thread_router.post_to_active_thread("Turn 2 message")
 
@@ -83,7 +83,7 @@ class TestThreadRouter:
         self, thread_router, test_channel, slack_harness, slack_client
     ):
         """File uploads should go to the active thread."""
-        ref = await slack_client.post("\U0001f527 Turn 1: Processing...", raw=True)
+        ref = await slack_client.post("\U0001f527 Turn 1: Processing...")
         thread_router.set_active_thread(ref.ts, ref)
 
         await thread_router.upload_to_active_thread(
@@ -149,7 +149,7 @@ class TestConclusionMention:
         self, thread_router, test_channel, slack_harness, slack_client
     ):
         """Turn starter message should be updatable with summary."""
-        ref = await slack_client.post("\U0001f527 Turn 1: Processing...", raw=True)
+        ref = await slack_client.post("\U0001f527 Turn 1: Processing...")
         thread_router.set_active_thread(ref.ts, ref)
 
         await thread_router.update_message(ref.ts, "\U0001f527 Turn 1: 2 tool calls · test.py")

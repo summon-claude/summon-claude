@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 _MAX_MESSAGE_CHARS = 3000
 _FLUSH_HEADROOM_CHARS = 100
 _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
-_SECTION_LIMIT = 3000
 
 # Maps tool names to the keys where their primary argument lives (tried in order).
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
@@ -187,7 +186,6 @@ class ResponseStreamer:
         self._current_turn_number = turn_number
         ref = await self._router.post_to_main(
             f"\U0001f527 Turn {turn_number}: Processing...",
-            raw=True,
         )
         self._router.set_active_thread(ref.ts, ref)
         return ref.ts
@@ -217,7 +215,7 @@ class ResponseStreamer:
             parts.append(", ".join(short_names))
         return " \u00b7 ".join(parts) if parts else "Processing..."
 
-    def record_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:  # noqa: ARG002
+    def record_tool_call(self, tool_input: dict[str, Any]) -> None:
         """Track tool calls for turn summary generation."""
         self._turn.tool_call_count += 1
         for key in ("file_path", "path", "command"):
@@ -307,7 +305,7 @@ class ResponseStreamer:
             await self._flush_buffer()
 
         self._turn.has_seen_tool_use = True
-        self.record_tool_call(block.name, block.input or {})
+        self.record_tool_call(block.input or {})
 
         if block.name == "Task":
             description = _extract_task_description(block.input or {})
@@ -528,7 +526,7 @@ class ResponseStreamer:
         # Prepend header to the full diff text, then split the combined string.
         header = f"*Edit:* `{filename}`\n"
         combined = f"{header}```{diff_text}```"
-        chunks = split_text(combined, _SECTION_LIMIT)
+        chunks = split_text(combined, _MAX_MESSAGE_CHARS)
         return [
             {
                 "type": "section",

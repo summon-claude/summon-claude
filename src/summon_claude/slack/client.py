@@ -54,11 +54,8 @@ class SlackClient:
         *,
         thread_ts: str | None = None,
         blocks: list[dict[str, Any]] | None = None,
-        raw: bool = False,
     ) -> MessageRef:
-        """Post message. Sanitizes text by default. raw=True to skip."""
-        if not raw:
-            text = sanitize_for_mrkdwn(text, max_len=len(text))
+        """Post a message to the channel."""
         kwargs: dict[str, Any] = {"channel": self.channel_id, "text": text}
         if blocks:
             kwargs["blocks"] = blocks

@@ -105,15 +105,9 @@ class TestSlackClient:
         ref = await client.post("hello")
         assert ref == MessageRef(channel_id="C123", ts="1.0")
 
-    async def test_post_sanitizes_text_by_default(self):
+    async def test_post_preserves_formatting(self):
         client, web = self._make_client()
         await client.post("hello\nworld")
-        call_kwargs = web.chat_postMessage.call_args.kwargs
-        assert "\n" not in call_kwargs["text"]
-
-    async def test_post_raw_skips_sanitization(self):
-        client, web = self._make_client()
-        await client.post("hello\nworld", raw=True)
         call_kwargs = web.chat_postMessage.call_args.kwargs
         assert call_kwargs["text"] == "hello\nworld"
 
@@ -126,7 +120,7 @@ class TestSlackClient:
     async def test_post_with_blocks(self):
         client, web = self._make_client()
         blocks = [{"type": "section", "text": {"type": "mrkdwn", "text": "hi"}}]
-        await client.post("hello", blocks=blocks, raw=True)
+        await client.post("hello", blocks=blocks)
         call_kwargs = web.chat_postMessage.call_args.kwargs
         assert call_kwargs["blocks"] == blocks
 

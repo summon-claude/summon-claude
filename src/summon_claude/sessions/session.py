@@ -120,11 +120,6 @@ _SYSTEM_PROMPT = {
 AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
 
-# ---------------------------------------------------------------------------
-# Inlined from channel_manager.py
-# ---------------------------------------------------------------------------
-
-
 def _slugify(text: str) -> str:
     """Convert text to a Slack-safe channel name slug."""
     text = text.lower()
@@ -240,7 +235,6 @@ async def _post_session_header(
     await client.post(
         f"Claude Code session started in {cwd}",
         blocks=blocks,
-        raw=True,
     )
 
 
@@ -665,7 +659,6 @@ class SummonSession:
                                             ],
                                         }
                                     ],
-                                    raw=True,
                                 )
                             except Exception as e2:
                                 logger.debug("Failed to post Claude session ID: %s", e2)
@@ -848,7 +841,6 @@ class SummonSession:
                 summary = summary[:3000]
                 await rt.client.post(
                     f":memo: *Session Summary*\n{summary}",
-                    raw=True,
                 )
         except Exception as e:
             logger.debug("Failed to generate session summary: %s", e)
@@ -860,7 +852,7 @@ class SummonSession:
         )
 
         # Post disconnect message (channel is preserved, not archived)
-        await self._post_disconnect_message(rt, reason="ended")
+        await self._post_disconnect_message(rt)
 
         # Update registry
         try:
@@ -885,28 +877,13 @@ class SummonSession:
             logger.warning("Failed to update registry on shutdown: %s", e)
         # Socket Mode is now managed by BoltRouter — no per-session cleanup needed
 
-    async def _post_disconnect_message(self, rt: _SessionRuntime, reason: str = "ended") -> None:
+    async def _post_disconnect_message(self, rt: _SessionRuntime) -> None:
         """Post a clear disconnect notice to the channel."""
-        if reason == "reconnect_exhausted":
-            text = (
-                ":x: *Claude session disconnected*\n"
-                "Connection to Slack lost and could not be re-established.\n"
-                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
-                f"Claude session: `{self._claude_session_id or 'unknown'}`\n"
-                "Resume with: `claude --resume <session-id>`"
-            )
-        elif reason == "watchdog":
-            text = (
-                ":rotating_light: *Claude session terminated by watchdog*\n"
-                "The session process became unresponsive and was terminated.\n"
-                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}"
-            )
-        else:
-            text = (
-                ":wave: *Claude session ended*\n"
-                f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
-                "Channel preserved — you can review the conversation history."
-            )
+        text = (
+            ":wave: *Claude session ended*\n"
+            f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
+            "Channel preserved — you can review the conversation history."
+        )
 
         blocks = [
             {"type": "divider"},
@@ -917,7 +894,7 @@ class SummonSession:
         ]
         try:
             await asyncio.wait_for(
-                rt.client.post(text, blocks=blocks, raw=True),
+                rt.client.post(text, blocks=blocks),
                 timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
@@ -938,7 +915,7 @@ class SummonSession:
             },
         ]
         try:
-            await rt.client.post("Conversation cleared.", blocks=blocks, raw=True)
+            await rt.client.post("Conversation cleared.", blocks=blocks)
         except Exception as e:
             logger.warning("Failed to post clear delineation: %s", e)
 
@@ -980,7 +957,7 @@ class SummonSession:
         if result.metadata.get("shutdown"):
             if result.text:
                 try:
-                    await rt.client.post(result.text, thread_ts=thread_ts, raw=True)
+                    await rt.client.post(result.text, thread_ts=thread_ts)
                 except Exception as e:
                     logger.warning("Failed to post shutdown message: %s", e)
             self._shutdown_event.set()
@@ -994,7 +971,7 @@ class SummonSession:
         if result.metadata.get("stop"):
             if result.text:
                 try:
-                    await rt.client.post(result.text, thread_ts=thread_ts, raw=True)
+                    await rt.client.post(result.text, thread_ts=thread_ts)
                 except Exception as e:
                     logger.warning("Failed to post stop message: %s", e)
             self._abort_current_turn()
@@ -1013,7 +990,6 @@ class SummonSession:
                 await rt.client.post(
                     f":gear: Running `{slash_message}`...",
                     thread_ts=thread_ts,
-                    raw=True,
                 )
             except Exception as e:
                 logger.warning("Failed to post passthrough ack: %s", e)
@@ -1025,7 +1001,7 @@ class SummonSession:
             chunks = _split_text(result.text, _MAX_USER_MESSAGE_CHARS)
             for chunk in chunks:
                 try:
-                    await rt.client.post(chunk, thread_ts=thread_ts, raw=True)
+                    await rt.client.post(chunk, thread_ts=thread_ts)
                 except Exception as e:
                     logger.warning("Failed to post command response: %s", e)
                     break
