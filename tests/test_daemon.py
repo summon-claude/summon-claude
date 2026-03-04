@@ -452,3 +452,92 @@ class TestEmptyPayload:
         reader.feed_eof()
         with pytest.raises(asyncio.IncompleteReadError):
             await recv_msg(reader)
+
+
+# ---------------------------------------------------------------------------
+# _validate_socket_path — Unix socket path length guard
+# ---------------------------------------------------------------------------
+
+
+class TestValidateSocketPath:
+    def test_accepts_short_path(self):
+        from summon_claude.daemon import _validate_socket_path
+
+        sock = Path("/tmp/d.sock")
+        _validate_socket_path(sock)  # should not raise
+
+    def test_raises_on_long_path(self):
+        from summon_claude.daemon import SocketPathTooLongError, _validate_socket_path
+
+        # Build a path that exceeds 104 chars
+        sock = Path("/" + "a" * 200 + "/daemon.sock")
+        with pytest.raises(SocketPathTooLongError, match="exceeding the Unix limit"):
+            _validate_socket_path(sock)
+
+    def test_error_message_includes_path_and_hint(self):
+        from summon_claude.daemon import SocketPathTooLongError, _validate_socket_path
+
+        sock = Path("/" + "x" * 200 + "/daemon.sock")
+        with pytest.raises(SocketPathTooLongError) as exc_info:
+            _validate_socket_path(sock)
+        msg = str(exc_info.value)
+        assert "XDG_DATA_HOME" in msg
+        assert "daemon.sock" in msg
+
+    def test_accepts_path_at_exact_limit(self):
+        from summon_claude.daemon import _UNIX_SOCKET_PATH_MAX, _validate_socket_path
+
+        # Build a path exactly at the limit: "/" (1 char) + N x's
+        sock = Path("/" + "x" * (_UNIX_SOCKET_PATH_MAX - 1))
+        assert len(str(sock)) == _UNIX_SOCKET_PATH_MAX
+        _validate_socket_path(sock)  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# _setup_daemon_logging — idempotency
+# ---------------------------------------------------------------------------
+
+
+class TestSetupDaemonLogging:
+    def test_creates_file_handler(self, tmp_path):
+        import logging
+
+        from summon_claude.daemon import _setup_daemon_logging
+
+        log_file = tmp_path / "logs" / "daemon.log"
+        root = logging.getLogger()
+        initial_handler_count = len(root.handlers)
+
+        try:
+            _setup_daemon_logging(log_file)
+
+            assert log_file.parent.exists()
+            # At least one new handler added
+            assert len(root.handlers) > initial_handler_count
+        finally:
+            # Clean up: remove any handlers we added
+            for h in root.handlers[initial_handler_count:]:
+                root.removeHandler(h)
+                h.close()
+
+    def test_idempotent_does_not_duplicate_handler(self, tmp_path):
+        import logging
+
+        from summon_claude.daemon import _setup_daemon_logging
+
+        log_file = tmp_path / "logs" / "daemon.log"
+        root = logging.getLogger()
+        initial_handler_count = len(root.handlers)
+
+        try:
+            _setup_daemon_logging(log_file)
+            count_after_first = len(root.handlers)
+
+            _setup_daemon_logging(log_file)
+            count_after_second = len(root.handlers)
+
+            assert count_after_second == count_after_first
+        finally:
+            for h in root.handlers[initial_handler_count:]:
+                root.removeHandler(h)
+                h.close()

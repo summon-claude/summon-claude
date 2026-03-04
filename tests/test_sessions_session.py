@@ -195,6 +195,66 @@ class TestWaitForAuth:
         await asyncio.wait_for(session._wait_for_auth(), timeout=2.0)
 
 
+class TestCreateChannel:
+    """Tests for _create_channel retry logic."""
+
+    async def test_succeeds_on_first_attempt(self):
+        config = make_config()
+        session = SummonSession(config, make_options(), auth=make_auth())
+
+        mock_client = AsyncMock()
+        mock_client.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C123", "name": "summon-test-0303-abcd1234"}}
+        )
+
+        cid, cname = await session._create_channel(mock_client)
+        assert cid == "C123"
+        assert cname == "summon-test-0303-abcd1234"
+        mock_client.conversations_create.assert_awaited_once()
+
+    async def test_retries_on_name_taken(self):
+        config = make_config()
+        session = SummonSession(config, make_options(), auth=make_auth())
+
+        mock_client = AsyncMock()
+        mock_client.conversations_create = AsyncMock(
+            side_effect=[
+                Exception("name_taken"),
+                {"channel": {"id": "C456", "name": "summon-test-0303-ffff0000"}},
+            ]
+        )
+
+        cid, cname = await session._create_channel(mock_client)
+        assert cid == "C456"
+        assert mock_client.conversations_create.await_count == 2
+
+    async def test_raises_after_all_retries_exhausted(self):
+        config = make_config()
+        session = SummonSession(config, make_options(), auth=make_auth())
+
+        mock_client = AsyncMock()
+        mock_client.conversations_create = AsyncMock(side_effect=Exception("name_taken"))
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="Could not create channel"):
+            await session._create_channel(mock_client)
+        assert mock_client.conversations_create.await_count == 3
+
+    async def test_non_name_taken_error_raises_immediately(self):
+        config = make_config()
+        session = SummonSession(config, make_options(), auth=make_auth())
+
+        mock_client = AsyncMock()
+        mock_client.conversations_create = AsyncMock(side_effect=Exception("invalid_auth"))
+
+        import pytest
+
+        with pytest.raises(Exception, match="invalid_auth"):
+            await session._create_channel(mock_client)
+        mock_client.conversations_create.assert_awaited_once()
+
+
 class TestSlashCommandHandler:
     """Test the /summon slash command handler internals."""
 
