@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import logging
 import os
@@ -98,8 +99,8 @@ class _SessionLogFilter(logging.Filter):
 
 
 _HEARTBEAT_INTERVAL_S = 30
-_AUTH_POLL_INTERVAL_S = 1.0
 _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
+_AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
 _CLEANUP_TIMEOUT_S = 10.0
@@ -131,7 +132,7 @@ def _slugify(text: str) -> str:
 def _make_channel_name(prefix: str, session_name: str) -> str:
     """Build a slugified channel name with prefix, date, and hex suffix."""
     date_suffix = datetime.now(UTC).strftime("%m%d")
-    hex_suffix = secrets.token_hex(3)
+    hex_suffix = secrets.token_hex(4)
     slug = _slugify(session_name) if session_name else "session"
     name = f"{prefix}-{slug}-{date_suffix}-{hex_suffix}"
     return name[:_MAX_CHANNEL_NAME_LEN].lower()
@@ -460,25 +461,51 @@ class SummonSession:
                         logger.warning("Failed to update registry on unexpected termination: %s", e)
 
     async def _wait_for_auth(self) -> AuthResult:
-        """Poll until auth is confirmed, timed out, or shutdown is requested."""
-        elapsed = 0.0
-        next_countdown = 15.0
-        while elapsed < _AUTH_TIMEOUT_S:
+        """Wait until auth is confirmed, timed out, or shutdown is requested.
+
+        Uses ``asyncio.wait`` on the auth and shutdown events for instant
+        response, with a periodic wakeup for countdown logging.
+        """
+        deadline = asyncio.get_running_loop().time() + _AUTH_TIMEOUT_S
+        next_countdown = _AUTH_COUNTDOWN_INTERVAL_S
+
+        while True:
+            remaining_total = deadline - asyncio.get_running_loop().time()
+            if remaining_total <= 0:
+                self._shutdown_event.set()
+                return "timed_out"
+
+            # Wait for either event, waking periodically for countdown logging
+            wait_duration = min(_AUTH_COUNTDOWN_INTERVAL_S, remaining_total)
+            auth_waiter = asyncio.create_task(self._authenticated_event.wait())
+            shutdown_waiter = asyncio.create_task(self._shutdown_event.wait())
+            try:
+                await asyncio.wait(
+                    {auth_waiter, shutdown_waiter},
+                    timeout=wait_duration,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                # Always cancel waiters to prevent leaks
+                for t in (auth_waiter, shutdown_waiter):
+                    if not t.done():
+                        t.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await t
+
             if self._authenticated_event.is_set():
                 return "authenticated"
             if self._shutdown_event.is_set():
                 logger.info("Shutdown requested. Cancelling authentication.")
                 return "shutdown"
-            await asyncio.sleep(_AUTH_POLL_INTERVAL_S)
-            elapsed += _AUTH_POLL_INTERVAL_S
+
+            # Neither event fired — periodic countdown log
+            elapsed = _AUTH_TIMEOUT_S - (deadline - asyncio.get_running_loop().time())
             if elapsed >= next_countdown:
                 remaining = _AUTH_TIMEOUT_S - elapsed
                 if remaining > 0:
                     logger.info("Waiting for authentication... %.0fs remaining", remaining)
-                next_countdown += 15.0
-
-        self._shutdown_event.set()
-        return "timed_out"
+                next_countdown += _AUTH_COUNTDOWN_INTERVAL_S
 
     async def _run_session(self, registry: SessionRegistry) -> None:  # noqa: PLR0915
         """Create channel, register with dispatcher, connect Claude, run message loop."""
@@ -492,11 +519,7 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
-        channel_name = _make_channel_name(self._config.channel_prefix, self._name)
-        resp = await web_client.conversations_create(name=channel_name, is_private=True)
-        channel_id = resp["channel"]["id"]  # type: ignore[index]
-        channel_name = resp["channel"]["name"]  # type: ignore[index]
-        logger.info("Authenticated! Session channel: #%s", channel_name)
+        channel_id, channel_name = await self._create_channel(web_client)
 
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
@@ -605,6 +628,39 @@ class SummonSession:
                 current_task.uncancel()
 
             await self._shutdown(rt)
+
+    _CHANNEL_CREATE_RETRIES = 3
+
+    async def _create_channel(self, web_client: AsyncWebClient) -> tuple[str, str]:
+        """Create a private Slack channel with retry on name collision.
+
+        Returns ``(channel_id, channel_name)``.  Generates a fresh random
+        hex suffix on each attempt so collisions are astronomically unlikely
+        (1 in ~4 billion per name per day), but retries handle the edge case.
+        """
+        last_err: Exception | None = None
+        for attempt in range(self._CHANNEL_CREATE_RETRIES):
+            channel_name = _make_channel_name(self._config.channel_prefix, self._name)
+            try:
+                resp = await web_client.conversations_create(name=channel_name, is_private=True)
+                cid: str = resp["channel"]["id"]  # type: ignore[index]
+                cname: str = resp["channel"]["name"]  # type: ignore[index]
+                logger.info("Session channel created: #%s (attempt %d)", cname, attempt + 1)
+                return cid, cname
+            except Exception as e:
+                last_err = e
+                if "name_taken" in str(e):
+                    logger.debug(
+                        "Channel name %r taken, retrying (%d/%d)",
+                        channel_name,
+                        attempt + 1,
+                        self._CHANNEL_CREATE_RETRIES,
+                    )
+                    continue
+                raise
+        raise RuntimeError(
+            f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
+        ) from last_err
 
     async def _run_message_loop(  # noqa: PLR0912, PLR0915
         self, rt: _SessionRuntime, router: ThreadRouter

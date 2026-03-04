@@ -91,6 +91,23 @@ def _daemon_socket() -> Path:
     return _data_dir() / "daemon.sock"
 
 
+def _validate_socket_path(sock: Path) -> None:
+    """Raise ``SocketPathTooLongError`` if *sock* exceeds the Unix limit.
+
+    Called at daemon startup rather than on every path resolution so tests
+    using long ``tmp_path`` directories are not affected.
+    """
+    sock_str = str(sock)
+    if len(sock_str) > _UNIX_SOCKET_PATH_MAX:
+        raise SocketPathTooLongError(
+            f"Daemon socket path is {len(sock_str)} chars, exceeding the "
+            f"Unix limit of {_UNIX_SOCKET_PATH_MAX}.\n"
+            f"  Path: {sock_str}\n"
+            f"Set XDG_DATA_HOME to a shorter path (e.g. export "
+            f"XDG_DATA_HOME=~/.local/share) or use the default ~/.summon directory."
+        )
+
+
 def _daemon_pid() -> Path:
     return _data_dir() / "daemon.pid"
 
@@ -103,8 +120,16 @@ def _daemon_log() -> Path:
     return _data_dir() / "logs" / "daemon.log"
 
 
+# Unix socket path length limit: 104 on macOS, 108 on Linux.
+# We use the lower bound so the daemon works on both platforms.
+_UNIX_SOCKET_PATH_MAX = 104
+
 _SOCKET_WAIT_TIMEOUT_S = 10.0
 _SOCKET_POLL_INTERVAL_S = 0.1
+
+
+class SocketPathTooLongError(RuntimeError):
+    """Raised when the daemon socket path exceeds the Unix limit."""
 
 
 class DaemonAlreadyRunningError(Exception):
@@ -289,6 +314,10 @@ def _disarm_sigalrm_watchdog() -> None:
 def _setup_daemon_logging(log_file: Path) -> None:
     """Configure file-based logging for the daemon process.
 
+    Idempotent — safe to call twice (e.g. once in the fork child for early
+    diagnostics, then again inside ``run_daemon``).  Skips if a
+    ``FileHandler`` pointing at *log_file* is already attached.
+
     Installs a ``SessionIdFilter`` on the root logger so that every log
     record emitted within a session task is tagged with ``session_id``.
     The format includes ``%(session_id)s`` when non-empty.
@@ -297,6 +326,13 @@ def _setup_daemon_logging(log_file: Path) -> None:
 
     log_file.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
+
+    # Idempotency: skip if already set up for this file
+    resolved = str(log_file.resolve())
+    for h in root.handlers:
+        if isinstance(h, logging.FileHandler) and h.baseFilename == resolved:
+            return
+
     root.setLevel(logging.DEBUG)
     root.addFilter(SessionIdFilter())
     # session_id is "[abc] " when inside a session task, "" at daemon level.
@@ -398,6 +434,9 @@ def start_daemon(config: SummonConfig) -> None:
     if sys.platform == "win32":
         raise RuntimeError("Daemon mode is not supported on Windows")
 
+    # Validate socket path length before attempting anything
+    _validate_socket_path(_daemon_socket())
+
     if is_daemon_running():
         logger.debug("Daemon already running — skipping fork")
         return
@@ -416,11 +455,15 @@ def start_daemon(config: SummonConfig) -> None:
 
     # Child: detach from terminal session and run daemon
     os.setsid()  # become session leader — detach from parent's terminal
+
+    # Set up file logging early so exceptions during daemon startup are
+    # captured in daemon.log instead of being silently swallowed.
+    log_path = _daemon_log()
+    _setup_daemon_logging(log_path)
+
     try:
         import daemon  # noqa: PLC0415
 
-        log_path = _daemon_log()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
         log_fh = log_path.open("a")
 
         ctx = daemon.DaemonContext(
@@ -433,9 +476,7 @@ def start_daemon(config: SummonConfig) -> None:
         with ctx:
             run_daemon(config)
     except Exception as exc:
-        # Swallow all exceptions in child — parent will time out if daemon
-        # never starts. Cannot log here since logging may not be set up yet.
-        logger.debug("Daemon child failed: %s", exc)
+        logger.critical("Daemon child failed: %s", exc, exc_info=True)
     finally:
         os._exit(0)
 

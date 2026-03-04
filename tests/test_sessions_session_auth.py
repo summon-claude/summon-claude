@@ -25,30 +25,20 @@ def _capture_session_logs() -> tuple[logging.Handler, list[str]]:
 
 
 class TestAuthCountdown:
-    """BUG-030: Auth countdown should log at 15s intervals."""
+    """BUG-030: Auth countdown should log at periodic intervals."""
 
     async def test_countdown_uses_logger(self):
         """_wait_for_auth should call logger.info for countdown messages."""
-        # Create a minimal session instance
         session = object.__new__(SummonSession)
         session._authenticated_event = asyncio.Event()
         session._shutdown_event = asyncio.Event()
 
-        # Trigger timeout after simulated 20 seconds
-        call_count = 0
-
-        async def fake_sleep(seconds):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 20:
-                session._shutdown_event.set()
-
         handler, log_messages = _capture_session_logs()
         try:
+            # Short timeout + tiny countdown interval → fast countdown messages
             with (
-                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 20),
-                patch("summon_claude.sessions.session._AUTH_POLL_INTERVAL_S", 1.0),
-                patch("asyncio.sleep", side_effect=fake_sleep),
+                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 0.15),
+                patch("summon_claude.sessions.session._AUTH_COUNTDOWN_INTERVAL_S", 0.03),
             ):
                 result = await session._wait_for_auth()
         finally:
@@ -56,31 +46,23 @@ class TestAuthCountdown:
             session_logger.removeHandler(handler)
             session_logger.setLevel(logging.NOTSET)
 
-        assert result in ("timed_out", "shutdown")
+        assert result == "timed_out"
         countdown_msgs = [m for m in log_messages if "remaining" in m]
         assert len(countdown_msgs) >= 1, f"Expected countdown messages, got: {log_messages}"
         assert "remaining" in countdown_msgs[0]
 
-    async def test_countdown_interval_is_15s(self):
-        """Countdown messages should appear at 15-second intervals."""
+    async def test_countdown_interval(self):
+        """Multiple countdown messages should appear at configured intervals."""
         session = object.__new__(SummonSession)
         session._authenticated_event = asyncio.Event()
         session._shutdown_event = asyncio.Event()
 
-        call_count = 0
-
-        async def fake_sleep(seconds):
-            nonlocal call_count
-            call_count += 1
-            if call_count > 45:
-                session._shutdown_event.set()
-
         handler, log_messages = _capture_session_logs()
         try:
+            # With 0.2s timeout and 0.04s interval, expect at least 2 countdown messages
             with (
-                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 45),
-                patch("summon_claude.sessions.session._AUTH_POLL_INTERVAL_S", 1.0),
-                patch("asyncio.sleep", side_effect=fake_sleep),
+                patch("summon_claude.sessions.session._AUTH_TIMEOUT_S", 0.2),
+                patch("summon_claude.sessions.session._AUTH_COUNTDOWN_INTERVAL_S", 0.04),
             ):
                 await session._wait_for_auth()
         finally:
@@ -89,5 +71,4 @@ class TestAuthCountdown:
             session_logger.setLevel(logging.NOTSET)
 
         countdown_msgs = [m for m in log_messages if "remaining" in m]
-        # At 45s timeout with 15s intervals: messages at 15s (30 remaining) and 30s (15 remaining)
-        assert len(countdown_msgs) >= 2
+        assert len(countdown_msgs) >= 2, f"Expected >=2 countdown msgs, got: {countdown_msgs}"
