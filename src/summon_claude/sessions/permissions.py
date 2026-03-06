@@ -271,6 +271,13 @@ class PermissionHandler:
                 f"Permission required: {header_text[:100]}",
                 blocks=blocks,
             )
+            # Ping user in turn thread so they get a Slack notification
+            # (ephemeral messages don't trigger notifications)
+            if self._authenticated_user_id:
+                await _post_quietly(
+                    self._router,
+                    f"<@{self._authenticated_user_id}> Permission needed",
+                )
         except Exception as e:
             logger.error("Failed to post permission message: %s", e)
             # Auto-deny if we can't post
