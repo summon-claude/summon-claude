@@ -124,7 +124,10 @@ _SYSTEM_PROMPT = {
     "preset": "claude_code",
     "append": (
         "You are running via summon-claude, bridged to a Slack channel. "
-        "The user interacts through Slack messages. Format responses for Slack mrkdwn."
+        "The user interacts through Slack messages. "
+        "Use standard markdown formatting "
+        "(e.g. **bold**, *italic*, [text](url), ```code```). "
+        "Your output will be automatically converted for Slack display."
     ),
 }
 
