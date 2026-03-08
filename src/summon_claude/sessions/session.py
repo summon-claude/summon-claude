@@ -1,6 +1,6 @@
 """Session orchestrator — ties Claude SDK + Slack + permissions + streaming together."""
 
-# pyright: reportArgumentType=false, reportReturnType=false
+# pyright: reportArgumentType=false, reportReturnType=false, reportAttributeAccessIssue=false
 # slack_sdk and claude_agent_sdk don't ship type stubs
 
 from __future__ import annotations
@@ -24,7 +24,16 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.config import SummonConfig, discover_installed_plugins, get_data_dir
 from summon_claude.sessions.auth import SessionAuth
-from summon_claude.sessions.commands import CommandContext, CommandRegistry, build_registry
+from summon_claude.sessions.commands import (
+    COMMAND_ACTIONS,
+    CommandContext,
+    CommandResult,
+    find_commands,
+    validate_sdk_commands,
+)
+from summon_claude.sessions.commands import (
+    dispatch as dispatch_command,
+)
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.permissions import PermissionHandler
 from summon_claude.sessions.registry import SessionRegistry
@@ -310,7 +319,7 @@ class SummonSession:
         self._resume = options.resume
 
         self._auth: SessionAuth | None = auth
-        self._command_registry: CommandRegistry = build_registry()
+        self._claude: ClaudeSDKClient | None = None
         self._session_start_time: datetime = datetime.now(UTC)
 
         # Shared web_client and dispatcher from the daemon (None for standalone/test use)
@@ -338,6 +347,7 @@ class SummonSession:
         self._last_context: ContextUsage | None = None
         self._last_model_seen: str | None = None
         self._claude_session_id: str | None = None
+        self._available_models: list[dict[str, str]] = []
 
         # Turn abort infrastructure
         self._current_turn_task: asyncio.Task | None = None
@@ -691,29 +701,24 @@ class SummonSession:
         )
 
         async with ClaudeSDKClient(options) as claude:
+            self._claude = claude
             try:
-                # Initialize command registry from server info
-                self._command_registry = build_registry()
+                # Validate SDK commands and extract model info from server info
                 try:
                     server_info = await claude.get_server_info()
                     if server_info:
                         commands = server_info.get("commands", [])
                         if commands:
-                            self._command_registry.set_passthrough_commands(commands)
+                            validate_sdk_commands(commands)
+                        models = server_info.get("models", [])
+                        if models:
+                            self._available_models = models
+                        # Best-effort: resolve initial model from init data
+                        init_model = server_info.get("model")
+                        if init_model and (not self._model or self._model == "default"):
+                            self._model = init_model
                 except Exception as e:
                     logger.debug("Could not retrieve server info: %s", e)
-
-                # Discover resolved model name via /model query
-                try:
-                    await claude.query("/model")
-                    async for msg in claude.receive_response():
-                        if isinstance(msg, AssistantMessage) and (
-                            not self._model or self._model == "default"
-                        ):
-                            self._model = msg.model
-                        # Consume but don't display the response
-                except Exception as e:
-                    logger.debug("Could not discover model name: %s", e)
 
                 while not self._shutdown_event.is_set():
                     try:
@@ -750,6 +755,7 @@ class SummonSession:
                         logger.debug("Session summary timed out")
                     except Exception as e:
                         logger.debug("Session summary failed: %s", e)
+                self._claude = None
 
     async def _handle_user_message(  # noqa: PLR0915
         self,
@@ -978,7 +984,50 @@ class SummonSession:
         except Exception as e:
             logger.warning("Failed to post clear delineation: %s", e)
 
-    async def _dispatch_command(  # noqa: PLR0912
+    async def _execute_compact(
+        self, rt: _SessionRuntime, instructions: str | None, thread_ts: str | None
+    ) -> None:
+        """Execute /compact via SDK and post feedback to Slack."""
+        compact_query = "/compact" + (f" {instructions}" if instructions else "")
+        try:
+            if self._claude:
+                await self._claude.query(compact_query)
+                pre_tokens = None
+                async for msg in self._claude.receive_response():
+                    if (
+                        hasattr(msg, "subtype")
+                        and msg.subtype == "compact_boundary"
+                        and hasattr(msg, "compact_metadata")
+                        and msg.compact_metadata
+                    ):
+                        pre_tokens = getattr(msg.compact_metadata, "pre_tokens", None)
+                if pre_tokens is not None:
+                    await rt.client.post(
+                        f":broom: Context compacted"
+                        f" (was ~{pre_tokens:,} tokens). Summary preserved.",
+                        thread_ts=thread_ts,
+                    )
+                else:
+                    await rt.client.post(
+                        ":warning: Compact may not have completed.",
+                        thread_ts=thread_ts,
+                    )
+            else:
+                await rt.client.post(
+                    ":warning: SDK client not available.",
+                    thread_ts=thread_ts,
+                )
+        except Exception as e:
+            logger.warning("Compact failed: %s", e)
+            try:
+                await rt.client.post(
+                    ":warning: Compact failed. Try again later.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post compact error: %s", e2)
+
+    async def _dispatch_command(  # noqa: PLR0912, PLR0915
         self,
         rt: _SessionRuntime,
         name: str,
@@ -993,11 +1042,11 @@ class SummonSession:
             start_time=self._session_start_time,
             model=self._model,
             session_id=self._session_id,
-            metadata={"registry": self._command_registry},
+            metadata={"models": self._available_models},
         )
 
         try:
-            result = await self._command_registry.dispatch(name, args, ctx)
+            result = await dispatch_command(name, args, ctx)
         except Exception as e:
             logger.exception("Command dispatch error for !%s: %s", name, e)
             try:
@@ -1033,9 +1082,29 @@ class SummonSession:
             self._abort_current_turn()
             return
 
+        # Handle !model — switch model via SDK
+        new_model = result.metadata.get("set_model")
+        if new_model:
+            if self._claude:
+                try:
+                    await self._claude.set_model(new_model)
+                    self._model = new_model
+                except Exception as e:
+                    logger.warning("set_model(%s) failed: %s", new_model, e)
+                    result = CommandResult(
+                        text=f":warning: Failed to switch model: {e}",
+                    )
+            else:
+                result = CommandResult(text=":warning: SDK client not available.")
+
         # Handle !clear — post visual delineation then fall through to passthrough
         if result.metadata.get("clear"):
             await self._post_clear_delineation(rt)
+
+        # Handle !compact — execute via SDK and report results
+        if result.metadata.get("compact"):
+            await self._execute_compact(rt, result.metadata.get("instructions"), thread_ts)
+            return
 
         # Pass-through: translate !cmd args -> /cmd args and enqueue
         if not result.suppress_queue:
@@ -1125,7 +1194,7 @@ class SummonSession:
             logging.getLogger().removeHandler(qh)
             qh.close()
 
-    async def _process_incoming_event(
+    async def _process_incoming_event(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         event: dict,  # type: ignore[type-arg]
         rt: _SessionRuntime,
@@ -1140,7 +1209,7 @@ class SummonSession:
         3. Message truncation at ``_MAX_USER_MESSAGE_CHARS``.
         4. File reference extraction via ``format_file_references``.
         5. AskUserQuestion free-text capture via ``permission_handler``.
-        6. Command prefix routing via ``_command_registry.parse``.
+        6. Command detection via ``find_commands`` (standalone and mid-message).
 
         Returns ``(full_text, thread_ts)`` when the message should be forwarded
         to Claude, or ``None`` when it has been handled/filtered internally.
@@ -1173,10 +1242,136 @@ class SummonSession:
             await rt.permission_handler.receive_text_input(text)
             return None
 
-        # 6: Check for !command prefix and dispatch immediately
-        parsed = self._command_registry.parse(full_text)
-        if parsed is not None:
-            await self._dispatch_command(rt, parsed[0], parsed[1], user_id, thread_ts)
+        # 6: Detect commands (!cmd or /cmd) anywhere in the message
+        # Fast path: skip regex scan if no command prefixes present
+        if "!" not in full_text and "/" not in full_text:
+            return full_text, thread_ts
+
+        matches = find_commands(full_text)
+        if not matches:
+            return full_text, thread_ts
+
+        # Standalone command: single match at position 0
+        if len(matches) == 1 and matches[0].start == 0:
+            match = matches[0]
+            standalone_args = match.args if match.args else full_text[match.end :].split()
+
+            defn = COMMAND_ACTIONS.get(match.name)
+            if defn is None:
+                try:
+                    await rt.client.post(
+                        f":no_entry_sign: Unknown command `!{match.raw_name}`. "
+                        "Use `!help` for available commands.",
+                        thread_ts=thread_ts,
+                    )
+                    await rt.client.react(thread_ts, "no_entry_sign")
+                except Exception:  # noqa: S110
+                    pass
+                return None
+
+            if defn.block_reason:
+                try:
+                    await rt.client.post(
+                        f":no_entry: `!{match.raw_name}` is not available: {defn.block_reason}",
+                        thread_ts=thread_ts,
+                    )
+                    await rt.client.react(thread_ts, "no_entry_sign")
+                except Exception:  # noqa: S110
+                    pass
+                return None
+
+            # LOCAL or PASSTHROUGH — route through existing _dispatch_command
+            await self._dispatch_command(rt, match.name, standalone_args, user_id, thread_ts)
             return None
 
-        return full_text, thread_ts
+        # Mid-message: multiple commands or command not at start
+        annotations: list[str] = []
+        modified_text = full_text
+        has_blocked = False
+
+        # Process in reverse so earlier string positions stay valid as we modify text
+        for match in reversed(matches):
+            defn = COMMAND_ACTIONS.get(match.name)
+
+            if defn is None:
+                annotations.insert(0, f"`!{match.raw_name}` — not found")
+                has_blocked = True
+                continue
+
+            if defn.block_reason:
+                annotations.insert(0, f"`!{match.raw_name}` — {defn.block_reason}")
+                has_blocked = True
+                continue
+
+            if defn.handler:
+                # LOCAL mid-message — execute as side-effect
+                ctx = CommandContext(
+                    turns=self._total_turns,
+                    cost_usd=self._total_cost,
+                    start_time=self._session_start_time,
+                    model=self._model,
+                    session_id=self._session_id,
+                    metadata={"models": self._available_models},
+                )
+                try:
+                    result = await dispatch_command(match.name, match.args, ctx)
+                    if result.metadata.get("shutdown"):
+                        self._shutdown_event.set()
+                        try:
+                            self._message_queue.put_nowait(("", None))
+                        except asyncio.QueueFull:
+                            pass
+                        return None
+                    if result.metadata.get("stop"):
+                        self._abort_current_turn()
+                        return None
+                    new_model = result.metadata.get("set_model")
+                    if new_model and self._claude:
+                        try:
+                            await self._claude.set_model(new_model)
+                            self._model = new_model
+                        except Exception as e:
+                            logger.warning("set_model(%s) failed: %s", new_model, e)
+                    if result.metadata.get("clear"):
+                        await self._post_clear_delineation(rt)
+                    if result.metadata.get("compact"):
+                        await self._execute_compact(
+                            rt, result.metadata.get("instructions"), thread_ts
+                        )
+                        annotations.insert(0, f"`!{match.raw_name}` — compacting context...")
+                    elif result.text:
+                        annotations.insert(0, f"`!{match.raw_name}` — {result.text}")
+                except Exception as e:
+                    logger.warning("Mid-message command error !%s: %s", match.raw_name, e)
+                    annotations.insert(0, f"`!{match.raw_name}` — error")
+
+                # Remove the command + args from the text
+                modified_text = modified_text[: match.start] + modified_text[match.end :]
+                continue
+
+            # PASSTHROUGH mid-message — swap ! to /
+            if match.prefix == "!":
+                modified_text = (
+                    modified_text[: match.start] + "/" + modified_text[match.start + 1 :]
+                )
+
+        # Add emoji reaction for blocked/unknown
+        if has_blocked and thread_ts:
+            try:
+                await rt.client.react(thread_ts, "no_entry_sign")
+            except Exception:  # noqa: S110
+                pass
+
+        # Post annotations as threaded reply
+        if annotations:
+            try:
+                await rt.client.post("\n".join(annotations), thread_ts=thread_ts)
+            except Exception as e:
+                logger.warning("Failed to post command annotations: %s", e)
+
+        # Clean up modified text and forward to Claude
+        modified_text = " ".join(modified_text.split())
+        if modified_text:
+            return modified_text, thread_ts
+
+        return None

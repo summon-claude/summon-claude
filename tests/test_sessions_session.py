@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.auth import SessionAuth
-from summon_claude.sessions.commands import build_registry
+from summon_claude.sessions.commands import COMMAND_ACTIONS, CommandResult
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
@@ -583,7 +583,7 @@ class TestProcessIncomingEvent:
     async def test_normal_message_returns_text_and_ts(self):
         """A normal user message returns (full_text, thread_ts)."""
         session = make_session()
-        session._command_registry = build_registry()
+
         rt = self._make_rt()
 
         event = {"user": "U001", "text": "Hello Claude", "ts": "123.456"}
@@ -626,7 +626,7 @@ class TestProcessIncomingEvent:
         from summon_claude.sessions.session import _MAX_USER_MESSAGE_CHARS
 
         session = make_session()
-        session._command_registry = build_registry()
+
         rt = self._make_rt()
 
         long_text = "x" * (_MAX_USER_MESSAGE_CHARS + 100)
@@ -641,7 +641,7 @@ class TestProcessIncomingEvent:
     async def test_file_references_appended(self):
         """File attachments are appended to the text."""
         session = make_session()
-        session._command_registry = build_registry()
+
         rt = self._make_rt()
 
         event = {
@@ -675,7 +675,7 @@ class TestProcessIncomingEvent:
     async def test_command_prefix_dispatched(self):
         """Messages with ! prefix are dispatched as commands and return None."""
         session = make_session()
-        session._command_registry = build_registry()
+
         rt = self._make_rt()
 
         # Mock _dispatch_command to avoid real execution
@@ -689,7 +689,7 @@ class TestProcessIncomingEvent:
     async def test_regular_message_not_command(self):
         """A message without ! prefix is returned as-is for Claude."""
         session = make_session()
-        session._command_registry = build_registry()
+
         rt = self._make_rt()
 
         event = {"user": "U001", "text": "What is 2+2?", "ts": "789"}
@@ -699,3 +699,128 @@ class TestProcessIncomingEvent:
         text, ts = result
         assert text == "What is 2+2?"
         assert ts == "789"
+
+    # ------------------------------------------------------------------
+    # Standalone command tests
+    # ------------------------------------------------------------------
+
+    async def test_standalone_unknown_command_posts_error(self):
+        """!xyznotreal at start should post 'Unknown command' and return None."""
+        session = make_session()
+        rt = self._make_rt()
+
+        event = {"user": "U001", "text": "!xyznotreal", "ts": "1"}
+        result = await session._process_incoming_event(event, rt)
+
+        assert result is None
+        rt.client.post.assert_called_once()
+        post_text = rt.client.post.call_args[0][0]
+        assert "Unknown command" in post_text or "not found" in post_text.lower()
+
+    async def test_standalone_blocked_command_posts_reason(self):
+        """!config at start should post 'not available' and return None."""
+        session = make_session()
+        rt = self._make_rt()
+
+        event = {"user": "U001", "text": "!config", "ts": "1"}
+        result = await session._process_incoming_event(event, rt)
+
+        assert result is None
+        rt.client.post.assert_called_once()
+        post_text = rt.client.post.call_args[0][0]
+        assert "not available" in post_text.lower()
+
+    async def test_standalone_passthrough_dispatched(self):
+        """!review at start should call _dispatch_command with name='review'."""
+        session = make_session()
+        rt = self._make_rt()
+
+        with patch.object(session, "_dispatch_command", new=AsyncMock()) as mock_dispatch:
+            event = {"user": "U001", "text": "!review", "ts": "1"}
+            result = await session._process_incoming_event(event, rt)
+
+        assert result is None
+        mock_dispatch.assert_awaited_once()
+        call_args = mock_dispatch.call_args
+        assert call_args[0][1] == "review"  # name argument
+
+    async def test_standalone_local_dispatched(self):
+        """!status at start should call _dispatch_command with name='status'."""
+        session = make_session()
+        rt = self._make_rt()
+
+        with patch.object(session, "_dispatch_command", new=AsyncMock()) as mock_dispatch:
+            event = {"user": "U001", "text": "!status", "ts": "1"}
+            result = await session._process_incoming_event(event, rt)
+
+        assert result is None
+        mock_dispatch.assert_awaited_once()
+        call_args = mock_dispatch.call_args
+        assert call_args[0][1] == "status"  # name argument
+
+    # ------------------------------------------------------------------
+    # Mid-message tests
+    # ------------------------------------------------------------------
+
+    async def test_mid_message_passthrough_swaps_prefix(self):
+        """'please !review this' should return modified text with '/review'."""
+        session = make_session()
+        rt = self._make_rt()
+
+        event = {"user": "U001", "text": "please !review this", "ts": "1"}
+        result = await session._process_incoming_event(event, rt)
+
+        assert result is not None
+        text, _ = result
+        assert "/review" in text
+        assert "!review" not in text
+
+    async def test_mid_message_blocked_annotated(self):
+        """'try !config please' should post annotation and return modified text."""
+        session = make_session()
+        rt = self._make_rt()
+
+        event = {"user": "U001", "text": "try !config please", "ts": "1"}
+        await session._process_incoming_event(event, rt)
+
+        # The blocked command should be annotated via rt.client.post
+        rt.client.post.assert_called()
+        # Check the annotation mentions the block reason
+        annotation_text = rt.client.post.call_args[0][0]
+        assert "config" in annotation_text.lower()
+
+    async def test_mid_message_local_executed(self):
+        """'please !status and then continue' should dispatch status and remove it from text."""
+        session = make_session()
+        rt = self._make_rt()
+
+        with patch(
+            "summon_claude.sessions.session.dispatch_command",
+            new=AsyncMock(return_value=CommandResult(text="status output")),
+        ):
+            event = {"user": "U001", "text": "please !status and then continue", "ts": "1"}
+            result = await session._process_incoming_event(event, rt)
+
+        assert result is not None
+        text, _ = result
+        # The !status command should have been removed from the text
+        assert "!status" not in text
+        # The surrounding text should remain (possibly cleaned up)
+        assert "please" in text
+        assert "continue" in text
+
+    async def test_plain_text_fast_path(self):
+        """Text with no '!' or '/' should return unchanged (no find_commands called)."""
+        session = make_session()
+        rt = self._make_rt()
+
+        with patch("summon_claude.sessions.session.find_commands") as mock_find:
+            event = {"user": "U001", "text": "just plain text here", "ts": "42"}
+            result = await session._process_incoming_event(event, rt)
+
+        assert result is not None
+        text, ts = result
+        assert text == "just plain text here"
+        assert ts == "42"
+        # find_commands should NOT have been called (fast path)
+        mock_find.assert_not_called()

@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Awaitable, Callable
+import re
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -35,103 +36,28 @@ class CommandContext:
 HandlerFn = Callable[[list[str], CommandContext], Awaitable[CommandResult]]
 
 
-class CommandRegistry:
-    """Registry for !-prefixed command dispatch."""
+@dataclass
+class CommandDef:
+    """Declarative definition for a single command."""
 
-    _REMAP_TO_END: frozenset[str] = frozenset({"quit", "exit", "logout"})
-    _BLOCKED_COMMANDS: dict[str, str] = {
-        "login": "Not available in Slack sessions.",
-        # CLI-only system commands — output goes to terminal, not SDK stream
-        "compact": "CLI-only (output not available via SDK). Context is managed automatically.",
-        "context": "CLI-only (output not available via SDK). Use `!status` for session info.",
-        "cost": "CLI-only (output not available via SDK). Use `!status` for cost info.",
-        "release-notes": "CLI-only (output not available via SDK).",
-    }
+    description: str
+    handler: HandlerFn | None = None
+    block_reason: str | None = None
+    aliases: list[str] = field(default_factory=list)
+    max_args: int | None = None
+    argument_hint: str = ""
 
-    def __init__(self) -> None:
-        self._local: dict[str, tuple[HandlerFn, str]] = {}
-        self._passthrough: dict[str, str] = {}
 
-    def register(self, name: str, handler: HandlerFn, description: str) -> None:
-        """Register a local command handler."""
-        self._local[name] = (handler, description)
+@dataclass
+class CommandMatch:
+    """A command found in message text by ``find_commands``."""
 
-    def set_passthrough_commands(self, commands: list[Any]) -> None:
-        """Populate passthrough commands from SDK init response."""
-        self._passthrough = {}
-        for item in commands:
-            if isinstance(item, str):
-                name = item.lstrip("/")
-                if name and name not in self._BLOCKED_COMMANDS and name not in self._REMAP_TO_END:
-                    self._passthrough[name] = f"/{name}"
-            elif isinstance(item, dict):
-                name = item.get("name", "").lstrip("/")
-                description = item.get("description", f"/{name}")
-                if name and name not in self._BLOCKED_COMMANDS and name not in self._REMAP_TO_END:
-                    self._passthrough[name] = description
-
-    def parse(self, text: str) -> tuple[str, list[str]] | None:
-        """Detect ! prefix and split into (command, args_list). Returns None if not a command."""
-        if not text.startswith("!"):
-            return None
-        rest = text[1:]
-        if not rest or not rest[0].isalpha():
-            return None
-        parts = rest.split()
-        command = parts[0].lower()
-        if len(command) > 64:
-            return None
-        args = parts[1:]
-        return command, args
-
-    async def dispatch(self, name: str, args: list[str], context: CommandContext) -> CommandResult:
-        """Dispatch a command: remap -> blocked -> local -> passthrough -> unknown."""
-        # Remap aliases to !end
-        if name in self._REMAP_TO_END:
-            name = "end"
-
-        # Blocked commands
-        if name in self._BLOCKED_COMMANDS:
-            reason = self._BLOCKED_COMMANDS[name]
-            return CommandResult(text=f":no_entry: `!{name}` is not available: {reason}")
-
-        # Local commands
-        if name in self._local:
-            handler, _ = self._local[name]
-            return await handler(args, context)
-
-        # Passthrough to Claude
-        if name in self._passthrough:
-            return CommandResult(text=None, suppress_queue=False)
-
-        # Unknown
-        return CommandResult(
-            text=f":question: Unknown command `!{name}`. Use `!help` to see available commands."
-        )
-
-    def all_commands(self) -> dict[str, str]:
-        """Return combined dict of all commands (local + passthrough + remap aliases)."""
-        result: dict[str, str] = {}
-        for name, (_, description) in self._local.items():
-            result[name] = description
-        for name, description in self._passthrough.items():
-            result[name] = description
-        for alias in self._REMAP_TO_END:
-            result[alias] = "Alias for !end"
-        return result
-
-    def register_passthrough(self, name: str, description: str) -> None:
-        """Register a single passthrough command (for pre-SDK-init fallbacks)."""
-        if name not in self._BLOCKED_COMMANDS and name not in self._REMAP_TO_END:
-            self._passthrough[name] = description
-
-    def local_commands(self) -> list[str]:
-        """Return sorted list of local command names."""
-        return sorted(self._local)
-
-    def passthrough_commands(self) -> list[str]:
-        """Return sorted list of passthrough command names."""
-        return sorted(self._passthrough)
+    prefix: str  # "!" or "/"
+    name: str  # canonical (after alias resolution)
+    raw_name: str  # as typed
+    args: list[str]  # consumed args (LOCAL with max_args)
+    start: int  # position in text
+    end: int  # end position (including consumed args)
 
 
 # ------------------------------------------------------------------
@@ -139,45 +65,29 @@ class CommandRegistry:
 # ------------------------------------------------------------------
 
 
-_CORE_CLI_COMMANDS: frozenset[str] = frozenset(
-    {
-        "compact",
-        "context",
-        "cost",
-        "config",
-        "doctor",
-        "model",
-        "review",
-        "bug",
-        "init",
-        "upgrade",
-    }
-)
-
-
-async def _handle_help(args: list[str], ctx: CommandContext) -> CommandResult:
-    registry: CommandRegistry = ctx.metadata["registry"]
-
-    # Detail view: passthrough to CLI's /help for rich output
+async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult:
     if args:
-        return CommandResult(text=None, suppress_queue=False)
+        cmd_name = args[0].lower().lstrip("!/")
+        canonical = _ALIAS_LOOKUP.get(cmd_name, cmd_name)
+        defn = COMMAND_ACTIONS.get(canonical)
+        if defn is None:
+            return CommandResult(text=f":question: Unknown command `!{cmd_name}`.")
 
-    # Overview: grouped local summary
-    local_names = sorted(registry.local_commands())
-    passthrough_names = sorted(registry.passthrough_commands())
+        action = "local" if defn.handler else ("blocked" if defn.block_reason else "passthrough")
+        lines = [f"*`!{canonical}`* — {defn.description}", f"_Type: {action}_"]
+        if defn.aliases:
+            lines.append(f"_Aliases: {', '.join(f'`!{a}`' for a in defn.aliases)}_")
+        return CommandResult(text="\n".join(lines))
 
-    core_names = sorted(n for n in passthrough_names if n in _CORE_CLI_COMMANDS)
-    plugin_names = sorted(n for n in passthrough_names if n not in _CORE_CLI_COMMANDS)
+    local_names = sorted(n for n, d in COMMAND_ACTIONS.items() if d.handler)
+    passthrough_names = sorted(
+        n for n, d in COMMAND_ACTIONS.items() if not d.handler and not d.block_reason
+    )
 
-    lines: list[str] = ["*Session* (local): " + ", ".join(f"`!{n}`" for n in local_names)]
-
-    if core_names:
-        lines.append("*Core CLI*: " + ", ".join(f"`!{n}`" for n in core_names))
-
-    if plugin_names:
-        lines.append("*Plugin*: " + ", ".join(f"`!{n}`" for n in plugin_names))
-
-    lines.append("_Use `!command` to run. Passthrough commands use Claude's native handling._")
+    lines = ["*Session* (local): " + ", ".join(f"`!{n}`" for n in local_names)]
+    if passthrough_names:
+        lines.append("*Claude CLI*: " + ", ".join(f"`!{n}`" for n in passthrough_names))
+    lines.append("_Use `!command` to run. `!help COMMAND` for details._")
 
     return CommandResult(text="\n".join(lines))
 
@@ -211,7 +121,7 @@ async def _handle_end(_args: list[str], _ctx: CommandContext) -> CommandResult:
 
 
 async def _handle_clear(_args: list[str], _ctx: CommandContext) -> CommandResult:
-    return CommandResult(text=None, suppress_queue=False, metadata={"clear": True})
+    return CommandResult(text=":broom: Conversation cleared.", metadata={"clear": True})
 
 
 async def _handle_stop(_args: list[str], _ctx: CommandContext) -> CommandResult:
@@ -221,14 +131,313 @@ async def _handle_stop(_args: list[str], _ctx: CommandContext) -> CommandResult:
     )
 
 
-def build_registry() -> CommandRegistry:
-    """Factory that creates a CommandRegistry with all built-in handlers registered."""
-    registry = CommandRegistry()
-    registry.register("help", _handle_help, "Show available commands")
-    registry.register("status", _handle_status, "Show session status")
-    registry.register("end", _handle_end, "End this session")
-    registry.register("clear", _handle_clear, "Clear conversation history")
-    registry.register("stop", _handle_stop, "Cancel the current Claude turn")
-    # Ensure model is available as passthrough even before SDK init populates the list
-    registry.register_passthrough("model", "Switch or display the active model")
-    return registry
+async def _handle_model(args: list[str], ctx: CommandContext) -> CommandResult:
+    models = ctx.metadata.get("models", [])
+    valid_names = [m.get("value", m) if isinstance(m, dict) else str(m) for m in models]
+
+    if not args:
+        current = ctx.model or "unknown"
+        lines = [f"*Current model:* `{current}`"]
+        if valid_names:
+            lines.append("*Available:* " + ", ".join(f"`{n}`" for n in valid_names))
+        return CommandResult(text="\n".join(lines))
+
+    requested = args[0]
+    if valid_names and requested not in valid_names:
+        return CommandResult(
+            text=f":warning: Unknown model `{requested}`. "
+            f"Available: {', '.join(f'`{n}`' for n in valid_names)}"
+        )
+
+    return CommandResult(
+        text=f":gear: Switching to `{requested}`...",
+        metadata={"set_model": requested},
+    )
+
+
+async def _handle_compact(args: list[str], _ctx: CommandContext) -> CommandResult:
+    return CommandResult(
+        text=None,
+        metadata={"compact": True, "instructions": " ".join(args) if args else None},
+    )
+
+
+# ------------------------------------------------------------------
+# Shared block-reason constant
+# ------------------------------------------------------------------
+
+_CLI_ONLY = "Only available in the interactive CLI"
+
+# ------------------------------------------------------------------
+# Declarative command inventory
+# ------------------------------------------------------------------
+
+COMMAND_ACTIONS: dict[str, CommandDef] = {
+    # --- Local handlers ---
+    "help": CommandDef(
+        description="Show available commands",
+        handler=_handle_help,
+        max_args=1,
+    ),
+    "status": CommandDef(
+        description="Show session status",
+        handler=_handle_status,
+        max_args=0,
+    ),
+    "end": CommandDef(
+        description="End this session",
+        handler=_handle_end,
+        max_args=0,
+        aliases=["quit", "exit", "logout"],
+    ),
+    "clear": CommandDef(
+        description="Clear conversation history",
+        handler=_handle_clear,
+        max_args=0,
+        aliases=["new", "reset"],
+    ),
+    "stop": CommandDef(
+        description="Cancel the current Claude turn",
+        handler=_handle_stop,
+        max_args=0,
+    ),
+    "model": CommandDef(
+        description="Switch or display the active model",
+        handler=_handle_model,
+        max_args=1,
+    ),
+    "compact": CommandDef(
+        description="Compact conversation context",
+        handler=_handle_compact,
+        max_args=None,
+    ),
+    # --- Passthrough (forwarded to Claude CLI) ---
+    "review": CommandDef(description="Review code changes"),
+    "init": CommandDef(description="Initialize project configuration"),
+    "pr-comments": CommandDef(description="Review PR comments"),
+    "security-review": CommandDef(description="Run security review"),
+    "debug": CommandDef(description="Debug session issues"),
+    "claude-developer-platform": CommandDef(description="Claude developer platform info"),
+    # --- Blocked with specific reasons ---
+    "insights": CommandDef(
+        description="Generates a local HTML report",
+        block_reason="Generates a local HTML report — not viewable in Slack",
+    ),
+    "context": CommandDef(
+        description="Show context info",
+        block_reason="Use `!status` for context info",
+    ),
+    "cost": CommandDef(
+        description="Show cost info",
+        block_reason="Use `!status` for cost info",
+    ),
+    "release-notes": CommandDef(
+        description="Show release notes",
+        block_reason="Not available in Slack sessions",
+    ),
+    "login": CommandDef(
+        description="Log in to Claude",
+        block_reason="Not available in Slack sessions.",
+    ),
+    # --- Blocked CLI-only ---
+    "config": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["settings"]),
+    "doctor": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "desktop": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["app"]),
+    "feedback": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["bug"]),
+    "permissions": CommandDef(
+        description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["allowed-tools"]
+    ),
+    "mobile": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["ios", "android"]),
+    "resume": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["continue"]),
+    "rewind": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["checkpoint"]),
+    "remote-control": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY, aliases=["rc"]),
+    "add-dir": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "agents": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "chrome": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "copy": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "diff": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "export": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "extra-usage": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "fast": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "fork": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "hooks": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "ide": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "install-github-app": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "install-slack-app": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "keybindings": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "mcp": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "memory": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "output-style": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "passes": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "plan": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "plugin": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "privacy-settings": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "reload-plugins": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "remote-env": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "rename": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "sandbox": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "skills": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "stats": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "statusline": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "stickers": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "tasks": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "terminal-setup": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "theme": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "upgrade": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "usage": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "vim": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+}
+
+# ------------------------------------------------------------------
+# Alias lookup — derived at import time
+# ------------------------------------------------------------------
+
+_ALIAS_LOOKUP: dict[str, str] = {
+    alias: name for name, defn in COMMAND_ACTIONS.items() for alias in defn.aliases
+}
+
+
+# ------------------------------------------------------------------
+# SDK command validation
+# ------------------------------------------------------------------
+
+
+def validate_sdk_commands(sdk_commands: Sequence[dict[str, Any] | str]) -> list[str]:
+    """Check SDK commands against COMMAND_ACTIONS; log warnings for unknowns.
+
+    Stores ``argumentHint`` from SDK response into matching CommandDef entries.
+    Unknown SDK commands are added as passthrough so they don't break dispatch.
+
+    Returns the list of unknown command names.
+    """
+    unknown: list[str] = []
+
+    for item in sdk_commands:
+        if isinstance(item, str):
+            name = item.lstrip("/")
+            hint = ""
+        elif isinstance(item, dict):
+            name = item.get("name", "").lstrip("/")
+            hint = item.get("argumentHint", "")
+        else:
+            continue
+
+        if not name:
+            continue
+
+        # Validate command name format (alphanumeric, hyphens, underscores only)
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$", name):
+            logger.warning("SDK command '%s' has invalid name format — skipping", name)
+            continue
+
+        defn = COMMAND_ACTIONS.get(name)
+        if defn is not None:
+            if hint and not defn.argument_hint:
+                defn.argument_hint = hint
+        else:
+            logger.warning("SDK command '%s' not in COMMAND_ACTIONS — add it", name)
+            unknown.append(name)
+            # Register as passthrough so it still works
+            COMMAND_ACTIONS[name] = CommandDef(
+                description=hint or f"/{name}",
+                argument_hint=hint,
+            )
+
+    return unknown
+
+
+# ------------------------------------------------------------------
+# Module-level dispatch and parse functions
+# ------------------------------------------------------------------
+
+
+async def dispatch(name: str, args: list[str], context: CommandContext) -> CommandResult:
+    """Dispatch a command: alias -> blocked -> local -> passthrough -> unknown."""
+    canonical = _ALIAS_LOOKUP.get(name, name)
+
+    defn = COMMAND_ACTIONS.get(canonical)
+    if defn is None:
+        return CommandResult(
+            text=f":question: Unknown command `!{name}`. Use `!help` to see available commands."
+        )
+
+    if defn.block_reason:
+        return CommandResult(text=f":no_entry: `!{name}` is not available: {defn.block_reason}")
+
+    if defn.handler:
+        return await defn.handler(args, context)
+
+    # Passthrough
+    return CommandResult(text=None, suppress_queue=False)
+
+
+def parse(text: str) -> tuple[str, list[str]] | None:
+    """Detect ! prefix and split into (command, args_list). Returns None if not a command."""
+    if not text.startswith("!"):
+        return None
+    rest = text[1:]
+    if not rest or not rest[0].isalpha():
+        return None
+    parts = rest.split()
+    command = parts[0].lower()
+    if len(command) > 64:
+        return None
+    args = parts[1:]
+    return command, args
+
+
+# ------------------------------------------------------------------
+# Mid-message command detection
+# ------------------------------------------------------------------
+
+# Match !cmd or /cmd after whitespace or start-of-string.
+# Negative lookbehind (?<![:/]) prevents matching inside URLs (https://...)
+# or path-like tokens (repo/review).
+_COMMAND_RE = re.compile(r"(?:^|(?<=\s))(?<![:/])([!/])([a-zA-Z][a-zA-Z0-9_-]{0,63})")
+
+
+def find_commands(text: str) -> list[CommandMatch]:
+    """Find all !cmd and /cmd tokens in text, with alias resolution and arg consumption."""
+    matches: list[CommandMatch] = []
+    consumed_ranges: list[tuple[int, int]] = []
+
+    for m in _COMMAND_RE.finditer(text):
+        # Skip if this match falls within a previously consumed arg range
+        if any(start <= m.start() < end for start, end in consumed_ranges):
+            continue
+
+        prefix = m.group(1)
+        raw_name = m.group(2).lower()
+        canonical = _ALIAS_LOOKUP.get(raw_name, raw_name)
+        defn = COMMAND_ACTIONS.get(canonical)
+
+        cmd_end = m.end()
+        consumed_args: list[str] = []
+
+        # Consume args for LOCAL commands with max_args > 0
+        if defn and defn.handler and defn.max_args is not None and defn.max_args > 0:
+            remaining = text[cmd_end:]
+            for arg_m in re.finditer(r"\S+", remaining):
+                if len(consumed_args) >= defn.max_args:
+                    break
+                word = arg_m.group()
+                # Stop at next command prefix
+                if len(word) > 1 and word[0] in "!/" and word[1].isalpha():
+                    break
+                consumed_args.append(word)
+                cmd_end = m.end() + arg_m.end()
+            if consumed_args:
+                consumed_ranges.append((m.end(), cmd_end))
+
+        matches.append(
+            CommandMatch(
+                prefix=prefix,
+                name=canonical,
+                raw_name=raw_name,
+                args=consumed_args,
+                start=m.start(),
+                end=cmd_end,
+            )
+        )
+
+    return matches

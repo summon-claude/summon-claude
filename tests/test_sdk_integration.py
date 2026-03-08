@@ -22,6 +22,8 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
+from summon_claude.sessions.commands import COMMAND_ACTIONS
+
 pytestmark = [
     pytest.mark.slow,
     pytest.mark.skipif(
@@ -206,3 +208,37 @@ async def test_passthrough_command_populates_result():
     assert result_msg.is_error is False, (
         "Expected /cost to complete without error, got is_error=True"
     )
+
+
+# ------------------------------------------------------------------
+# SDK command inventory tests
+# ------------------------------------------------------------------
+
+
+class TestSDKCommandInventory:
+    """Verify COMMAND_ACTIONS covers all SDK commands."""
+
+    @pytest.fixture
+    async def server_info(self):
+        """Get server_info from a real Claude SDK connection."""
+        os.environ.pop("CLAUDECODE", None)
+        options = ClaudeAgentOptions(cwd="/tmp")
+        async with ClaudeSDKClient(options) as client:
+            info = await client.get_server_info()
+            yield info
+
+    async def test_all_sdk_commands_in_inventory(self, server_info):
+        if not server_info:
+            pytest.skip("No server_info available")
+        commands = server_info.get("commands", [])
+        for item in commands:
+            name = (
+                item.get("name", item).lstrip("/") if isinstance(item, dict) else item.lstrip("/")
+            )
+            assert name in COMMAND_ACTIONS, f"SDK command '{name}' not in COMMAND_ACTIONS — add it"
+
+    async def test_models_available(self, server_info):
+        if not server_info:
+            pytest.skip("No server_info available")
+        models = server_info.get("models", [])
+        assert len(models) > 0, "Expected at least one model in server_info"
