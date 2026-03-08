@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from markdown_to_mrkdwn import SlackMarkdownConverter
+
+logger = logging.getLogger(__name__)
 
 _converter = SlackMarkdownConverter()
 
@@ -18,4 +22,5 @@ def markdown_to_mrkdwn(text: str) -> str:
     try:
         return _converter.convert(text)
     except Exception:
+        logger.warning("mrkdwn conversion failed for text (len=%d)", len(text), exc_info=True)
         return text

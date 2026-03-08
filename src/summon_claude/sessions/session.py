@@ -762,9 +762,9 @@ class SummonSession:
                             self._post_session_summary(router, claude), timeout=30.0
                         )
                     except TimeoutError:
-                        logger.debug("Session summary timed out")
+                        logger.warning("Session summary timed out")
                     except Exception as e:
-                        logger.debug("Session summary failed: %s", e)
+                        logger.warning("Session summary failed: %s", e)
                 self._claude = None
 
     async def _handle_user_message(  # noqa: PLR0915
@@ -815,7 +815,7 @@ class SummonSession:
                             ],
                         )
                     except Exception:
-                        logger.debug("Failed to post Claude session ID to Slack")
+                        logger.warning("Failed to post Claude session ID to Slack", exc_info=True)
                 cost = stream_result.result.total_cost_usd or 0.0
                 self._total_cost += cost
                 await rt.registry.record_turn(self._session_id, cost)
@@ -835,7 +835,7 @@ class SummonSession:
                     )
                     await rt.client.set_topic(topic)
                 except Exception:
-                    logger.debug("Post-turn topic update failed")
+                    logger.warning("Post-turn topic update failed", exc_info=True)
 
         self._current_turn_task = asyncio.create_task(_do_turn())
         abort_wait = asyncio.create_task(self._abort_event.wait())
@@ -918,7 +918,7 @@ class SummonSession:
                     f":memo: *Session Summary*\n{summary}",
                 )
         except Exception as e:
-            logger.debug("Failed to generate session summary: %s", e)
+            logger.warning("Failed to generate session summary: %s", e)
 
     async def _shutdown(self, rt: _SessionRuntime) -> None:
         """Gracefully shut down the session."""

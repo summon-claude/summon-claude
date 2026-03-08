@@ -466,7 +466,7 @@ class ResponseStreamer:
                     "white_check_mark",
                 )
             except Exception:
-                logger.debug("Reaction failed", exc_info=True)
+                logger.warning("Reaction failed", exc_info=True)
 
     def _make_tool_use_blocks(
         self,
