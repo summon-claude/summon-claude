@@ -334,6 +334,18 @@ def _pick_session(identifier: str, matches: list[dict], ctx: click.Context) -> d
     return matches[result[1]]
 
 
+async def _stop_and_report(resolved_id: str, *, suggest_cleanup: bool = False) -> None:
+    """Stop a session via the daemon and report the result."""
+    found = await daemon_client.stop_session(resolved_id)
+    if found:
+        click.echo(f"Stop requested for session {resolved_id[:8]}")
+    else:
+        msg = f"Session {resolved_id[:8]} not owned by running daemon."
+        if suggest_cleanup:
+            msg += " Run 'summon session cleanup' to clear stale sessions."
+        click.echo(msg)
+
+
 async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: bool) -> None:
     if not is_daemon_running():
         click.echo("Daemon is not running.")
@@ -366,11 +378,7 @@ async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: 
                     click.echo("No session selected.")
                     return
                 resolved_id = active[result[1]]["session_id"]
-            found = await daemon_client.stop_session(resolved_id)
-            if found:
-                click.echo(f"Stop requested for session {resolved_id[:8]}")
-            else:
-                click.echo(f"Session {resolved_id[:8]} not owned by running daemon.")
+            await _stop_and_report(resolved_id)
             return
 
         if stop_all:
@@ -393,15 +401,7 @@ async def _async_cmd_stop(ctx: click.Context, session_id: str | None, stop_all: 
                 ctx.exit(1)
                 return
 
-            resolved_id = session["session_id"]
-            found = await daemon_client.stop_session(resolved_id)
-            if found:
-                click.echo(f"Stop requested for session {resolved_id[:8]}")
-            else:
-                click.echo(
-                    f"Session {resolved_id[:8]} not owned by running daemon."
-                    " Run 'summon session cleanup' to clear stale sessions."
-                )
+            await _stop_and_report(session["session_id"], suggest_cleanup=True)
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
@@ -524,6 +524,7 @@ def session_logs(ctx: click.Context, session_id: str | None, tail: int) -> None:
 
         if len(ordered_paths) == 1:
             log_file = ordered_paths[0]
+            click.echo(f"Auto-selecting {log_file.name}")
         else:
             options = [format_log_option(p) for p in ordered_paths]
             result = interactive_select(options, "Select log file:", ctx)

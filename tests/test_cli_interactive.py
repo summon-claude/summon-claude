@@ -121,6 +121,16 @@ class TestFormatSessionOption:
         assert "abcdefgh" in result
         assert "1234" not in result.split("  ")[0]
 
+    def test_truncates_long_name_with_ellipsis(self):
+        session = {
+            "session_id": "aaaa1111-2222-3333-4444-555566667777",
+            "session_name": "a" * 40,
+            "status": "active",
+        }
+        result = format_session_option(session)
+        assert "\u2026" in result
+        assert len(result.split("  ")[1]) <= 30
+
 
 # ---------------------------------------------------------------------------
 # format_log_option
@@ -141,7 +151,15 @@ class TestFormatLogOption:
         log.write_text("test")
         result = format_log_option(log)
         assert "aaaa1111" in result
+        assert "\u2026" in result
         assert "0m ago" in result
+
+    def test_short_stem_no_ellipsis(self, tmp_path):
+        log = tmp_path / "short.log"
+        log.write_text("test")
+        result = format_log_option(log)
+        assert "short" in result
+        assert "\u2026" not in result
 
     def test_session_log_hours_old(self, tmp_path):
         log = tmp_path / "bbbb1111-2222-3333-4444-555566667777.log"
@@ -201,6 +219,24 @@ class TestInteractiveSelect:
         assert "Pick one:" in result.output
         assert "1) Option A" in result.output
         assert "2) Option B" in result.output
+
+    def test_non_interactive_abort_returns_none(self):
+        """Ctrl+C during click.prompt returns None instead of raising."""
+        ctx = _make_ctx()
+        runner = CliRunner()
+        result_container = {}
+
+        @click.command()
+        @click.pass_context
+        def cmd(click_ctx):
+            click_ctx.obj = ctx.obj
+            result_container["result"] = interactive_select(
+                ["Option A", "Option B"], "Pick one:", click_ctx
+            )
+
+        # Empty input causes click.Abort
+        runner.invoke(cmd, input="")
+        assert result_container.get("result") is None
 
     def test_interactive_calls_pick(self):
         ctx = _make_ctx()
@@ -273,6 +309,37 @@ class TestInteractiveMultiSelect:
         assert result.exit_code == 0
         assert result_container["result"] == [("A", 0)]
 
+    def test_non_interactive_all_invalid_returns_empty(self):
+        """All invalid tokens returns empty list."""
+        ctx = _make_ctx()
+        runner = CliRunner()
+        result_container = {}
+
+        @click.command()
+        @click.pass_context
+        def cmd(click_ctx):
+            click_ctx.obj = ctx.obj
+            result_container["result"] = interactive_multi_select(["A", "B"], "Pick:", click_ctx)
+
+        result = runner.invoke(cmd, input="abc,xyz\n")
+        assert result.exit_code == 0
+        assert result_container["result"] == []
+
+    def test_non_interactive_abort_returns_empty(self):
+        """Ctrl+C during click.prompt returns empty list."""
+        ctx = _make_ctx()
+        runner = CliRunner()
+        result_container = {}
+
+        @click.command()
+        @click.pass_context
+        def cmd(click_ctx):
+            click_ctx.obj = ctx.obj
+            result_container["result"] = interactive_multi_select(["A", "B"], "Pick:", click_ctx)
+
+        runner.invoke(cmd, input="")
+        assert result_container.get("result") == []
+
     def test_interactive_calls_pick_multiselect(self):
         ctx = _make_ctx()
         with (
@@ -337,6 +404,49 @@ class TestSessionLogsInteractive:
         assert "daemon" in result.output
         assert "aaaa1111" in result.output
 
+    def test_logs_single_file_auto_selects(self, tmp_path):
+        """Interactive mode with one log file auto-selects and shows content."""
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        log_file = log_dir / "aaaa1111-2222-3333-4444-555566667777.log"
+        log_file.write_text("log line 1\nlog line 2\n")
+        with (
+            patch("summon_claude.cli.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.cli.is_interactive", return_value=True),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "logs"])
+        assert result.exit_code == 0
+        assert "Auto-selecting" in result.output
+        assert "log line 1" in result.output
+
+    def test_logs_interactive_pick_selects_file(self, tmp_path):
+        """Interactive mode with multiple logs presents picker."""
+        import os
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        file_a = log_dir / "aaaa1111-2222-3333-4444-555566667777.log"
+        file_b = log_dir / "bbbb2222-3333-4444-5555-666677778888.log"
+        file_a.write_text("session A line\n")
+        file_b.write_text("session B line\n")
+        # Ensure deterministic mtime order: B is newer (appears first in sorted desc)
+        os.utime(file_a, (1000, 1000))
+        os.utime(file_b, (2000, 2000))
+        # Sorted by mtime desc: [B, A]. Picking index 1 → file A.
+        with (
+            patch("summon_claude.cli.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.cli.is_interactive", return_value=True),
+            patch(
+                "summon_claude.cli.interactive_select",
+                return_value=("aaaa1111", 1),
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "logs"])
+        assert result.exit_code == 0
+        assert "session A line" in result.output
+
 
 # ---------------------------------------------------------------------------
 # CLI integration: stop no-args
@@ -399,6 +509,46 @@ class TestStopNoArgsInteractive:
         assert result.exit_code == 0
         assert "Auto-selecting" in result.output
         assert "Stop requested" in result.output
+
+    def test_stop_no_args_interactive_multiple_sessions_picker(self):
+        """Interactive mode, multiple sessions → picker selects one."""
+        second = {**_ACTIVE_SESSION, "session_id": "cccc3333-4444-5555-6666-777788889999"}
+        with (
+            patch("summon_claude.cli.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.is_interactive", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new=AsyncMock(return_value=[_ACTIVE_SESSION, second]),
+            ),
+            patch(
+                "summon_claude.cli.interactive_select",
+                return_value=("cccc3333", 1),
+            ),
+            patch(
+                "summon_claude.cli.daemon_client.stop_session",
+                new=AsyncMock(return_value=True),
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["stop"])
+        assert result.exit_code == 0
+        assert "Stop requested for session cccc3333" in result.output
+
+    def test_stop_no_args_interactive_picker_cancelled(self):
+        """Interactive mode, picker cancelled → 'No session selected.'."""
+        with (
+            patch("summon_claude.cli.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.is_interactive", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new=AsyncMock(return_value=[_ACTIVE_SESSION, _ACTIVE_SESSION]),
+            ),
+            patch("summon_claude.cli.interactive_select", return_value=None),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["stop"])
+        assert result.exit_code == 0
+        assert "No session selected" in result.output
 
 
 # ---------------------------------------------------------------------------

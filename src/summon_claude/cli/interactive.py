@@ -41,7 +41,7 @@ def format_log_option(path: pathlib.Path | str) -> str:
     if path.name == "daemon.log":
         return "daemon    (daemon log)"
 
-    stem = path.stem[:8]
+    stem = path.stem[:8] + ("\u2026" if len(path.stem) > 8 else "")
     try:
         age_seconds = int(time.time() - path.stat().st_mtime)
         if age_seconds < 3600:
@@ -75,7 +75,10 @@ def interactive_select(
     click.echo(title)
     for i, opt in enumerate(options, 1):
         click.echo(f"  {i}) {opt}")
-    choice = click.prompt("Select", type=click.IntRange(1, len(options)))
+    try:
+        choice = click.prompt("Select", type=click.IntRange(1, len(options)))
+    except (KeyboardInterrupt, click.Abort):
+        return None
     return (options[choice - 1], choice - 1)
 
 
@@ -96,7 +99,10 @@ def interactive_multi_select(
     click.echo(title)
     for i, opt in enumerate(options, 1):
         click.echo(f"  {i}) {opt}")
-    raw = click.prompt("Select (e.g. 1,2,3)")
+    try:
+        raw = click.prompt("Select (e.g. 1,2,3)")
+    except (KeyboardInterrupt, click.Abort):
+        return []
     seen: set[int] = set()
     result = []
     for raw_token in raw.split(","):
