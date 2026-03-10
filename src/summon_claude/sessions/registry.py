@@ -59,6 +59,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
 )
 """
 
+_CREATE_SCHEMA_VERSION = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL
+)
+"""
+
+CURRENT_SCHEMA_VERSION = 1
+
+# Mapping from version N to the coroutine that migrates N → N+1.
+# Migration 0→1 is a no-op: the existing DDL already produces schema v1.
+_MIGRATIONS: dict[int, Any] = {
+    0: None,  # baseline — no-op
+}
+
 _MAX_FAILED_ATTEMPTS = 5
 
 
@@ -77,6 +92,43 @@ def _default_db_path() -> Path:
         logger.info("Migrated registry from %s to %s", old_path, new_path)
 
     return new_path
+
+
+async def _get_schema_version(db: aiosqlite.Connection) -> int:
+    """Return the current schema version, or 0 if the version table is empty."""
+    async with db.execute(
+        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+    ) as cursor:
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+async def _run_migrations(db: aiosqlite.Connection) -> None:
+    """Apply any pending schema migrations and update the version row."""
+    # Use BEGIN IMMEDIATE to prevent concurrent migration races across processes.
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        current = await _get_schema_version(db)
+
+        if current >= CURRENT_SCHEMA_VERSION:
+            await db.execute("COMMIT")
+            return
+
+        for version in range(current, CURRENT_SCHEMA_VERSION):
+            migration = _MIGRATIONS.get(version)
+            if migration is not None:
+                await migration(db)
+            logger.info("Applied DB migration %d → %d", version, version + 1)
+
+        # Upsert the version row (PK id=1 enforces single row)
+        await db.execute(
+            "INSERT OR REPLACE INTO schema_version (id, version) VALUES (1, ?)",
+            (CURRENT_SCHEMA_VERSION,),
+        )
+        await db.execute("COMMIT")
+    except Exception:
+        await db.execute("ROLLBACK")
+        raise
 
 
 class SessionRegistry:
@@ -112,12 +164,19 @@ class SessionRegistry:
         await self._db.execute(_CREATE_SESSIONS)
         await self._db.execute(_CREATE_PENDING_AUTH_TOKENS)
         await self._db.execute(_CREATE_AUDIT_LOG)
+        await self._db.execute(_CREATE_SCHEMA_VERSION)
         await self._db.commit()
+        await _run_migrations(self._db)
 
     async def _close(self) -> None:
         if self._db:
             await self._db.close()
             self._db = None
+
+    @property
+    def db(self) -> aiosqlite.Connection:
+        """Return the active DB connection. Raises if not connected."""
+        return self._check_connected()
 
     def _check_connected(self) -> aiosqlite.Connection:
         if not self._db:

@@ -748,6 +748,148 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# db command group
+# ---------------------------------------------------------------------------
+
+
+@cli.group("db")
+def cmd_db() -> None:
+    """Database maintenance commands."""
+
+
+@cmd_db.command("migrate")
+@click.pass_context
+def db_migrate(ctx: click.Context) -> None:
+    """Run pending schema migrations."""
+    asyncio.run(_async_db_migrate(ctx))
+
+
+async def _async_db_migrate(ctx: click.Context) -> None:
+    from summon_claude.sessions.registry import _get_schema_version  # noqa: PLC0415
+
+    version = 0
+    async with SessionRegistry() as reg:
+        version = await _get_schema_version(reg.db)
+    _echo(f"Schema version: {version} (current)", ctx)
+
+
+@cmd_db.command("reset")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.pass_context
+def db_reset(ctx: click.Context, yes: bool) -> None:
+    """Delete and recreate the registry database."""
+    from summon_claude.sessions.registry import _default_db_path  # noqa: PLC0415
+
+    db_path = _default_db_path()
+
+    if not yes:
+        click.confirm(
+            f"This will permanently delete all session history and recreate an empty database"
+            f" at {db_path.name}. Continue?",
+            abort=True,
+        )
+
+    # Delete existing DB and WAL/SHM files
+    for suffix in ("", "-wal", "-shm"):
+        (db_path.parent / (db_path.name + suffix)).unlink(missing_ok=True)
+
+    asyncio.run(_async_db_reset(db_path, ctx))
+
+
+async def _async_db_reset(db_path: pathlib.Path, ctx: click.Context) -> None:
+    from summon_claude.sessions.registry import _get_schema_version  # noqa: PLC0415
+
+    version = 0
+    reg = SessionRegistry(db_path=db_path)
+    async with reg:
+        version = await _get_schema_version(reg.db)
+    _echo(f"Database recreated at {db_path}", ctx)
+    _echo(f"Schema version: {version}", ctx)
+
+
+@cmd_db.command("vacuum")
+@click.pass_context
+def db_vacuum(ctx: click.Context) -> None:
+    """Compact the database and check integrity."""
+    from summon_claude.sessions.registry import _default_db_path  # noqa: PLC0415
+
+    db_path = _default_db_path()
+    if not db_path.exists():
+        click.echo(f"Database not found: {db_path}", err=True)
+        ctx.exit(1)
+        return
+
+    size_before = db_path.stat().st_size
+    asyncio.run(_async_db_vacuum(db_path, ctx))
+    size_after = db_path.stat().st_size
+
+    _echo(f"Size: {size_before:,} → {size_after:,} bytes", ctx)
+
+
+async def _async_db_vacuum(db_path: pathlib.Path, ctx: click.Context) -> None:
+    import aiosqlite  # noqa: PLC0415
+
+    async with aiosqlite.connect(str(db_path)) as db:
+        await db.execute("PRAGMA busy_timeout=5000")
+        async with db.execute("PRAGMA integrity_check") as cursor:
+            result = await cursor.fetchone()
+            integrity = result[0] if result else "unknown"
+        await db.execute("VACUUM")
+    _echo(f"Integrity: {integrity}", ctx)
+
+
+@cmd_db.command("purge")
+@click.option(
+    "--older-than",
+    default=30,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Purge records older than N days",
+)
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.pass_context
+def db_purge(ctx: click.Context, older_than: int, yes: bool) -> None:
+    """Purge old sessions, audit logs, and expired auth tokens."""
+    if not yes:
+        msg = f"Purge all completed/errored records older than {older_than} days?"
+        click.confirm(msg, abort=True)
+    asyncio.run(_async_db_purge(older_than, ctx))
+
+
+async def _async_db_purge(older_than: int, ctx: click.Context) -> None:
+    from datetime import UTC, timedelta  # noqa: PLC0415
+
+    cutoff = (datetime.now(UTC) - timedelta(days=older_than)).isoformat()
+
+    sessions_deleted = 0
+    audit_deleted = 0
+    tokens_deleted = 0
+    async with SessionRegistry() as reg:
+        db = reg.db
+        async with db.execute(
+            "DELETE FROM sessions WHERE started_at < ? AND status IN ('completed', 'errored')",
+            (cutoff,),
+        ) as cur:
+            sessions_deleted = cur.rowcount
+        async with db.execute(
+            "DELETE FROM audit_log WHERE timestamp < ?",
+            (cutoff,),
+        ) as cur:
+            audit_deleted = cur.rowcount
+        async with db.execute(
+            "DELETE FROM pending_auth_tokens WHERE expires_at < ?",
+            (cutoff,),
+        ) as cur:
+            tokens_deleted = cur.rowcount
+        await db.commit()
+
+    _echo(f"Purged records older than {older_than} days (before {cutoff[:10]}):", ctx)
+    _echo(f"  Sessions:    {sessions_deleted}", ctx)
+    _echo(f"  Audit log:   {audit_deleted}", ctx)
+    _echo(f"  Auth tokens: {tokens_deleted}", ctx)
+
+
+# ---------------------------------------------------------------------------
 # Formatting helpers
 # ---------------------------------------------------------------------------
 

@@ -4,11 +4,22 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from summon_claude.sessions.registry import SessionRegistry
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_registry_db(tmp_path_factory):
+    """Prevent tests from writing to the real registry.db."""
+    db_dir = tmp_path_factory.mktemp("db")
+    with patch(
+        "summon_claude.sessions.registry._default_db_path",
+        return_value=db_dir / "registry.db",
+    ):
+        yield
 
 
 @pytest.fixture

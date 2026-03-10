@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import re
@@ -191,7 +192,64 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo(f"  [FAIL] DB path error: {e}")
         all_pass = False
 
-    # Check 4: Slack API reachable (optional, best-effort)
+    # Check 4-6: Schema version, integrity, and row counts
+    try:
+        from summon_claude.sessions.registry import (  # noqa: PLC0415
+            CURRENT_SCHEMA_VERSION,
+            SessionRegistry,
+            _get_schema_version,
+        )
+
+        async def _check_db() -> tuple[int, str, int, int]:
+            version = 0
+            integrity = "unknown"
+            sessions = 0
+            audit = 0
+            reg = SessionRegistry(db_path=db_path)
+            async with reg:
+                db = reg.db
+                version = await _get_schema_version(db)
+                async with db.execute("PRAGMA integrity_check") as cursor:
+                    row = await cursor.fetchone()
+                    integrity = row[0] if row else "unknown"
+                async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
+                    row = await cur.fetchone()
+                    sessions = row[0] if row else 0
+                async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
+                    row = await cur.fetchone()
+                    audit = row[0] if row else 0
+            return version, integrity, sessions, audit
+
+        version, integrity, sessions_count, audit_count = asyncio.run(_check_db())
+
+        # Schema version
+        if version == CURRENT_SCHEMA_VERSION:
+            if not quiet:
+                click.echo(f"  [PASS] Schema version {version} (current)")
+        else:
+            click.echo(
+                f"  [FAIL] Schema version {version} (expected {CURRENT_SCHEMA_VERSION})"
+                " — run summon db migrate"
+            )
+            all_pass = False
+
+        # Integrity
+        if integrity == "ok":
+            if not quiet:
+                click.echo("  [PASS] Database integrity OK")
+        else:
+            click.echo(f"  [FAIL] Database integrity error: {integrity}")
+            all_pass = False
+
+        # Row counts (informational only)
+        if not quiet:
+            click.echo(f"  [INFO] Sessions: {sessions_count}, Audit log: {audit_count}")
+
+    except Exception:
+        click.echo("  [FAIL] Database validation error")
+        all_pass = False
+
+    # Check 7: Slack API reachable (optional, best-effort)
     if bot_token.startswith("xoxb-"):
         try:
             from slack_sdk import WebClient  # noqa: PLC0415

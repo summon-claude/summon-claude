@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 
 import pytest
@@ -314,3 +315,56 @@ class TestSQLitePragmas:
         result = await cursor.fetchone()
         timeout_ms = result[0]
         assert timeout_ms == 5000, f"Expected busy_timeout=5000, got {timeout_ms}"
+
+
+class TestSchemaVersioning:
+    """Tests for schema versioning and migrations."""
+
+    async def test_fresh_db_gets_schema_version_1(self, tmp_path):
+        """A fresh database should have schema_version = 1 after connection."""
+        from summon_claude.sessions.registry import _get_schema_version
+
+        db_path = tmp_path / "fresh.db"
+        async with SessionRegistry(db_path=db_path) as reg:
+            version = await _get_schema_version(reg.db)
+            assert version == 1
+
+    async def test_existing_db_at_version_1_is_noop(self, tmp_path, caplog):
+        """Connecting to an already-migrated DB should not log migration messages."""
+        db_path = tmp_path / "existing.db"
+        # First connection: creates and migrates
+        async with SessionRegistry(db_path=db_path):
+            pass
+
+        # Second connection: should be a no-op
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions.registry"):
+            caplog.clear()
+            async with SessionRegistry(db_path=db_path):
+                pass
+            migration_msgs = [r for r in caplog.records if "migration" in r.message.lower()]
+            assert migration_msgs == []
+
+    async def test_migration_runs_when_version_behind(self, tmp_path, caplog):
+        """If schema_version is behind, migration should run and update version."""
+        import aiosqlite
+
+        from summon_claude.sessions.registry import _get_schema_version
+
+        db_path = tmp_path / "behind.db"
+        # First connection: creates DB at version 1
+        async with SessionRegistry(db_path=db_path):
+            pass
+
+        # Manually set schema_version to 0 to simulate an old DB
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute("UPDATE schema_version SET version = 0")
+            await raw_db.commit()
+
+        # Re-connect: migration should run 0 -> 1
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions.registry"):
+            caplog.clear()
+            async with SessionRegistry(db_path=db_path) as reg:
+                version = await _get_schema_version(reg.db)
+                assert version == 1
+            migration_msgs = [r for r in caplog.records if "migration" in r.message.lower()]
+            assert len(migration_msgs) == 1
