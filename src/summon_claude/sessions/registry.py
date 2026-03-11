@@ -251,7 +251,7 @@ class SessionRegistry:
                 logger.warning("update_status: ignoring unknown field %r", key)
 
         set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = [*list(updates.values()), session_id]
+        values = [*updates.values(), session_id]
         async with self._lock:
             await db.execute(f"UPDATE sessions SET {set_clause} WHERE session_id = ?", values)
             await db.commit()

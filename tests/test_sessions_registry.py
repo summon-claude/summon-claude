@@ -109,9 +109,7 @@ class TestUpdatableFields:
 
         from summon_claude.sessions.registry import _CREATE_SESSIONS
 
-        columns = set(
-            _re.findall(r"^\s+(\w+)\s+(?:TEXT|INTEGER|REAL)", _CREATE_SESSIONS, _re.MULTILINE)
-        )
+        columns = set(_re.findall(r"^\s+(\w+)\s+[A-Z]", _CREATE_SESSIONS, _re.MULTILINE))
         assert SessionRegistry._UPDATABLE_FIELDS.issubset(columns), (
             f"Fields not in schema: {SessionRegistry._UPDATABLE_FIELDS - columns}"
         )
