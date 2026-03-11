@@ -169,7 +169,21 @@ class SessionRegistry:
         await self._db.execute(_CREATE_AUDIT_LOG)
         await self._db.execute(_CREATE_SCHEMA_VERSION)
         await self._db.commit()
-        self.migrated_from = await _run_migrations(self._db)
+
+        # Fresh DB (empty schema_version table): DDL already created the
+        # current schema, so just stamp the version — don't run migrations
+        # which would conflict with columns the DDL already created.
+        async with self._db.execute("SELECT COUNT(*) FROM schema_version") as cur:
+            row = await cur.fetchone()
+            is_fresh = row[0] == 0  # type: ignore[index]
+        if is_fresh:
+            await self._db.execute(
+                "INSERT INTO schema_version (id, version) VALUES (1, ?)",
+                (CURRENT_SCHEMA_VERSION,),
+            )
+            self.migrated_from = CURRENT_SCHEMA_VERSION
+        else:
+            self.migrated_from = await _run_migrations(self._db)
 
     async def _close(self) -> None:
         if self._db:

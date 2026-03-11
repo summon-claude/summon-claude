@@ -198,8 +198,10 @@ _MIGRATIONS: dict[int, Any] = {
 
 **Rules:**
 - Migrations must be **idempotent** — if the process crashes mid-migration, the same migration reruns on next connect
-- Each migration runs inside `BEGIN IMMEDIATE` / `COMMIT` with `ROLLBACK` on error
+- All pending migrations run within a single `BEGIN IMMEDIATE` / `COMMIT` transaction, with `ROLLBACK` on any error
 - `None` means no-op (used for the 0→1 baseline where DDL already matches)
+- **Fresh DBs skip migrations entirely** — the DDL constants create the current schema directly, so only the version is stamped. Migrations only run when upgrading an *existing* DB.
+- Update the DDL constant (e.g., `_CREATE_SESSIONS`) **and** add a migration — the DDL is for fresh installs, the migration is for upgrades
 - `summon db status` shows the current schema version and whether migration was applied
 
 ## Git Workflow

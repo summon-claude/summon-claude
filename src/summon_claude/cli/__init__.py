@@ -21,7 +21,7 @@ import pathlib
 import re
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import click
 from slack_sdk.web.async_client import AsyncWebClient
@@ -880,8 +880,6 @@ def db_purge(ctx: click.Context, older_than: int, yes: bool) -> None:
 
 
 async def _async_db_purge(older_than: int, ctx: click.Context) -> None:
-    from datetime import UTC, timedelta  # noqa: PLC0415
-
     cutoff = (datetime.now(UTC) - timedelta(days=older_than)).isoformat()
 
     sessions_deleted = 0

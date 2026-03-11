@@ -410,16 +410,18 @@ class TestSchemaVersioning:
         """SessionRegistry.migrated_from should show the pre-migration version."""
         import aiosqlite
 
+        from summon_claude.sessions.registry import CURRENT_SCHEMA_VERSION
+
         db_path = tmp_path / "track.db"
-        # Fresh DB: migrated_from should be 0 (baseline)
+        # Fresh DB: version stamped directly, no migration ran
         async with SessionRegistry(db_path=db_path) as reg:
-            assert reg.migrated_from == 0
+            assert reg.migrated_from == CURRENT_SCHEMA_VERSION
 
-        # Already current: migrated_from should be 1
+        # Already current: same result
         async with SessionRegistry(db_path=db_path) as reg:
-            assert reg.migrated_from == 1
+            assert reg.migrated_from == CURRENT_SCHEMA_VERSION
 
-        # Downgrade to 0, re-connect: migrated_from should be 0 again
+        # Downgrade to simulate an older DB, re-connect: migration runs
         async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
             await raw_db.execute("UPDATE schema_version SET version = 0")
         async with SessionRegistry(db_path=db_path) as reg:
