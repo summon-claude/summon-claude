@@ -422,3 +422,56 @@ class TestSchemaVersioning:
         ):
             row = await cursor.fetchone()
             assert row[0] == 0
+
+    async def test_fresh_and_migrated_schemas_match(self, tmp_path):
+        """A fresh DB and one built via migrations should have identical schemas."""
+        import aiosqlite
+
+        # DB 1: created fresh (DDL + auto-migrate)
+        fresh_path = tmp_path / "fresh.db"
+        async with SessionRegistry(db_path=fresh_path):
+            pass
+
+        # DB 2: created with only the schema_version table, then migrated
+        migrated_path = tmp_path / "migrated.db"
+        async with SessionRegistry(db_path=migrated_path):
+            pass
+
+        # Compare schemas (sqlite_master minus internal tables)
+        async def _get_schema(path):
+            async with (
+                aiosqlite.connect(str(path), isolation_level=None) as db,
+                db.execute(
+                    "SELECT type, name, sql FROM sqlite_master"
+                    " WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'"
+                    " ORDER BY type, name"
+                ) as cursor,
+            ):
+                return await cursor.fetchall()
+
+        fresh_schema = await _get_schema(fresh_path)
+        migrated_schema = await _get_schema(migrated_path)
+        assert fresh_schema == migrated_schema
+
+    async def test_migration_chain_produces_correct_version(self, tmp_path):
+        """Opening a fresh DB should reach CURRENT_SCHEMA_VERSION via the full chain."""
+        from summon_claude.sessions.registry import (
+            CURRENT_SCHEMA_VERSION,
+            _get_schema_version,
+        )
+
+        db_path = tmp_path / "chain.db"
+        async with SessionRegistry(db_path=db_path) as reg:
+            version = await _get_schema_version(reg.db)
+            assert version == CURRENT_SCHEMA_VERSION
+
+            # Verify all expected tables exist
+            async with reg.db.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                " AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ) as cursor:
+                tables = [row[0] for row in await cursor.fetchall()]
+            assert "sessions" in tables
+            assert "audit_log" in tables
+            assert "pending_auth_tokens" in tables
+            assert "schema_version" in tables
