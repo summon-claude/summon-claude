@@ -317,6 +317,43 @@ class TestSQLitePragmas:
         assert timeout_ms == 5000, f"Expected busy_timeout=5000, got {timeout_ms}"
 
 
+class TestMigrationStructure:
+    """Structural validation of the migration framework.
+
+    These tests catch common developer mistakes when adding new migrations,
+    without needing to run the actual migration code.
+    """
+
+    def test_migrations_cover_all_versions(self):
+        """_MIGRATIONS must have an entry for every version from 0 to CURRENT-1."""
+        from summon_claude.sessions.registry import _MIGRATIONS, CURRENT_SCHEMA_VERSION
+
+        expected_keys = set(range(CURRENT_SCHEMA_VERSION))
+        actual_keys = set(_MIGRATIONS.keys())
+        missing = expected_keys - actual_keys
+        extra = actual_keys - expected_keys
+        assert not missing, f"Missing migration(s) for version(s): {sorted(missing)}"
+        assert not extra, f"Extra migration(s) beyond CURRENT_SCHEMA_VERSION: {sorted(extra)}"
+
+    def test_migrations_are_callable_or_none(self):
+        """Each migration must be None (no-op) or an async callable."""
+        from summon_claude.sessions.registry import _MIGRATIONS
+
+        for version, migration in _MIGRATIONS.items():
+            assert migration is None or callable(migration), (
+                f"Migration {version} must be None or callable, got {type(migration)}"
+            )
+
+    def test_current_version_matches_migration_count(self):
+        """CURRENT_SCHEMA_VERSION must equal the number of migrations."""
+        from summon_claude.sessions.registry import _MIGRATIONS, CURRENT_SCHEMA_VERSION
+
+        assert len(_MIGRATIONS) == CURRENT_SCHEMA_VERSION, (
+            f"CURRENT_SCHEMA_VERSION={CURRENT_SCHEMA_VERSION}"
+            f" but _MIGRATIONS has {len(_MIGRATIONS)} entries"
+        )
+
+
 class TestSchemaVersioning:
     """Tests for schema versioning and migrations."""
 
@@ -475,3 +512,54 @@ class TestSchemaVersioning:
             assert "audit_log" in tables
             assert "pending_auth_tokens" in tables
             assert "schema_version" in tables
+
+    async def test_migration_preserves_existing_data(self, tmp_path):
+        """Migrations must not destroy existing rows."""
+        import aiosqlite
+
+        from summon_claude.sessions.registry import _get_schema_version
+
+        db_path = tmp_path / "data.db"
+
+        # Create DB and seed data
+        async with SessionRegistry(db_path=db_path) as reg:
+            await reg.register("data-sess", 111, "/tmp", "my-session", "claude-opus-4-6")
+            await reg.update_status("data-sess", "active", slack_channel_id="C123")
+            await reg.log_event("test_event", session_id="data-sess")
+            await reg.store_pending_token("TOK123", "data-sess", "2099-01-01T00:00:00+00:00")
+
+        # Downgrade version to 0, forcing re-migration on next connect
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute("UPDATE schema_version SET version = 0")
+
+        # Re-open — migration runs over existing data
+        async with SessionRegistry(db_path=db_path) as reg:
+            version = await _get_schema_version(reg.db)
+            assert version == 1
+
+            # Verify data survived
+            session = await reg.get_session("data-sess")
+            assert session is not None
+            assert session["session_name"] == "my-session"
+            assert session["slack_channel_id"] == "C123"
+
+            token = await reg._get_pending_token("TOK123")
+            assert token is not None
+
+    async def test_migration_is_idempotent(self, tmp_path):
+        """Running migration twice on the same DB must not error."""
+        import aiosqlite
+
+        from summon_claude.sessions.registry import _get_schema_version, _run_migrations
+
+        db_path = tmp_path / "idempotent.db"
+        async with SessionRegistry(db_path=db_path):
+            pass
+
+        # Downgrade and re-migrate twice
+        for _ in range(2):
+            async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+                await raw_db.execute("UPDATE schema_version SET version = 0")
+                await _run_migrations(raw_db)
+                version = await _get_schema_version(raw_db)
+                assert version == 1
