@@ -178,7 +178,7 @@ class SessionRegistry:
             is_fresh = row[0] == 0  # type: ignore[index]
         if is_fresh:
             await self._db.execute(
-                "INSERT INTO schema_version (id, version) VALUES (1, ?)",
+                "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, ?)",
                 (CURRENT_SCHEMA_VERSION,),
             )
             self.migrated_from = CURRENT_SCHEMA_VERSION
