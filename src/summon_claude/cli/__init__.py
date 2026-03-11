@@ -21,7 +21,7 @@ import pathlib
 import re
 import sys
 import threading
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 import click
 from slack_sdk.web.async_client import AsyncWebClient
@@ -38,7 +38,12 @@ from summon_claude.cli.interactive import (
 )
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
 from summon_claude.daemon import is_daemon_running, start_daemon
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions import registry as _registry
+from summon_claude.sessions.registry import (
+    CURRENT_SCHEMA_VERSION,
+    SessionRegistry,
+    _get_schema_version,
+)
 from summon_claude.sessions.session import SessionOptions
 
 logger = logging.getLogger(__name__)
@@ -263,6 +268,14 @@ async def _async_cmd_start(
         model=model or config.default_model,
         resume=resume,
     )
+
+    # Phase 0: Run DB migration if needed (fast, ~10ms)
+    async with SessionRegistry() as reg:
+        if reg.migrated_from is not None and reg.migrated_from < CURRENT_SCHEMA_VERSION:
+            click.echo(
+                f"Database schema upgraded: v{reg.migrated_from} → v{CURRENT_SCHEMA_VERSION}",
+                err=True,
+            )
 
     # Phase 1: Ensure daemon is running (auto-start if not)
     try:
@@ -745,6 +758,161 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
     """Set a configuration value (e.g. SUMMON_SLACK_BOT_TOKEN)."""
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
     config_set(key, value, config_path_override)
+
+
+# ---------------------------------------------------------------------------
+# db command group
+# ---------------------------------------------------------------------------
+
+
+@cli.group("db")
+def cmd_db() -> None:
+    """Database maintenance commands."""
+
+
+@cmd_db.command("status")
+@click.pass_context
+def db_status(ctx: click.Context) -> None:
+    """Show schema version, integrity, and row counts."""
+    asyncio.run(_async_db_status(ctx))
+
+
+async def _async_db_status(ctx: click.Context) -> None:
+    previous: int | None = None
+    version = 0
+    integrity = "unknown"
+    sessions_count = 0
+    audit_count = 0
+    async with SessionRegistry() as reg:
+        previous = reg.migrated_from
+        db = reg.db
+        version = await _get_schema_version(db)
+        async with db.execute("PRAGMA integrity_check") as cursor:
+            row = await cursor.fetchone()
+            integrity = row[0] if row else "unknown"
+        async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
+            row = await cur.fetchone()
+            sessions_count = row[0] if row else 0
+        async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
+            row = await cur.fetchone()
+            audit_count = row[0] if row else 0
+
+    if previous is not None and previous < CURRENT_SCHEMA_VERSION:
+        _echo(f"Migrated schema from version {previous} → {version}", ctx)
+    else:
+        _echo(f"Schema version: {version} (current)", ctx)
+    _echo(f"Integrity: {integrity}", ctx)
+    _echo(f"Sessions: {sessions_count}, Audit log: {audit_count}", ctx)
+
+
+@cmd_db.command("reset")
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.pass_context
+def db_reset(ctx: click.Context, yes: bool) -> None:
+    """Delete and recreate the registry database."""
+    db_path = _registry._default_db_path()  # noqa: SLF001
+
+    if not yes:
+        click.confirm(
+            f"This will permanently delete all session history and recreate an empty database"
+            f" at {db_path.name}. Continue?",
+            abort=True,
+        )
+
+    # Delete existing DB and WAL/SHM files
+    for suffix in ("", "-wal", "-shm"):
+        (db_path.parent / (db_path.name + suffix)).unlink(missing_ok=True)
+
+    asyncio.run(_async_db_reset(db_path, ctx))
+
+
+async def _async_db_reset(db_path: pathlib.Path, ctx: click.Context) -> None:
+    async with SessionRegistry(db_path=db_path):
+        pass
+    _echo(f"Database recreated at {db_path}", ctx)
+    _echo(f"Schema version: {CURRENT_SCHEMA_VERSION}", ctx)
+
+
+@cmd_db.command("vacuum")
+@click.pass_context
+def db_vacuum(ctx: click.Context) -> None:
+    """Compact the database and check integrity."""
+    db_path = _registry._default_db_path()  # noqa: SLF001
+    if not db_path.exists():
+        click.echo(f"Database not found: {db_path}", err=True)
+        ctx.exit(1)
+        return
+
+    size_before = db_path.stat().st_size
+    asyncio.run(_async_db_vacuum(db_path, ctx))
+    size_after = db_path.stat().st_size
+
+    _echo(f"Size: {size_before:,} → {size_after:,} bytes", ctx)
+
+
+async def _async_db_vacuum(db_path: pathlib.Path, ctx: click.Context) -> None:
+    integrity = "unknown"
+    async with SessionRegistry(db_path=db_path) as reg:
+        db = reg.db
+        async with db.execute("PRAGMA integrity_check") as cursor:
+            result = await cursor.fetchone()
+            integrity = result[0] if result else "unknown"
+        await db.execute("VACUUM")
+    _echo(f"Integrity: {integrity}", ctx)
+
+
+@cmd_db.command("purge")
+@click.option(
+    "--older-than",
+    default=30,
+    type=click.IntRange(min=1),
+    show_default=True,
+    help="Purge records older than N days",
+)
+@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
+@click.pass_context
+def db_purge(ctx: click.Context, older_than: int, yes: bool) -> None:
+    """Purge old sessions, audit logs, and expired auth tokens."""
+    if not yes:
+        msg = f"Purge all completed/errored records older than {older_than} days?"
+        click.confirm(msg, abort=True)
+    asyncio.run(_async_db_purge(older_than, ctx))
+
+
+async def _async_db_purge(older_than: int, ctx: click.Context) -> None:
+    cutoff = (datetime.now(UTC) - timedelta(days=older_than)).isoformat()
+
+    sessions_deleted = 0
+    audit_deleted = 0
+    tokens_deleted = 0
+    async with SessionRegistry() as reg:
+        db = reg.db
+        await db.execute("BEGIN")
+        try:
+            async with db.execute(
+                "DELETE FROM sessions WHERE started_at < ? AND status IN ('completed', 'errored')",
+                (cutoff,),
+            ) as cur:
+                sessions_deleted = cur.rowcount
+            async with db.execute(
+                "DELETE FROM audit_log WHERE timestamp < ?",
+                (cutoff,),
+            ) as cur:
+                audit_deleted = cur.rowcount
+            async with db.execute(
+                "DELETE FROM pending_auth_tokens WHERE expires_at < ?",
+                (cutoff,),
+            ) as cur:
+                tokens_deleted = cur.rowcount
+            await db.execute("COMMIT")
+        except Exception:
+            await db.execute("ROLLBACK")
+            raise
+
+    _echo(f"Purged records older than {older_than} days (before {cutoff[:10]}):", ctx)
+    _echo(f"  Sessions:    {sessions_deleted}", ctx)
+    _echo(f"  Audit log:   {audit_deleted}", ctx)
+    _echo(f"  Auth tokens: {tokens_deleted}", ctx)
 
 
 # ---------------------------------------------------------------------------

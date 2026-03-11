@@ -59,6 +59,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
 )
 """
 
+_CREATE_SCHEMA_VERSION = """
+CREATE TABLE IF NOT EXISTS schema_version (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    version INTEGER NOT NULL
+)
+"""
+
+CURRENT_SCHEMA_VERSION = 1
+
+# Mapping from version N to the coroutine that migrates N → N+1.
+# Migration 0→1 is a no-op: the existing DDL already produces schema v1.
+_MIGRATIONS: dict[int, Any] = {
+    0: None,  # baseline — no-op
+}
+
 _MAX_FAILED_ATTEMPTS = 5
 
 
@@ -79,6 +94,45 @@ def _default_db_path() -> Path:
     return new_path
 
 
+async def _get_schema_version(db: aiosqlite.Connection) -> int:
+    """Return the current schema version, or 0 if the version table is empty."""
+    async with db.execute("SELECT version FROM schema_version WHERE id = 1") as cursor:
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+async def _run_migrations(db: aiosqlite.Connection) -> int:
+    """Apply any pending schema migrations and update the version row.
+
+    Returns the schema version that was in place before migration ran.
+    """
+    # Use BEGIN IMMEDIATE to prevent concurrent migration races across processes.
+    await db.execute("BEGIN IMMEDIATE")
+    try:
+        current = await _get_schema_version(db)
+
+        if current >= CURRENT_SCHEMA_VERSION:
+            await db.execute("COMMIT")
+            return current
+
+        for version in range(current, CURRENT_SCHEMA_VERSION):
+            migration = _MIGRATIONS.get(version)
+            if migration is not None:
+                await migration(db)
+            logger.info("Applied DB migration %d → %d", version, version + 1)
+
+        # Upsert the version row (PK id=1 enforces single row)
+        await db.execute(
+            "INSERT OR REPLACE INTO schema_version (id, version) VALUES (1, ?)",
+            (CURRENT_SCHEMA_VERSION,),
+        )
+        await db.execute("COMMIT")
+        return current
+    except Exception:
+        await db.execute("ROLLBACK")
+        raise
+
+
 class SessionRegistry:
     """Async SQLite session registry. Use as an async context manager."""
 
@@ -86,6 +140,7 @@ class SessionRegistry:
         self._db_path = db_path or _default_db_path()
         self._db: aiosqlite.Connection | None = None
         self._lock = asyncio.Lock()
+        self.migrated_from: int | None = None
 
     async def __aenter__(self) -> SessionRegistry:
         await self._connect()
@@ -97,7 +152,7 @@ class SessionRegistry:
 
     async def _connect(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = await aiosqlite.connect(str(self._db_path))
+        self._db = await aiosqlite.connect(str(self._db_path), isolation_level=None)
         # Restrict DB file to owner-only access (0600)
         try:
             self._db_path.chmod(0o600)
@@ -112,12 +167,33 @@ class SessionRegistry:
         await self._db.execute(_CREATE_SESSIONS)
         await self._db.execute(_CREATE_PENDING_AUTH_TOKENS)
         await self._db.execute(_CREATE_AUDIT_LOG)
+        await self._db.execute(_CREATE_SCHEMA_VERSION)
         await self._db.commit()
+
+        # Fresh DB (empty schema_version table): DDL already created the
+        # current schema, so just stamp the version — don't run migrations
+        # which would conflict with columns the DDL already created.
+        async with self._db.execute("SELECT COUNT(*) FROM schema_version") as cur:
+            row = await cur.fetchone()
+            is_fresh = row[0] == 0  # type: ignore[index]
+        if is_fresh:
+            await self._db.execute(
+                "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, ?)",
+                (CURRENT_SCHEMA_VERSION,),
+            )
+            self.migrated_from = CURRENT_SCHEMA_VERSION
+        else:
+            self.migrated_from = await _run_migrations(self._db)
 
     async def _close(self) -> None:
         if self._db:
             await self._db.close()
             self._db = None
+
+    @property
+    def db(self) -> aiosqlite.Connection:
+        """Return the active DB connection. Raises if not connected."""
+        return self._check_connected()
 
     def _check_connected(self) -> aiosqlite.Connection:
         if not self._db:

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import logging
 import os
 import re
 import subprocess
@@ -11,6 +13,13 @@ import sys
 import click
 
 from summon_claude.config import get_config_file, get_data_dir
+from summon_claude.sessions.registry import (
+    CURRENT_SCHEMA_VERSION,
+    SessionRegistry,
+    _get_schema_version,
+)
+
+logger = logging.getLogger(__name__)
 
 _SETTABLE_KEYS = frozenset(
     {
@@ -137,7 +146,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
                 k, _, v = stripped.partition("=")
                 values[k.strip()] = v.strip()
 
-    # Check 1: Required keys
+    # Required keys
     for key in _REQUIRED_KEYS:
         present = bool(values.get(key))
         if present:
@@ -147,7 +156,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo(f"  [FAIL] {key} is missing")
             all_pass = False
 
-    # Check 2: Token format
+    # Token format
     bot_token = values.get("SUMMON_SLACK_BOT_TOKEN", "")
     app_token = values.get("SUMMON_SLACK_APP_TOKEN", "")
     signing_secret = values.get("SUMMON_SLACK_SIGNING_SECRET", "")
@@ -176,7 +185,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Signing secret should be a hex string")
             all_pass = False
 
-    # Check 3: DB writable
+    # DB writable
     db_path = get_data_dir() / "registry.db"
     try:
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -191,7 +200,63 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo(f"  [FAIL] DB path error: {e}")
         all_pass = False
 
-    # Check 4: Slack API reachable (optional, best-effort)
+    # Schema version, integrity, and row counts
+    try:
+
+        async def _check_db() -> tuple[int, str, int, int]:
+            version = 0
+            integrity = "unknown"
+            sessions = 0
+            audit = 0
+            reg = SessionRegistry(db_path=db_path)
+            async with reg:
+                db = reg.db
+                version = await _get_schema_version(db)
+                async with db.execute("PRAGMA integrity_check") as cursor:
+                    row = await cursor.fetchone()
+                    integrity = row[0] if row else "unknown"
+                async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
+                    row = await cur.fetchone()
+                    sessions = row[0] if row else 0
+                async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
+                    row = await cur.fetchone()
+                    audit = row[0] if row else 0
+            return version, integrity, sessions, audit
+
+        version, integrity, sessions_count, audit_count = asyncio.run(_check_db())
+
+        # Schema version
+        if version == CURRENT_SCHEMA_VERSION:
+            if not quiet:
+                click.echo(f"  [PASS] Schema version {version} (current)")
+        elif version > CURRENT_SCHEMA_VERSION:
+            click.echo(
+                f"  [WARN] Schema version {version} is ahead of this release"
+                f" (expects {CURRENT_SCHEMA_VERSION}) — upgrade summon-claude"
+            )
+        else:
+            # Should not happen — _connect() auto-migrates
+            click.echo(f"  [FAIL] Schema version {version} (expected {CURRENT_SCHEMA_VERSION})")
+            all_pass = False
+
+        # Integrity
+        if integrity == "ok":
+            if not quiet:
+                click.echo("  [PASS] Database integrity OK")
+        else:
+            click.echo(f"  [FAIL] Database integrity error: {integrity}")
+            all_pass = False
+
+        # Row counts (informational only)
+        if not quiet:
+            click.echo(f"  [INFO] Sessions: {sessions_count}, Audit log: {audit_count}")
+
+    except Exception:
+        logger.debug("Database validation error", exc_info=True)
+        click.echo("  [FAIL] Database validation error")
+        all_pass = False
+
+    # Slack API reachable (optional, best-effort)
     if bot_token.startswith("xoxb-"):
         try:
             from slack_sdk import WebClient  # noqa: PLC0415
