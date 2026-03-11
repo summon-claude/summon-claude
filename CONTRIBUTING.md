@@ -174,6 +174,34 @@ uv run ruff format .          # Auto-format
 uv run pyright                # Type checking
 ```
 
+### Database Migrations
+
+Schema migrations run automatically when `SessionRegistry` connects — users never need to run a manual step. The migration system lives in `sessions/registry.py`.
+
+**Adding a migration:**
+
+1. Bump `CURRENT_SCHEMA_VERSION`
+2. Write an async migration function that takes `db: aiosqlite.Connection`
+3. Add it to `_MIGRATIONS` keyed by the version it migrates *from*
+
+```python
+CURRENT_SCHEMA_VERSION = 2  # was 1
+
+async def _migrate_1_to_2(db: aiosqlite.Connection) -> None:
+    await db.execute("ALTER TABLE sessions ADD COLUMN tags TEXT")
+
+_MIGRATIONS: dict[int, Any] = {
+    0: None,            # baseline — no-op
+    1: _migrate_1_to_2, # adds tags column
+}
+```
+
+**Rules:**
+- Migrations must be **idempotent** — if the process crashes mid-migration, the same migration reruns on next connect
+- Each migration runs inside `BEGIN IMMEDIATE` / `COMMIT` with `ROLLBACK` on error
+- `None` means no-op (used for the 0→1 baseline where DDL already matches)
+- `summon db status` shows the current schema version and whether migration was applied
+
 ## Git Workflow
 
 Use feature branches for all work. Don't commit directly to main.
