@@ -70,8 +70,7 @@ CREATE TABLE IF NOT EXISTS spawn_tokens (
     cwd TEXT NOT NULL,
     spawn_source TEXT NOT NULL DEFAULT 'session',
     created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    consumed INTEGER NOT NULL DEFAULT 0
+    expires_at TEXT NOT NULL
 )
 """
 
@@ -549,7 +548,6 @@ class SessionRegistry:
             async with db.execute(
                 """DELETE FROM spawn_tokens
                    WHERE token = ?
-                     AND consumed = 0
                      AND expires_at > ?
                    RETURNING *""",
                 (token, now_iso),
