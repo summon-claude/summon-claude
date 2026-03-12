@@ -1,12 +1,15 @@
-"""Dumb MCP tools — Slack actions bound to main channel only via SlackClient."""
+"""MCP tools — Slack actions and reading tools bound via SlackClient."""
 
 # pyright: reportArgumentType=false, reportReturnType=false
 # claude_agent_sdk doesn't ship type stubs
 
 from __future__ import annotations
 
+import json
 import re
-from typing import TYPE_CHECKING
+import urllib.parse
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
@@ -22,6 +25,31 @@ _MAX_TEXT_CHARS = 3000  # Slack block limit
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")
 _EMOJI_RE = re.compile(r"^[A-Za-z0-9_+]+$")
 
+_RAW_MAX_BYTES = 100_000
+
+_NOISE_SUBTYPES = frozenset(
+    {
+        "channel_join",
+        "channel_leave",
+        "channel_topic",
+        "channel_purpose",
+        "channel_name",
+        "channel_archive",
+        "channel_unarchive",
+        "group_join",
+        "group_leave",
+        "group_topic",
+        "group_purpose",
+        "group_name",
+        "group_archive",
+        "group_unarchive",
+        "pinned_item",
+        "unpinned_item",
+    }
+)
+
+_URL_RE = re.compile(r"archives/([A-Z0-9]+)/p(\d+)")
+
 
 def _sanitize_mrkdwn_meta(value: str) -> str:
     """Strip mrkdwn formatting characters from metadata values (title, language).
@@ -32,13 +60,63 @@ def _sanitize_mrkdwn_meta(value: str) -> str:
     return re.sub(r"[*`~\n]", "", value)
 
 
-def create_summon_mcp_tools(client: SlackClient) -> list[SdkMcpTool]:
+def _format_message_summary(msg: dict[str, Any]) -> str:
+    ts = msg.get("ts", "?")
+    user = msg.get("user", msg.get("bot_id", "unknown"))
+    text = msg.get("text", "")[:500]
+    reply_count = msg.get("reply_count", 0)
+    suffix = f" [{reply_count} replies]" if reply_count else ""
+    subtype = msg.get("subtype", "")
+    tag = f" ({subtype})" if subtype else ""
+    return f"[{ts}] <{user}>{tag}: {text}{suffix}"
+
+
+def _filter_noise(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [m for m in messages if m.get("subtype") not in _NOISE_SUBTYPES]
+
+
+def _format_messages(
+    messages: list[dict[str, Any]], fmt: str, *, has_more: bool = False
+) -> list[dict[str, Any]]:
+    if not messages:
+        return [{"type": "text", "text": "No messages found."}]
+    more_note = (
+        "\n(more messages available — adjust limit or oldest to paginate)" if has_more else ""
+    )
+    if fmt == "raw":
+        raw = json.dumps(messages, default=str)
+        if len(raw) > _RAW_MAX_BYTES:
+            raw = raw[:_RAW_MAX_BYTES] + f"\n... (truncated, {len(raw)} bytes total)"
+        return [{"type": "text", "text": raw + more_note}]
+    filtered = _filter_noise(messages)
+    if not filtered:
+        return [
+            {
+                "type": "text",
+                "text": "No conversation messages found (only system messages)." + more_note,
+            }
+        ]
+    lines = [_format_message_summary(m) for m in filtered]
+    return [{"type": "text", "text": "\n".join(lines) + more_note}]
+
+
+def create_summon_mcp_tools(  # noqa: PLR0915
+    client: SlackClient,
+    allowed_channels: Callable[[], set[str]] | None = None,
+) -> list[SdkMcpTool]:
     """Create MCP tool instances bound to the given SlackClient.
 
     All tools post to the main channel only — no active-thread state.
     BEHAVIOR CHANGE from mcp_tools.py: slack_upload_file and slack_post_snippet
     previously posted to the active turn thread; they now post to main channel.
     """
+
+    def _check_channel(channel: str | None) -> str:
+        resolved = channel or client.channel_id
+        allowed = (allowed_channels or (lambda: {client.channel_id}))()
+        if resolved not in allowed:
+            raise ValueError("Channel access denied")
+        return resolved
 
     @tool(
         "slack_upload_file",
@@ -198,10 +276,205 @@ def create_summon_mcp_tools(client: SlackClient) -> list[SdkMcpTool]:
             }
         return {"content": [{"type": "text", "text": "Code snippet posted to Slack"}]}
 
-    return [upload_file, create_thread, react, post_snippet]
+    # ------------------------------------------------------------------
+    # Reading tools
+    # ------------------------------------------------------------------
+
+    @tool(
+        "slack_read_history",
+        (
+            "Read recent messages from a Slack channel. "
+            "Returns channel message history (top-level messages only, no thread replies) "
+            "in newest-first order. "
+            "Use slack_fetch_thread to read thread replies for a specific message. "
+            "Note: when reading your own session channel, you will see your own messages. "
+            "System messages (join/leave/topic) are filtered from summary format. "
+            "limit: max messages to return (default 50, max 200). "
+            "oldest: only return messages after this Unix timestamp (e.g. '1234567890.123456'). "
+            "channel: channel ID to read (default: session channel). "
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+        ),
+        {"limit": int, "oldest": str, "channel": str, "format": str},
+    )
+    async def read_history(args: dict) -> dict:
+        try:
+            limit = max(1, min(args.get("limit", 50), 200))
+            oldest = args.get("oldest")
+            if oldest and not _PARENT_TS_RE.match(oldest):
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: invalid oldest format."
+                            " Expected 'seconds.microseconds'.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+            channel = _check_channel(args.get("channel"))
+            fmt = args.get("format", "summary")
+            result = await client.fetch_history(channel=channel, limit=limit, oldest=oldest)
+            return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error reading history: {e}"}],
+                "is_error": True,
+            }
+
+    @tool(
+        "slack_fetch_thread",
+        (
+            "Read replies in a Slack message thread. "
+            "Results include the parent message as the first entry, followed by replies "
+            "in chronological order. "
+            "parent_ts: timestamp of the thread's parent message "
+            "(required, e.g. '1234567890.123456'). "
+            "limit: max replies to return (default 50, max 200). "
+            "channel: channel ID (default: session channel). "
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+        ),
+        {"parent_ts": str, "limit": int, "channel": str, "format": str},
+    )
+    async def fetch_thread(args: dict) -> dict:
+        parent_ts = args.get("parent_ts", "")
+        if not _PARENT_TS_RE.match(parent_ts):
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Error: invalid parent_ts format. Expected 'seconds.microseconds'.",
+                    }
+                ],
+                "is_error": True,
+            }
+        try:
+            limit = max(1, min(args.get("limit", 50), 200))
+            channel = _check_channel(args.get("channel"))
+            fmt = args.get("format", "summary")
+            result = await client.fetch_thread_replies(parent_ts, channel=channel, limit=limit)
+            return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error fetching thread: {e}"}],
+                "is_error": True,
+            }
+
+    @tool(
+        "slack_get_context",
+        (
+            "Get messages surrounding a specific Slack message, identified by URL or "
+            "channel+timestamp. "
+            "Use this when a user references a Slack message URL to understand the "
+            "conversation context. "
+            "This tool makes 2-3 API calls per invocation. "
+            "url: a Slack message URL (e.g. "
+            "'https://workspace.slack.com/archives/C0123/p1234567890123456'). "
+            "channel: channel ID (alternative to URL). "
+            "message_ts: message timestamp (alternative to URL, requires channel). "
+            "surrounding: number of messages before and after the target (default 5, max 20). "
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+        ),
+        {"url": str, "channel": str, "message_ts": str, "surrounding": int, "format": str},
+    )
+    async def get_context(args: dict) -> dict:
+        try:
+            fmt = args.get("format", "summary")
+            surrounding = max(1, min(args.get("surrounding", 5), 20))
+            url = args.get("url")
+            channel = args.get("channel")
+            message_ts = args.get("message_ts")
+
+            # Parse URL if provided
+            thread_ts_from_url = None
+            if url:
+                m = _URL_RE.search(url)
+                if not m:
+                    return {
+                        "content": [{"type": "text", "text": "Error: could not parse Slack URL."}],
+                        "is_error": True,
+                    }
+                channel = m.group(1)
+                digits = m.group(2)
+                message_ts = digits[:10] + "." + digits[10:]
+
+                # Check for threaded URL
+                parsed = urllib.parse.urlparse(url)
+                qs = urllib.parse.parse_qs(parsed.query)
+                if "thread_ts" in qs:
+                    thread_ts_from_url = qs["thread_ts"][0]
+
+            if not channel or not message_ts:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: provide either url or both channel and message_ts.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            channel = _check_channel(channel)
+
+            # Threaded URL: fetch thread, not channel context
+            if thread_ts_from_url:
+                result = await client.fetch_thread_replies(
+                    thread_ts_from_url, channel=channel, limit=200
+                )
+                content = _format_messages(result.messages, fmt, has_more=result.has_more)
+                header = (
+                    f"Thread context (parent: {thread_ts_from_url}, highlight: {message_ts}):\n"
+                )
+                if content and content[0].get("type") == "text":
+                    content[0]["text"] = header + content[0]["text"]
+                return {"content": content}
+
+            # Standard URL / manual params: fetch channel context
+            ctx = await client.fetch_context(message_ts, channel=channel, surrounding=surrounding)
+            parts = []
+
+            # Format channel context (oldest-first)
+            msg_content = _format_messages(ctx["messages"], fmt)
+            if msg_content:
+                parts.append(
+                    f"Channel context around {message_ts}:\n" + msg_content[0].get("text", "")
+                )
+
+            # Format thread if present
+            if ctx.get("thread"):
+                thread_content = _format_messages(ctx["thread"], fmt)
+                if thread_content:
+                    parts.append("\nThread replies:\n" + thread_content[0].get("text", ""))
+
+            return {"content": [{"type": "text", "text": "\n".join(parts)}]}
+
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error getting context: {e}"}],
+                "is_error": True,
+            }
+
+    return [
+        upload_file,
+        create_thread,
+        react,
+        post_snippet,
+        read_history,
+        fetch_thread,
+        get_context,
+    ]
 
 
-def create_summon_mcp_server(client: SlackClient) -> McpSdkServerConfig:
+def create_summon_mcp_server(
+    client: SlackClient,
+    allowed_channels: Callable[[], set[str]] | None = None,
+) -> McpSdkServerConfig:
     """Create an MCP server with Slack tools bound to the current SlackClient."""
-    tools = create_summon_mcp_tools(client)
+    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels)
     return create_sdk_mcp_server(name="summon-slack", version="1.0.0", tools=tools)
