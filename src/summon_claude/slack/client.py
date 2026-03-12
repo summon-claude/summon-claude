@@ -178,14 +178,15 @@ class SlackClient:
     ) -> dict[str, Any]:
         """Fetch messages surrounding a specific timestamp."""
         ch = channel or self.channel_id
-        # Messages at and before target
+        # Slack inclusive=True on latest → includes the target message itself.
+        # Slack oldest defaults to inclusive=False → excludes target from "after".
+        # Dedup via by_ts handles any edge-case overlap.
         before_resp = await self._web.conversations_history(
             channel=ch,
             latest=message_ts,
             limit=surrounding,
             inclusive=True,
         )
-        # Messages after target (exclusive — no duplicate)
         after_resp = await self._web.conversations_history(
             channel=ch,
             oldest=message_ts,

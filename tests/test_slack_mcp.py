@@ -340,6 +340,11 @@ class TestReadHistoryTool:
         call_kwargs = mock_client._web.conversations_history.call_args.kwargs
         assert call_kwargs["channel"] == "C123"
 
+    async def test_invalid_format_rejected(self, reading_tools):
+        result = await reading_tools["slack_read_history"].handler({"format": "detailed"})
+        assert result["is_error"] is True
+        assert "invalid format" in result["content"][0]["text"].lower()
+
 
 class TestFetchThreadTool:
     async def test_happy_path(self, reading_tools, mock_client):
@@ -355,6 +360,13 @@ class TestFetchThreadTool:
             {"parent_ts": "2.0", "channel": "C_FORBIDDEN"}
         )
         assert result["is_error"] is True
+
+    async def test_invalid_format_rejected(self, reading_tools):
+        result = await reading_tools["slack_fetch_thread"].handler(
+            {"parent_ts": "2.0", "format": "verbose"}
+        )
+        assert result["is_error"] is True
+        assert "invalid format" in result["content"][0]["text"].lower()
 
 
 class TestGetContextTool:
@@ -410,6 +422,13 @@ class TestGetContextTool:
         )
         assert result["is_error"] is True
         assert "message_ts" in result["content"][0]["text"].lower()
+
+    async def test_invalid_format_rejected(self, reading_tools):
+        result = await reading_tools["slack_get_context"].handler(
+            {"channel": "C123", "message_ts": "2.0", "format": "xml"}
+        )
+        assert result["is_error"] is True
+        assert "invalid format" in result["content"][0]["text"].lower()
 
     async def test_invalid_thread_ts_in_url(self, reading_tools):
         result = await reading_tools["slack_get_context"].handler(
@@ -468,12 +487,16 @@ class TestMessageFormatting:
         result = _format_messages([], "summary")
         assert "No messages found" in result[0]["text"]
 
-    def test_unknown_format_defaults_to_summary(self):
-        from summon_claude.slack.mcp import _format_messages
+    def test_summary_includes_truncation_indicator(self):
+        from summon_claude.slack.mcp import _format_message_summary
 
-        msgs = [{"ts": "1.0", "user": "U1", "text": "hi"}]
-        result = _format_messages(msgs, "detailed")
-        assert "[1.0]" in result[0]["text"]
+        msg = {"ts": "1.0", "user": "U1", "text": "x" * 600}
+        result = _format_message_summary(msg)
+        assert result.endswith("…")
+
+        short_msg = {"ts": "1.0", "user": "U1", "text": "hello"}
+        short_result = _format_message_summary(short_msg)
+        assert not short_result.endswith("…")
 
     def test_noise_filtered_in_summary(self):
         from summon_claude.slack.mcp import _format_messages
@@ -507,12 +530,23 @@ class TestMessageFormatting:
         result = _format_messages(msgs, "summary", has_more=False)
         assert "more messages available" not in result[0]["text"]
 
-    def test_raw_truncation(self):
+    def test_raw_truncation_produces_valid_json(self):
+        import json
+
         from summon_claude.slack.mcp import _RAW_MAX_BYTES, _format_messages
 
-        msgs = [{"ts": "1.0", "text": "x" * (_RAW_MAX_BYTES + 1000)}]
+        msgs = [
+            {"ts": "1.0", "text": "x" * (_RAW_MAX_BYTES + 1000)},
+            {"ts": "2.0", "text": "should not appear"},
+        ]
         result = _format_messages(msgs, "raw")
-        assert "truncated" in result[0]["text"]
+        text = result[0]["text"]
+        # Should have a count note since not all messages fit
+        assert "messages total" in text
+        # The JSON portion (before the count note) should be valid
+        json_part = text.split("\n(")[0]
+        parsed = json.loads(json_part)
+        assert isinstance(parsed, list)
 
 
 class TestBackwardCompatibility:

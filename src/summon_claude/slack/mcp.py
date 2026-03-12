@@ -50,6 +50,8 @@ _NOISE_SUBTYPES = frozenset(
 
 _URL_RE = re.compile(r"archives/([A-Z0-9]+)/p(\d+)")
 
+_VALID_FORMATS = frozenset({"summary", "raw"})
+
 
 def _sanitize_mrkdwn_meta(value: str) -> str:
     """Strip mrkdwn formatting characters from metadata values (title, language).
@@ -63,7 +65,8 @@ def _sanitize_mrkdwn_meta(value: str) -> str:
 def _format_message_summary(msg: dict[str, Any]) -> str:
     ts = msg.get("ts", "?")
     user = msg.get("user", msg.get("bot_id", "unknown"))
-    text = msg.get("text", "")[:500]
+    raw_text = msg.get("text", "")
+    text = raw_text[:500] + ("…" if len(raw_text) > 500 else "")
     reply_count = msg.get("reply_count", 0)
     suffix = f" [{reply_count} replies]" if reply_count else ""
     subtype = msg.get("subtype", "")
@@ -84,9 +87,18 @@ def _format_messages(
         "\n(more messages available — adjust limit or oldest to paginate)" if has_more else ""
     )
     if fmt == "raw":
-        raw = json.dumps(messages, default=str)
-        if len(raw) > _RAW_MAX_BYTES:
-            raw = raw[:_RAW_MAX_BYTES] + f"\n... (truncated, {len(raw)} bytes total)"
+        parts: list[str] = []
+        total = 2  # [ and ]
+        for msg in messages:
+            encoded = json.dumps(msg, default=str)
+            needed = len(encoded) + (2 if parts else 0)
+            if total + needed > _RAW_MAX_BYTES:
+                break
+            parts.append(encoded)
+            total += needed
+        raw = "[" + ", ".join(parts) + "]"
+        if len(parts) < len(messages):
+            raw += f"\n({len(messages)} messages total, showing {len(parts)})"
         return [{"type": "text", "text": raw + more_note}]
     filtered = _filter_noise(messages)
     if not filtered:
@@ -128,6 +140,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         {"content": str, "filename": str, "title": str},
     )
     async def upload_file(args: dict) -> dict:
+        try:
+            _check_channel(None)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
         content = args["content"]
         if len(content.encode("utf-8", errors="replace")) > _MAX_UPLOAD_BYTES:
             return {
@@ -163,6 +179,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         {"parent_ts": str, "text": str},
     )
     async def create_thread(args: dict) -> dict:
+        try:
+            _check_channel(None)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
         parent_ts = args.get("parent_ts", "")
         if not _PARENT_TS_RE.match(parent_ts):
             return {
@@ -203,6 +223,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         {"timestamp": str, "emoji": str},
     )
     async def react(args: dict) -> dict:
+        try:
+            _check_channel(None)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
         emoji_name = args["emoji"].strip(":")
         if not _EMOJI_RE.match(emoji_name):
             return {
@@ -249,6 +273,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         {"code": str, "language": str, "title": str},
     )
     async def post_snippet(args: dict) -> dict:
+        try:
+            _check_channel(None)
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
         code = args["code"][: _MAX_TEXT_CHARS - 20]  # Reserve space for fences/title
         lang = _sanitize_mrkdwn_meta(args.get("language", ""))
         title = _sanitize_mrkdwn_meta(args.get("title", "Code"))
@@ -313,6 +341,16 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                 }
             channel = _check_channel(args.get("channel"))
             fmt = args.get("format", "summary")
+            if fmt not in _VALID_FORMATS:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                        }
+                    ],
+                    "is_error": True,
+                }
             result = await client.fetch_history(channel=channel, limit=limit, oldest=oldest)
             return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
         except ValueError as e:
@@ -353,6 +391,16 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             limit = max(1, min(args.get("limit", 50), 200))
             channel = _check_channel(args.get("channel"))
             fmt = args.get("format", "summary")
+            if fmt not in _VALID_FORMATS:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                        }
+                    ],
+                    "is_error": True,
+                }
             result = await client.fetch_thread_replies(parent_ts, channel=channel, limit=limit)
             return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
         except ValueError as e:
@@ -383,6 +431,16 @@ def create_summon_mcp_tools(  # noqa: PLR0915
     async def get_context(args: dict) -> dict:  # noqa: PLR0911, PLR0912
         try:
             fmt = args.get("format", "summary")
+            if fmt not in _VALID_FORMATS:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                        }
+                    ],
+                    "is_error": True,
+                }
             surrounding = max(1, min(args.get("surrounding", 5), 20))
             url = args.get("url")
             channel = args.get("channel")
