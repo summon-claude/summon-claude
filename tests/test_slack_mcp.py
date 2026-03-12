@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from summon_claude.slack.client import SlackClient
+from summon_claude.slack.client import HistoryResult, SlackClient
 from summon_claude.slack.mcp import create_summon_mcp_server, create_summon_mcp_tools
 
 
@@ -19,6 +19,26 @@ def make_mock_client() -> SlackClient:
     web.reactions_add = AsyncMock(return_value={})
     web.files_upload_v2 = AsyncMock(return_value={})
     web.conversations_setTopic = AsyncMock(return_value={})
+    web.conversations_history = AsyncMock(
+        return_value={
+            "messages": [
+                {"ts": "3.0", "user": "U123", "text": "hello", "reply_count": 0},
+                {"ts": "2.0", "user": "U456", "text": "world", "reply_count": 2},
+                {"ts": "1.0", "user": "U123", "text": "first"},
+            ],
+            "has_more": False,
+        }
+    )
+    web.conversations_replies = AsyncMock(
+        return_value={
+            "messages": [
+                {"ts": "2.0", "user": "U456", "text": "world"},
+                {"ts": "2.1", "user": "U123", "text": "reply 1"},
+                {"ts": "2.2", "user": "U789", "text": "reply 2"},
+            ],
+            "has_more": False,
+        }
+    )
     client = SlackClient(web, "C123")
     return client
 
@@ -181,3 +201,103 @@ class TestMCPServerCreation:
         assert config["name"] == "summon-slack"
         assert config["type"] == "sdk"
         assert config["instance"] is not None
+
+
+class TestFetchHistory:
+    async def test_default_channel(self, mock_client):
+        result = await mock_client.fetch_history()
+        assert isinstance(result, HistoryResult)
+        assert len(result.messages) == 3
+        mock_client._web.conversations_history.assert_called_once()
+        call_kwargs = mock_client._web.conversations_history.call_args.kwargs
+        assert call_kwargs["channel"] == "C123"
+
+    async def test_custom_channel(self, mock_client):
+        await mock_client.fetch_history(channel="C999")
+        call_kwargs = mock_client._web.conversations_history.call_args.kwargs
+        assert call_kwargs["channel"] == "C999"
+
+    async def test_with_oldest(self, mock_client):
+        await mock_client.fetch_history(oldest="1234567890.000000")
+        call_kwargs = mock_client._web.conversations_history.call_args.kwargs
+        assert call_kwargs["oldest"] == "1234567890.000000"
+
+    async def test_oldest_omitted_when_none(self, mock_client):
+        await mock_client.fetch_history()
+        call_kwargs = mock_client._web.conversations_history.call_args.kwargs
+        assert "oldest" not in call_kwargs
+
+    async def test_has_more_true(self, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            return_value={"messages": [{"ts": "1.0"}], "has_more": True}
+        )
+        result = await mock_client.fetch_history()
+        assert result.has_more is True
+
+    async def test_has_more_false_when_absent(self, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            return_value={"messages": [{"ts": "1.0"}]}
+        )
+        result = await mock_client.fetch_history()
+        assert result.has_more is False
+
+
+class TestFetchThreadReplies:
+    async def test_default_channel(self, mock_client):
+        result = await mock_client.fetch_thread_replies("2.0")
+        assert isinstance(result, HistoryResult)
+        assert len(result.messages) == 3
+        call_kwargs = mock_client._web.conversations_replies.call_args.kwargs
+        assert call_kwargs["channel"] == "C123"
+        assert call_kwargs["ts"] == "2.0"
+
+    async def test_custom_channel(self, mock_client):
+        await mock_client.fetch_thread_replies("2.0", channel="C999")
+        call_kwargs = mock_client._web.conversations_replies.call_args.kwargs
+        assert call_kwargs["channel"] == "C999"
+
+
+class TestFetchContext:
+    async def test_merges_and_deduplicates(self, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            side_effect=[
+                {
+                    "messages": [
+                        {"ts": "2.0", "user": "U1", "text": "target"},
+                        {"ts": "1.0", "user": "U2", "text": "before"},
+                    ]
+                },
+                {"messages": [{"ts": "3.0", "user": "U3", "text": "after"}]},
+            ]
+        )
+        result = await mock_client.fetch_context("2.0")
+        assert result["target_ts"] == "2.0"
+        tss = [m["ts"] for m in result["messages"]]
+        assert tss == ["1.0", "2.0", "3.0"]
+
+    async def test_includes_thread_when_replies(self, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            side_effect=[
+                {"messages": [{"ts": "2.0", "reply_count": 3}]},
+                {"messages": []},
+            ]
+        )
+        mock_client._web.conversations_replies = AsyncMock(
+            return_value={
+                "messages": [{"ts": "2.0"}, {"ts": "2.1"}, {"ts": "2.2"}],
+                "has_more": False,
+            }
+        )
+        result = await mock_client.fetch_context("2.0")
+        assert result["thread"] is not None
+        assert len(result["thread"]) == 3
+
+    async def test_no_thread_when_no_replies(self, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            side_effect=[
+                {"messages": [{"ts": "2.0", "reply_count": 0}]},
+                {"messages": []},
+            ]
+        )
+        result = await mock_client.fetch_context("2.0")
+        assert result["thread"] is None
