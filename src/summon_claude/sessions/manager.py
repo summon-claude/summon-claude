@@ -135,20 +135,13 @@ class SessionManager:
             raise RuntimeError("Auth generation failed silently")
         return auth
 
-    async def create_session_with_spawn_token(
-        self, options: SessionOptions, spawn_token: str
-    ) -> str:
-        """Create a pre-authenticated session using a spawn token."""
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
-
-        spawn_auth: SpawnAuth | None = None
-        session_id = str(uuid.uuid4())
+    @staticmethod
+    async def _verify_and_log_spawn_token(spawn_token: str, session_id: str) -> SpawnAuth | None:
+        """Verify a spawn token and log the consumption event."""
         async with SessionRegistry() as registry:
             spawn_auth = await verify_spawn_token(registry, spawn_token)
             if spawn_auth is None:
-                raise ValueError("Invalid or expired spawn token")
+                return None
             await registry.log_event(
                 "spawn_token_consumed",
                 session_id=session_id,
@@ -159,6 +152,21 @@ class SessionManager:
                     "cwd": spawn_auth.cwd,
                 },
             )
+            return spawn_auth
+
+    async def create_session_with_spawn_token(
+        self, options: SessionOptions, spawn_token: str
+    ) -> str:
+        """Create a pre-authenticated session using a spawn token."""
+        if self._grace_timer is not None:
+            self._grace_timer.cancel()
+            self._grace_timer = None
+
+        session_id = str(uuid.uuid4())
+        spawn_auth = await self._verify_and_log_spawn_token(spawn_token, session_id)
+
+        if spawn_auth is None:
+            raise ValueError("Invalid or expired spawn token")
 
         # Enforce the authorized working directory from the spawn token
         options = dataclasses.replace(options, cwd=spawn_auth.cwd)
