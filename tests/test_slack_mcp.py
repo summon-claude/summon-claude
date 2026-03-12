@@ -298,6 +298,9 @@ class TestFetchContext:
         result = await mock_client.fetch_context("2.0")
         assert result["thread"] is not None
         assert len(result["thread"]) == 3
+        # Verify fetch_context requests up to 200 thread replies
+        call_kwargs = mock_client._web.conversations_replies.call_args.kwargs
+        assert call_kwargs["limit"] == 200
 
     async def test_no_thread_when_no_replies(self, mock_client):
         mock_client._web.conversations_history = AsyncMock(
@@ -547,6 +550,198 @@ class TestMessageFormatting:
         json_part = text.split("\n(")[0]
         parsed = json.loads(json_part)
         assert isinstance(parsed, list)
+
+
+class TestAISummarization:
+    """Tests for format='ai' which spawns a Haiku SDK session."""
+
+    async def test_read_history_ai_format(self, reading_tools, mock_client):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(return_value="AI summary of conversation"),
+            )
+            result = await reading_tools["slack_read_history"].handler({"format": "ai"})
+        assert not result.get("is_error")
+        assert "AI summary of conversation" in result["content"][0]["text"]
+
+    async def test_fetch_thread_ai_format(self, reading_tools, mock_client):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(return_value="Thread summary"),
+            )
+            result = await reading_tools["slack_fetch_thread"].handler(
+                {"parent_ts": "2.0", "format": "ai"}
+            )
+        assert not result.get("is_error")
+        assert "Thread summary" in result["content"][0]["text"]
+
+    async def test_get_context_ai_format_with_url(self, reading_tools, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            side_effect=[
+                {"messages": [{"ts": "1234567890.123456", "user": "U1", "text": "hi"}]},
+                {"messages": []},
+            ]
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(return_value="Context summary"),
+            )
+            result = await reading_tools["slack_get_context"].handler(
+                {
+                    "url": "https://test.slack.com/archives/C123/p1234567890123456",
+                    "format": "ai",
+                }
+            )
+        assert not result.get("is_error")
+        assert "Context summary" in result["content"][0]["text"]
+
+    async def test_get_context_ai_format_threaded_url(self, reading_tools, mock_client):
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(return_value="Threaded context summary"),
+            )
+            result = await reading_tools["slack_get_context"].handler(
+                {
+                    "url": "https://test.slack.com/archives/C123/p1234567890123456"
+                    "?thread_ts=1234567890.000000&cid=C123",
+                    "format": "ai",
+                }
+            )
+        assert not result.get("is_error")
+        assert "Threaded context summary" in result["content"][0]["text"]
+
+    async def test_ai_fallback_on_error(self, reading_tools, mock_client):
+        """When AI summarization fails, falls back to summary format."""
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(side_effect=RuntimeError("SDK unavailable")),
+            )
+            result = await reading_tools["slack_read_history"].handler({"format": "ai"})
+        assert not result.get("is_error")
+        # Falls back to summary format — should have timestamp markers
+        assert "[3.0]" in result["content"][0]["text"]
+
+    async def test_ai_has_more_pagination_note(self, reading_tools, mock_client):
+        mock_client._web.conversations_history = AsyncMock(
+            return_value={"messages": [{"ts": "1.0", "user": "U1", "text": "hi"}], "has_more": True}
+        )
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp._ai_summarize",
+                AsyncMock(return_value="Summary"),
+            )
+            result = await reading_tools["slack_read_history"].handler({"format": "ai"})
+        assert "more messages available" in result["content"][0]["text"]
+
+    async def test_ai_passes_cwd_to_summarize(self, mock_client):
+        """Verify cwd is threaded from create_summon_mcp_tools to _ai_summarize."""
+        tools_with_cwd = {
+            t.name: t
+            for t in create_summon_mcp_tools(
+                mock_client, allowed_channels=lambda: {"C123"}, cwd="/project/dir"
+            )
+        }
+        with pytest.MonkeyPatch.context() as mp:
+            mock_summarize = AsyncMock(return_value="summary")
+            mp.setattr("summon_claude.slack.mcp._ai_summarize", mock_summarize)
+            await tools_with_cwd["slack_read_history"].handler({"format": "ai"})
+        mock_summarize.assert_called_once()
+        assert mock_summarize.call_args.kwargs["cwd"] == "/project/dir"
+
+
+class TestAISummarizeFunction:
+    """Tests for the _ai_summarize function itself."""
+
+    async def test_extracts_text_from_sdk_response(self):
+        """Successful SDK session returns extracted text."""
+        from claude_agent_sdk import AssistantMessage, TextBlock
+
+        from summon_claude.slack.mcp import _ai_summarize
+
+        mock_block = MagicMock(spec=TextBlock)
+        mock_block.text = "Summarized conversation"
+        mock_msg = MagicMock(spec=AssistantMessage)
+        mock_msg.content = [mock_block]
+
+        async def mock_response():
+            yield mock_msg
+
+        mock_haiku = AsyncMock()
+        mock_haiku.receive_response = mock_response
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_haiku)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(
+                "summon_claude.slack.mcp.ClaudeSDKClient",
+                MagicMock(return_value=mock_ctx),
+            )
+            result = await _ai_summarize([{"ts": "1.0", "text": "hello"}])
+        assert result == "Summarized conversation"
+
+    async def test_restores_claudecode_env(self):
+        """CLAUDECODE env var is restored after summarization."""
+        import os
+
+        from summon_claude.slack.mcp import _ai_summarize
+
+        async def empty_response():
+            return
+            yield
+
+        mock_haiku = AsyncMock()
+        mock_haiku.receive_response = empty_response
+
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_haiku)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        os.environ["CLAUDECODE"] = "test_value"
+        try:
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(
+                    "summon_claude.slack.mcp.ClaudeSDKClient",
+                    MagicMock(return_value=mock_ctx),
+                )
+                await _ai_summarize([{"ts": "1.0", "text": "hello"}])
+            assert os.environ.get("CLAUDECODE") == "test_value"
+        finally:
+            os.environ.pop("CLAUDECODE", None)
+
+    async def test_clears_claudecode_for_subprocess(self):
+        """CLAUDECODE is removed from env before ClaudeSDKClient is created."""
+        import os
+
+        from claude_agent_sdk import ClaudeSDKClient
+
+        from summon_claude.slack.mcp import _ai_summarize
+
+        os.environ["CLAUDECODE"] = "original"
+        captured_env: dict[str, str | None] = {}
+
+        def spy_init(self, *args, **kwargs):
+            captured_env["CLAUDECODE"] = os.environ.get("CLAUDECODE")
+            raise RuntimeError("stop before subprocess")
+
+        try:
+            with pytest.MonkeyPatch.context() as mp:
+                mp.setattr(ClaudeSDKClient, "__init__", spy_init)
+                with pytest.raises(RuntimeError, match="stop before subprocess"):
+                    await _ai_summarize([{"ts": "1.0", "text": "hello"}])
+
+            # Env var was cleared before SDK client was created
+            assert captured_env["CLAUDECODE"] is None
+            # And restored after
+            assert os.environ.get("CLAUDECODE") == "original"
+        finally:
+            os.environ.pop("CLAUDECODE", None)
 
 
 class TestBackwardCompatibility:

@@ -204,7 +204,7 @@ class SlackClient:
         thread = None
         target = by_ts.get(message_ts)
         if target and target.get("reply_count", 0) > 0:
-            thread_result = await self.fetch_thread_replies(message_ts, channel=ch)
+            thread_result = await self.fetch_thread_replies(message_ts, channel=ch, limit=200)
             thread = thread_result.messages
 
         return {"messages": messages, "thread": thread, "target_ts": message_ts}

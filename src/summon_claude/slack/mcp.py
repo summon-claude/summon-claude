@@ -5,13 +5,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
+import os
 import re
 import urllib.parse
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import create_sdk_mcp_server, tool
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    PermissionResultDeny,
+    TextBlock,
+    create_sdk_mcp_server,
+    tool,
+)
 
 from summon_claude.slack.client import SlackClient
 
@@ -50,7 +61,85 @@ _NOISE_SUBTYPES = frozenset(
 
 _URL_RE = re.compile(r"archives/([A-Z0-9]+)/p(\d+)")
 
-_VALID_FORMATS = frozenset({"summary", "raw"})
+_VALID_FORMATS = frozenset({"summary", "raw", "ai"})
+
+logger = logging.getLogger(__name__)
+
+# Serializes CLAUDECODE env var manipulation across concurrent sessions.
+# The SDK subprocess inherits the parent env at fork time — we must ensure
+# only one task mutates os.environ at a time during client startup.
+_ai_env_lock = asyncio.Lock()
+
+
+_AI_MAX_INPUT_CHARS = 150_000  # ~37K tokens, well within Haiku's context
+_AI_TIMEOUT_SECONDS = 30
+
+
+async def _ai_summarize(messages: list[dict[str, Any]], *, cwd: str = ".") -> str:
+    """Spawn a Haiku SDK session to summarize Slack messages."""
+    raw = json.dumps(messages, default=str)
+    if len(raw) > _AI_MAX_INPUT_CHARS:
+        raw = raw[:_AI_MAX_INPUT_CHARS] + "\n... (truncated)"
+
+    async def _deny_all_tools(
+        tool_name: str,  # noqa: ARG001
+        input_data: dict[str, Any],  # noqa: ARG001
+        context: Any,  # noqa: ARG001
+    ) -> PermissionResultDeny:
+        return PermissionResultDeny(message="Tool use not allowed in summarization session")
+
+    options = ClaudeAgentOptions(
+        model="claude-haiku-4-5-20251001",
+        effort="low",
+        max_turns=1,
+        cwd=cwd,
+        can_use_tool=_deny_all_tools,
+        system_prompt=(
+            "Summarize this Slack conversation concisely. "
+            "Preserve decisions, action items, and key context. "
+            "Include timestamps and user IDs for reference."
+        ),
+    )
+    # Hold lock only through subprocess spawn, not the full query.
+    async with _ai_env_lock:
+        saved = os.environ.pop("CLAUDECODE", None)
+        try:
+            client_ctx = ClaudeSDKClient(options)
+            haiku = await client_ctx.__aenter__()
+        except BaseException:
+            if saved is not None:
+                os.environ["CLAUDECODE"] = saved
+            raise
+        if saved is not None:
+            os.environ["CLAUDECODE"] = saved
+
+    try:
+        await haiku.query(f"Summarize:\n\n{raw}")
+        parts: list[str] = []
+        async for msg in haiku.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        parts.append(block.text)
+        return "".join(parts).strip() or "No summary generated."
+    finally:
+        await client_ctx.__aexit__(None, None, None)
+
+
+async def _ai_format_response(
+    messages: list[dict[str, Any]], *, has_more: bool = False, cwd: str = "."
+) -> dict:
+    """Summarize messages with AI, falling back to summary format on error."""
+    try:
+        summary = await asyncio.wait_for(
+            _ai_summarize(messages, cwd=cwd), timeout=_AI_TIMEOUT_SECONDS
+        )
+    except Exception:
+        logger.warning("AI summarization failed, falling back to summary", exc_info=True)
+        summary = "\n".join(_format_message_summary(m) for m in _filter_noise(messages))
+    if has_more:
+        summary += "\n(more messages available — adjust limit or oldest to paginate)"
+    return {"content": [{"type": "text", "text": summary}]}
 
 
 def _sanitize_mrkdwn_meta(value: str) -> str:
@@ -115,6 +204,7 @@ def _format_messages(
 def create_summon_mcp_tools(  # noqa: PLR0915
     client: SlackClient,
     allowed_channels: Callable[[], set[str]] | None = None,
+    cwd: str = ".",
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances bound to the given SlackClient.
 
@@ -320,7 +410,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             "limit: max messages to return (default 50, max 200). "
             "oldest: only return messages after this Unix timestamp (e.g. '1234567890.123456'). "
             "channel: channel ID to read (default: session channel). "
-            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data, "
+            "'ai' for AI-generated summary (slower, uses a Haiku session)."
         ),
         {"limit": int, "oldest": str, "channel": str, "format": str},
     )
@@ -346,12 +437,15 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                            "text": f"Error: invalid format '{fmt}'."
+                            " Must be 'summary', 'raw', or 'ai'.",
                         }
                     ],
                     "is_error": True,
                 }
             result = await client.fetch_history(channel=channel, limit=limit, oldest=oldest)
+            if fmt == "ai":
+                return await _ai_format_response(result.messages, has_more=result.has_more, cwd=cwd)
             return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
         except ValueError as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
@@ -371,7 +465,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             "(required, e.g. '1234567890.123456'). "
             "limit: max replies to return (default 50, max 200). "
             "channel: channel ID (default: session channel). "
-            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data, "
+            "'ai' for AI-generated summary (slower, uses a Haiku session)."
         ),
         {"parent_ts": str, "limit": int, "channel": str, "format": str},
     )
@@ -396,12 +491,15 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                            "text": f"Error: invalid format '{fmt}'."
+                            " Must be 'summary', 'raw', or 'ai'.",
                         }
                     ],
                     "is_error": True,
                 }
             result = await client.fetch_thread_replies(parent_ts, channel=channel, limit=limit)
+            if fmt == "ai":
+                return await _ai_format_response(result.messages, has_more=result.has_more, cwd=cwd)
             return {"content": _format_messages(result.messages, fmt, has_more=result.has_more)}
         except ValueError as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
@@ -424,7 +522,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             "channel: channel ID (alternative to URL). "
             "message_ts: message timestamp (alternative to URL, requires channel). "
             "surrounding: number of messages before and after the target (default 5, max 20). "
-            "format: 'summary' (default) for compact output, 'raw' for full Slack API data."
+            "format: 'summary' (default) for compact output, 'raw' for full Slack API data, "
+            "'ai' for AI-generated summary (slower, uses a Haiku session)."
         ),
         {"url": str, "channel": str, "message_ts": str, "surrounding": int, "format": str},
     )
@@ -436,7 +535,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Error: invalid format '{fmt}'. Must be 'summary' or 'raw'.",
+                            "text": f"Error: invalid format '{fmt}'."
+                            " Must be 'summary', 'raw', or 'ai'.",
                         }
                     ],
                     "is_error": True,
@@ -506,6 +606,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                 result = await client.fetch_thread_replies(
                     thread_ts_from_url, channel=channel, limit=200
                 )
+                if fmt == "ai":
+                    return await _ai_format_response(
+                        result.messages, has_more=result.has_more, cwd=cwd
+                    )
                 content = _format_messages(result.messages, fmt, has_more=result.has_more)
                 header = (
                     f"Thread context (parent: {thread_ts_from_url}, highlight: {message_ts}):\n"
@@ -516,12 +620,19 @@ def create_summon_mcp_tools(  # noqa: PLR0915
 
             # Standard URL / manual params: fetch channel context
             ctx = await client.fetch_context(message_ts, channel=channel, surrounding=surrounding)
-            parts = []
+
+            if fmt == "ai":
+                all_msgs = list(ctx["messages"])
+                if ctx.get("thread"):
+                    all_msgs.extend(ctx["thread"])
+                return await _ai_format_response(all_msgs, cwd=cwd)
+
+            text_parts = []
 
             # Format channel context (oldest-first)
             msg_content = _format_messages(ctx["messages"], fmt)
             if msg_content:
-                parts.append(
+                text_parts.append(
                     f"Channel context around {message_ts}:\n" + msg_content[0].get("text", "")
                 )
 
@@ -529,9 +640,9 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             if ctx.get("thread"):
                 thread_content = _format_messages(ctx["thread"], fmt)
                 if thread_content:
-                    parts.append("\nThread replies:\n" + thread_content[0].get("text", ""))
+                    text_parts.append("\nThread replies:\n" + thread_content[0].get("text", ""))
 
-            return {"content": [{"type": "text", "text": "\n".join(parts)}]}
+            return {"content": [{"type": "text", "text": "\n".join(text_parts)}]}
 
         except ValueError as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
@@ -555,7 +666,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
 def create_summon_mcp_server(
     client: SlackClient,
     allowed_channels: Callable[[], set[str]] | None = None,
+    cwd: str = ".",
 ) -> McpSdkServerConfig:
     """Create an MCP server with Slack tools bound to the current SlackClient."""
-    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels)
+    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels, cwd=cwd)
     return create_sdk_mcp_server(name="summon-slack", version="1.0.0", tools=tools)

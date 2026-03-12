@@ -699,6 +699,7 @@ class SummonSession:
         slack_mcp = create_summon_mcp_server(
             rt.client,
             allowed_channels=lambda: {rt.client.channel_id},
+            cwd=self._cwd,
         )
 
         options = ClaudeAgentOptions(
