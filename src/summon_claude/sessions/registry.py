@@ -272,6 +272,7 @@ class SessionRegistry:
             "slack_channel_name",
             "claude_session_id",
             "authenticated_at",
+            "authenticated_user_id",
             "ended_at",
             "error_message",
             "model",

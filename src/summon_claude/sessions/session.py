@@ -582,6 +582,7 @@ class SummonSession:
             slack_channel_id=channel_id,
             slack_channel_name=channel_name,
             authenticated_at=datetime.now(UTC).isoformat(),
+            authenticated_user_id=self._authenticated_user_id,
         )
         await registry.log_event(
             "session_active",
