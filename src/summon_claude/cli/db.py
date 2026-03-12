@@ -67,6 +67,7 @@ async def async_db_purge(older_than: int, ctx: click.Context) -> None:
     sessions_deleted = 0
     audit_deleted = 0
     tokens_deleted = 0
+    spawn_deleted = 0
     async with SessionRegistry() as reg:
         db = reg.db
         await db.execute("BEGIN")
@@ -86,12 +87,18 @@ async def async_db_purge(older_than: int, ctx: click.Context) -> None:
                 (cutoff,),
             ) as cur:
                 tokens_deleted = cur.rowcount
+            async with db.execute(
+                "DELETE FROM spawn_tokens WHERE expires_at < ?",
+                (cutoff,),
+            ) as cur:
+                spawn_deleted = cur.rowcount
             await db.execute("COMMIT")
         except Exception:
             await db.execute("ROLLBACK")
             raise
 
     echo(f"Purged records older than {older_than} days (before {cutoff[:10]}):", ctx)
-    echo(f"  Sessions:    {sessions_deleted}", ctx)
-    echo(f"  Audit log:   {audit_deleted}", ctx)
-    echo(f"  Auth tokens: {tokens_deleted}", ctx)
+    echo(f"  Sessions:     {sessions_deleted}", ctx)
+    echo(f"  Audit log:    {audit_deleted}", ctx)
+    echo(f"  Auth tokens:  {tokens_deleted}", ctx)
+    echo(f"  Spawn tokens: {spawn_deleted}", ctx)
