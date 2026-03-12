@@ -11,7 +11,12 @@ import pytest
 
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.auth import SessionAuth
-from summon_claude.sessions.commands import COMMAND_ACTIONS, CommandResult
+from summon_claude.sessions.commands import (
+    _ALIAS_LOOKUP,
+    COMMAND_ACTIONS,
+    CommandDef,
+    CommandResult,
+)
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
@@ -894,6 +899,27 @@ class TestProcessIncomingEvent:
         # The surrounding text should remain (possibly cleaned up)
         assert "please" in text
         assert "continue" in text
+
+    async def test_mid_message_passthrough_expands_alias(self):
+        """'please !quit-alias this' should expand alias to /canonical in text."""
+        # Register a test alias: short-cmd -> test-plug:short-cmd
+        COMMAND_ACTIONS["test-plug:short-cmd"] = CommandDef(description="test")
+        _ALIAS_LOOKUP["short-cmd"] = "test-plug:short-cmd"
+        try:
+            session = make_session()
+            rt = self._make_rt()
+
+            event = {"user": "U001", "text": "please !short-cmd this", "ts": "1"}
+            result = await session._process_incoming_event(event, rt)
+
+            assert result is not None
+            text, _ = result
+            # Should expand to /test-plug:short-cmd, not /short-cmd
+            assert "/test-plug:short-cmd" in text
+            assert "!short-cmd" not in text
+        finally:
+            COMMAND_ACTIONS.pop("test-plug:short-cmd", None)
+            _ALIAS_LOOKUP.pop("short-cmd", None)
 
     async def test_plain_text_fast_path(self):
         """Text with no '!' or '/' should return unchanged (no find_commands called)."""

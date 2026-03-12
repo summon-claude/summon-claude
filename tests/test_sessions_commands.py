@@ -6,12 +6,15 @@ from datetime import UTC, datetime
 
 import pytest
 
+from summon_claude.config import PluginSkill
 from summon_claude.sessions.commands import (
+    _ALIAS_LOOKUP,
     COMMAND_ACTIONS,
     CommandContext,
     dispatch,
     find_commands,
     parse,
+    register_plugin_skills,
     validate_sdk_commands,
 )
 
@@ -233,6 +236,75 @@ class TestHelpHandler:
         result = await dispatch("help", ["quit"], context)
         assert result.text is not None
         assert "end" in result.text
+
+    async def test_help_shows_skills_summary(self, make_context):
+        """Help listing should show plugin names with skill counts, not full list."""
+        skills = [
+            PluginSkill("test-plug", "cmd-a", "A"),
+            PluginSkill("test-plug", "cmd-b", "B"),
+        ]
+        try:
+            register_plugin_skills(skills)
+            context = make_context()
+            result = await dispatch("help", [], context)
+            assert result.text is not None
+            assert "*Skills*:" in result.text
+            assert "test-plug" in result.text
+            assert "(2)" in result.text
+            # Full skill names should NOT appear in the listing
+            assert "!test-plug:cmd-a" not in result.text
+        finally:
+            COMMAND_ACTIONS.pop("test-plug:cmd-a", None)
+            COMMAND_ACTIONS.pop("test-plug:cmd-b", None)
+            _ALIAS_LOOKUP.pop("cmd-a", None)
+            _ALIAS_LOOKUP.pop("cmd-b", None)
+
+    async def test_help_plugin_name_lists_skills(self, make_context):
+        """!help plugin-name should list that plugin's skills."""
+        skills = [
+            PluginSkill("test-plug", "cmd-a", "A"),
+            PluginSkill("test-plug", "cmd-b", "B"),
+        ]
+        try:
+            register_plugin_skills(skills)
+            context = make_context()
+            result = await dispatch("help", ["test-plug"], context)
+            assert result.text is not None
+            assert "!test-plug:cmd-a" in result.text
+            assert "!test-plug:cmd-b" in result.text
+        finally:
+            COMMAND_ACTIONS.pop("test-plug:cmd-a", None)
+            COMMAND_ACTIONS.pop("test-plug:cmd-b", None)
+            _ALIAS_LOOKUP.pop("cmd-a", None)
+            _ALIAS_LOOKUP.pop("cmd-b", None)
+
+    async def test_help_detail_plugin_skill_shows_type_skill(self, make_context):
+        """!help for a plugin skill should show type 'skill', not 'passthrough'."""
+        skills = [PluginSkill("test-plug", "test-sk", "A test skill")]
+        try:
+            register_plugin_skills(skills)
+            context = make_context()
+            result = await dispatch("help", ["test-plug:test-sk"], context)
+            assert result.text is not None
+            assert "skill" in result.text
+            assert "passthrough" not in result.text
+        finally:
+            COMMAND_ACTIONS.pop("test-plug:test-sk", None)
+            _ALIAS_LOOKUP.pop("test-sk", None)
+
+    async def test_help_detail_plugin_skill_shows_short_alias(self, make_context):
+        """!help for a plugin skill should show its short alias."""
+        skills = [PluginSkill("test-plug", "unique-sk", "A skill")]
+        try:
+            register_plugin_skills(skills)
+            context = make_context()
+            result = await dispatch("help", ["test-plug:unique-sk"], context)
+            assert result.text is not None
+            assert "unique-sk" in result.text
+            assert "Short:" in result.text
+        finally:
+            COMMAND_ACTIONS.pop("test-plug:unique-sk", None)
+            _ALIAS_LOOKUP.pop("unique-sk", None)
 
 
 class TestStatusHandler:
@@ -693,3 +765,131 @@ class TestDispatchEdgeCases:
                 await dispatch("_test_boom", [], context)
         finally:
             COMMAND_ACTIONS.pop("_test_boom", None)
+
+
+# ------------------------------------------------------------------
+# Colon support in command names (plugin:skill syntax)
+# ------------------------------------------------------------------
+
+
+class TestColonCommandNames:
+    """Commands with colons (plugin:skill) should work in regex and dispatch."""
+
+    def test_command_regex_matches_colon_name(self):
+        """!dev-essentials:session-start should be matched by _COMMAND_RE."""
+        matches = find_commands("!dev-essentials:session-start")
+        assert len(matches) == 1
+        assert matches[0].name == "dev-essentials:session-start"
+
+    def test_slash_prefix_colon_name(self):
+        """/dev-essentials:session-start should also match."""
+        matches = find_commands("/dev-essentials:session-start")
+        assert len(matches) == 1
+        assert matches[0].name == "dev-essentials:session-start"
+
+    def test_colon_name_mid_message(self):
+        """Colon commands found mid-message."""
+        matches = find_commands("please run !sc:brainstorm for this feature")
+        assert len(matches) == 1
+        assert matches[0].name == "sc:brainstorm"
+
+    def test_validate_sdk_commands_allows_colons(self):
+        """validate_sdk_commands should accept names with colons."""
+        try:
+            unknown = validate_sdk_commands([{"name": "/my-plugin:my-skill"}])
+            assert "my-plugin:my-skill" in unknown
+            assert "my-plugin:my-skill" in COMMAND_ACTIONS
+        finally:
+            COMMAND_ACTIONS.pop("my-plugin:my-skill", None)
+
+    def test_url_with_colon_not_matched(self):
+        """https://example.com:8080 should not be matched."""
+        matches = find_commands("visit https://example.com:8080/path")
+        assert len(matches) == 0
+
+
+# ------------------------------------------------------------------
+# register_plugin_skills() tests
+# ------------------------------------------------------------------
+
+
+class TestRegisterPluginSkills:
+    """Test plugin skill registration into COMMAND_ACTIONS."""
+
+    def test_registers_fully_qualified_name(self):
+        skills = [PluginSkill("my-plugin", "my-skill", "Do something")]
+        try:
+            count = register_plugin_skills(skills)
+            assert count > 0
+            assert "my-plugin:my-skill" in COMMAND_ACTIONS
+            defn = COMMAND_ACTIONS["my-plugin:my-skill"]
+            assert defn.description == "Do something"
+            assert defn.handler is None  # passthrough
+        finally:
+            COMMAND_ACTIONS.pop("my-plugin:my-skill", None)
+            _ALIAS_LOOKUP.pop("my-skill", None)
+
+    def test_registers_short_alias_when_unambiguous(self):
+        skills = [PluginSkill("my-plugin", "unique-skill", "Unique")]
+        try:
+            register_plugin_skills(skills)
+            assert _ALIAS_LOOKUP.get("unique-skill") == "my-plugin:unique-skill"
+        finally:
+            COMMAND_ACTIONS.pop("my-plugin:unique-skill", None)
+            _ALIAS_LOOKUP.pop("unique-skill", None)
+
+    def test_no_short_alias_on_collision(self):
+        """Two plugins with same skill name should NOT create a short alias."""
+        skills = [
+            PluginSkill("plugin-a", "init", "A init"),
+            PluginSkill("plugin-b", "init", "B init"),
+        ]
+        try:
+            register_plugin_skills(skills)
+            assert "plugin-a:init" in COMMAND_ACTIONS
+            assert "plugin-b:init" in COMMAND_ACTIONS
+            # "init" should NOT be in alias lookup (ambiguous)
+            # (it may already exist as a built-in, but shouldn't point to either plugin)
+            alias_target = _ALIAS_LOOKUP.get("init", "")
+            assert "plugin-a" not in alias_target
+            assert "plugin-b" not in alias_target
+        finally:
+            COMMAND_ACTIONS.pop("plugin-a:init", None)
+            COMMAND_ACTIONS.pop("plugin-b:init", None)
+            _ALIAS_LOOKUP.pop("init", None)
+
+    def test_no_short_alias_when_builtin_exists(self):
+        """Short name matching a built-in command should not create an alias."""
+        skills = [PluginSkill("my-plugin", "help", "Plugin help")]
+        try:
+            register_plugin_skills(skills)
+            assert "my-plugin:help" in COMMAND_ACTIONS
+            # "help" already exists as a built-in — alias should not be created
+            assert _ALIAS_LOOKUP.get("help") != "my-plugin:help"
+        finally:
+            COMMAND_ACTIONS.pop("my-plugin:help", None)
+
+    def test_idempotent_registration(self):
+        """Registering the same skills twice should not duplicate."""
+        skills = [PluginSkill("my-plugin", "idempotent-skill", "Test")]
+        try:
+            count1 = register_plugin_skills(skills)
+            count2 = register_plugin_skills(skills)
+            assert count1 > 0
+            assert count2 == 0  # already registered
+        finally:
+            COMMAND_ACTIONS.pop("my-plugin:idempotent-skill", None)
+            _ALIAS_LOOKUP.pop("idempotent-skill", None)
+
+    async def test_dispatch_passthrough_for_plugin_skill(self, make_context):
+        """Registered plugin skill should dispatch as passthrough."""
+        skills = [PluginSkill("test-plugin", "test-skill", "Test")]
+        try:
+            register_plugin_skills(skills)
+            context = make_context()
+            result = await dispatch("test-plugin:test-skill", [], context)
+            assert result.text is None
+            assert result.suppress_queue is False
+        finally:
+            COMMAND_ACTIONS.pop("test-plugin:test-skill", None)
+            _ALIAS_LOOKUP.pop("test-skill", None)

@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import field_validator
@@ -102,6 +104,79 @@ def discover_installed_plugins() -> list[dict]:
 
     logger.debug("Discovered %d installed plugins", len(plugins))
     return plugins
+
+
+# ------------------------------------------------------------------
+# Plugin skill / command discovery
+# ------------------------------------------------------------------
+
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---", re.DOTALL)
+_FM_FIELD_RE = re.compile(r"^([a-zA-Z_-]+)\s*:\s*(.+)$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class PluginSkill:
+    """A skill or command discovered from an installed Claude Code plugin."""
+
+    plugin_name: str
+    name: str
+    description: str
+
+
+def _parse_frontmatter(text: str) -> dict[str, str]:
+    """Extract YAML-like key: value pairs from ``---`` frontmatter."""
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}
+    return {k.strip(): v.strip().strip("\"'") for k, v in _FM_FIELD_RE.findall(m.group(1))}
+
+
+def discover_plugin_skills() -> list[PluginSkill]:
+    """Enumerate skills and commands from all installed Claude Code plugins.
+
+    For each plugin returned by ``discover_installed_plugins()``, reads:
+    - ``.claude-plugin/plugin.json`` for the plugin name
+    - ``commands/*.md`` for user-invocable commands
+    - ``skills/*/SKILL.md`` for model/user-invocable skills
+
+    Returns a flat list of :class:`PluginSkill` entries.
+    """
+    plugins = discover_installed_plugins()
+    results: list[PluginSkill] = []
+
+    for entry in plugins:
+        plugin_path = Path(entry["path"])
+
+        # Read plugin name from manifest
+        manifest = plugin_path / ".claude-plugin" / "plugin.json"
+        if not manifest.exists():
+            continue
+        try:
+            meta = json.loads(manifest.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        plugin_name = meta.get("name", plugin_path.name)
+
+        # Discover commands/*.md
+        commands_dir = plugin_path / "commands"
+        if commands_dir.is_dir():
+            for md_file in sorted(commands_dir.glob("*.md")):
+                fm = _parse_frontmatter(md_file.read_text(errors="replace"))
+                skill_name = fm.get("name", md_file.stem)
+                desc = fm.get("description", "")
+                results.append(PluginSkill(plugin_name, skill_name, desc))
+
+        # Discover skills/*/SKILL.md
+        skills_dir = plugin_path / "skills"
+        if skills_dir.is_dir():
+            for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+                fm = _parse_frontmatter(skill_md.read_text(errors="replace"))
+                skill_name = fm.get("name", skill_md.parent.name)
+                desc = fm.get("description", "")
+                results.append(PluginSkill(plugin_name, skill_name, desc))
+
+    logger.debug("Discovered %d plugin skills/commands", len(results))
+    return results
 
 
 class SummonConfig(BaseSettings):

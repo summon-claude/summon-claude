@@ -271,13 +271,16 @@ class PermissionHandler:
                 f"Permission required: {header_text[:100]}",
                 blocks=blocks,
             )
-            # Ping user in turn thread so they get a Slack notification
-            # (ephemeral messages don't trigger notifications)
+            # Ping user in main channel so they get a Slack notification
+            # (ephemeral messages don't trigger notifications, and thread
+            # mentions auto-subscribe the user to the thread)
             if self._authenticated_user_id:
-                await _post_quietly(
-                    self._router,
-                    f"<@{self._authenticated_user_id}> Permission needed",
-                )
+                try:
+                    await self._router.post_to_main(
+                        f"<@{self._authenticated_user_id}> Permission needed",
+                    )
+                except Exception as e:
+                    logger.warning("Failed to post permission ping to main channel: %s", e)
         except Exception as e:
             logger.error("Failed to post permission message: %s", e)
             # Auto-deny if we can't post

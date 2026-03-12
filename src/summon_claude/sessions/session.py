@@ -26,13 +26,19 @@ from slack_sdk.http_retry.builtin_async_handlers import (
 )
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude.config import SummonConfig, discover_installed_plugins, get_data_dir
+from summon_claude.config import (
+    SummonConfig,
+    discover_installed_plugins,
+    discover_plugin_skills,
+    get_data_dir,
+)
 from summon_claude.sessions.auth import SessionAuth
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
     CommandResult,
     find_commands,
+    register_plugin_skills,
     validate_sdk_commands,
 )
 from summon_claude.sessions.commands import (
@@ -700,7 +706,7 @@ class SummonSession:
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
 
-    async def _run_message_loop(  # noqa: PLR0912
+    async def _run_message_loop(  # noqa: PLR0912, PLR0915
         self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Listen for Slack messages and forward them to Claude."""
@@ -746,6 +752,14 @@ class SummonSession:
                             self._model = init_model
                 except Exception as e:
                     logger.debug("Could not retrieve server info: %s", e)
+
+                # Register plugin skills/commands for !help and passthrough
+                try:
+                    plugin_skills = discover_plugin_skills()
+                    if plugin_skills:
+                        register_plugin_skills(plugin_skills)
+                except Exception as e:
+                    logger.debug("Could not discover plugin skills: %s", e)
 
                 while not self._shutdown_event.is_set():
                     try:
@@ -1386,11 +1400,11 @@ class SummonSession:
                 modified_text = modified_text[: match.start] + modified_text[match.end :]
                 continue
 
-            # PASSTHROUGH mid-message — swap ! to /
-            if match.prefix == "!":
-                modified_text = (
-                    modified_text[: match.start] + "/" + modified_text[match.start + 1 :]
-                )
+            # PASSTHROUGH mid-message — replace with /canonical
+            # Use match.name (canonical, alias-resolved) not raw_name,
+            # so short aliases like !session-start expand to /dev-essentials:session-start
+            replacement = f"/{match.name}"
+            modified_text = modified_text[: match.start] + replacement + modified_text[match.end :]
 
         # Add emoji reaction for blocked/unknown
         if has_blocked and thread_ts:

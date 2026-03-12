@@ -321,7 +321,13 @@ src/summon_claude/
 ├── daemon.py              # Unix daemon with PID/lock, IPC framing
 ├── event_dispatcher.py    # Routes Slack events to sessions by channel
 ├── cli/
-│   ├── __init__.py        # CLI entry point with global flags and subcommands
+│   ├── __init__.py        # Click wiring, root group, setup_logging
+│   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
+│   ├── helpers.py         # Session resolution (resolve_session, pick_session)
+│   ├── start.py           # async_start() implementation
+│   ├── stop.py            # async_stop() implementation
+│   ├── session.py         # Session subcommand implementations
+│   ├── db.py              # DB subcommand implementations
 │   ├── config.py          # Config subcommands (show, set, path, edit, check)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
 │   └── update_check.py    # PyPI update checker with 24h cache
