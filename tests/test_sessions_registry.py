@@ -613,3 +613,79 @@ class TestSchemaVersioning:
                 await _run_migrations(raw_db)
                 version = await _get_schema_version(raw_db)
                 assert version == CURRENT_SCHEMA_VERSION
+
+
+class TestSpawnTokens:
+    async def test_store_and_consume_spawn_token(self, registry):
+        from datetime import UTC, datetime, timedelta
+
+        expires = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+        await registry.store_spawn_token(
+            token="abc123",
+            target_user_id="U999",
+            cwd="/tmp",
+            expires_at=expires,
+            spawn_source="session",
+            parent_session_id="parent-1",
+            parent_channel_id="C111",
+        )
+        row = await registry.consume_spawn_token("abc123", datetime.now(UTC).isoformat())
+        assert row is not None
+        assert row["token"] == "abc123"
+        assert row["target_user_id"] == "U999"
+        assert row["parent_session_id"] == "parent-1"
+
+    async def test_consume_spawn_token_expired(self, registry):
+        from datetime import UTC, datetime, timedelta
+
+        expired = (datetime.now(UTC) - timedelta(seconds=10)).isoformat()
+        await registry.store_spawn_token(
+            token="expired1",
+            target_user_id="U999",
+            cwd="/tmp",
+            expires_at=expired,
+        )
+        row = await registry.consume_spawn_token("expired1", datetime.now(UTC).isoformat())
+        assert row is None
+
+    async def test_consume_spawn_token_already_consumed(self, registry):
+        from datetime import UTC, datetime, timedelta
+
+        expires = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+        await registry.store_spawn_token(
+            token="once1",
+            target_user_id="U999",
+            cwd="/tmp",
+            expires_at=expires,
+        )
+        first = await registry.consume_spawn_token("once1", datetime.now(UTC).isoformat())
+        second = await registry.consume_spawn_token("once1", datetime.now(UTC).isoformat())
+        assert first is not None
+        assert second is None
+
+    async def test_store_spawn_token_nullable_parent(self, registry):
+        from datetime import UTC, datetime, timedelta
+
+        expires = (datetime.now(UTC) + timedelta(seconds=30)).isoformat()
+        await registry.store_spawn_token(
+            token="cli1",
+            target_user_id="U999",
+            cwd="/tmp",
+            expires_at=expires,
+            spawn_source="cli",
+        )
+        row = await registry.consume_spawn_token("cli1", datetime.now(UTC).isoformat())
+        assert row is not None
+        assert row["parent_session_id"] is None
+        assert row["parent_channel_id"] is None
+        assert row["spawn_source"] == "cli"
+
+    async def test_register_with_parent_session_id(self, registry):
+        await registry.register("sess-parent", 1234, "/tmp", parent_session_id="parent-sess")
+        session = await registry.get_session("sess-parent")
+        assert session["parent_session_id"] == "parent-sess"
+
+    async def test_register_with_authenticated_user_id(self, registry):
+        await registry.register("sess-uid", 1234, "/tmp", authenticated_user_id="U123")
+        session = await registry.get_session("sess-uid")
+        assert session["authenticated_user_id"] == "U123"

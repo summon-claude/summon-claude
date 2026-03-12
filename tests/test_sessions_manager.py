@@ -654,3 +654,64 @@ class TestControlAPI:
         writer.wait_closed = AsyncMock()
 
         await manager.handle_client(reader, writer)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Tests: create_session_with_spawn_token
+# ---------------------------------------------------------------------------
+
+
+class TestCreateSessionWithSpawnToken:
+    async def test_valid_spawn_token_creates_session(self):
+        """create_session_with_spawn_token creates a pre-authenticated session."""
+        config = make_config()
+        web_client = MagicMock()
+        web_client.auth_test = AsyncMock(return_value={"user_id": "BBOT"})
+        dispatcher = MagicMock()
+        dispatcher.register = MagicMock()
+        dispatcher.unregister = MagicMock()
+        mgr = SessionManager(config, web_client, "BBOT", dispatcher)
+
+        # Mock the spawn token verification
+        spawn_auth = MagicMock()
+        spawn_auth.target_user_id = "U123"
+        spawn_auth.parent_session_id = "parent-sess"
+        with (
+            patch(
+                "summon_claude.sessions.manager.verify_spawn_token",
+                new_callable=AsyncMock,
+                return_value=spawn_auth,
+            ),
+            patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls,
+        ):
+            mock_reg = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            session_id = await mgr.create_session_with_spawn_token(make_options(), "valid-token")
+        assert session_id is not None
+        assert session_id in mgr._sessions
+        # Session should be pre-authenticated
+        session = mgr._sessions[session_id]
+        assert session._authenticated_event.is_set()
+        # Cleanup
+        await mgr.shutdown()
+
+    async def test_invalid_spawn_token_raises(self):
+        config = make_config()
+        web_client = MagicMock()
+        dispatcher = MagicMock()
+        mgr = SessionManager(config, web_client, "BBOT", dispatcher)
+
+        with (
+            patch(
+                "summon_claude.sessions.manager.verify_spawn_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls,
+        ):
+            mock_reg = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="Invalid or expired"):
+                await mgr.create_session_with_spawn_token(make_options(), "bad-token")
