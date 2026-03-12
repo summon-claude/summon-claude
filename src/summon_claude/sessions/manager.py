@@ -158,15 +158,17 @@ class SessionManager:
         self, options: SessionOptions, spawn_token: str
     ) -> str:
         """Create a pre-authenticated session using a spawn token."""
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
-
         session_id = str(uuid.uuid4())
         spawn_auth = await self._verify_and_log_spawn_token(spawn_token, session_id)
 
         if spawn_auth is None:
             raise ValueError("Invalid or expired spawn token")
+
+        # Cancel grace timer only after successful verification — prevents
+        # invalid tokens from keeping the daemon alive indefinitely.
+        if self._grace_timer is not None:
+            self._grace_timer.cancel()
+            self._grace_timer = None
 
         # Enforce the authorized working directory from the spawn token
         options = dataclasses.replace(options, cwd=spawn_auth.cwd)
