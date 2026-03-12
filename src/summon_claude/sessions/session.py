@@ -696,7 +696,10 @@ class SummonSession:
         self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Listen for Slack messages and forward them to Claude."""
-        slack_mcp = create_summon_mcp_server(rt.client)
+        slack_mcp = create_summon_mcp_server(
+            rt.client,
+            allowed_channels=lambda: {rt.client.channel_id},
+        )
 
         options = ClaudeAgentOptions(
             cwd=self._cwd,
