@@ -404,6 +404,20 @@ class TestGetContextTool:
         )
         assert result["is_error"] is True
 
+    async def test_invalid_message_ts_manual(self, reading_tools):
+        result = await reading_tools["slack_get_context"].handler(
+            {"channel": "C123", "message_ts": "not-a-timestamp"}
+        )
+        assert result["is_error"] is True
+        assert "message_ts" in result["content"][0]["text"].lower()
+
+    async def test_invalid_thread_ts_in_url(self, reading_tools):
+        result = await reading_tools["slack_get_context"].handler(
+            {"url": "https://test.slack.com/archives/C123/p1234567890123456?thread_ts=bad&cid=C123"}
+        )
+        assert result["is_error"] is True
+        assert "thread_ts" in result["content"][0]["text"].lower()
+
 
 class TestChannelEnforcement:
     async def test_custom_allowed_channels(self, mock_client):

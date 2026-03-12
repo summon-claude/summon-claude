@@ -380,7 +380,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         ),
         {"url": str, "channel": str, "message_ts": str, "surrounding": int, "format": str},
     )
-    async def get_context(args: dict) -> dict:
+    async def get_context(args: dict) -> dict:  # noqa: PLR0911, PLR0912
         try:
             fmt = args.get("format", "summary")
             surrounding = max(1, min(args.get("surrounding", 5), 20))
@@ -413,6 +413,29 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                         {
                             "type": "text",
                             "text": "Error: provide either url or both channel and message_ts.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Validate timestamp formats
+            if not _PARENT_TS_RE.match(message_ts):
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: invalid message_ts format."
+                            " Expected 'seconds.microseconds'.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+            if thread_ts_from_url and not _PARENT_TS_RE.match(thread_ts_from_url):
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: invalid thread_ts format in URL.",
                         }
                     ],
                     "is_error": True,
