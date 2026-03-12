@@ -6,6 +6,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -176,3 +178,29 @@ class TestVerifySpawnToken:
         await asyncio.sleep(0.1)
         result = await verify_spawn_token(registry, auth.token)
         assert result is None
+
+
+class TestGenerateSpawnTokenValidation:
+    async def test_rejects_empty_target_user_id(self, registry):
+        with pytest.raises(ValueError, match="target_user_id"):
+            await generate_spawn_token(registry, "", "/tmp")
+
+    async def test_rejects_whitespace_target_user_id(self, registry):
+        with pytest.raises(ValueError, match="target_user_id"):
+            await generate_spawn_token(registry, "   ", "/tmp")
+
+    async def test_rejects_empty_cwd(self, registry):
+        with pytest.raises(ValueError, match="cwd"):
+            await generate_spawn_token(registry, "U123", "")
+
+    async def test_rejects_relative_cwd(self, registry):
+        with pytest.raises(ValueError, match="cwd"):
+            await generate_spawn_token(registry, "U123", "relative/path")
+
+    async def test_rejects_empty_spawn_source(self, registry):
+        with pytest.raises(ValueError, match="spawn_source"):
+            await generate_spawn_token(registry, "U123", "/tmp", spawn_source="")
+
+    async def test_rejects_whitespace_spawn_source(self, registry):
+        with pytest.raises(ValueError, match="spawn_source"):
+            await generate_spawn_token(registry, "U123", "/tmp", spawn_source="   ")

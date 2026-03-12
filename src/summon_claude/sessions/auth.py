@@ -130,6 +130,12 @@ async def generate_spawn_token(
     parent_channel_id: str | None = None,
 ) -> SpawnAuth:
     """Generate a spawn token for pre-authenticated session creation."""
+    if not target_user_id or not target_user_id.strip():
+        raise ValueError("target_user_id must be non-empty")
+    if not cwd or not cwd.startswith("/"):
+        raise ValueError("cwd must be a non-empty absolute path")
+    if not spawn_source or not spawn_source.strip():
+        raise ValueError("spawn_source must be non-empty")
     token = secrets.token_hex(16)  # 32-char hex, 128-bit entropy
     expires_at = datetime.now(UTC) + timedelta(seconds=_SPAWN_TOKEN_TTL_SECONDS)
     await registry.store_spawn_token(
@@ -171,11 +177,13 @@ async def verify_spawn_token(registry: SessionRegistry, token: str) -> SpawnAuth
         # Do NOT break — always iterate all entries
 
     if match is None:
+        logger.warning("Spawn token verification failed: no valid match")
         return None
 
     # Atomically consume using the stored token value (not user input)
     row = await registry.consume_spawn_token(match["token"], now.isoformat())
     if row is None:
+        logger.warning("Spawn token consumed by concurrent caller")
         return None
     return SpawnAuth(
         token=row["token"],

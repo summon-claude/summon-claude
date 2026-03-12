@@ -137,10 +137,14 @@ class SessionManager:
 
     @staticmethod
     async def _verify_and_log_spawn_token(spawn_token: str, session_id: str) -> SpawnAuth | None:
-        """Verify a spawn token and log the consumption event."""
+        """Verify a spawn token and log the result (success or rejection)."""
         async with SessionRegistry() as registry:
             spawn_auth = await verify_spawn_token(registry, spawn_token)
             if spawn_auth is None:
+                await registry.log_event(
+                    "spawn_token_rejected",
+                    session_id=session_id,
+                )
                 return None
             await registry.log_event(
                 "spawn_token_consumed",
