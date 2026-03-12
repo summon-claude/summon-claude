@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import logging
 import os
 import time
@@ -149,6 +150,9 @@ class SessionManager:
         if spawn_auth is None:
             raise ValueError("Invalid or expired spawn token")
 
+        # Enforce the authorized working directory from the spawn token
+        options = dataclasses.replace(options, cwd=spawn_auth.cwd)
+
         session_id = str(uuid.uuid4())
         session = SummonSession(
             config=self._config,
@@ -158,9 +162,22 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            parent_session_id=spawn_auth.parent_session_id,
         )
-        session._parent_session_id = spawn_auth.parent_session_id
         session.authenticate(spawn_auth.target_user_id)
+
+        # Audit log: record spawn token consumption
+        async with SessionRegistry() as reg:
+            await reg.log_event(
+                "spawn_token_consumed",
+                session_id=session_id,
+                user_id=spawn_auth.target_user_id,
+                details={
+                    "parent_session_id": spawn_auth.parent_session_id,
+                    "spawn_source": spawn_auth.spawn_source,
+                    "cwd": spawn_auth.cwd,
+                },
+            )
 
         self._sessions[session_id] = session
         task = asyncio.create_task(
