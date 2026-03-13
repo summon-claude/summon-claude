@@ -83,6 +83,8 @@ class _AskUserState:
     pending_other: tuple[str, int] | None = None
     # For multi-select: toggled selections per question keyed by (request_id, question_idx)
     multi_selections: dict[tuple[str, int], list[str]] = field(default_factory=dict)
+    # response_url for dismissing the ephemeral when all questions are answered
+    response_urls: dict[str, str] = field(default_factory=dict)
 
 
 class PermissionHandler:
@@ -419,6 +421,10 @@ class PermissionHandler:
         if request_id not in self._ask_user.events:
             return
 
+        # Store response_url for ephemeral dismissal on completion
+        if response_url and request_id not in self._ask_user.response_urls:
+            self._ask_user.response_urls[request_id] = response_url
+
         questions = self._ask_user.questions.get(request_id, [])
         if q_idx >= len(questions):
             return
@@ -458,7 +464,7 @@ class PermissionHandler:
             self._router,
             f":white_check_mark: *{header}*: {sanitize_for_mrkdwn(answer)}",
         )
-        self._check_ask_user_complete(request_id)
+        await self._check_ask_user_complete(request_id)
 
     async def _handle_ask_option(
         self, request_id: str, q_idx: int, question: dict, opt_val: str
@@ -485,7 +491,7 @@ class PermissionHandler:
                 self._router,
                 f":white_check_mark: *{header}*: {sanitize_for_mrkdwn(label)}",
             )
-            self._check_ask_user_complete(request_id)
+            await self._check_ask_user_complete(request_id)
 
     async def _toggle_multi_select(
         self, request_id: str, q_idx: int, label: str, header: str
@@ -534,13 +540,17 @@ class PermissionHandler:
             f":white_check_mark: *{safe_header}*: {sanitize_for_mrkdwn(text)}",
         )
 
-        self._check_ask_user_complete(request_id)
+        await self._check_ask_user_complete(request_id)
 
-    def _check_ask_user_complete(self, request_id: str) -> None:
-        """If all questions for a request are answered, signal the waiting coroutine."""
+    async def _check_ask_user_complete(self, request_id: str) -> None:
+        """If all questions for a request are answered, dismiss ephemeral and signal."""
         answers = self._ask_user.answers.get(request_id, {})
         expected = self._ask_user.expected.get(request_id, 0)
         if len(answers) >= expected:
+            # Dismiss the ephemeral message
+            url = self._ask_user.response_urls.get(request_id)
+            if url:
+                await _dismiss_ephemeral(url)
             event = self._ask_user.events.get(request_id)
             if event:
                 event.set()
@@ -551,6 +561,7 @@ class PermissionHandler:
         questions = self._ask_user.questions.pop(request_id, [])
         self._ask_user.answers.pop(request_id, None)
         self._ask_user.expected.pop(request_id, None)
+        self._ask_user.response_urls.pop(request_id, None)
         if self._ask_user.pending_other and self._ask_user.pending_other[0] == request_id:
             self._ask_user.pending_other = None
         # Clean up multi-select state for all questions in this request
