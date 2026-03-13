@@ -14,6 +14,7 @@ import os
 import queue
 import re
 import secrets
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -182,6 +183,19 @@ _SYSTEM_PROMPT = {
         "for session control."
     ),
 }
+
+
+def _build_google_workspace_mcp(services: str) -> dict:
+    """Build MCP server config for Google Workspace (workspace-mcp).
+
+    Uses sys.executable to ensure we run from the same Python environment
+    as summon, so it works whether installed via pip, pipx, or Homebrew.
+    """
+    return {
+        "command": sys.executable,
+        "args": ["-m", "workspace_mcp", "--tools", services, "--tool-tier", "core"],
+    }
+
 
 AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
