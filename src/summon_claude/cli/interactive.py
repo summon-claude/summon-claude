@@ -19,6 +19,13 @@ def is_interactive(ctx: click.Context) -> bool:
 
 _MAX_SESSION_NAME = 30
 
+# Column widths for log picker — shared between format_log_option and the header
+_LOG_COL_ID = 10
+_LOG_COL_STATUS = 12
+_LOG_COL_NAME = _MAX_SESSION_NAME + 2
+_LOG_COL_CHANNEL = 16
+_BACK_LABEL = "← Back"
+
 
 def format_session_option(session: dict, *, annotation: str | None = None) -> str:
     """Format a session dict as a human-readable option string.
@@ -33,26 +40,65 @@ def format_session_option(session: dict, *, annotation: str | None = None) -> st
     return f"{sid}  {name}  [{badge}]"
 
 
-def format_log_option(path: pathlib.Path | str) -> str:
-    """Format a log file path as a human-readable option string."""
+def _format_age(mtime: float) -> str:
+    """Format a file's mtime as a human-readable relative age string."""
+    age_seconds = int(time.time() - mtime)
+    if age_seconds < 3600:
+        return f"{age_seconds // 60}m ago"
+    if age_seconds < 86400:
+        return f"{age_seconds // 3600}h ago"
+    return f"{age_seconds // 86400}d ago"
+
+
+def format_log_option(
+    path: pathlib.Path | str,
+    session_meta: dict | None = None,
+) -> str:
+    """Format a log file path as a human-readable option string.
+
+    When *session_meta* is provided (a registry row dict), the output
+    mirrors ``session list`` style::
+
+        a1b2c3d4  completed  my-session          #summon-abc  2h ago
+
+    Without metadata, falls back to a simpler format.
+    """
     if not isinstance(path, pathlib.Path):
         path = pathlib.Path(path)
 
-    if path.name == "daemon.log":
-        return "daemon    (daemon log)"
-
-    stem = path.stem[:8] + ("\u2026" if len(path.stem) > 8 else "")
     try:
-        age_seconds = int(time.time() - path.stat().st_mtime)
-        if age_seconds < 3600:
-            age_str = f"{age_seconds // 60}m ago"
-        elif age_seconds < 86400:
-            age_str = f"{age_seconds // 3600}h ago"
-        else:
-            age_str = f"{age_seconds // 86400}d ago"
+        age_str = _format_age(path.stat().st_mtime)
     except OSError:
         age_str = "unknown"
-    return f"{stem}  (modified {age_str})"
+
+    if path.name == "daemon.log":
+        return (
+            f"{'daemon':<{_LOG_COL_ID}}{'-':<{_LOG_COL_STATUS}}"
+            f"{'daemon log':<{_LOG_COL_NAME}}{'-':<{_LOG_COL_CHANNEL}}"
+            f"{age_str}"
+        )
+
+    short_id = path.stem[:8]
+
+    if session_meta:
+        status = session_meta.get("status", "?")
+        name = session_meta.get("session_name") or "-"
+        if len(name) > _MAX_SESSION_NAME:
+            name = name[: _MAX_SESSION_NAME - 1] + "\u2026"
+        channel = session_meta.get("slack_channel_name") or "-"
+        return (
+            f"{short_id:<{_LOG_COL_ID}}{status:<{_LOG_COL_STATUS}}"
+            f"{name:<{_LOG_COL_NAME}}{channel:<{_LOG_COL_CHANNEL}}"
+            f"{age_str}"
+        )
+
+    return f"{short_id}  (modified {age_str})"
+
+
+LOG_PICKER_HEADER = (
+    f"{'ID':<{_LOG_COL_ID}}{'STATUS':<{_LOG_COL_STATUS}}"
+    f"{'NAME':<{_LOG_COL_NAME}}{'CHANNEL':<{_LOG_COL_CHANNEL}}AGE"
+)
 
 
 def interactive_select(
@@ -65,11 +111,19 @@ def interactive_select(
     if is_interactive(ctx):
         import pick  # noqa: PLC0415
 
+        picker_options = [*options, _BACK_LABEL]
+        # Append hint to first line only (title may contain \n for subheaders)
+        lines = title.split("\n", 1)
+        lines[0] += "  (ctrl+c to exit)"
+        hint = "\n".join(lines)
         try:
-            result = pick.pick(options, title, indicator=">")
+            result = pick.pick(picker_options, hint, indicator=">")
         except KeyboardInterrupt:
             return None
-        return (str(result[0]), int(result[1]))
+        idx = int(result[1])
+        if idx >= len(options):
+            return None
+        return (str(result[0]), idx)
 
     # Non-interactive fallback: numbered list with click.prompt
     click.echo(title)
@@ -92,7 +146,8 @@ def interactive_multi_select(
     if is_interactive(ctx):
         import pick  # noqa: PLC0415
 
-        selected = pick.pick(options, title, multiselect=True, min_selection_count=1, indicator=">")
+        hint = f"{title}  (ctrl+c to exit)"
+        selected = pick.pick(options, hint, multiselect=True, min_selection_count=1, indicator=">")
         return [(str(s[0]), int(s[1])) for s in selected]
 
     # Non-interactive fallback: numbered list with comma-separated input

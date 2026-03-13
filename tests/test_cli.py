@@ -531,6 +531,105 @@ class TestSessionCleanup:
         assert result.exit_code == 0
         assert "Cleaned up 1 stale session(s)." in result.output
 
+    def test_cleanup_removes_orphan_log_files(self, tmp_path):
+        """Log files with no matching session in registry are deleted."""
+        import os
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        # Orphan: no matching session (backdate past the 60s safety window)
+        orphan = log_dir / "deadbeef-dead-dead-dead-deaddeaddead.log"
+        orphan.write_text("orphan\n")
+        old_mtime = time.time() - 120
+        os.utime(orphan, (old_mtime, old_mtime))
+        # Known: matches a session in registry
+        known = log_dir / f"{_ACTIVE_SESSION['session_id']}.log"
+        known.write_text("valid\n")
+        # Daemon log should never be deleted
+        (log_dir / "daemon.log").write_text("daemon\n")
+
+        mock_ctx = _mock_registry(stale=[], all=[_ACTIVE_SESSION])
+        with (
+            patch("summon_claude.cli.session.SessionRegistry", return_value=mock_ctx),
+            patch("summon_claude.cli.session.get_data_dir", return_value=tmp_path),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "cleanup"])
+        assert result.exit_code == 0
+        assert "Removed 1 orphan log file(s)." in result.output
+        assert not orphan.exists()
+        assert known.exists()
+        assert (log_dir / "daemon.log").exists()
+
+    def test_cleanup_removes_old_rotated_daemon_logs(self, tmp_path):
+        """Rotated daemon logs older than 7 days are deleted."""
+        import os
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        (log_dir / "daemon.log").write_text("current\n")
+        old_rotated = log_dir / "daemon.log.1"
+        old_rotated.write_text("old rotated\n")
+        # Set mtime to 8 days ago
+        old_mtime = time.time() - 8 * 86400
+        os.utime(old_rotated, (old_mtime, old_mtime))
+        # Fresh rotated log should survive
+        fresh_rotated = log_dir / "daemon.log.2"
+        fresh_rotated.write_text("fresh rotated\n")
+
+        mock_ctx = _mock_registry(stale=[], all=[])
+        with (
+            patch("summon_claude.cli.session.SessionRegistry", return_value=mock_ctx),
+            patch("summon_claude.cli.session.get_data_dir", return_value=tmp_path),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "cleanup"])
+        assert result.exit_code == 0
+        assert not old_rotated.exists()
+        assert fresh_rotated.exists()
+
+    def test_cleanup_runs_log_cleanup_even_without_stale_sessions(self, tmp_path):
+        """Log cleanup runs regardless of whether stale sessions exist."""
+        import os
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        orphan = log_dir / "deadbeef-dead-dead-dead-deaddeaddead.log"
+        orphan.write_text("orphan\n")
+        old_mtime = time.time() - 120
+        os.utime(orphan, (old_mtime, old_mtime))
+
+        mock_ctx = _mock_registry(stale=[], all=[])
+        with (
+            patch("summon_claude.cli.session.SessionRegistry", return_value=mock_ctx),
+            patch("summon_claude.cli.session.get_data_dir", return_value=tmp_path),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "cleanup"])
+        assert result.exit_code == 0
+        assert "No stale sessions found." in result.output
+        assert "Removed 1 orphan log file(s)." in result.output
+        assert not orphan.exists()
+
+    def test_cleanup_preserves_recently_created_orphan_logs(self, tmp_path):
+        """Orphan log files created within the last 60s are not deleted (race guard)."""
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        # Fresh orphan — mtime is now, within the 60s safety window
+        fresh_orphan = log_dir / "deadbeef-dead-dead-dead-deaddeaddead.log"
+        fresh_orphan.write_text("just created\n")
+
+        mock_ctx = _mock_registry(stale=[], all=[])
+        with (
+            patch("summon_claude.cli.session.SessionRegistry", return_value=mock_ctx),
+            patch("summon_claude.cli.session.get_data_dir", return_value=tmp_path),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "cleanup"])
+        assert result.exit_code == 0
+        assert fresh_orphan.exists(), "Recently-created orphan should survive cleanup"
+        assert "orphan" not in result.output
+
 
 # ---------------------------------------------------------------------------
 # Update check integration in cmd_start

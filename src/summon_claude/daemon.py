@@ -379,8 +379,12 @@ def _setup_daemon_logging(log_file: Path) -> logging.handlers.QueueListener:
         "%(asctime)s %(levelname)s %(name)s: %(session_id)s%(message)s",
         datefmt="%H:%M:%S",
     )
-    fh = logging.FileHandler(log_file)
-    fh.setLevel(logging.DEBUG)
+    fh = logging.handlers.RotatingFileHandler(
+        log_file,
+        maxBytes=5_000_000,
+        backupCount=2,
+    )
+    fh.setLevel(logging.INFO)
     fh.setFormatter(fmt)
 
     # Non-blocking: QueueHandler enqueues instantly; QueueListener writes

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -20,6 +22,33 @@ def _isolate_registry_db(tmp_path_factory):
         return_value=db_dir / "registry.db",
     ):
         yield
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_data_dir(tmp_path_factory):
+    """Prevent tests from writing log files or other data to the real data dir."""
+    data_dir = tmp_path_factory.mktemp("data")
+    (data_dir / "logs").mkdir()
+    with (
+        patch("summon_claude.sessions.session.get_data_dir", return_value=data_dir),
+        patch("summon_claude.cli.session.get_data_dir", return_value=data_dir),
+        patch("summon_claude.cli.config.get_data_dir", return_value=data_dir),
+        patch("summon_claude.daemon.get_data_dir", return_value=data_dir),
+    ):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_root_logger_handlers():
+    """Remove any QueueHandlers leaked onto the root logger by tests."""
+    root = logging.getLogger()
+    before = list(root.handlers)
+    yield
+    for handler in list(root.handlers):
+        if handler not in before:
+            root.removeHandler(handler)
+            if isinstance(handler, logging.handlers.QueueHandler):
+                handler.close()
 
 
 @pytest.fixture

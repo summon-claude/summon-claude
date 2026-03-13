@@ -144,22 +144,30 @@ class TestFormatLogOption:
         daemon = tmp_path / "daemon.log"
         daemon.write_text("test")
         result = format_log_option(daemon)
-        assert result == "daemon    (daemon log)"
+        assert "daemon" in result and "daemon log" in result
 
     def test_session_log_recent(self, tmp_path):
         log = tmp_path / "aaaa1111-2222-3333-4444-555566667777.log"
         log.write_text("test")
         result = format_log_option(log)
         assert "aaaa1111" in result
-        assert "\u2026" in result
         assert "0m ago" in result
+
+    def test_session_log_with_metadata(self, tmp_path):
+        log = tmp_path / "aaaa1111-2222-3333-4444-555566667777.log"
+        log.write_text("test")
+        meta = {"status": "active", "session_name": "my-proj", "slack_channel_name": "#summon-x"}
+        result = format_log_option(log, session_meta=meta)
+        assert "aaaa1111" in result
+        assert "active" in result
+        assert "my-proj" in result
+        assert "#summon-x" in result
 
     def test_short_stem_no_ellipsis(self, tmp_path):
         log = tmp_path / "short.log"
         log.write_text("test")
         result = format_log_option(log)
         assert "short" in result
-        assert "\u2026" not in result
 
     def test_session_log_hours_old(self, tmp_path):
         log = tmp_path / "bbbb1111-2222-3333-4444-555566667777.log"
@@ -179,7 +187,7 @@ class TestFormatLogOption:
         log = tmp_path / "daemon.log"
         log.write_text("test")
         result = format_log_option(str(log))
-        assert result == "daemon    (daemon log)"
+        assert "daemon" in result and "daemon log" in result
 
     def test_handles_nonexistent_file(self, tmp_path):
         log = tmp_path / "missing.log"
@@ -247,7 +255,36 @@ class TestInteractiveSelect:
             mock_stdin.isatty.return_value = True
             result = interactive_select(["Option A", "Option B"], "Pick one:", ctx)
         assert result == ("Option B", 1)
-        mock_pick.assert_called_once_with(["Option A", "Option B"], "Pick one:", indicator=">")
+        mock_pick.assert_called_once_with(
+            ["Option A", "Option B", "\u2190 Back"],
+            "Pick one:  (ctrl+c to exit)",
+            indicator=">",
+        )
+
+    def test_interactive_hint_on_first_line_with_multiline_title(self):
+        """ctrl+c hint goes on the title line, not the subheader line."""
+        ctx = _make_ctx()
+        with (
+            patch("summon_claude.cli.interactive.sys.stdin") as mock_stdin,
+            patch("pick.pick", return_value=("A", 0)) as mock_pick,
+        ):
+            mock_stdin.isatty.return_value = True
+            interactive_select(["A"], "Select:\n  HEADER ROW", ctx)
+        called_title = mock_pick.call_args[0][1]
+        lines = called_title.split("\n")
+        assert "(ctrl+c to exit)" in lines[0]
+        assert "(ctrl+c to exit)" not in lines[1]
+
+    def test_interactive_back_returns_none(self):
+        """Selecting the Back option returns None (cancel)."""
+        ctx = _make_ctx()
+        with (
+            patch("summon_claude.cli.interactive.sys.stdin") as mock_stdin,
+            patch("pick.pick", return_value=("\u2190 Back", 2)) as _mock_pick,
+        ):
+            mock_stdin.isatty.return_value = True
+            result = interactive_select(["Option A", "Option B"], "Pick one:", ctx)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +387,11 @@ class TestInteractiveMultiSelect:
             result = interactive_multi_select(["A", "B", "C"], "Pick:", ctx)
         assert result == [("A", 0), ("C", 2)]
         mock_pick.assert_called_once_with(
-            ["A", "B", "C"], "Pick:", multiselect=True, min_selection_count=1, indicator=">"
+            ["A", "B", "C"],
+            "Pick:  (ctrl+c to exit)",
+            multiselect=True,
+            min_selection_count=1,
+            indicator=">",
         )
 
 
@@ -404,8 +445,8 @@ class TestSessionLogsInteractive:
         assert "daemon" in result.output
         assert "aaaa1111" in result.output
 
-    def test_logs_single_file_auto_selects(self, tmp_path):
-        """Interactive mode with one log file auto-selects and shows content."""
+    def test_logs_single_file_shows_picker(self, tmp_path):
+        """Interactive mode with one log file still shows the picker."""
         log_dir = tmp_path / "logs"
         log_dir.mkdir()
         log_file = log_dir / "aaaa1111-2222-3333-4444-555566667777.log"
@@ -413,12 +454,11 @@ class TestSessionLogsInteractive:
         with (
             patch("summon_claude.cli.session.get_data_dir", return_value=tmp_path),
             patch("summon_claude.cli.session.is_interactive", return_value=True),
+            patch("pick.pick", return_value=("aaaa1111", 0)),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["session", "logs"])
         assert result.exit_code == 0
-        assert "Auto-selecting" in result.output
-        assert "log line 1" in result.output
 
     def test_logs_interactive_pick_selects_file(self, tmp_path):
         """Interactive mode with multiple logs presents picker."""
