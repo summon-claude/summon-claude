@@ -327,6 +327,25 @@ class TestPermissionEphemeral:
         handler = PermissionHandler(router, config)
         assert handler._authenticated_user_id == ""
 
+    async def test_permission_ping_goes_to_main_channel(self):
+        """Permission notification ping should go to main channel, not thread."""
+        handler, provider, router = make_handler(authenticated_user_id="U_PING")
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post = AsyncMock(return_value=AsyncMock(ts="1234"))
+
+        await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
+
+        # post() should have been called with the permission ping (no thread_ts)
+        ping_calls = [
+            c
+            for c in provider.post.call_args_list
+            if "Permission needed" in str(c) and "U_PING" in str(c)
+        ]
+        assert len(ping_calls) == 1
+        # Main channel post = no thread_ts kwarg
+        call_kwargs = ping_calls[0].kwargs
+        assert "thread_ts" not in call_kwargs or call_kwargs.get("thread_ts") is None
+
 
 class TestPermissionSuggestions:
     """Test permission suggestions behavior (BUG-013)."""

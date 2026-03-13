@@ -458,8 +458,9 @@ class TestStopNoArgsInteractive:
 
     def test_stop_no_args_daemon_not_running(self):
         """No daemon → 'Daemon is not running.' exit 0."""
-        runner = CliRunner()
-        result = runner.invoke(cli, ["stop"])
+        with patch("summon_claude.cli.stop.is_daemon_running", return_value=False):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["stop"])
         assert result.exit_code == 0
         assert "Daemon is not running" in result.output
 

@@ -26,13 +26,19 @@ from slack_sdk.http_retry.builtin_async_handlers import (
 )
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude.config import SummonConfig, discover_installed_plugins, get_data_dir
+from summon_claude.config import (
+    SummonConfig,
+    discover_installed_plugins,
+    discover_plugin_skills,
+    get_data_dir,
+)
 from summon_claude.sessions.auth import SessionAuth
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
     CommandResult,
     find_commands,
+    register_plugin_skills,
     validate_sdk_commands,
 )
 from summon_claude.sessions.commands import (
@@ -192,9 +198,12 @@ def _format_topic(
     model: str | None,
     cwd: str,
     git_branch: str | None,
-    context: ContextUsage | None,
 ) -> str:
-    """Build the channel topic string with session metadata."""
+    """Build the channel topic string with session metadata.
+
+    Only includes stable metadata (model, cwd, branch) — not per-turn
+    context usage, which changes every turn and belongs in the turn summary.
+    """
     # Model: strip 'claude-' prefix for brevity
     if model and model.startswith("claude-"):
         model_short = model[len("claude-") :]
@@ -207,19 +216,10 @@ def _format_topic(
     except ValueError:
         cwd_display = cwd
 
-    # Context usage string
-    if context is not None:
-        ctx_k = context.input_tokens // 1000
-        win_k = context.context_window // 1000
-        ctx_str = f"{ctx_k}k/{win_k}k ({context.percentage:.0f}%)"
-    else:
-        ctx_str = "--"
-
     parts = [f"\U0001f916 {model_short}", f"\U0001f4c2 {cwd_display}"]
     if git_branch:
         branch_display = git_branch[:50]
         parts.append(f"\U0001f33f {branch_display}")
-    parts.append(f"\U0001f4ca {ctx_str}")
 
     topic = " \u00b7 ".join(parts)
     return topic[:250]
@@ -358,6 +358,8 @@ class SummonSession:
         self._total_turns: int = 0
         self._last_context: ContextUsage | None = None
         self._last_model_seen: str | None = None
+        self._last_topic_model: str | None = None
+        self._last_topic_branch: str | None = None
         self._claude_session_id: str | None = None
         self._available_models: list[dict[str, str]] = []
 
@@ -597,12 +599,9 @@ class SummonSession:
         await _post_session_header(client, self._cwd, self._model, self._session_id)
 
         git_branch = await _get_git_branch(self._cwd)
-        topic = _format_topic(
-            model=self._model,
-            cwd=self._cwd,
-            git_branch=git_branch,
-            context=None,
-        )
+        self._last_topic_model = self._model
+        self._last_topic_branch = git_branch
+        topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
         try:
             await client.set_topic(topic)
         except Exception as e:
@@ -700,7 +699,7 @@ class SummonSession:
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
 
-    async def _run_message_loop(  # noqa: PLR0912
+    async def _run_message_loop(  # noqa: PLR0912, PLR0915
         self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Listen for Slack messages and forward them to Claude."""
@@ -746,6 +745,14 @@ class SummonSession:
                             self._model = init_model
                 except Exception as e:
                     logger.debug("Could not retrieve server info: %s", e)
+
+                # Register plugin skills/commands for !help and passthrough
+                try:
+                    plugin_skills = discover_plugin_skills()
+                    if plugin_skills:
+                        register_plugin_skills(plugin_skills)
+                except Exception as e:
+                    logger.debug("Could not discover plugin skills: %s", e)
 
                 while not self._shutdown_event.is_set():
                     try:
@@ -838,21 +845,26 @@ class SummonSession:
                 cost = stream_result.result.total_cost_usd or 0.0
                 self._total_cost += cost
                 await rt.registry.record_turn(self._session_id, cost)
-                summary = streamer.finalize_turn()
-                await streamer.update_turn_summary(summary)
                 if stream_result.context is not None:
                     self._last_context = stream_result.context
                 if stream_result.model is not None:
                     self._last_model_seen = stream_result.model
+                summary = streamer.finalize_turn(context=self._last_context)
+                await streamer.update_turn_summary(summary)
+                # Only update topic if model or branch changed
                 try:
+                    current_model = self._last_model_seen or self._model
                     git_branch = await _get_git_branch(self._cwd)
-                    topic = _format_topic(
-                        model=self._last_model_seen or self._model,
-                        cwd=self._cwd,
-                        git_branch=git_branch,
-                        context=self._last_context,
-                    )
-                    await rt.client.set_topic(topic)
+                    if (
+                        current_model != self._last_topic_model
+                        or git_branch != self._last_topic_branch
+                    ):
+                        topic = _format_topic(
+                            model=current_model, cwd=self._cwd, git_branch=git_branch
+                        )
+                        await rt.client.set_topic(topic)
+                        self._last_topic_model = current_model
+                        self._last_topic_branch = git_branch
                 except Exception:
                     logger.warning("Post-turn topic update failed", exc_info=True)
 
@@ -1386,11 +1398,11 @@ class SummonSession:
                 modified_text = modified_text[: match.start] + modified_text[match.end :]
                 continue
 
-            # PASSTHROUGH mid-message — swap ! to /
-            if match.prefix == "!":
-                modified_text = (
-                    modified_text[: match.start] + "/" + modified_text[match.start + 1 :]
-                )
+            # PASSTHROUGH mid-message — replace with /canonical
+            # Use match.name (canonical, alias-resolved) not raw_name,
+            # so short aliases like !session-start expand to /dev-essentials:session-start
+            replacement = f"/{match.name}"
+            modified_text = modified_text[: match.start] + replacement + modified_text[match.end :]
 
         # Add emoji reaction for blocked/unknown
         if has_blocked and thread_ts:

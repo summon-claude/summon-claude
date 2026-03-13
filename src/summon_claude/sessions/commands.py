@@ -7,7 +7,10 @@ import re
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from summon_claude.config import PluginSkill
 
 logger = logging.getLogger(__name__)
 
@@ -65,28 +68,60 @@ class CommandMatch:
 # ------------------------------------------------------------------
 
 
-async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult:
+async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult:  # noqa: PLR0912
+    # Build skill grouping (used by both detail and listing paths)
+    skill_grouped: dict[str, list[str]] = {}
+    for n, d in COMMAND_ACTIONS.items():
+        if not d.handler and not d.block_reason and ":" in n:
+            plugin, _, skill = n.partition(":")
+            skill_grouped.setdefault(plugin, []).append(skill)
+
     if args:
         cmd_name = args[0].lower().lstrip("!/")
         canonical = _ALIAS_LOOKUP.get(cmd_name, cmd_name)
+
+        # Check if arg is a plugin name — list its skills
+        if cmd_name in skill_grouped:
+            skills = sorted(skill_grouped[cmd_name])
+            lines = [f"*{cmd_name}* plugin skills:"]
+            lines.extend(f"  `!{cmd_name}:{s}`" for s in skills)
+            return CommandResult(text="\n".join(lines))
+
         defn = COMMAND_ACTIONS.get(canonical)
         if defn is None:
             return CommandResult(text=f":question: Unknown command `!{cmd_name}`.")
 
-        action = "local" if defn.handler else ("blocked" if defn.block_reason else "passthrough")
+        if defn.handler:
+            action = "local"
+        elif defn.block_reason:
+            action = "blocked"
+        elif ":" in canonical:
+            action = "skill"
+        else:
+            action = "passthrough"
         lines = [f"*`!{canonical}`* — {defn.description}", f"_Type: {action}_"]
         if defn.aliases:
             lines.append(f"_Aliases: {', '.join(f'`!{a}`' for a in defn.aliases)}_")
+        # Show short aliases from _ALIAS_LOOKUP (e.g. plugin skills)
+        short_aliases = [a for a, target in _ALIAS_LOOKUP.items() if target == canonical]
+        if short_aliases:
+            lines.append(f"_Short: {', '.join(f'`!{a}`' for a in sorted(short_aliases))}_")
         return CommandResult(text="\n".join(lines))
 
     local_names = sorted(n for n, d in COMMAND_ACTIONS.items() if d.handler)
     passthrough_names = sorted(
-        n for n, d in COMMAND_ACTIONS.items() if not d.handler and not d.block_reason
+        n
+        for n, d in COMMAND_ACTIONS.items()
+        if not d.handler and not d.block_reason and ":" not in n
     )
 
     lines = ["*Session* (local): " + ", ".join(f"`!{n}`" for n in local_names)]
     if passthrough_names:
         lines.append("*Claude CLI*: " + ", ".join(f"`!{n}`" for n in passthrough_names))
+    if skill_grouped:
+        parts = [f"`{p}` ({len(ss)})" for p, ss in sorted(skill_grouped.items())]
+        lines.append("*Skills*: " + ", ".join(parts))
+        lines.append("_Use `!help PLUGIN` to list a plugin's skills._")
     lines.append("_Use `!command` to run. `!help COMMAND` for details._")
 
     return CommandResult(text="\n".join(lines))
@@ -325,8 +360,8 @@ def validate_sdk_commands(sdk_commands: Sequence[dict[str, Any] | str]) -> list[
         if not name:
             continue
 
-        # Validate command name format (alphanumeric, hyphens, underscores only)
-        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_-]{0,63}$", name):
+        # Validate command name format (alphanumeric, hyphens, underscores, colons)
+        if not re.match(r"^[a-zA-Z][a-zA-Z0-9_:-]{0,63}$", name):
             logger.warning("SDK command '%s' has invalid name format — skipping", name)
             continue
 
@@ -344,6 +379,43 @@ def validate_sdk_commands(sdk_commands: Sequence[dict[str, Any] | str]) -> list[
             )
 
     return unknown
+
+
+def register_plugin_skills(skills: Sequence[PluginSkill]) -> int:
+    """Register discovered plugin skills/commands as passthrough entries.
+
+    Adds both the fully-qualified name (``plugin:skill``) and, if unambiguous,
+    a short alias (``skill``) so users can reference either form.
+
+    Returns the number of newly registered entries.
+    """
+    registered = 0
+    short_names: dict[str, str] = {}  # short_name → plugin_name (for collision detection)
+
+    for skill in skills:
+        fq_name = f"{skill.plugin_name}:{skill.name}"
+        if fq_name not in COMMAND_ACTIONS:
+            COMMAND_ACTIONS[fq_name] = CommandDef(description=skill.description or fq_name)
+            registered += 1
+
+        # Track short-name ownership for alias registration
+        if skill.name in short_names:
+            short_names[skill.name] = ""  # collision — mark ambiguous
+        else:
+            short_names[skill.name] = skill.plugin_name
+
+    # Register unambiguous short-name aliases
+    for short_name, plugin in short_names.items():
+        if not plugin:
+            continue  # ambiguous — skip
+        if short_name in COMMAND_ACTIONS or short_name in _ALIAS_LOOKUP:
+            continue  # already a built-in, SDK command, or registered alias
+        fq_name = f"{plugin}:{short_name}"
+        _ALIAS_LOOKUP[short_name] = fq_name
+        registered += 1
+
+    logger.info("Registered %d plugin skill entries", registered)
+    return registered
 
 
 # ------------------------------------------------------------------
@@ -393,7 +465,8 @@ def parse(text: str) -> tuple[str, list[str]] | None:
 # Match !cmd or /cmd after whitespace or start-of-string.
 # Negative lookbehind (?<![:/]) prevents matching inside URLs (https://...)
 # or path-like tokens (repo/review).
-_COMMAND_RE = re.compile(r"(?:^|(?<=\s))(?<![:/])([!/])([a-zA-Z][a-zA-Z0-9_-]{0,63})")
+# Colons allowed for plugin:skill-name syntax (e.g. !dev-essentials:session-start).
+_COMMAND_RE = re.compile(r"(?:^|(?<=\s))(?<![:/])([!/])([a-zA-Z][a-zA-Z0-9_:-]{0,63})")
 
 
 def find_commands(text: str) -> list[CommandMatch]:

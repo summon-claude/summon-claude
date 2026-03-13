@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import field_validator
@@ -102,6 +104,114 @@ def discover_installed_plugins() -> list[dict]:
 
     logger.debug("Discovered %d installed plugins", len(plugins))
     return plugins
+
+
+# ------------------------------------------------------------------
+# Plugin skill / command discovery
+# ------------------------------------------------------------------
+
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---", re.DOTALL)
+
+
+@dataclass(frozen=True)
+class PluginSkill:
+    """A skill or command discovered from an installed Claude Code plugin."""
+
+    plugin_name: str
+    name: str
+    description: str
+
+
+def _parse_frontmatter(text: str) -> dict[str, str]:
+    """Extract YAML-like key: value pairs from ``---`` frontmatter.
+
+    Handles simple ``key: value`` pairs plus YAML block scalars (``|``, ``>``,
+    ``|-``, ``>-``) where continuation lines are indented.
+    """
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}
+
+    result: dict[str, str] = {}
+    current_key: str | None = None
+    current_lines: list[str] = []
+
+    for line in m.group(1).splitlines():
+        # New key: value (non-indented line with colon)
+        if line and not line[0].isspace() and ":" in line:
+            # Flush previous key
+            if current_key is not None:
+                result[current_key] = " ".join(current_lines)
+            key, _, val = line.partition(":")
+            current_key = key.strip()
+            val = val.strip().strip("\"'")
+            # Block scalar indicator — value is on continuation lines
+            current_lines = [] if val in ("|", ">", "|-", ">-") else [val] if val else []
+        elif current_key is not None and line and line[0].isspace():
+            # Continuation line for block scalar
+            current_lines.append(line.strip())
+
+    # Flush last key
+    if current_key is not None:
+        result[current_key] = " ".join(current_lines)
+
+    return result
+
+
+def discover_plugin_skills() -> list[PluginSkill]:
+    """Enumerate skills and commands from all installed Claude Code plugins.
+
+    For each plugin returned by ``discover_installed_plugins()``, reads:
+    - ``.claude-plugin/plugin.json`` for the plugin name (falls back to dir name)
+    - ``commands/*.md`` and ``commands/*/COMMAND.md`` for user-invocable commands
+    - ``skills/*/SKILL.md`` for model/user-invocable skills
+
+    Returns a flat list of :class:`PluginSkill` entries.
+    """
+    plugins = discover_installed_plugins()
+    results: list[PluginSkill] = []
+
+    for entry in plugins:
+        plugin_path = Path(entry["path"])
+
+        # Read plugin name from manifest; fall back to parent dir name
+        # (some plugins like claude-plugins-official/plugin-dev have no manifest)
+        manifest = plugin_path / ".claude-plugin" / "plugin.json"
+        plugin_name = plugin_path.parent.name  # default: cache/<org>/<name>/<ver>
+        if manifest.exists():
+            try:
+                meta = json.loads(manifest.read_text())
+                plugin_name = meta.get("name", plugin_name)
+            except (json.JSONDecodeError, OSError):
+                pass
+
+        # Discover commands — two patterns:
+        #   commands/<name>.md (flat)
+        #   commands/<name>/COMMAND.md (subdirectory)
+        commands_dir = plugin_path / "commands"
+        if commands_dir.is_dir():
+            for md_file in sorted(commands_dir.glob("*.md")):
+                fm = _parse_frontmatter(md_file.read_text(errors="replace"))
+                skill_name = fm.get("name", md_file.stem)
+                desc = fm.get("description", "")
+                results.append(PluginSkill(plugin_name, skill_name, desc))
+            for cmd_md in sorted(commands_dir.glob("*/COMMAND.md")):
+                fm = _parse_frontmatter(cmd_md.read_text(errors="replace"))
+                skill_name = fm.get("name", cmd_md.parent.name)
+                desc = fm.get("description", "")
+                results.append(PluginSkill(plugin_name, skill_name, desc))
+
+        # Discover skills/*/SKILL.md
+        skills_dir = plugin_path / "skills"
+        if skills_dir.is_dir():
+            for skill_md in sorted(skills_dir.glob("*/SKILL.md")):
+                fm = _parse_frontmatter(skill_md.read_text(errors="replace"))
+                skill_name = fm.get("name", skill_md.parent.name)
+                desc = fm.get("description", "")
+                results.append(PluginSkill(plugin_name, skill_name, desc))
+
+    logger.debug("Discovered %d plugin skills/commands", len(results))
+    return results
 
 
 class SummonConfig(BaseSettings):

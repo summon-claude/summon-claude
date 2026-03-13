@@ -8,7 +8,13 @@ from unittest.mock import patch
 
 import pytest
 
-from summon_claude.config import SummonConfig, discover_installed_plugins
+from summon_claude.config import (
+    PluginSkill,
+    SummonConfig,
+    _parse_frontmatter,
+    discover_installed_plugins,
+    discover_plugin_skills,
+)
 
 
 def _make_config(**overrides) -> SummonConfig:
@@ -188,3 +194,156 @@ class TestDiscoverInstalledPlugins:
         assert len(result) == 1
         assert result[0]["type"] == "local"
         assert result[0]["path"] == str(plugin_dir)
+
+
+# ------------------------------------------------------------------
+# Frontmatter parsing
+# ------------------------------------------------------------------
+
+
+class TestParseFrontmatter:
+    def test_basic_frontmatter(self):
+        text = "---\nname: my-skill\ndescription: A skill\n---\n# Body"
+        fm = _parse_frontmatter(text)
+        assert fm["name"] == "my-skill"
+        assert fm["description"] == "A skill"
+
+    def test_no_frontmatter(self):
+        assert _parse_frontmatter("# Just markdown") == {}
+
+    def test_quoted_values_stripped(self):
+        text = "---\nname: \"my-skill\"\ndescription: 'A skill'\n---\n"
+        fm = _parse_frontmatter(text)
+        assert fm["name"] == "my-skill"
+        assert fm["description"] == "A skill"
+
+    def test_empty_frontmatter(self):
+        text = "---\n---\n# Body"
+        assert _parse_frontmatter(text) == {}
+
+    def test_block_scalar_folded(self):
+        text = "---\nname: my-skill\ndescription: >-\n  First line\n  second line\n---\n"
+        fm = _parse_frontmatter(text)
+        assert fm["name"] == "my-skill"
+        assert fm["description"] == "First line second line"
+
+    def test_block_scalar_literal(self):
+        text = "---\nname: my-skill\ndescription: |\n  Line one\n  Line two\n---\n"
+        fm = _parse_frontmatter(text)
+        assert fm["description"] == "Line one Line two"
+
+    def test_list_value_captured(self):
+        text = "---\nname: test\nallowed-tools: [Bash, Read, Write]\n---\n"
+        fm = _parse_frontmatter(text)
+        assert fm["allowed-tools"] == "[Bash, Read, Write]"
+
+
+# ------------------------------------------------------------------
+# Plugin skill discovery
+# ------------------------------------------------------------------
+
+
+def _make_plugin(tmp_path, plugin_name, *, commands=None, skills=None):
+    """Create a plugin directory structure under tmp_path/.claude/."""
+    plugin_dir = tmp_path / ".claude" / "plugins" / "cache" / plugin_name
+    manifest_dir = plugin_dir / ".claude-plugin"
+    manifest_dir.mkdir(parents=True)
+    (manifest_dir / "plugin.json").write_text(json.dumps({"name": plugin_name}))
+
+    if commands:
+        cmd_dir = plugin_dir / "commands"
+        cmd_dir.mkdir()
+        for name, desc in commands.items():
+            (cmd_dir / f"{name}.md").write_text(f"---\ndescription: {desc}\n---\n")
+
+    if skills:
+        skills_dir = plugin_dir / "skills"
+        for name, desc in skills.items():
+            skill_dir = skills_dir / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(f"---\nname: {name}\ndescription: {desc}\n---\n")
+
+    # Register plugin in installed_plugins.json
+    plugins_dir = tmp_path / ".claude" / "plugins"
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    registry_path = plugins_dir / "installed_plugins.json"
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else []
+    registry.append({"installPath": str(plugin_dir)})
+    registry_path.write_text(json.dumps(registry))
+
+    return plugin_dir
+
+
+class TestDiscoverPluginSkills:
+    def test_discovers_commands(self, tmp_path):
+        _make_plugin(tmp_path, "my-plugin", commands={"session-start": "Start session"})
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            results = discover_plugin_skills()
+        assert len(results) == 1
+        assert results[0] == PluginSkill("my-plugin", "session-start", "Start session")
+
+    def test_discovers_skills(self, tmp_path):
+        _make_plugin(tmp_path, "my-plugin", skills={"uv-python": "Use uv"})
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            results = discover_plugin_skills()
+        assert len(results) == 1
+        assert results[0] == PluginSkill("my-plugin", "uv-python", "Use uv")
+
+    def test_discovers_both(self, tmp_path):
+        _make_plugin(
+            tmp_path,
+            "dev-tools",
+            commands={"init": "Initialize"},
+            skills={"linting": "Lint code"},
+        )
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            results = discover_plugin_skills()
+        assert len(results) == 2
+        names = {r.name for r in results}
+        assert names == {"init", "linting"}
+
+    def test_multiple_plugins(self, tmp_path):
+        _make_plugin(tmp_path, "plugin-a", commands={"cmd-a": "A"})
+        _make_plugin(tmp_path, "plugin-b", skills={"skill-b": "B"})
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            results = discover_plugin_skills()
+        assert len(results) == 2
+        plugins = {r.plugin_name for r in results}
+        assert plugins == {"plugin-a", "plugin-b"}
+
+    def test_no_plugins_returns_empty(self, tmp_path):
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            assert discover_plugin_skills() == []
+
+    def test_missing_manifest_skipped(self, tmp_path):
+        """Plugin dir without plugin.json is skipped."""
+        plugin_dir = tmp_path / ".claude" / "plugins" / "cache" / "broken"
+        plugin_dir.mkdir(parents=True)
+
+        plugins_dir = tmp_path / ".claude" / "plugins"
+        (plugins_dir / "installed_plugins.json").write_text(
+            json.dumps([{"installPath": str(plugin_dir)}])
+        )
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            assert discover_plugin_skills() == []
+
+    def test_skill_name_from_frontmatter(self, tmp_path):
+        """Skill name comes from frontmatter 'name' field, not directory name."""
+        plugin_dir = tmp_path / ".claude" / "plugins" / "cache" / "test-plugin"
+        manifest_dir = plugin_dir / ".claude-plugin"
+        manifest_dir.mkdir(parents=True)
+        (manifest_dir / "plugin.json").write_text(json.dumps({"name": "test-plugin"}))
+
+        skill_dir = plugin_dir / "skills" / "dir-name"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: actual-name\ndescription: X\n---\n")
+
+        plugins_dir = tmp_path / ".claude" / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        (plugins_dir / "installed_plugins.json").write_text(
+            json.dumps([{"installPath": str(plugin_dir)}])
+        )
+
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            results = discover_plugin_skills()
+        assert results[0].name == "actual-name"
