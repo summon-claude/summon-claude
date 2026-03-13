@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import pathlib
 import re
+import shutil
+import time
 
 import click
 
@@ -18,6 +20,7 @@ from summon_claude.cli.formatting import (
 )
 from summon_claude.cli.helpers import resolve_or_pick
 from summon_claude.cli.interactive import (
+    LOG_PICKER_HEADER,
     format_log_option,
     format_session_option,
     interactive_multi_select,
@@ -100,19 +103,24 @@ async def session_logs_impl(ctx: click.Context, session_id: str | None, tail: in
             log_files = [f for f in log_files if f.name != "daemon.log"]
         ordered_paths.extend(log_files)
 
-        if len(ordered_paths) == 1:
-            log_file = ordered_paths[0]
-            click.echo(f"Auto-selecting {log_file.name}")
-        else:
-            options = [format_log_option(p) for p in ordered_paths]
-            result = interactive_select(options, "Select log file:", ctx)
-            if result is None:
-                click.echo("No log selected.")
-                return
-            log_file = ordered_paths[result[1]]
+        # Cross-reference with session registry for rich labels
+        session_lookup: dict[str, dict] = {}
+        try:
+            async with SessionRegistry() as registry:
+                for s in await registry.list_all(limit=500):
+                    session_lookup[s["session_id"]] = s
+        except Exception as exc:
+            logger.debug("Could not load session metadata for log picker: %s", exc)
+
+        options = [format_log_option(p, session_lookup.get(p.stem)) for p in ordered_paths]
+        title = f"Select log file:\n  {LOG_PICKER_HEADER}"
+        result = interactive_select(options, title, ctx)
+        if result is None:
+            click.echo("No log selected.")
+            return
+        log_file = ordered_paths[result[1]]
         lines = log_file.read_text().splitlines()
-        for line in lines[-tail:]:
-            click.echo(line)
+        _page_lines(lines[-tail:])
         return
 
     # Resolve partial ID or channel name to full session_id
@@ -129,8 +137,20 @@ async def session_logs_impl(ctx: click.Context, session_id: str | None, tail: in
         return
 
     lines = log_file.read_text().splitlines()
-    for line in lines[-tail:]:
-        click.echo(line)
+    _page_lines(lines[-tail:])
+
+
+def _page_lines(lines: list[str]) -> None:
+    """Output lines, using the system pager only when output exceeds terminal height."""
+    if not lines:
+        click.echo("(empty log file)")
+        return
+    text = "\n".join(lines) + "\n"
+    terminal_height = shutil.get_terminal_size().lines
+    if len(lines) > terminal_height - 2:
+        click.echo_via_pager(text)
+    else:
+        click.echo(text, nl=False)
 
 
 async def async_session_cleanup(ctx: click.Context, *, archive: bool = False) -> None:
@@ -179,39 +199,70 @@ async def async_session_cleanup(ctx: click.Context, *, archive: bool = False) ->
             selected_indices = {idx for _, idx in selected}
             stale = [s for i, s in enumerate(stale) if i in selected_indices]
 
-        if not stale:
-            echo("No stale sessions found.", ctx)
-            return
-
-        # Try to construct a Slack client for archiving channels (best-effort, only if --archive)
-        slack_client = None
-        if archive:
-            try:
-                from slack_sdk.web.async_client import AsyncWebClient  # noqa: PLC0415
-
-                config_path: str | None = ctx.obj.get("config_path") if ctx.obj else None
-                config = SummonConfig.from_file(config_path)
-                slack_client = AsyncWebClient(token=config.slack_bot_token)
-            except Exception as e:
-                logger.debug("Could not initialize Slack client for cleanup: %s", e)
-
-        for session in stale:
-            session_id = session["session_id"]
-            channel_id = session.get("slack_channel_id")
-
-            if session_id in pid_stale_ids:
-                reason = f"Owner process (pid {session['pid']}) no longer running"
-            else:
-                reason = "Not tracked by running daemon (orphaned)"
-
-            # Archive the Slack channel only if --archive flag was passed
-            if archive and slack_client and channel_id:
+        if stale:
+            # Best-effort Slack client for archiving channels
+            slack_client = None
+            if archive:
                 try:
-                    await slack_client.conversations_archive(channel=channel_id)
-                    logger.info("Archived channel %s for stale session %s", channel_id, session_id)
+                    from slack_sdk.web.async_client import AsyncWebClient  # noqa: PLC0415
+
+                    config_path: str | None = ctx.obj.get("config_path") if ctx.obj else None
+                    config = SummonConfig.from_file(config_path)
+                    slack_client = AsyncWebClient(token=config.slack_bot_token)
                 except Exception as e:
-                    logger.debug("Could not archive channel %s: %s", channel_id, e)
+                    logger.debug("Could not initialize Slack client for cleanup: %s", e)
 
-            await registry.mark_stale(session_id, reason)
+            for session in stale:
+                session_id = session["session_id"]
+                channel_id = session.get("slack_channel_id")
 
-        click.echo(f"Cleaned up {len(stale)} stale session(s).")
+                if session_id in pid_stale_ids:
+                    reason = f"Owner process (pid {session['pid']}) no longer running"
+                else:
+                    reason = "Not tracked by running daemon (orphaned)"
+
+                # Archive the Slack channel only if --archive flag was passed
+                if archive and slack_client and channel_id:
+                    try:
+                        await slack_client.conversations_archive(channel=channel_id)
+                        logger.info(
+                            "Archived channel %s for session %s",
+                            channel_id,
+                            session_id,
+                        )
+                    except Exception as e:
+                        logger.debug("Could not archive channel %s: %s", channel_id, e)
+
+                await registry.mark_stale(session_id, reason)
+
+            click.echo(f"Cleaned up {len(stale)} stale session(s).")
+        else:
+            echo("No stale sessions found.", ctx)
+
+        # Clean up orphan log files (no matching session in registry)
+        log_dir = get_data_dir() / "logs"
+        if log_dir.exists():
+            all_session_ids = {s["session_id"] for s in await registry.list_all(limit=10_000)}
+            removed = 0
+            recent_cutoff = time.time() - 60
+            for log_file in log_dir.glob("*.log"):
+                if log_file.name == "daemon.log":
+                    continue
+                if log_file.stem not in all_session_ids:
+                    try:
+                        if log_file.stat().st_mtime < recent_cutoff:
+                            log_file.unlink()
+                            removed += 1
+                    except OSError:
+                        pass
+            # Remove rotated daemon logs older than 7 days
+            week_ago = time.time() - 7 * 86400
+            for rotated in log_dir.glob("daemon.log.*"):
+                try:
+                    if rotated.stat().st_mtime < week_ago:
+                        rotated.unlink()
+                        removed += 1
+                except OSError:
+                    pass
+            if removed:
+                click.echo(f"Removed {removed} orphan log file(s).")
