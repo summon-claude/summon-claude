@@ -66,6 +66,7 @@ from summon_claude.slack.canvas_templates import get_canvas_template
 from summon_claude.slack.client import SlackClient
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
+from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
 
 if TYPE_CHECKING:
     from summon_claude.event_dispatcher import EventDispatcher
@@ -320,6 +321,7 @@ class SessionOptions:
     model: str | None = None
     effort: str = "high"
     resume: str | None = None
+    pm_profile: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -380,6 +382,7 @@ class SummonSession:
         parent_channel_id: str | None = None,
     ) -> None:
         self._config = config
+        self._options = options
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -809,11 +812,27 @@ class SummonSession:
         self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Create SDK client, then run preprocessor + response consumer concurrently."""
+        is_pm = self._options.pm_profile
+
+        # Channel scoping: regular sessions can read only their own channel.
+        # PM sessions get unrestricted access (dynamic resolver added by Global PM plan).
+        channel_scope = None if is_pm else lambda: {rt.client.channel_id}
         slack_mcp = create_summon_mcp_server(
             rt.client,
-            allowed_channels=lambda: {rt.client.channel_id},
+            allowed_channels=channel_scope,
             cwd=self._cwd,
         )
+        mcp_servers: dict = {"summon-slack": slack_mcp}
+
+        if is_pm:
+            cli_mcp = create_summon_cli_mcp_server(
+                registry=rt.registry,
+                session_id=self._session_id,
+                authenticated_user_id=self._authenticated_user_id,
+                channel_id=rt.client.channel_id,
+                cwd=self._cwd,
+            )
+            mcp_servers["summon-cli"] = cli_mcp
 
         options = ClaudeAgentOptions(
             cwd=self._cwd,
@@ -823,7 +842,7 @@ class SummonSession:
             setting_sources=["user", "project"],
             plugins=discover_installed_plugins(),
             can_use_tool=rt.permission_handler.handle,
-            mcp_servers={"summon-slack": slack_mcp},
+            mcp_servers=mcp_servers,
             model=self._model,
             # TODO: if config gains thinking_budget_tokens, use
             # ThinkingConfigEnabled(budget_tokens=N) when enable_thinking
