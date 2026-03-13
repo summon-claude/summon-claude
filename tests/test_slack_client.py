@@ -230,3 +230,59 @@ class TestSlackClient:
         web.assistant_threads_setStatus.side_effect = Exception("api error")
         # Should not raise
         await client.set_thread_status("1.0", "Thinking...")
+
+    async def test_canvas_create_returns_canvas_id(self):
+        client, web = self._make_client()
+        web.api_call = AsyncMock(return_value={"canvas_id": "F_ABC"})
+        result = await client.canvas_create("# Hello")
+        assert result == "F_ABC"
+        web.api_call.assert_called_once()
+        call_args = web.api_call.call_args
+        assert call_args[0][0] == "canvases.create"
+        assert call_args[1]["json"]["channel_id"] == "C123"
+
+    async def test_canvas_create_fallback_on_failure(self):
+        client, web = self._make_client()
+        web.api_call = AsyncMock(side_effect=Exception("plan_limit"))
+        web.files_list = AsyncMock(return_value={"files": [{"id": "F_EXIST"}]})
+        result = await client.canvas_create("# Hello")
+        assert result == "F_EXIST"
+
+    async def test_canvas_create_returns_none_when_all_fail(self):
+        client, web = self._make_client()
+        web.api_call = AsyncMock(side_effect=Exception("fail"))
+        web.files_list = AsyncMock(return_value={"files": []})
+        result = await client.canvas_create("# Hello")
+        assert result is None
+
+    async def test_canvas_sync_success(self):
+        client, web = self._make_client()
+        web.api_call = AsyncMock(return_value={"ok": True})
+        ok = await client.canvas_sync("F_ABC", "# Updated")
+        assert ok is True
+        call_args = web.api_call.call_args
+        assert call_args[0][0] == "canvases.edit"
+
+    async def test_canvas_sync_failure_returns_false(self):
+        client, web = self._make_client()
+        web.api_call = AsyncMock(side_effect=Exception("rate_limited"))
+        ok = await client.canvas_sync("F_ABC", "# Updated")
+        assert ok is False
+
+    async def test_get_canvas_id_returns_first_file(self):
+        client, web = self._make_client()
+        web.files_list = AsyncMock(return_value={"files": [{"id": "F_FIRST"}]})
+        result = await client.get_canvas_id()
+        assert result == "F_FIRST"
+
+    async def test_get_canvas_id_returns_none_when_empty(self):
+        client, web = self._make_client()
+        web.files_list = AsyncMock(return_value={"files": []})
+        result = await client.get_canvas_id()
+        assert result is None
+
+    async def test_get_canvas_id_returns_none_on_error(self):
+        client, web = self._make_client()
+        web.files_list = AsyncMock(side_effect=Exception("api error"))
+        result = await client.get_canvas_id()
+        assert result is None
