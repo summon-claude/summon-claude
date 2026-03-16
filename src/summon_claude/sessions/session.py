@@ -33,6 +33,7 @@ from slack_sdk.http_retry.builtin_async_handlers import (
 )
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.canvas_mcp import create_canvas_mcp_server
 from summon_claude.config import (
     SummonConfig,
     discover_installed_plugins,
@@ -167,23 +168,32 @@ _THINKING_TRIGGERS = frozenset(
 # Patterns that may appear in exception messages and should not be stored in the audit log
 _SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
 
-_SYSTEM_PROMPT = {
-    "type": "preset",
-    "preset": "claude_code",
-    "append": (
-        "You are running headlessly via summon-claude, bridged to a private Slack channel. "
-        "There is no terminal, no visible desktop, and no interactive UI. "
-        "The user interacts through Slack messages — all your replies, tool use, "
-        "and thinking are captured and routed to Slack automatically. "
-        "UI-based tools (non-headless browsers, GUI editors, desktop apps) "
-        "will not be visible to the user. "
-        "Use standard markdown formatting "
-        "(e.g. **bold**, *italic*, [text](url), ```code```). "
-        "Your output will be automatically converted for Slack display. "
-        "The user can use !commands (e.g. !help, !status, !stop, !end) "
-        "for session control."
-    ),
-}
+_SYSTEM_PROMPT_BASE = (
+    "You are running headlessly via summon-claude, bridged to a private Slack channel. "
+    "There is no terminal, no visible desktop, and no interactive UI. "
+    "The user interacts through Slack messages — all your replies, tool use, "
+    "and thinking are captured and routed to Slack automatically. "
+    "UI-based tools (non-headless browsers, GUI editors, desktop apps) "
+    "will not be visible to the user. "
+    "Use standard markdown formatting "
+    "(e.g. **bold**, *italic*, [text](url), ```code```). "
+    "Your output will be automatically converted for Slack display. "
+    "The user can use !commands (e.g. !help, !status, !stop, !end) "
+    "for session control."
+)
+
+_CANVAS_PROMPT_SECTION = (
+    "\n\nCanvas: a persistent markdown document is visible in the channel's "
+    "Canvas tab. Use it to track work across the session. Tools: summon_canvas_read "
+    "(read full canvas), summon_canvas_update_section (update one section by heading — "
+    "preferred), summon_canvas_write (replace all content — use sparingly). "
+    "Update these sections as you work: "
+    "'Current Task' when starting or completing a task; "
+    "'Recent Activity' after significant actions; "
+    "'Notes' for key decisions, blockers, and discoveries. "
+    "Do not update the '# Session Status' heading (it spans the entire document). "
+    "Always prefer summon_canvas_update_section over summon_canvas_write."
+)
 
 
 def _build_google_workspace_mcp(services: str) -> dict:
@@ -987,6 +997,15 @@ class SummonSession:
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 
+        if self._canvas_store is not None and self._authenticated_user_id is not None:
+            canvas_mcp = create_canvas_mcp_server(
+                canvas_store=self._canvas_store,
+                registry=rt.registry,
+                authenticated_user_id=self._authenticated_user_id,
+                channel_id=rt.client.channel_id,
+            )
+            mcp_servers["summon-canvas"] = canvas_mcp
+
         if is_pm:
             assert self._authenticated_user_id is not None, (
                 "_run_message_loop reached without authenticated_user_id"
@@ -1000,10 +1019,19 @@ class SummonSession:
             )
             mcp_servers["summon-cli"] = cli_mcp
 
+        prompt_append = _SYSTEM_PROMPT_BASE
+        if self._canvas_store is not None:
+            prompt_append += _CANVAS_PROMPT_SECTION
+        system_prompt = {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": prompt_append,
+        }
+
         options = ClaudeAgentOptions(
             cwd=self._cwd,
             resume=self._resume,
-            system_prompt=_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             include_partial_messages=True,
             setting_sources=["user", "project"],
             plugins=discover_installed_plugins(),
