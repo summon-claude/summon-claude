@@ -1101,6 +1101,9 @@ class SummonSession:
             max_inline_chars=self._config.max_inline_chars,
         )
 
+        # Disable auto-compaction — we handle compaction via !compact
+        os.environ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = "100"
+
         async with ClaudeSDKClient(options) as claude:
             self._claude = claude
             try:
