@@ -16,7 +16,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 9
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +82,36 @@ async def _migrate_6_to_7(db: aiosqlite.Connection) -> None:
         await db.execute("ALTER TABLE sessions ADD COLUMN context_pct REAL")
 
 
+async def _migrate_7_to_8(db: aiosqlite.Connection) -> None:
+    """Create projects table and add project_id column to sessions table."""
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS projects (
+            project_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            directory TEXT NOT NULL,
+            channel_prefix TEXT NOT NULL,
+            pm_channel_id TEXT,
+            workflow_instructions TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    try:
+        await db.execute("ALTER TABLE sessions ADD COLUMN project_id TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+        logger.debug("Column project_id already exists, skipping")
+
+
+async def _migrate_8_to_9(db: aiosqlite.Connection) -> None:
+    """Add unique index on channel_prefix in projects table."""
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_channel_prefix ON projects (channel_prefix)"
+    )
+
+
 # Mapping from version N to the coroutine that migrates N → N+1.
 # Migration 0→1 is a no-op: the baseline DDL in _connect() produces schema v1.
 _MIGRATIONS: dict[int, Any] = {
@@ -92,6 +122,8 @@ _MIGRATIONS: dict[int, Any] = {
     4: _migrate_4_to_5,
     5: _migrate_5_to_6,
     6: _migrate_6_to_7,
+    7: _migrate_7_to_8,
+    8: _migrate_8_to_9,
 }
 
 

@@ -192,6 +192,7 @@ class SessionRegistry:
         model: str | None = None,
         parent_session_id: str | None = None,
         authenticated_user_id: str | None = None,
+        project_id: str | None = None,
     ) -> None:
         """Insert a new session with status pending_auth."""
         db = self._check_connected()
@@ -207,8 +208,8 @@ class SessionRegistry:
                     INSERT INTO sessions
                         (session_id, pid, status, session_name, cwd, model,
                          started_at, last_activity_at,
-                         parent_session_id, authenticated_user_id)
-                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?)
+                         parent_session_id, authenticated_user_id, project_id)
+                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -220,6 +221,7 @@ class SessionRegistry:
                         _now(),
                         parent_session_id,
                         authenticated_user_id,
+                        project_id,
                     ),
                 )
             except Exception as exc:
@@ -245,6 +247,7 @@ class SessionRegistry:
             "model",
             "canvas_id",
             "canvas_markdown",
+            "project_id",
         }
     )
 
@@ -438,6 +441,129 @@ class SessionRegistry:
         for session in active:
             await self.mark_stale(session["session_id"], reason)
         return active
+
+    # --- Project methods ---
+
+    async def add_project(self, name: str, directory: str) -> str:
+        """Register a new project. Returns the generated project_id.
+
+        Derives ``channel_prefix`` from the project name using slugification.
+        Raises ``ValueError`` if a project with the same name already exists.
+        """
+        import re  # noqa: PLC0415
+        import uuid  # noqa: PLC0415
+
+        def _slugify_name(text: str) -> str:
+            text = text.lower()
+            text = re.sub(r"[^a-z0-9\-]", "-", text)
+            text = re.sub(r"-+", "-", text)
+            return text.strip("-") or "project"
+
+        project_id = str(uuid.uuid4())
+        channel_prefix = _slugify_name(name)[:20].rstrip("-")
+        db = self._check_connected()
+        async with self._lock:
+            try:
+                await db.execute(
+                    """
+                    INSERT INTO projects
+                        (project_id, name, directory, channel_prefix, workflow_instructions)
+                    VALUES (?, ?, ?, ?, '')
+                    """,
+                    (project_id, name, directory, channel_prefix),
+                )
+                await db.commit()
+            except sqlite3.IntegrityError as exc:
+                if "UNIQUE constraint failed: projects.name" in str(exc):
+                    raise ValueError(f"A project with name {name!r} already exists.") from exc
+                raise
+        return project_id
+
+    async def remove_project(self, project_id_or_name: str) -> None:
+        """Remove a project by ID or name.
+
+        Raises ``ValueError`` if the project has active sessions or doesn't exist.
+        """
+        project = await self.get_project(project_id_or_name)
+        if project is None:
+            raise ValueError(f"No project found: {project_id_or_name!r}")
+
+        project_id = project["project_id"]
+        active = await self.get_project_sessions(project_id)
+        running = [s for s in active if s.get("status") in ("pending_auth", "active")]
+        if running:
+            raise ValueError(
+                f"Project {project['name']!r} has {len(running)} active session(s). "
+                "Stop them before removing the project."
+            )
+
+        db = self._check_connected()
+        async with self._lock:
+            await db.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+            await db.commit()
+
+    async def list_projects(self) -> list[dict]:
+        """List all projects with a ``pm_running`` boolean field."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT p.*, "
+            "  EXISTS("
+            "    SELECT 1 FROM sessions s"
+            "    WHERE s.project_id = p.project_id"
+            "      AND s.status IN ('pending_auth', 'active')"
+            "  ) AS pm_running"
+            " FROM projects p ORDER BY p.name"
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    async def get_project(self, project_id_or_name: str) -> dict | None:
+        """Fetch a project by ID or name. Returns None if not found."""
+        db = self._check_connected()
+        # Try by project_id first
+        async with db.execute(
+            "SELECT * FROM projects WHERE project_id = ?", (project_id_or_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return dict(row)
+        # Fall back to name
+        async with db.execute(
+            "SELECT * FROM projects WHERE name = ?", (project_id_or_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_project_sessions(self, project_id: str) -> list[dict]:
+        """List sessions associated with a project."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM sessions WHERE project_id = ? ORDER BY started_at DESC",
+            (project_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+    _UPDATABLE_PROJECT_FIELDS: frozenset[str] = frozenset(
+        {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory"}
+    )
+
+    async def update_project(self, project_id: str, **kwargs: Any) -> None:
+        """Update mutable project fields (pm_channel_id, workflow_instructions, etc.)."""
+        updates: dict[str, Any] = {}
+        for key, val in kwargs.items():
+            if key in self._UPDATABLE_PROJECT_FIELDS:
+                updates[key] = val
+            else:
+                logger.warning("update_project: ignoring unknown field %r", key)
+        if not updates:
+            return
+        db = self._check_connected()
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = [*updates.values(), project_id]
+        async with self._lock:
+            await db.execute(f"UPDATE projects SET {set_clause} WHERE project_id = ?", values)
+            await db.commit()
 
     # --- Canvas methods ---
 

@@ -103,6 +103,7 @@ class TestUpdatableFields:
             "model",
             "canvas_id",
             "canvas_markdown",
+            "project_id",
         }
         assert expected == SessionRegistry._UPDATABLE_FIELDS
 
@@ -758,91 +759,47 @@ class TestWorkflowDefaults:
 
 
 class TestProjectWorkflow:
-    _PROJECTS_DDL = (
-        "CREATE TABLE projects ("
-        "  project_id TEXT PRIMARY KEY,"
-        "  workflow_instructions TEXT NOT NULL DEFAULT ''"
-        ")"
-    )
-
-    async def test_get_project_workflow_no_projects_table(self, registry):
-        """Returns empty string when projects table doesn't exist."""
-        result = await registry.get_project_workflow("proj-1")
-        assert result == ""
-
-    async def test_set_project_workflow_no_projects_table(self, registry):
-        """Raises RuntimeError when projects table doesn't exist."""
-        with pytest.raises(RuntimeError, match="projects table"):
-            await registry.set_project_workflow("proj-1", "instructions")
-
-    async def test_clear_project_workflow_no_projects_table(self, registry):
-        """Raises RuntimeError when projects table doesn't exist."""
-        with pytest.raises(RuntimeError, match="projects table"):
-            await registry.clear_project_workflow("proj-1")
-
-    async def test_get_project_workflow_returns_instructions(self, registry):
-        """Returns stored instructions when project exists."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.execute(
-            "INSERT INTO projects (project_id, workflow_instructions) VALUES ('proj-1', 'Use TDD.')"
-        )
-        await db.commit()
-        result = await registry.get_project_workflow("proj-1")
-        assert result == "Use TDD."
-
     async def test_get_project_workflow_missing_project(self, registry):
         """Returns empty string when project_id not in table."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.commit()
         result = await registry.get_project_workflow("no-such")
         assert result == ""
 
+    async def test_get_project_workflow_returns_instructions(self, registry):
+        """Returns stored instructions when project exists."""
+        project_id = await registry.add_project("wflow-proj", "/tmp/wflow-proj")
+        await registry.set_project_workflow(project_id, "Use TDD.")
+        result = await registry.get_project_workflow(project_id)
+        assert result == "Use TDD."
+
     async def test_set_project_workflow_updates_existing(self, registry):
         """Updates instructions for an existing project."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.execute(
-            "INSERT INTO projects (project_id, workflow_instructions) VALUES ('proj-1', 'Old.')"
-        )
-        await db.commit()
-        await registry.set_project_workflow("proj-1", "New.")
-        result = await registry.get_project_workflow("proj-1")
+        project_id = await registry.add_project("wflow-update", "/tmp/wflow-update")
+        await registry.set_project_workflow(project_id, "Old.")
+        await registry.set_project_workflow(project_id, "New.")
+        result = await registry.get_project_workflow(project_id)
         assert result == "New."
 
     async def test_set_project_workflow_raises_on_missing_project(self, registry):
         """Raises KeyError when project_id doesn't exist in the table."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.commit()
         with pytest.raises(KeyError, match="proj-missing"):
             await registry.set_project_workflow("proj-missing", "instructions")
 
     async def test_clear_project_workflow_resets_to_empty(self, registry):
         """Clears instructions by setting to empty string."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.execute(
-            "INSERT INTO projects (project_id, workflow_instructions)"
-            " VALUES ('proj-1', 'Some instructions.')"
-        )
-        await db.commit()
-        await registry.clear_project_workflow("proj-1")
-        result = await registry.get_project_workflow("proj-1")
+        project_id = await registry.add_project("wflow-clear", "/tmp/wflow-clear")
+        await registry.set_project_workflow(project_id, "Some instructions.")
+        await registry.clear_project_workflow(project_id)
+        result = await registry.get_project_workflow(project_id)
         assert result == ""
 
     async def test_clear_project_workflow_noop_for_missing_project(self, registry):
         """Clearing a non-existent project is a silent no-op."""
-        db = registry.db
-        await db.execute(self._PROJECTS_DDL)
-        await db.commit()
         await registry.clear_project_workflow("no-such")  # should not raise
 
 
 class TestEffectiveWorkflow:
     async def test_effective_workflow_returns_global_when_no_project(self, registry):
-        """Falls back to global defaults when projects table doesn't exist."""
+        """Falls back to global defaults when project_id not in table."""
         await registry.set_workflow_defaults("Global instructions.")
         result = await registry.get_effective_workflow("nonexistent")
         assert result == "Global instructions."
@@ -859,63 +816,28 @@ class TestEffectiveWorkflow:
 
     async def test_effective_workflow_project_overrides_global(self, registry):
         """Per-project instructions take precedence over global defaults."""
-        db = registry.db
-        await db.execute(
-            "CREATE TABLE projects ("
-            "  project_id TEXT PRIMARY KEY,"
-            "  workflow_instructions TEXT NOT NULL DEFAULT ''"
-            ")"
-        )
-        await db.execute(
-            "INSERT INTO projects (project_id, workflow_instructions)"
-            " VALUES ('proj-1', 'Project-level.')"
-        )
-        await db.commit()
+        project_id = await registry.add_project("eff-override", "/tmp/eff-override")
+        await registry.set_project_workflow(project_id, "Project-level.")
         await registry.set_workflow_defaults("Global fallback.")
-        result = await registry.get_effective_workflow("proj-1")
+        result = await registry.get_effective_workflow(project_id)
         assert result == "Project-level."
 
     async def test_effective_workflow_empty_project_falls_through(self, registry):
         """Empty per-project instructions fall through to global defaults."""
-        db = registry.db
-        await db.execute(
-            "CREATE TABLE projects ("
-            "  project_id TEXT PRIMARY KEY,"
-            "  workflow_instructions TEXT NOT NULL DEFAULT ''"
-            ")"
-        )
-        await db.execute(
-            "INSERT INTO projects (project_id, workflow_instructions) VALUES ('proj-1', '')"
-        )
-        await db.commit()
+        project_id = await registry.add_project("eff-empty", "/tmp/eff-empty")
+        # workflow_instructions defaults to '' on project creation
         await registry.set_workflow_defaults("Global fallback.")
-        result = await registry.get_effective_workflow("proj-1")
+        result = await registry.get_effective_workflow(project_id)
         assert result == "Global fallback."
 
     async def test_effective_workflow_missing_project_falls_through(self, registry):
         """Project not in table falls through to global defaults."""
-        db = registry.db
-        await db.execute(
-            "CREATE TABLE projects ("
-            "  project_id TEXT PRIMARY KEY,"
-            "  workflow_instructions TEXT NOT NULL DEFAULT ''"
-            ")"
-        )
-        await db.commit()
         await registry.set_workflow_defaults("Global fallback.")
         result = await registry.get_effective_workflow("no-such-project")
         assert result == "Global fallback."
 
     async def test_effective_workflow_neither_set_with_projects_table(self, registry):
         """Returns empty when projects table exists but nothing is configured."""
-        db = registry.db
-        await db.execute(
-            "CREATE TABLE projects ("
-            "  project_id TEXT PRIMARY KEY,"
-            "  workflow_instructions TEXT NOT NULL DEFAULT ''"
-            ")"
-        )
-        await db.commit()
         result = await registry.get_effective_workflow("proj-1")
         assert result == ""
 
