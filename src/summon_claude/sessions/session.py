@@ -808,7 +808,7 @@ class SummonSession:
         logger.info("Canvas initialized: %s for session %s", canvas_id, self._session_id)
         return store
 
-    async def _run_session_tasks(  # noqa: PLR0912
+    async def _run_session_tasks(  # noqa: PLR0912, PLR0915
         self, rt: _SessionRuntime, router: ThreadRouter
     ) -> None:
         """Create SDK client, then run preprocessor + response consumer concurrently."""

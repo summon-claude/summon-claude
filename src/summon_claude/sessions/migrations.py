@@ -70,8 +70,7 @@ async def _migrate_4_to_5(db: aiosqlite.Connection) -> None:
 async def _migrate_5_to_6(db: aiosqlite.Connection) -> None:
     """Add index on parent_session_id for list_children queries."""
     await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_session_id "
-        "ON sessions (parent_session_id)"
+        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_session_id ON sessions (parent_session_id)"
     )
 
 
