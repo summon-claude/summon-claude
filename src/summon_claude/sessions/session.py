@@ -205,6 +205,22 @@ _SYSTEM_PROMPT = {
     "append": _BASE_SYSTEM_APPEND,
 }
 
+# Summarization prompt for context compaction. Currently unused by _execute_compact
+# (which delegates to the SDK's built-in /compact), but defined here for future use
+# if we implement a custom compaction flow (e.g. client-restart with manual summary).
+_COMPACT_PROMPT = (
+    "Please create a concise but comprehensive summary of our conversation so far. "
+    "The summary will be used to restore context after the conversation window is compacted. "
+    "Preserve:\n"
+    "- The main task or goal being worked on\n"
+    "- Key decisions made and their rationale\n"
+    "- Files created, modified, or examined\n"
+    "- Commands run and their outcomes\n"
+    "- Current state and next steps\n"
+    "- Any important constraints or requirements discovered\n"
+    "Format the summary as structured markdown so it can be easily parsed and re-injected."
+)
+
 
 def _build_google_workspace_mcp(services: str) -> dict:
     """Build MCP server config for Google Workspace (workspace-mcp).
