@@ -149,16 +149,19 @@ Once a session is active in Slack, type `!`-prefixed commands to control the ses
 | `!help` | Show all available commands |
 | `!status` | Show session status (model, effort, turns, cost, uptime) |
 | `!end` | End the current session |
+| `!stop` | Cancel the current Claude turn |
+| `!clear` | Clear conversation history |
 | `!model` | Show the active model |
-| `!model <name>` | Switch model (takes effect on next session start) |
+| `!model <name>` | Switch the model for the current session |
 | `!effort` | Show the current effort level |
 | `!effort <level>` | Switch effort (`low`, `medium`, `high`, `max`) |
+| `!compact [instructions]` | Compact conversation context |
 
-**Aliases:** `!quit`, `!exit`, and `!logout` all map to `!end`.
+**Aliases:** `!quit`, `!exit`, and `!logout` all map to `!end`. `!new` and `!reset` map to `!clear`.
 
-**Passthrough commands:** Claude SDK slash commands (e.g., `/compact`, `/clear`) are also available as `!compact`, `!clear`, etc. — they are forwarded to the SDK as their `/` equivalents.
+**Passthrough commands:** Some Claude SDK slash commands are available as `!`-prefixed passthroughs — forwarded to the SDK as `/` equivalents. Active passthroughs: `!review`, `!init`, `!pr-comments`, `!security-review`, `!debug`, `!claude-developer-platform`.
 
-**Blocked commands:** `!login` is blocked in Slack sessions.
+**Blocked commands:** `!login`, `!context`, `!cost`, `!insights`, and `!release-notes` are blocked or redirected in Slack sessions. CLI-only commands (e.g., `!config`, `!mcp`, `!plan`) are blocked with a message. Use `!help` to see all blocked commands and reasons.
 
 Use `!help` in a session to see the full list, including any passthrough commands discovered from the SDK.
 
