@@ -148,6 +148,8 @@ Once a session is active in Slack, type `!`-prefixed commands to control the ses
 | `!end` | End the current session |
 | `!model` | Show the active model |
 | `!model <name>` | Switch model (takes effect on next session start) |
+| `!effort` | Show the current effort level |
+| `!effort <level>` | Switch effort (`low`, `medium`, `high`, `max`) |
 
 **Aliases:** `!quit`, `!exit`, and `!logout` all map to `!end`.
 

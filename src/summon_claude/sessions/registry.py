@@ -288,26 +288,34 @@ class SessionRegistry:
                     f"An active session with name {name!r} already exists. "
                     "Use --name to specify a different name."
                 )
-            await db.execute(
-                """
-                INSERT INTO sessions
-                    (session_id, pid, status, session_name, cwd, model,
-                     started_at, last_activity_at,
-                     parent_session_id, authenticated_user_id)
-                VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    session_id,
-                    pid,
-                    name,
-                    cwd,
-                    model,
-                    _now(),
-                    _now(),
-                    parent_session_id,
-                    authenticated_user_id,
-                ),
-            )
+            try:
+                await db.execute(
+                    """
+                    INSERT INTO sessions
+                        (session_id, pid, status, session_name, cwd, model,
+                         started_at, last_activity_at,
+                         parent_session_id, authenticated_user_id)
+                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        pid,
+                        name,
+                        cwd,
+                        model,
+                        _now(),
+                        _now(),
+                        parent_session_id,
+                        authenticated_user_id,
+                    ),
+                )
+            except Exception as exc:
+                if "UNIQUE constraint failed: sessions.session_name" in str(exc):
+                    raise ValueError(
+                        f"An active session with name {name!r} already exists. "
+                        "Use --name to specify a different name."
+                    ) from exc
+                raise
             await db.commit()
 
     _VALID_STATUSES: frozenset[str] = frozenset({"pending_auth", "active", "completed", "errored"})
@@ -405,18 +413,28 @@ class SessionRegistry:
             if len(rows) > 1:
                 return None, rows
 
-        # 3. Session name match
+        # 3. Session name match — active wins (uniqueness-constrained)
         async with db.execute(
-            "SELECT * FROM sessions WHERE session_name = ? ORDER BY started_at DESC",
+            "SELECT * FROM sessions WHERE session_name = ?"
+            " AND status IN ('pending_auth', 'active') LIMIT 1",
             (identifier,),
         ) as cursor:
-            name_rows = [dict(r) for r in await cursor.fetchall()]
-            if len(name_rows) == 1:
-                return name_rows[0], name_rows
-            if len(name_rows) > 1:
-                return None, name_rows
+            row = await cursor.fetchone()
+            if row:
+                d = dict(row)
+                return d, [d]
 
-        # 4. Channel name match
+        # 4. Session name match — most recent historical
+        async with db.execute(
+            "SELECT * FROM sessions WHERE session_name = ? ORDER BY started_at DESC LIMIT 1",
+            (identifier,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                d = dict(row)
+                return d, [d]
+
+        # 5. Channel name match
         async with db.execute(
             "SELECT * FROM sessions WHERE slack_channel_name = ? ORDER BY started_at DESC LIMIT 1",
             (identifier,),

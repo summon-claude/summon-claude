@@ -73,25 +73,25 @@ async def async_session_list(
             print_session_table(sessions, show_id=show_all)
 
 
-async def session_info_impl(ctx: click.Context, session_id: str, output: str) -> None:
+async def session_info_impl(ctx: click.Context, session: str, output: str) -> None:
     """Resolve and show session detail."""
-    session = await resolve_or_pick(session_id, ctx)
-    if not session:
+    record = await resolve_or_pick(session, ctx)
+    if not record:
         return
     if output == "json":
-        click.echo(format_json(session))
+        click.echo(format_json(record))
     else:
-        print_session_detail(session)
+        print_session_detail(record)
 
 
-async def session_logs_impl(ctx: click.Context, session_id: str | None, tail: int) -> None:
+async def session_logs_impl(ctx: click.Context, session: str | None, tail: int) -> None:
     """View logs with interactive picker."""
     log_dir = get_data_dir() / "logs"
     if not log_dir.exists():
         click.echo("No log files found.")
         return
 
-    if session_id is None:
+    if session is None:
         log_files = sorted(log_dir.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
         if not log_files:
             click.echo("No log files found.")
@@ -132,10 +132,10 @@ async def session_logs_impl(ctx: click.Context, session_id: str | None, tail: in
         _page_lines(lines[-tail:])
         return
 
-    # Resolve partial ID or channel name to full session_id
-    resolved_id = session_id
-    if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", session_id):
-        session_record = await resolve_or_pick(session_id, ctx)
+    # Resolve partial ID, name, or channel name to full session_id
+    resolved_id = session
+    if not re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", session):
+        session_record = await resolve_or_pick(session, ctx)
         if not session_record:
             return
         resolved_id = session_record["session_id"]

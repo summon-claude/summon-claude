@@ -949,6 +949,14 @@ class TestRegisterNameUniqueness:
         await registry.register("sess-no-name-2", 222, "/tmp")
         # Both should succeed — None names don't trigger uniqueness check
 
+    async def test_db_constraint_catches_duplicate_bypassing_app_check(self, registry):
+        """The partial unique index must catch duplicates even if app check is bypassed."""
+        await registry.register("sess-constraint-1", 111, "/tmp", "constrained-name")
+        # The app-level check AND the DB constraint both enforce uniqueness.
+        # This test verifies the error is a user-friendly ValueError.
+        with pytest.raises(ValueError, match="active session with name"):
+            await registry.register("sess-constraint-2", 222, "/tmp", "constrained-name")
+
 
 class TestResolveSessionByName:
     async def test_resolve_by_session_name(self, registry):
@@ -957,14 +965,25 @@ class TestResolveSessionByName:
         assert session is not None
         assert session["session_id"] == "sess-name-r1"
 
-    async def test_resolve_by_name_ambiguous(self, registry):
+    async def test_resolve_by_name_returns_most_recent_when_multiple_completed(self, registry):
+        """Multiple completed sessions with same name → most recent wins."""
         await registry.register("sess-name-r2", 111, "/tmp", "shared-name")
         await registry.update_status("sess-name-r2", "completed")
         await registry.register("sess-name-r3", 222, "/tmp", "shared-name")
         await registry.update_status("sess-name-r3", "completed")
         session, matches = await registry.resolve_session("shared-name")
-        assert session is None
-        assert len(matches) == 2
+        assert session is not None
+        assert session["session_id"] == "sess-name-r3"
+
+    async def test_resolve_by_name_prefers_active_over_completed(self, registry):
+        """Active session with same name should win over completed sessions."""
+        await registry.register("sess-name-old", 111, "/tmp", "reused-name")
+        await registry.update_status("sess-name-old", "completed")
+        await registry.register("sess-name-new", 222, "/tmp", "reused-name")
+        session, matches = await registry.resolve_session("reused-name")
+        assert session is not None
+        assert session["session_id"] == "sess-name-new"
+        assert session["status"] == "pending_auth"
 
     async def test_resolve_prefers_id_over_name(self, registry):
         """Exact ID match should take priority over name match."""
