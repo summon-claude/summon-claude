@@ -533,6 +533,9 @@ class SessionOptions:
     effort: str = "high"
     resume: str | None = None
     pm_profile: bool = False
+    auth_only: bool = False
+    project_id: str | None = None
+    scan_interval_s: int = 900
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,6 +610,9 @@ class SummonSession:
     ) -> None:
         self._config = config
         self._pm_profile = options.pm_profile
+        self._auth_only = options.auth_only
+        self._project_id = options.project_id
+        self._scan_interval_s = options.scan_interval_s
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -724,6 +730,7 @@ class SummonSession:
                 model=self._model,
                 parent_session_id=self._parent_session_id,
                 authenticated_user_id=self._authenticated_user_id,
+                project_id=self._project_id,
             )
             await registry.log_event(
                 "session_created",
@@ -737,7 +744,7 @@ class SummonSession:
 
                 if auth_status == "authenticated":
                     logger.info("Authenticated! Setting up session...")
-                    await self._run_session(registry)
+                    await self._run_authenticated(registry)
                     return True
                 if auth_status == "timed_out":
                     if self._auth:
@@ -840,6 +847,28 @@ class SummonSession:
                 if remaining > 0:
                     logger.info("Waiting for authentication... %.0fs remaining", remaining)
                 next_countdown += _AUTH_COUNTDOWN_INTERVAL_S
+
+    async def _run_authenticated(self, registry: SessionRegistry) -> None:
+        """Dispatch after authentication: auth-only sessions complete immediately,
+        normal sessions proceed to _run_session."""
+        if self._auth_only:
+            logger.info("Auth-only session authenticated, completing.")
+            await registry.update_status(
+                self._session_id,
+                "completed",
+                authenticated_user_id=self._authenticated_user_id,
+                authenticated_at=datetime.now(UTC).isoformat(),
+                ended_at=datetime.now(UTC).isoformat(),
+            )
+            await registry.log_event(
+                "session_completed",
+                session_id=self._session_id,
+                user_id=self._authenticated_user_id,
+                details={"auth_only": True},
+            )
+            self._shutdown_completed = True
+            return
+        await self._run_session(registry)
 
     async def _run_session(self, registry: SessionRegistry) -> None:  # noqa: PLR0912, PLR0915
         """Create channel, register with dispatcher, connect Claude, run message loop."""

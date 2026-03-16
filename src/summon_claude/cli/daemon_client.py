@@ -86,6 +86,23 @@ async def create_session_with_spawn_token(options: SessionOptions, spawn_token: 
     return response["session_id"]
 
 
+async def create_auth_session(options: SessionOptions) -> tuple[str, str]:
+    """Send a ``create_auth_session`` request to the daemon.
+
+    The session runs auth-only (no Claude, no Slack channel).
+
+    Returns:
+        ``(short_code, session_id)`` — short_code for /summon auth,
+        session_id for polling the registry for completion.
+    """
+    response = await _request(
+        {"type": "create_auth_session", "options": dataclasses.asdict(options)}
+    )
+    if response.get("type") != "auth_session_created":
+        raise DaemonError(f"Unexpected daemon response: {response}")
+    return response["short_code"], response["session_id"]
+
+
 async def stop_session(session_id: str) -> bool:
     """Send a ``stop_session`` request to the daemon.
 

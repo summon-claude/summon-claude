@@ -382,6 +382,39 @@ class SessionManager:
                     return {"type": "error", "message": str(e)}
                 return {"type": "session_created_spawned", "session_id": session_id}
 
+            case "create_auth_session":
+                try:
+                    raw_options = msg["options"]
+                    # Force auth_only=True regardless of what was sent
+                    raw_options["auth_only"] = True
+                    options = SessionOptions(**raw_options)
+                except (TypeError, KeyError) as e:
+                    return {"type": "error", "message": f"Invalid session options: {e}"}
+                session_id = str(uuid.uuid4())
+                auth = await self._generate_auth(session_id)
+                session = SummonSession(
+                    config=self._config,
+                    options=options,
+                    auth=auth,
+                    session_id=session_id,
+                    web_client=self._web_client,
+                    dispatcher=self._dispatcher,
+                    bot_user_id=self._bot_user_id,
+                )
+                self._sessions[session_id] = session
+                task = asyncio.create_task(
+                    self._supervised_session(session, session_id),
+                    name=f"session-auth-{session_id}",
+                )
+                task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+                self._tasks[session_id] = task
+                logger.info("SessionManager: created auth-only session %s", session_id)
+                return {
+                    "type": "auth_session_created",
+                    "short_code": auth.short_code,
+                    "session_id": session_id,
+                }
+
             case _:
                 return {"type": "error", "message": f"Unknown command: {msg.get('type')}"}
 
