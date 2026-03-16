@@ -946,3 +946,49 @@ class TestRegisterPluginSkills:
         finally:
             COMMAND_ACTIONS.pop("test-plugin:test-skill", None)
             _ALIAS_LOOKUP.pop("test-skill", None)
+
+
+# ------------------------------------------------------------------
+# !summon command handler tests
+# ------------------------------------------------------------------
+
+
+class TestSummonHandler:
+    """Test the !summon command handler."""
+
+    async def test_summon_start_returns_spawn_metadata(self, make_context):
+        """!summon start should return metadata with spawn=True."""
+        context = make_context()
+        result = await dispatch("summon", ["start"], context)
+        assert result.metadata.get("spawn") is True
+        assert result.text is None
+        assert result.suppress_queue is True
+
+    async def test_summon_start_case_insensitive(self, make_context):
+        """!summon START should also trigger spawn."""
+        context = make_context()
+        result = await dispatch("summon", ["START"], context)
+        assert result.metadata.get("spawn") is True
+
+    async def test_summon_no_subcommand_shows_usage(self, make_context):
+        """!summon with no args should return usage text."""
+        context = make_context()
+        result = await dispatch("summon", [], context)
+        assert result.text is not None
+        assert "start" in result.text.lower()
+        assert result.metadata.get("spawn") is not True
+
+    async def test_summon_unknown_subcommand_shows_usage(self, make_context):
+        """!summon foo should return an error/usage message."""
+        context = make_context()
+        result = await dispatch("summon", ["foo"], context)
+        assert result.text is not None
+        assert "foo" in result.text
+        assert result.metadata.get("spawn") is not True
+
+    def test_summon_in_command_actions(self):
+        """!summon should be registered in COMMAND_ACTIONS with a handler."""
+        assert "summon" in COMMAND_ACTIONS
+        defn = COMMAND_ACTIONS["summon"]
+        assert defn.handler is not None
+        assert defn.max_args == 1

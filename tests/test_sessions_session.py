@@ -1089,3 +1089,97 @@ class TestMCPRegistration:
     def test_session_options_pm_profile_true(self):
         opts = SessionOptions(cwd="/tmp", name="test", pm_profile=True)
         assert opts.pm_profile is True
+
+
+# ------------------------------------------------------------------
+# Spawn session tests
+# ------------------------------------------------------------------
+
+
+class TestHandleSpawn:
+    """Tests for _handle_spawn and !summon dispatch."""
+
+    def _make_rt(self, channel_id: str = "C_TEST") -> _SessionRuntime:
+        return _SessionRuntime(
+            registry=AsyncMock(),
+            client=make_mock_client(channel_id),
+            permission_handler=AsyncMock(),
+        )
+
+    async def test_spawn_rejects_wrong_user(self):
+        """_handle_spawn posts rejection when caller is not the session owner."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Only the session owner" in text
+
+    async def test_spawn_rejects_wrong_user_does_not_call_generate_token(self):
+        """Rejection short-circuits before generating spawn token."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        # Patch at the source module since _handle_spawn uses lazy import
+        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+            await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
+
+        mock_gen.assert_not_called()
+
+    async def test_dispatch_command_spawn_metadata_calls_handle_spawn(self):
+        """_dispatch_command with spawn metadata should call _handle_spawn."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        spawn_result = CommandResult(text=None, metadata={"spawn": True})
+
+        with (
+            patch(
+                "summon_claude.sessions.session.dispatch_command",
+                new=AsyncMock(return_value=spawn_result),
+            ),
+            patch.object(session, "_handle_spawn", new=AsyncMock()) as mock_spawn,
+        ):
+            await session._dispatch_command(rt, "summon", ["start"], "U_OWNER", None)
+
+        mock_spawn.assert_awaited_once_with(rt, "U_OWNER", None)
+
+    async def test_handle_spawn_posts_success_message_on_completion(self, tmp_path):
+        """_handle_spawn posts a success message when daemon_client succeeds."""
+        from summon_claude.sessions.registry import SessionRegistry
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-spawn", 1234, "/tmp")
+
+            session = make_session(session_id="sess-spawn", cwd="/tmp")
+            session._authenticated_user_id = "U_OWNER"
+            session._channel_id = "C_SELF"
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=make_mock_client("C_SELF"),
+                permission_handler=AsyncMock(),
+            )
+
+            with (
+                patch(
+                    "summon_claude.sessions.auth.generate_spawn_token",
+                    new=AsyncMock(
+                        return_value=AsyncMock(token="tok123", parent_session_id="sess-spawn")
+                    ),
+                ),
+                patch(
+                    "summon_claude.cli.daemon_client.create_session_with_spawn_token",
+                    new=AsyncMock(return_value="child-sess-id"),
+                ),
+            ):
+                await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+            rt.client.post.assert_awaited_once()
+            text = rt.client.post.call_args[0][0]
+            assert "Spawned session started" in text
