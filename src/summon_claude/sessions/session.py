@@ -190,7 +190,7 @@ _CANVAS_PROMPT_SECTION = (
     "'Current Task' when starting or completing a task; "
     "'Recent Activity' after significant actions; "
     "'Notes' for key decisions, blockers, and discoveries. "
-    "The 'Session Status' section is auto-populated. "
+    "Do not update the '# Session Status' heading (it spans the entire document). "
     "Always prefer summon_canvas_update_section over summon_canvas_write."
 )
 
