@@ -218,6 +218,14 @@ async def _handle_compact(args: list[str], _ctx: CommandContext) -> CommandResul
     )
 
 
+async def _handle_summon(args: list[str], _ctx: CommandContext) -> CommandResult:
+    if args and args[0].lower() == "start":
+        return CommandResult(text=None, metadata={"spawn": True})
+    if not args:
+        return CommandResult(text="Usage: `!summon start` — spawn a new session in this directory")
+    return CommandResult(text=f":question: Unknown subcommand `{args[0]}`. Usage: `!summon start`")
+
+
 # ------------------------------------------------------------------
 # Shared block-reason constant
 # ------------------------------------------------------------------
@@ -271,6 +279,11 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         description="Compact conversation context",
         handler=_handle_compact,
         max_args=None,
+    ),
+    "summon": CommandDef(
+        description="Spawn a new session",
+        handler=_handle_summon,
+        max_args=1,
     ),
     # --- Passthrough (forwarded to Claude CLI) ---
     "review": CommandDef(description="Review code changes"),
