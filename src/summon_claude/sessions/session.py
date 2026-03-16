@@ -33,6 +33,7 @@ from slack_sdk.http_retry.builtin_async_handlers import (
 )
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.canvas_mcp import create_canvas_mcp_server
 from summon_claude.config import (
     SummonConfig,
     discover_installed_plugins,
@@ -193,12 +194,6 @@ _CANVAS_PROMPT_SECTION = (
     "Do not update the '# Session Status' heading (it spans the entire document). "
     "Always prefer summon_canvas_update_section over summon_canvas_write."
 )
-
-_SYSTEM_PROMPT = {
-    "type": "preset",
-    "preset": "claude_code",
-    "append": _SYSTEM_PROMPT_BASE,
-}
 
 
 def _build_google_workspace_mcp(services: str) -> dict:
@@ -1002,6 +997,15 @@ class SummonSession:
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 
+        if self._canvas_store is not None and self._authenticated_user_id is not None:
+            canvas_mcp = create_canvas_mcp_server(
+                canvas_store=self._canvas_store,
+                registry=rt.registry,
+                authenticated_user_id=self._authenticated_user_id,
+                channel_id=rt.client.channel_id,
+            )
+            mcp_servers["summon-canvas"] = canvas_mcp
+
         if is_pm:
             assert self._authenticated_user_id is not None, (
                 "_run_message_loop reached without authenticated_user_id"
@@ -1012,19 +1016,17 @@ class SummonSession:
                 authenticated_user_id=self._authenticated_user_id,
                 channel_id=rt.client.channel_id,
                 cwd=self._cwd,
-                canvas_store=self._canvas_store,
             )
             mcp_servers["summon-cli"] = cli_mcp
 
-        system_prompt = (
-            {
-                "type": "preset",
-                "preset": "claude_code",
-                "append": _SYSTEM_PROMPT_BASE + _CANVAS_PROMPT_SECTION,
-            }
-            if is_pm
-            else _SYSTEM_PROMPT
-        )
+        prompt_append = _SYSTEM_PROMPT_BASE
+        if self._canvas_store is not None:
+            prompt_append += _CANVAS_PROMPT_SECTION
+        system_prompt = {
+            "type": "preset",
+            "preset": "claude_code",
+            "append": prompt_append,
+        }
 
         options = ClaudeAgentOptions(
             cwd=self._cwd,
