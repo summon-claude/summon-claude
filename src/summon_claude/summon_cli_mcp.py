@@ -19,9 +19,13 @@ if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
     from claude_agent_sdk.types import McpSdkServerConfig
 
+    from summon_claude.slack.canvas_store import CanvasStore
+
 logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
+
+_CANVAS_MAX_BYTES = 102400  # 100 KB
 
 _MAX_ACTIVE_CHILDREN_PER_PM = 15
 
@@ -33,12 +37,13 @@ def _sanitize_session(session: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in session.items() if k not in _SENSITIVE_FIELDS}
 
 
-def create_summon_cli_mcp_tools(  # noqa: PLR0915
+def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
     registry: SessionRegistry,
     session_id: str,
     authenticated_user_id: str,
     channel_id: str,
     cwd: str,
+    canvas_store: CanvasStore | None = None,
     *,
     _generate_spawn_token: Callable[..., Awaitable[Any]] | None = None,
     _ipc_create_session: Callable[..., Awaitable[str]] | None = None,
@@ -52,6 +57,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
         authenticated_user_id: For spawn token generation and scope guards.
         channel_id: For spawn token's parent_channel_id.
         cwd: Calling session's working directory, default for spawned sessions.
+        canvas_store: Optional CanvasStore for canvas read/write tools.
         _generate_spawn_token: Override for generate_spawn_token (testing).
         _ipc_create_session: Override for daemon IPC create (testing).
         _ipc_stop_session: Override for daemon IPC stop (testing).
@@ -370,18 +376,152 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [session_list, session_info, session_start, session_stop]
+    @tool(
+        "summon_canvas_read",
+        (
+            "Read the channel canvas. Returns the full markdown content of the "
+            "persistent work-tracking document. "
+            "channel: optional channel ID to read another channel's canvas. "
+            "Omit or leave empty to read the current session's canvas."
+        ),
+        {"channel": str},
+    )
+    async def summon_canvas_read(args: dict) -> dict:
+        if canvas_store is None:
+            return {
+                "content": [
+                    {"type": "text", "text": "Error: Canvas not available for this session."}
+                ],
+                "is_error": True,
+            }
+        target_channel = args.get("channel", "").strip()
+        if not target_channel or target_channel == channel_id:
+            return {"content": [{"type": "text", "text": canvas_store.read()}]}
+        # Cross-channel read via registry
+        try:
+            _, canvas_markdown = await registry.get_canvas_by_channel(target_channel)
+            if canvas_markdown is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: No canvas found for channel {target_channel}.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+            return {"content": [{"type": "text", "text": canvas_markdown}]}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error reading canvas: {e}"}],
+                "is_error": True,
+            }
+
+    @tool(
+        "summon_canvas_write",
+        (
+            "Replace the entire channel canvas with new markdown content. "
+            "WARNING: this overwrites all existing canvas content. "
+            "Prefer summon_canvas_update_section for partial updates. "
+            "markdown: the full canvas content (required, max 100KB)."
+        ),
+        {"markdown": str},
+    )
+    async def summon_canvas_write(args: dict) -> dict:
+        if canvas_store is None:
+            return {
+                "content": [
+                    {"type": "text", "text": "Error: Canvas not available for this session."}
+                ],
+                "is_error": True,
+            }
+        markdown = args.get("markdown", "")
+        if not markdown:
+            return {
+                "content": [{"type": "text", "text": "Error: markdown content is required."}],
+                "is_error": True,
+            }
+        if len(markdown) > _CANVAS_MAX_BYTES:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Error: markdown content exceeds 100KB limit ({len(markdown)} chars)."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+        try:
+            await canvas_store.write(markdown)
+            return {"content": [{"type": "text", "text": "Canvas updated."}]}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error writing canvas: {e}"}],
+                "is_error": True,
+            }
+
+    @tool(
+        "summon_canvas_update_section",
+        (
+            "Update a single section of the channel canvas by heading name. "
+            "If the section exists, replaces its content. If not found, appends a new section. "
+            "heading: the section heading text WITHOUT the ## prefix (required). "
+            "markdown: the new section body content (required)."
+        ),
+        {"heading": str, "markdown": str},
+    )
+    async def summon_canvas_update_section(args: dict) -> dict:
+        if canvas_store is None:
+            return {
+                "content": [
+                    {"type": "text", "text": "Error: Canvas not available for this session."}
+                ],
+                "is_error": True,
+            }
+        heading = args.get("heading", "")
+        markdown = args.get("markdown", "")
+        if not heading:
+            return {
+                "content": [{"type": "text", "text": "Error: heading is required."}],
+                "is_error": True,
+            }
+        try:
+            await canvas_store.update_section(heading, markdown)
+            return {"content": [{"type": "text", "text": f"Section '{heading}' updated."}]}
+        except ValueError as e:
+            return {
+                "content": [{"type": "text", "text": f"Error: {e}"}],
+                "is_error": True,
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error updating canvas section: {e}"}],
+                "is_error": True,
+            }
+
+    return [
+        session_list,
+        session_info,
+        session_start,
+        session_stop,
+        summon_canvas_read,
+        summon_canvas_write,
+        summon_canvas_update_section,
+    ]
 
 
-def create_summon_cli_mcp_server(
+def create_summon_cli_mcp_server(  # noqa: PLR0913
     registry: SessionRegistry,
     session_id: str,
     authenticated_user_id: str,
     channel_id: str,
     cwd: str,
+    canvas_store: CanvasStore | None = None,
 ) -> McpSdkServerConfig:
     """Create an MCP server with session lifecycle tools."""
     tools = create_summon_cli_mcp_tools(
-        registry, session_id, authenticated_user_id, channel_id, cwd
+        registry, session_id, authenticated_user_id, channel_id, cwd, canvas_store
     )
     return create_sdk_mcp_server(name="summon-cli", version="1.0.0", tools=tools)
