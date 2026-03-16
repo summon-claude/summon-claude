@@ -35,6 +35,7 @@ from summon_claude.cli.config import (
 )
 from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
+from summon_claude.cli.project import async_project_add, async_project_list, async_project_remove
 from summon_claude.cli.session import (
     async_session_cleanup,
     async_session_list,
@@ -84,7 +85,7 @@ def _setup_logging(verbose: bool = False) -> None:
 class AliasedGroup(click.Group):
     """Click group with command alias support."""
 
-    _ALIASES: dict[str, str] = {"s": "session"}
+    _ALIASES: dict[str, str] = {"s": "session", "p": "project"}
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         rv = click.Group.get_command(self, ctx, cmd_name)
@@ -357,6 +358,63 @@ def session_logs(ctx: click.Context, session: str | None, tail: int) -> None:
 def session_cleanup(ctx: click.Context, archive: bool) -> None:
     """Mark sessions with dead processes as errored."""
     asyncio.run(async_session_cleanup(ctx, archive=archive))
+
+
+# ---------------------------------------------------------------------------
+# project command group (alias: p)
+# ---------------------------------------------------------------------------
+
+
+@cli.group("project")
+def cmd_project() -> None:
+    """Manage summon projects."""
+
+
+@cmd_project.command("add")
+@click.argument("name")
+@click.argument("directory", default=".", type=click.Path())
+@click.pass_context
+def project_add(ctx: click.Context, name: str, directory: str) -> None:
+    """Register a project directory for PM agent management."""
+    project_id = asyncio.run(async_project_add(name, directory))
+    if not ctx.obj.get("quiet"):
+        click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
+
+
+@cmd_project.command("remove")
+@click.argument("name_or_id")
+@click.pass_context
+def project_remove(ctx: click.Context, name_or_id: str) -> None:
+    """Remove a registered project."""
+    asyncio.run(async_project_remove(name_or_id))
+    if not ctx.obj.get("quiet"):
+        click.echo(f"Project {name_or_id!r} removed.")
+
+
+@cmd_project.command("list")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def project_list(ctx: click.Context, output: str) -> None:
+    """List all registered projects."""
+    projects = asyncio.run(async_project_list())
+    if output == "json":
+        click.echo(json.dumps(projects, indent=2))
+        return
+    if not projects:
+        click.echo("No projects registered.")
+        return
+    click.echo(f"{'NAME':<20} {'DIRECTORY':<40} {'PM':<6} {'ID'}")
+    click.echo("-" * 80)
+    for p in projects:
+        pm_status = "running" if p.get("pm_running") else "-"
+        pid = p.get("project_id", "")[:8]
+        click.echo(f"{p['name']:<20} {p['directory']:<40} {pm_status:<6} {pid}...")
 
 
 # ---------------------------------------------------------------------------
