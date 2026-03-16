@@ -197,6 +197,11 @@ Use `summon config path` to see which path is active. Use `summon init` to creat
 | `SUMMON_PERMISSION_DEBOUNCE_MS` | `500` | Debounce window for batching permission requests (ms) |
 | `SUMMON_MAX_INLINE_CHARS` | `2500` | Threshold for inline vs file upload display |
 | `SUMMON_NO_UPDATE_CHECK` | (unset) | Set to `1` to disable update notifications on `summon start` |
+| `SUMMON_ENABLE_THINKING` | `true` | Enable adaptive thinking tokens in Claude responses |
+| `SUMMON_SHOW_THINKING` | `false` | Post thinking content to turn threads in Slack |
+| `SUMMON_SCRIBE_ENABLED` | `false` | Enable scribe monitoring agent (PM agent system — preview) |
+| `SUMMON_SCRIBE_MODEL` | (inherit) | Model for the scribe agent; defaults to `SUMMON_DEFAULT_MODEL` (PM agent system — preview) |
+| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated Google Workspace services for scribe (PM agent system — preview) |
 
 A local `.env` in the project directory overrides the config file.
 
