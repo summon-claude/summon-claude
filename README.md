@@ -78,12 +78,12 @@ summon start
 2. The terminal prints:
    ```
    ==================================================
-     SUMMON CODE: ABC123
-     Type in Slack: /summon ABC123
+     SUMMON CODE: a3f2b1c4
+     Type in Slack: /summon a3f2b1c4
      Expires in 5 minutes
    ==================================================
    ```
-3. In Slack, type `/summon ABC123`
+3. In Slack, type `/summon a3f2b1c4`
 4. The bot verifies the code, creates a session channel, and posts a header
 5. All further interaction happens in that Slack channel
 
@@ -201,9 +201,14 @@ Use `summon config path` to see which path is active. Use `summon init` to creat
 | `SUMMON_SHOW_THINKING` | `false` | Post thinking content to turn threads in Slack |
 | `SUMMON_SCRIBE_ENABLED` | `false` | Enable scribe monitoring agent (PM agent system — preview) |
 | `SUMMON_SCRIBE_MODEL` | (inherit) | Model for the scribe agent; defaults to `SUMMON_DEFAULT_MODEL` (PM agent system — preview) |
-| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated Google Workspace services for scribe (PM agent system — preview) |
 | `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | `5` | How often the scribe agent polls for new data (PM agent system — preview) |
+| `SUMMON_SCRIBE_CWD` | (data dir) | Working directory for the scribe agent; defaults to `<data-dir>/scribe` (PM agent system — preview) |
+| `SUMMON_SCRIBE_IMPORTANCE_KEYWORDS` | (unset) | Comma-separated keywords that elevate signal importance (PM agent system — preview) |
+| `SUMMON_SCRIBE_QUIET_HOURS` | (unset) | Quiet hours range in `HH:MM-HH:MM` format; only critical alerts during this window (PM agent system — preview) |
+| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated Google Workspace services for scribe (PM agent system — preview) |
 | `SUMMON_SCRIBE_SLACK_ENABLED` | `false` | Enable Slack channel monitoring via browser scraping in scribe (PM agent system — preview) |
+| `SUMMON_SCRIBE_SLACK_BROWSER` | `chrome` | Browser for Slack monitoring: `chrome`, `firefox`, or `webkit` (PM agent system — preview) |
+| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | (unset) | Comma-separated Slack channel names to monitor in scribe (PM agent system — preview) |
 
 A local `.env` in the project directory overrides the config file.
 
