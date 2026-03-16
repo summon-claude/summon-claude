@@ -1566,7 +1566,7 @@ class SummonSession:
             except Exception as e2:
                 logger.debug("Failed to post effort error: %s", e2)
 
-    async def _dispatch_command(  # noqa: PLR0912, PLR0915
+    async def _dispatch_command(  # noqa: PLR0911, PLR0912, PLR0915
         self,
         rt: _SessionRuntime,
         name: str,
@@ -1669,6 +1669,11 @@ class SummonSession:
             )
             return
 
+        # Handle !summon start — spawn a child session
+        if result.metadata.get("spawn"):
+            await self._handle_spawn(rt, user_id, thread_ts)
+            return
+
         # Pass-through: translate !cmd args -> /cmd args and enqueue
         if not result.suppress_queue:
             slash_message = f"/{name}" + (" " + " ".join(args) if args else "")
@@ -1701,6 +1706,67 @@ class SummonSession:
                 except Exception as e:
                     logger.warning("Failed to post command response: %s", e)
                     break
+
+    async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:
+        """Handle !summon start: verify caller, generate spawn token, create child session."""
+        if user_id != self._authenticated_user_id:
+            try:
+                await rt.client.post(
+                    ":no_entry: Only the session owner can spawn new sessions.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post spawn rejection: %s", e)
+            return
+
+        from summon_claude.cli import daemon_client  # noqa: PLC0415
+        from summon_claude.sessions.auth import generate_spawn_token  # noqa: PLC0415
+
+        try:
+            spawn_auth = await generate_spawn_token(
+                registry=rt.registry,
+                target_user_id=user_id,
+                cwd=self._cwd,
+                spawn_source="session",
+                parent_session_id=self._session_id,
+                parent_channel_id=self._channel_id,
+                parent_cwd=self._cwd,
+            )
+        except Exception as e:
+            logger.warning("Failed to generate spawn token: %s", e)
+            try:
+                await rt.client.post(
+                    f":warning: Failed to prepare spawn: {e}",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post spawn error: %s", e2)
+            return
+
+        child_options = SessionOptions(cwd=self._cwd, name=f"{self._name}-spawn")
+        try:
+            child_session_id = await daemon_client.create_session_with_spawn_token(
+                child_options, spawn_auth.token
+            )
+        except Exception as e:
+            logger.warning("Failed to create spawn session: %s", e)
+            try:
+                await rt.client.post(
+                    f":warning: Failed to spawn session: {e}",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post spawn error: %s", e2)
+            return
+
+        logger.info("Session %s: spawned child session %s", self._session_id, child_session_id)
+        try:
+            await rt.client.post(
+                ":white_check_mark: Spawned session started — it will post here when ready.",
+                thread_ts=thread_ts,
+            )
+        except Exception as e:
+            logger.debug("Failed to post spawn success message: %s", e)
 
     def _abort_current_turn(self) -> None:
         """Signal the current Claude turn to abort."""
