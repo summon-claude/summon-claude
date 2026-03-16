@@ -172,7 +172,7 @@ _THINKING_TRIGGERS = frozenset(
 # Patterns that may appear in exception messages and should not be stored in the audit log
 _SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
 
-_SYSTEM_PROMPT_BASE = (
+_BASE_SYSTEM_APPEND = (
     "You are running headlessly via summon-claude, bridged to a private Slack channel. "
     "There is no terminal, no visible desktop, and no interactive UI. "
     "The user interacts through Slack messages — all your replies, tool use, "
@@ -198,6 +198,12 @@ _CANVAS_PROMPT_SECTION = (
     "Do not update the '# Session Status' heading (it spans the entire document). "
     "Always prefer summon_canvas_update_section over summon_canvas_write."
 )
+
+_SYSTEM_PROMPT = {
+    "type": "preset",
+    "preset": "claude_code",
+    "append": _BASE_SYSTEM_APPEND,
+}
 
 
 def _build_google_workspace_mcp(services: str) -> dict:
@@ -1042,7 +1048,7 @@ class SummonSession:
             )
             mcp_servers["summon-cli"] = cli_mcp
 
-        prompt_append = _SYSTEM_PROMPT_BASE
+        prompt_append = _BASE_SYSTEM_APPEND
         if self._canvas_store is not None:
             prompt_append += _CANVAS_PROMPT_SECTION
         system_prompt = {
