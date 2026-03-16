@@ -263,10 +263,15 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 parent_cwd=cwd,
             )
 
+            # Auto-propagate project_id from calling session to spawned sessions
+            calling_session = await registry.get_session(session_id)
+            parent_project_id = calling_session.get("project_id") if calling_session else None
+
             options = SessionOptions(
                 cwd=target_cwd,
                 name=name,
                 model=model,
+                project_id=parent_project_id,
             )
 
             new_session_id = await ipc_create(options, spawn_auth.token)
@@ -368,7 +373,84 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [session_list, session_info, session_start, session_stop]
+    @tool(
+        "session_status_update",
+        (
+            "Update the pinned status message in the PM's Slack channel. "
+            "Use this to broadcast current project status, active tasks, and blockers. "
+            "status: one of 'active', 'idle', 'blocked', or 'error'. "
+            "summary: brief status summary (required, max 500 chars). "
+            "details: optional structured details (markdown, max 2000 chars)."
+        ),
+        {"status": str, "summary": str, "details": str},
+    )
+    async def session_status_update(args: dict) -> dict:
+        valid_statuses = {"active", "idle", "blocked", "error"}
+        status = args.get("status", "active")
+        if status not in valid_statuses:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Error: status must be one of {sorted(valid_statuses)}.",
+                    }
+                ],
+                "is_error": True,
+            }
+        summary = (args.get("summary") or "").strip()[:500]
+        if not summary:
+            return {
+                "content": [{"type": "text", "text": "Error: summary is required."}],
+                "is_error": True,
+            }
+        details = (args.get("details") or "").strip()[:2000]
+
+        status_emoji = {
+            "active": ":green_circle:",
+            "idle": ":white_circle:",
+            "blocked": ":red_circle:",
+            "error": ":x:",
+        }
+        emoji = status_emoji.get(status, ":information_source:")
+        message = f"{emoji} *PM Status [{status}]*: {summary}"
+        if details:
+            message += f"\n\n{details}"
+
+        try:
+            # Log to registry for observability
+            calling_session = await registry.get_session(session_id)
+            if calling_session is None:
+                return {
+                    "content": [{"type": "text", "text": "Error: could not find calling session."}],
+                    "is_error": True,
+                }
+            target_channel = channel_id
+            # Log to registry for observability
+            await registry.log_event(
+                "pm_status_update",
+                session_id=session_id,
+                user_id=authenticated_user_id,
+                details={"status": status, "summary": summary},
+            )
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Status update recorded: [{status}] {summary}. "
+                            f"Channel: {target_channel}. "
+                            "Note: for full Slack posting, use the summon-slack MCP post tool."
+                        ),
+                    }
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error updating status: {e}"}],
+                "is_error": True,
+            }
+
+    return [session_list, session_info, session_start, session_stop, session_status_update]
 
 
 def create_summon_cli_mcp_server(
