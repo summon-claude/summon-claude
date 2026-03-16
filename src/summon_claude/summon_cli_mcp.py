@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
 
-_CANVAS_MAX_BYTES = 102400  # 100 KB
+_CANVAS_MAX_CHARS = 102400  # 100K characters
 
 _MAX_ACTIVE_CHILDREN_PER_PM = 15
 
@@ -399,8 +399,18 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             return {"content": [{"type": "text", "text": canvas_store.read()}]}
         # Cross-channel read via registry
         try:
-            _, canvas_markdown = await registry.get_canvas_by_channel(target_channel)
+            _, canvas_markdown, owner_user_id = await registry.get_canvas_by_channel(target_channel)
             if canvas_markdown is None:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error: No canvas found for channel {target_channel}.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+            if owner_user_id != authenticated_user_id:
                 return {
                     "content": [
                         {
@@ -423,7 +433,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "Replace the entire channel canvas with new markdown content. "
             "WARNING: this overwrites all existing canvas content. "
             "Prefer summon_canvas_update_section for partial updates. "
-            "markdown: the full canvas content (required, max 100KB)."
+            "markdown: the full canvas content (required, max 100K characters)."
         ),
         {"markdown": str},
     )
@@ -441,13 +451,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 "content": [{"type": "text", "text": "Error: markdown content is required."}],
                 "is_error": True,
             }
-        if len(markdown) > _CANVAS_MAX_BYTES:
+        if len(markdown) > _CANVAS_MAX_CHARS:
             return {
                 "content": [
                     {
                         "type": "text",
                         "text": (
-                            f"Error: markdown content exceeds 100KB limit ({len(markdown)} chars)."
+                            f"Error: markdown content exceeds 100K character limit"
+                            f" ({len(markdown)} chars)."
                         ),
                     }
                 ],

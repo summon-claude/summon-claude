@@ -616,6 +616,24 @@ class TestCanvasRead:
         assert result["is_error"] is True
         assert "No canvas found" in result["content"][0]["text"]
 
+    async def test_cross_channel_read_blocked_for_different_owner(
+        self, canvas_tools, populated_registry
+    ):
+        """Cross-channel canvas read is blocked when the canvas owner differs from caller."""
+        # Set up a canvas owned by U_OTHER in a separate channel
+        await populated_registry.register(
+            "other-cc", os.getpid(), "/tmp", name="other-cc", authenticated_user_id="U_OTHER"
+        )
+        await populated_registry.update_status(
+            "other-cc", "active", slack_channel_id="C_OTHER", authenticated_user_id="U_OTHER"
+        )
+        await populated_registry.update_canvas("other-cc", "F_OTHER", "# Secret")
+        # canvas_tools caller is U_OWNER — should be denied
+        tools, _mock = canvas_tools
+        result = await tools["summon_canvas_read"].handler({"channel": "C_OTHER"})
+        assert result["is_error"] is True
+        assert "No canvas found" in result["content"][0]["text"]
+
     async def test_canvas_none_returns_error(self, canvas_tools_no_store):
         result = await canvas_tools_no_store["summon_canvas_read"].handler({})
         assert result["is_error"] is True
@@ -641,7 +659,7 @@ class TestCanvasWrite:
         big_content = "x" * 102401
         result = await tools["summon_canvas_write"].handler({"markdown": big_content})
         assert result["is_error"] is True
-        assert "100KB" in result["content"][0]["text"]
+        assert "100K character limit" in result["content"][0]["text"]
         mock_canvas.write.assert_not_called()
 
     async def test_exactly_max_size_allowed(self, canvas_tools):

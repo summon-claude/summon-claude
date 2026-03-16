@@ -167,32 +167,37 @@ _THINKING_TRIGGERS = frozenset(
 # Patterns that may appear in exception messages and should not be stored in the audit log
 _SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
 
+_SYSTEM_PROMPT_BASE = (
+    "You are running headlessly via summon-claude, bridged to a private Slack channel. "
+    "There is no terminal, no visible desktop, and no interactive UI. "
+    "The user interacts through Slack messages — all your replies, tool use, "
+    "and thinking are captured and routed to Slack automatically. "
+    "UI-based tools (non-headless browsers, GUI editors, desktop apps) "
+    "will not be visible to the user. "
+    "Use standard markdown formatting "
+    "(e.g. **bold**, *italic*, [text](url), ```code```). "
+    "Your output will be automatically converted for Slack display. "
+    "The user can use !commands (e.g. !help, !status, !stop, !end) "
+    "for session control."
+)
+
+_CANVAS_PROMPT_SECTION = (
+    "\n\nCanvas: a persistent markdown document is visible in the channel's "
+    "Canvas tab. Use it to track work across the session. Tools: summon_canvas_read "
+    "(read full canvas), summon_canvas_update_section (update one section by heading — "
+    "preferred), summon_canvas_write (replace all content — use sparingly). "
+    "Update these sections as you work: "
+    "'Current Task' when starting or completing a task; "
+    "'Recent Activity' after significant actions; "
+    "'Notes' for key decisions, blockers, and discoveries. "
+    "The 'Session Status' section is auto-populated. "
+    "Always prefer summon_canvas_update_section over summon_canvas_write."
+)
+
 _SYSTEM_PROMPT = {
     "type": "preset",
     "preset": "claude_code",
-    "append": (
-        "You are running headlessly via summon-claude, bridged to a private Slack channel. "
-        "There is no terminal, no visible desktop, and no interactive UI. "
-        "The user interacts through Slack messages — all your replies, tool use, "
-        "and thinking are captured and routed to Slack automatically. "
-        "UI-based tools (non-headless browsers, GUI editors, desktop apps) "
-        "will not be visible to the user. "
-        "Use standard markdown formatting "
-        "(e.g. **bold**, *italic*, [text](url), ```code```). "
-        "Your output will be automatically converted for Slack display. "
-        "The user can use !commands (e.g. !help, !status, !stop, !end) "
-        "for session control.\n\n"
-        "Canvas: if available, a persistent markdown document is visible in the channel's "
-        "Canvas tab. Use it to track work across the session. Tools: summon_canvas_read "
-        "(read full canvas), summon_canvas_update_section (update one section by heading — "
-        "preferred), summon_canvas_write (replace all content — use sparingly). "
-        "Update these sections as you work: "
-        "'Current Task' when starting or completing a task; "
-        "'Recent Activity' after significant actions; "
-        "'Notes' for key decisions, blockers, and discoveries. "
-        "The 'Session Status' section is auto-populated. "
-        "Always prefer summon_canvas_update_section over summon_canvas_write."
-    ),
+    "append": _SYSTEM_PROMPT_BASE,
 }
 
 
@@ -1011,10 +1016,20 @@ class SummonSession:
             )
             mcp_servers["summon-cli"] = cli_mcp
 
+        system_prompt = (
+            {
+                "type": "preset",
+                "preset": "claude_code",
+                "append": _SYSTEM_PROMPT_BASE + _CANVAS_PROMPT_SECTION,
+            }
+            if is_pm
+            else _SYSTEM_PROMPT
+        )
+
         options = ClaudeAgentOptions(
             cwd=self._cwd,
             resume=self._resume,
-            system_prompt=_SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             include_partial_messages=True,
             setting_sources=["user", "project"],
             plugins=discover_installed_plugins(),

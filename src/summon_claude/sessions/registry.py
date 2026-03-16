@@ -445,19 +445,21 @@ class SessionRegistry:
                 return row[0], row[1]
             return None, None
 
-    async def get_canvas_by_channel(self, channel_id: str) -> tuple[str | None, str | None]:
-        """Return (canvas_id, canvas_markdown) for a session by channel ID."""
+    async def get_canvas_by_channel(
+        self, channel_id: str
+    ) -> tuple[str | None, str | None, str | None]:
+        """Return (canvas_id, canvas_markdown, authenticated_user_id) for a channel."""
         db = self._check_connected()
         async with db.execute(
-            "SELECT canvas_id, canvas_markdown FROM sessions"
+            "SELECT canvas_id, canvas_markdown, authenticated_user_id FROM sessions"
             " WHERE slack_channel_id = ? AND canvas_id IS NOT NULL"
             " ORDER BY started_at DESC LIMIT 1",
             (channel_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
-                return row[0], row[1]
-            return None, None
+                return row[0], row[1], row[2]
+            return None, None, None
 
     # --- Pending auth token methods ---
 

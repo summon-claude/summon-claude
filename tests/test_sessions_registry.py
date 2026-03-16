@@ -1026,14 +1026,15 @@ class TestCanvasMethods:
         await registry.register("sess-cc", 111, "/tmp")
         await registry.update_status("sess-cc", "active", slack_channel_id="C_CANVAS")
         await registry.update_canvas("sess-cc", "F_CANVAS_2", "# Status\nOK")
-        canvas_id, md = await registry.get_canvas_by_channel("C_CANVAS")
+        canvas_id, md, _ = await registry.get_canvas_by_channel("C_CANVAS")
         assert canvas_id == "F_CANVAS_2"
         assert md == "# Status\nOK"
 
     async def test_get_canvas_by_channel_missing(self, registry):
-        canvas_id, md = await registry.get_canvas_by_channel("C_MISSING")
+        canvas_id, md, owner = await registry.get_canvas_by_channel("C_MISSING")
         assert canvas_id is None
         assert md is None
+        assert owner is None
 
     async def test_get_canvas_by_channel_skips_null_canvas(self, registry):
         """Newer session with no canvas should not shadow older session with canvas."""
@@ -1047,7 +1048,7 @@ class TestCanvasMethods:
         await registry.update_status("sess-new", "errored", slack_channel_id="C_SHARED")
         # sess-new has no canvas_id (NULL)
 
-        canvas_id, md = await registry.get_canvas_by_channel("C_SHARED")
+        canvas_id, md, _ = await registry.get_canvas_by_channel("C_SHARED")
         assert canvas_id == "F_OLD"
         assert md == "# Old canvas"
 
