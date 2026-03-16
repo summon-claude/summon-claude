@@ -181,7 +181,17 @@ _SYSTEM_PROMPT = {
         "(e.g. **bold**, *italic*, [text](url), ```code```). "
         "Your output will be automatically converted for Slack display. "
         "The user can use !commands (e.g. !help, !status, !stop, !end) "
-        "for session control."
+        "for session control.\n\n"
+        "Canvas: if available, a persistent markdown document is visible in the channel's "
+        "Canvas tab. Use it to track work across the session. Tools: summon_canvas_read "
+        "(read full canvas), summon_canvas_update_section (update one section by heading — "
+        "preferred), summon_canvas_write (replace all content — use sparingly). "
+        "Update these sections as you work: "
+        "'Current Task' when starting or completing a task; "
+        "'Recent Activity' after significant actions; "
+        "'Notes' for key decisions, blockers, and discoveries. "
+        "The 'Session Status' section is auto-populated. "
+        "Always prefer summon_canvas_update_section over summon_canvas_write."
     ),
 }
 
@@ -997,6 +1007,7 @@ class SummonSession:
                 authenticated_user_id=self._authenticated_user_id,
                 channel_id=rt.client.channel_id,
                 cwd=self._cwd,
+                canvas_store=self._canvas_store,
             )
             mcp_servers["summon-cli"] = cli_mcp
 
