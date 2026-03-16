@@ -1299,3 +1299,200 @@ class TestHandleSpawn:
         rt.client.post.assert_called()
         annotation_text = rt.client.post.call_args[0][0]
         assert "standalone" in annotation_text.lower()
+
+
+# ------------------------------------------------------------------
+# Compaction tests
+# ------------------------------------------------------------------
+
+
+class TestAutoCompactionDisabled:
+    """Verify CLAUDE_AUTOCOMPACT_PCT_OVERRIDE is set before SDK client creation."""
+
+    async def test_env_var_set_before_client_creation(self, registry):
+        """CLAUDE_AUTOCOMPACT_PCT_OVERRIDE should be '100' when ClaudeSDKClient is entered."""
+        import os
+
+        captured_env = {}
+        _sentinel = RuntimeError("stop-after-capture")
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                # Record env var at construction time (just after `os.environ` line)
+                captured_env["val"] = os.environ.get("CLAUDE_AUTOCOMPACT_PCT_OVERRIDE")
+
+            async def __aenter__(self):
+                raise _sentinel  # Break out before the TaskGroup hangs
+
+            async def __aexit__(self, *_):
+                pass
+
+        session = make_session()
+        rt = make_rt(registry)
+        router = AsyncMock()
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+        ):
+            try:
+                await session._run_session_tasks(rt, router)
+            except RuntimeError as e:
+                assert e is _sentinel  # Confirm we stopped at the right place
+
+        assert captured_env.get("val") == "100"
+
+    def test_base_system_append_is_string(self):
+        """_BASE_SYSTEM_APPEND must be a non-empty string."""
+        from summon_claude.sessions.session import _BASE_SYSTEM_APPEND
+
+        assert isinstance(_BASE_SYSTEM_APPEND, str)
+        assert len(_BASE_SYSTEM_APPEND) > 0
+
+    def test_system_prompt_references_base_append(self):
+        """_SYSTEM_PROMPT['append'] should equal _BASE_SYSTEM_APPEND."""
+        from summon_claude.sessions.session import _BASE_SYSTEM_APPEND, _SYSTEM_PROMPT
+
+        assert _SYSTEM_PROMPT["append"] is _BASE_SYSTEM_APPEND
+
+    def test_compact_prompt_is_string(self):
+        """_COMPACT_PROMPT must be a non-empty string."""
+        from summon_claude.sessions.session import _COMPACT_PROMPT
+
+        assert isinstance(_COMPACT_PROMPT, str)
+        assert len(_COMPACT_PROMPT) > 0
+
+    def test_compact_prompt_mentions_summary(self):
+        """_COMPACT_PROMPT should describe summarization intent."""
+        from summon_claude.sessions.session import _COMPACT_PROMPT
+
+        assert "summary" in _COMPACT_PROMPT.lower()
+
+
+class TestExecuteCompact:
+    """Tests for _execute_compact success and failure paths."""
+
+    def _make_mock_claude_compact(self, pre_tokens: int | None = 50000):
+        """Create a mock SDK client whose receive_response yields a compact_boundary msg."""
+        claude = AsyncMock()
+        claude.query = AsyncMock()
+
+        if pre_tokens is not None:
+            compact_meta = MagicMock()
+            compact_meta.pre_tokens = pre_tokens
+
+            msg = MagicMock()
+            msg.subtype = "compact_boundary"
+            msg.compact_metadata = compact_meta
+        else:
+            msg = MagicMock()
+            msg.subtype = "other"
+            msg.compact_metadata = None
+
+        async def fake_receive():
+            yield msg
+
+        claude.receive_response = fake_receive
+        return claude
+
+    async def test_success_posts_compacted_message(self, registry):
+        """On success, _execute_compact should post a ':broom: Context compacted' message."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = self._make_mock_claude_compact(pre_tokens=42000)
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert ":broom:" in text
+        assert "42,000" in text
+
+    async def test_success_resets_context_warned(self, registry):
+        """Successful compact should reset _context_warned to False."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = self._make_mock_claude_compact(pre_tokens=10000)
+        session._context_warned = True
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        assert session._context_warned is False
+
+    async def test_no_compact_boundary_posts_warning(self, registry):
+        """If no compact_boundary is received, post 'may not have completed' warning."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = self._make_mock_claude_compact(pre_tokens=None)
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "may not have completed" in text
+
+    async def test_no_claude_client_posts_unavailable(self, registry):
+        """If _claude is None, post SDK client not available."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = None
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "not available" in text
+
+    async def test_failure_generic_posts_retry_message(self, registry):
+        """On a generic exception, post a message with retry/clear suggestion."""
+        session = make_session()
+        rt = make_rt(registry)
+
+        claude = AsyncMock()
+        claude.query = AsyncMock(side_effect=RuntimeError("network error"))
+        session._claude = claude
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert ":warning:" in text
+        assert "!clear" in text
+
+    async def test_failure_overflow_error_posts_overflow_message(self, registry):
+        """On a context/token/limit exception, post an overflow-specific message."""
+        session = make_session()
+        rt = make_rt(registry)
+
+        claude = AsyncMock()
+        claude.query = AsyncMock(side_effect=RuntimeError("context limit exceeded"))
+        session._claude = claude
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert ":warning:" in text
+        assert "too full" in text
+        assert "slack_read_history" in text
+
+    async def test_instructions_included_in_compact_query(self, registry):
+        """Instructions should be appended to the /compact query."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = self._make_mock_claude_compact(pre_tokens=5000)
+
+        await session._execute_compact(rt, instructions="focus on tests", thread_ts=None)
+
+        session._claude.query.assert_awaited_once_with("/compact focus on tests")
+
+    async def test_pre_sent_skips_query(self, registry):
+        """When pre_sent=True, _execute_compact should NOT call query()."""
+        session = make_session()
+        rt = make_rt(registry)
+        session._claude = self._make_mock_claude_compact(pre_tokens=5000)
+
+        await session._execute_compact(rt, instructions=None, thread_ts=None, pre_sent=True)
+
+        session._claude.query.assert_not_awaited()
