@@ -272,22 +272,34 @@ Slack input flows through `BoltRouter` (a single shared Bolt app per daemon), wh
 | `config.py` | pydantic-settings config with XDG path resolution and plugin discovery |
 | `daemon.py` | Unix daemon with PID/lock management, IPC framing |
 | `event_dispatcher.py` | Routes Slack events to session handles by channel |
+| `summon_cli_mcp.py` | MCP tools exposing session lifecycle management to Claude agents |
 | `cli/__init__.py` | CLI entry point: global flags, subcommands, daemon interaction |
-| `cli/config.py` | Config subcommand handlers: show, path, edit, set, check |
+| `cli/config.py` | Config subcommand handlers: show, path, edit, set, check, google-auth |
 | `cli/daemon_client.py` | Typed async client for daemon Unix socket control API |
+| `cli/db.py` | Database maintenance command logic (status, reset, vacuum, purge) |
+| `cli/formatting.py` | Formatting helpers for CLI output (echo, format_json, session tables) |
+| `cli/helpers.py` | Session resolution and stop helpers for CLI commands |
+| `cli/interactive.py` | Interactive terminal selection with TTY-aware fallback |
+| `cli/session.py` | Session subcommand logic (list, info, logs, cleanup) |
+| `cli/start.py` | Start command logic (auth code flow, daemon delegation) |
+| `cli/stop.py` | Stop command logic (by name/ID or --all) |
 | `cli/update_check.py` | PyPI update checker with 24h cache, shown on `summon start` |
-| `sessions/session.py` | Session orchestrator: ties Claude SDK + Slack + permissions + streaming together |
+| `sessions/session.py` | Session orchestrator: Claude SDK + Slack + permissions + streaming + pre-send architecture |
 | `sessions/manager.py` | Session lifecycle, IPC control plane, daemon coordination |
-| `sessions/response.py` | Response streaming, text splitting, turn summaries |
+| `sessions/migrations.py` | Schema versioning and migration functions (single source of truth for DB changes) |
+| `sessions/response.py` | Response streaming, turn threads, emoji lifecycle, turn summaries |
 | `sessions/permissions.py` | Debounced permission batching with Slack interactive buttons |
 | `sessions/auth.py` | 8-char hex short codes with 5-min TTL, brute-force protection (5 attempts) |
-| `sessions/commands.py` | `!`-prefixed command dispatch: local handlers, passthrough, blocking, aliasing |
-| `sessions/context.py` | Context window usage tracking |
+| `sessions/commands.py` | `!`-prefixed command dispatch: local handlers, passthrough, blocking, aliasing, plugin skills |
+| `sessions/context.py` | Context window usage tracking via JSONL transcript parsing |
 | `sessions/registry.py` | SQLite session registry with WAL mode, schema versioning, heartbeat, audit log |
 | `slack/bolt.py` | Slack Bolt app, rate limiter, health monitor, event routing |
-| `slack/client.py` | Channel-bound Slack output client (post, update, react, upload) |
+| `slack/canvas_store.py` | SQLite-backed canvas markdown state with background Slack sync |
+| `slack/canvas_templates.py` | Canvas markdown templates for different agent profiles |
+| `slack/client.py` | Channel-bound Slack output client (post, update, react, upload, canvas) |
+| `slack/formatting.py` | Markdown-to-Slack-mrkdwn conversion |
+| `slack/mcp.py` | MCP tools for Claude to read and interact with Slack channels |
 | `slack/router.py` | Thread-aware message routing (main channel, turn threads, subagent threads) |
-| `slack/mcp.py` | MCP tools for Claude to interact with Slack |
 
 ## Security
 
