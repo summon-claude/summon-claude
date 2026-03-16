@@ -35,7 +35,13 @@ from summon_claude.cli.config import (
 )
 from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
-from summon_claude.cli.project import async_project_add, async_project_list, async_project_remove
+from summon_claude.cli.project import (
+    async_project_add,
+    async_project_list,
+    async_project_remove,
+    launch_project_managers,
+    stop_project_managers,
+)
 from summon_claude.cli.session import (
     async_session_cleanup,
     async_session_list,
@@ -45,6 +51,7 @@ from summon_claude.cli.session import (
 from summon_claude.cli.start import async_start
 from summon_claude.cli.stop import async_stop
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
+from summon_claude.daemon import start_daemon
 from summon_claude.sessions import registry as _registry
 
 _BANNER_WIDTH = 50
@@ -415,6 +422,52 @@ def project_list(ctx: click.Context, output: str) -> None:
         pm_status = "running" if p.get("pm_running") else "-"
         pid = p.get("project_id", "")[:8]
         click.echo(f"{p['name']:<20} {p['directory']:<40} {pm_status:<6} {pid}...")
+
+
+@cmd_project.command("up")
+@click.pass_context
+def project_up(ctx: click.Context) -> None:
+    """Start PM agents for all registered projects that don't have one running."""
+    import shutil  # noqa: PLC0415
+
+    if not shutil.which("claude"):
+        click.echo("Error: Claude CLI not found in PATH.", err=True)
+        raise SystemExit(1)
+
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    try:
+        config = SummonConfig.from_file(config_path_override)
+        config.validate()
+    except Exception as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from e
+
+    try:
+        start_daemon(config)
+    except Exception as e:
+        click.echo(f"Error starting daemon: {e}", err=True)
+        raise SystemExit(1) from e
+
+    try:
+        asyncio.run(launch_project_managers())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
+
+
+@cmd_project.command("down")
+@click.pass_context
+def project_down(ctx: click.Context) -> None:
+    """Stop all active PM sessions for registered projects."""
+    try:
+        asyncio.run(stop_project_managers())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 # ---------------------------------------------------------------------------
