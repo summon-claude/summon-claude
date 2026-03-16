@@ -142,17 +142,14 @@ class SessionRegistry:
         await self._db.execute(_CREATE_SCHEMA_VERSION)
         await self._db.commit()
 
-        # Stamp v1 for fresh DBs so migrations start from the baseline.
+        # Detect fresh DB before migrations (empty schema_version table).
         async with self._db.execute("SELECT COUNT(*) FROM schema_version") as cur:
             row = await cur.fetchone()
             is_fresh = row[0] == 0  # type: ignore[index]
-        if is_fresh:
-            await self._db.execute(
-                "INSERT OR IGNORE INTO schema_version (id, version) VALUES (1, 1)"
-            )
-            await self._db.commit()
 
         # Always run migrations — single source of truth for schema changes.
+        # Fresh DBs start at version 0 (0→1 is a no-op baseline), so all
+        # real migrations run inside the same BEGIN IMMEDIATE transaction.
         pre_version = await run_migrations(self._db)
         # Fresh DBs don't report as "migrated" to avoid spurious upgrade messages.
         self.migrated_from = CURRENT_SCHEMA_VERSION if is_fresh else pre_version
