@@ -624,7 +624,7 @@ class SummonSession:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self) -> bool:
+    async def start(self) -> bool:  # noqa: PLR0912
         """Main entry point. Runs the full session lifecycle.
 
         In the daemon architecture:
@@ -707,6 +707,15 @@ class SummonSession:
                         )
                     except Exception as e:
                         logger.warning("Failed to update registry on unexpected termination: %s", e)
+                    # Notify parent channel of spawn failure (non-fatal)
+                    if self._parent_channel_id and self._web_client:
+                        try:
+                            await self._web_client.chat_postMessage(
+                                channel=self._parent_channel_id,
+                                text=":x: Spawned session failed to start.",
+                            )
+                        except Exception as e:
+                            logger.debug("Failed to post parent failure notification: %s", e)
 
     async def _wait_for_auth(self) -> AuthResult:
         """Wait until auth is confirmed, timed out, or shutdown is requested.
@@ -804,6 +813,16 @@ class SummonSession:
             user_id=self._authenticated_user_id,
             details={"channel_id": channel_id},
         )
+
+        # Notify parent channel that this spawned session is ready (non-fatal)
+        if self._parent_channel_id:
+            try:
+                await web_client.chat_postMessage(
+                    channel=self._parent_channel_id,
+                    text=f":white_check_mark: Spawned session ready: <#{channel_id}>",
+                )
+            except Exception as e:
+                logger.debug("Failed to post parent channel spawn notification: %s", e)
 
         # --- NOW create the channel-bound SlackClient ---
         client = SlackClient(web_client, channel_id)
