@@ -14,7 +14,6 @@ import os
 import queue
 import re
 import secrets
-import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
