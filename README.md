@@ -107,6 +107,8 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
 | `summon config check` | Validate config file (keys, token format, DB writability, schema version, integrity, Slack API connectivity) |
+| `summon config google-auth` | Authenticate with Google Workspace for scribe monitoring |
+| `summon config google-status` | Check Google Workspace authentication status |
 | `summon db status` | Show schema version, integrity, and row counts (migrations apply automatically on connect) |
 | `summon db reset --yes` | Delete and recreate the registry database |
 | `summon db vacuum` | Compact the database and check integrity |
@@ -134,6 +136,7 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `-q`, `--quiet` | Suppress non-essential output (mutually exclusive with `--verbose`) |
 | `--no-color` | Disable colored output (respects `NO_COLOR` environment variable) |
 | `--config PATH` | Override config file location (default: XDG-aware path) |
+| `--no-interactive` | Disable interactive prompts |
 
 `-o`, `--output {json|table}` is available on `version`, `session list`, and `session info` (default: table).
 
