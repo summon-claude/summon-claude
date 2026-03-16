@@ -52,12 +52,18 @@ async def populated_registry(registry: SessionRegistry) -> SessionRegistry:
 
 
 @pytest.fixture
-def canvas_tools(populated_registry):
-    """Tools fixture with a mock CanvasStore."""
-    mock_canvas = MagicMock()
-    mock_canvas.read = MagicMock(return_value="# My Canvas\n\nContent here.")
-    mock_canvas.write = AsyncMock()
-    mock_canvas.update_section = AsyncMock()
+def mock_canvas():
+    """Mock CanvasStore with sync read and async write/update_section."""
+    store = MagicMock()
+    store.read = MagicMock(return_value="# My Canvas\n\nContent here.")
+    store.write = AsyncMock()
+    store.update_section = AsyncMock()
+    return store
+
+
+@pytest.fixture
+def canvas_tools(populated_registry, mock_canvas):
+    """Dict of canvas MCP tools keyed by name."""
     return {
         t.name: t
         for t in create_canvas_mcp_tools(
@@ -66,12 +72,11 @@ def canvas_tools(populated_registry):
             authenticated_user_id="U_OWNER",
             channel_id="C100",
         )
-    }, mock_canvas
+    }
 
 
 class TestCanvasMCPServerCreation:
-    def test_returns_valid_config(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
+    def test_returns_valid_config(self, mock_canvas):
         config = create_canvas_mcp_server(
             canvas_store=mock_canvas,
             registry=MagicMock(),
@@ -82,36 +87,31 @@ class TestCanvasMCPServerCreation:
         assert config["type"] == "sdk"
 
     def test_tool_count(self, canvas_tools):
-        tools, _ = canvas_tools
-        assert len(tools) == 3
+        assert len(canvas_tools) == 3
 
 
 class TestCanvasRead:
-    async def test_reads_own_canvas(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_read"].handler({})
+    async def test_reads_own_canvas(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_read"].handler({})
         assert not result.get("is_error")
         assert "My Canvas" in result["content"][0]["text"]
         mock_canvas.read.assert_called_once()
 
-    async def test_reads_own_canvas_explicit_channel(self, canvas_tools):
+    async def test_reads_own_canvas_explicit_channel(self, canvas_tools, mock_canvas):
         """Passing own channel_id still uses canvas_store.read()."""
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_read"].handler({"channel": "C100"})
+        result = await canvas_tools["summon_canvas_read"].handler({"channel": "C100"})
         assert not result.get("is_error")
         mock_canvas.read.assert_called_once()
 
     async def test_cross_channel_read(self, canvas_tools, populated_registry):
         """Reading another channel uses registry.get_canvas_by_channel."""
         await populated_registry.update_canvas("child-2222", "canvas-x", "# Cross Canvas")
-        tools, _mock = canvas_tools
-        result = await tools["summon_canvas_read"].handler({"channel": "C200"})
+        result = await canvas_tools["summon_canvas_read"].handler({"channel": "C200"})
         assert not result.get("is_error")
         assert "Cross Canvas" in result["content"][0]["text"]
 
     async def test_cross_channel_not_found(self, canvas_tools):
-        tools, _mock = canvas_tools
-        result = await tools["summon_canvas_read"].handler({"channel": "C_NONEXISTENT"})
+        result = await canvas_tools["summon_canvas_read"].handler({"channel": "C_NONEXISTENT"})
         assert result["is_error"] is True
         assert "No canvas found" in result["content"][0]["text"]
 
@@ -126,86 +126,98 @@ class TestCanvasRead:
             "other-cc", "active", slack_channel_id="C_OTHER", authenticated_user_id="U_OTHER"
         )
         await populated_registry.update_canvas("other-cc", "F_OTHER", "# Secret")
-        tools, _mock = canvas_tools
-        result = await tools["summon_canvas_read"].handler({"channel": "C_OTHER"})
+        result = await canvas_tools["summon_canvas_read"].handler({"channel": "C_OTHER"})
         assert result["is_error"] is True
         assert "No canvas found" in result["content"][0]["text"]
 
 
 class TestCanvasWrite:
-    async def test_writes_content(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_write"].handler({"markdown": "# New Content"})
+    async def test_writes_content(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_write"].handler({"markdown": "# New Content"})
         assert not result.get("is_error")
         mock_canvas.write.assert_called_once_with("# New Content")
 
-    async def test_empty_content_rejected(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_write"].handler({"markdown": ""})
+    async def test_empty_content_rejected(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_write"].handler({"markdown": ""})
         assert result["is_error"] is True
         assert "required" in result["content"][0]["text"].lower()
         mock_canvas.write.assert_not_called()
 
-    async def test_whitespace_only_rejected(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_write"].handler({"markdown": "   \n\n  "})
+    async def test_whitespace_only_rejected(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_write"].handler({"markdown": "   \n\n  "})
         assert result["is_error"] is True
         assert "required" in result["content"][0]["text"].lower()
         mock_canvas.write.assert_not_called()
 
-    async def test_oversized_content_rejected(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
+    async def test_oversized_content_rejected(self, canvas_tools, mock_canvas):
         big_content = "x" * (_CANVAS_MAX_CHARS + 1)
-        result = await tools["summon_canvas_write"].handler({"markdown": big_content})
+        result = await canvas_tools["summon_canvas_write"].handler({"markdown": big_content})
         assert result["is_error"] is True
         assert "100K character limit" in result["content"][0]["text"]
         mock_canvas.write.assert_not_called()
 
-    async def test_exactly_max_size_allowed(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
+    async def test_exactly_max_size_allowed(self, canvas_tools, mock_canvas):
         max_content = "x" * _CANVAS_MAX_CHARS
-        result = await tools["summon_canvas_write"].handler({"markdown": max_content})
+        result = await canvas_tools["summon_canvas_write"].handler({"markdown": max_content})
         assert not result.get("is_error")
         mock_canvas.write.assert_called_once()
 
 
 class TestCanvasUpdateSection:
-    async def test_updates_section(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_update_section"].handler(
+    async def test_updates_section(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_update_section"].handler(
             {"heading": "Current Task", "markdown": "Working on feature X"}
         )
         assert not result.get("is_error")
         assert "Current Task" in result["content"][0]["text"]
         mock_canvas.update_section.assert_called_once_with("Current Task", "Working on feature X")
 
-    async def test_empty_heading_rejected(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_update_section"].handler(
+    async def test_clears_section_with_empty_markdown(self, canvas_tools, mock_canvas):
+        """Empty markdown is forwarded to canvas_store to clear the section."""
+        result = await canvas_tools["summon_canvas_update_section"].handler(
+            {"heading": "Notes", "markdown": ""}
+        )
+        assert not result.get("is_error")
+        assert "Notes" in result["content"][0]["text"]
+        mock_canvas.update_section.assert_called_once_with("Notes", "")
+
+    async def test_omitted_markdown_defaults_to_empty(self, canvas_tools, mock_canvas):
+        """Missing markdown key defaults to empty string (clears section)."""
+        result = await canvas_tools["summon_canvas_update_section"].handler({"heading": "Notes"})
+        assert not result.get("is_error")
+        mock_canvas.update_section.assert_called_once_with("Notes", "")
+
+    async def test_whitespace_only_markdown_clears_section(self, canvas_tools, mock_canvas):
+        """Whitespace-only markdown passes through (unlike write, which rejects it)."""
+        result = await canvas_tools["summon_canvas_update_section"].handler(
+            {"heading": "Notes", "markdown": "   \n  "}
+        )
+        assert not result.get("is_error")
+        mock_canvas.update_section.assert_called_once_with("Notes", "   \n  ")
+
+    async def test_empty_heading_rejected(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_update_section"].handler(
             {"heading": "", "markdown": "some content"}
         )
         assert result["is_error"] is True
         mock_canvas.update_section.assert_not_called()
 
-    async def test_hash_only_heading_raises_value_error(self, canvas_tools):
+    async def test_hash_only_heading_raises_value_error(self, canvas_tools, mock_canvas):
         """canvas_store.update_section raises ValueError for heading that strips to empty."""
-        tools, mock_canvas = canvas_tools
         mock_canvas.update_section = AsyncMock(side_effect=ValueError("empty heading"))
-        result = await tools["summon_canvas_update_section"].handler(
+        result = await canvas_tools["summon_canvas_update_section"].handler(
             {"heading": "###", "markdown": "content"}
         )
         assert result["is_error"] is True
 
-    async def test_missing_heading_param(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
-        result = await tools["summon_canvas_update_section"].handler({"markdown": "content"})
+    async def test_missing_heading_param(self, canvas_tools, mock_canvas):
+        result = await canvas_tools["summon_canvas_update_section"].handler({"markdown": "content"})
         assert result["is_error"] is True
         mock_canvas.update_section.assert_not_called()
 
-    async def test_oversized_section_content_rejected(self, canvas_tools):
-        tools, mock_canvas = canvas_tools
+    async def test_oversized_section_content_rejected(self, canvas_tools, mock_canvas):
         big_content = "x" * (_CANVAS_MAX_CHARS + 1)
-        result = await tools["summon_canvas_update_section"].handler(
+        result = await canvas_tools["summon_canvas_update_section"].handler(
             {"heading": "Notes", "markdown": big_content}
         )
         assert result["is_error"] is True

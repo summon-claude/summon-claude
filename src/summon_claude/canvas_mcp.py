@@ -106,9 +106,10 @@ def create_canvas_mcp_tools(
         try:
             await canvas_store.write(markdown)
             return {"content": [{"type": "text", "text": "Canvas updated."}]}
-        except Exception as e:
+        except Exception:
+            logger.exception("Canvas write failed")
             return {
-                "content": [{"type": "text", "text": f"Error writing canvas: {e}"}],
+                "content": [{"type": "text", "text": "Error: could not write canvas."}],
                 "is_error": True,
             }
 
@@ -118,7 +119,8 @@ def create_canvas_mcp_tools(
             "Update a single section of the channel canvas by heading name. "
             "If the section exists, replaces its content. If not found, appends a new section. "
             "heading: the section heading text WITHOUT the ## prefix (required). "
-            "markdown: the new section body content (required, max 100K characters)."
+            "markdown: the new section body content (required, max 100K characters). "
+            "Pass empty string to clear a section while keeping the heading."
         ),
         {"heading": str, "markdown": str},
     )
@@ -151,9 +153,10 @@ def create_canvas_mcp_tools(
                 "content": [{"type": "text", "text": f"Error: {e}"}],
                 "is_error": True,
             }
-        except Exception as e:
+        except Exception:
+            logger.exception("Canvas update_section failed for heading=%s", heading)
             return {
-                "content": [{"type": "text", "text": f"Error updating canvas section: {e}"}],
+                "content": [{"type": "text", "text": "Error: could not update canvas section."}],
                 "is_error": True,
             }
 
