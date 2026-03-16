@@ -1579,11 +1579,25 @@ class SummonSession:
                 )
         except Exception as e:
             logger.warning("Compact failed: %s", e)
-            try:
-                await rt.client.post(
-                    ":warning: Compact failed. Try again later.",
-                    thread_ts=thread_ts,
+            err_str = str(e).lower()
+            is_overflow = any(
+                kw in err_str for kw in ("context", "token", "limit", "length", "overflow")
+            )
+            if is_overflow:
+                msg = (
+                    ":warning: Compact failed — context may be too full to summarize.\n"
+                    "Recovery options:\n"
+                    "• `!clear` — start a fresh conversation (context lost)\n"
+                    "• Use the `slack_read_history` MCP tool to manually recover context\n"
+                    "• Start a new session if this one is unrecoverable"
                 )
+            else:
+                msg = (
+                    ":warning: Compact failed. Try again, or use `!clear` to start fresh.\n"
+                    "Use the `slack_read_history` MCP tool to recover context if needed."
+                )
+            try:
+                await rt.client.post(msg, thread_ts=thread_ts)
             except Exception as e2:
                 logger.debug("Failed to post compact error: %s", e2)
 
