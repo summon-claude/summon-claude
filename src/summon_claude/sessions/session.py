@@ -2248,12 +2248,7 @@ class SummonSession:
                         await self._execute_effort(rt, new_effort, thread_ts)
                     if result.metadata.get("clear"):
                         await self._post_clear_delineation(rt)
-                    if result.metadata.get("compact"):
-                        annotations.insert(
-                            0,
-                            f"`!{match.raw_name}` — must be used as a standalone command",
-                        )
-                    elif result.metadata.get("spawn"):
+                    if result.metadata.get("compact") or result.metadata.get("spawn"):
                         annotations.insert(
                             0,
                             f"`!{match.raw_name}` — must be used as a standalone command",

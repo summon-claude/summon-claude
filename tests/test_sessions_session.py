@@ -1903,3 +1903,171 @@ class TestCompactMidMessageBlocked:
         rt.client.post.assert_called()
         annotation_text = rt.client.post.call_args[0][0]
         assert "standalone" in annotation_text.lower()
+
+
+class TestFinalizeEscalatingWarnings:
+    """Integration tests that call _finalize_turn_result to verify Slack warnings."""
+
+    @staticmethod
+    def _make_stream_result(
+        session_id: str = "claude-sid-123", cost: float = 0.001, model: str = "opus"
+    ):
+        result = MagicMock()
+        result.session_id = session_id
+        result.total_cost_usd = cost
+        sr = MagicMock()
+        sr.result = result
+        sr.model = model
+        return sr
+
+    @staticmethod
+    def _make_streamer():
+        streamer = AsyncMock()
+        streamer.finalize_turn = MagicMock(return_value="summary")
+        streamer.update_turn_summary = AsyncMock()
+        streamer.post_turn_footer = AsyncMock()
+        return streamer
+
+    async def _run_finalize(self, session, rt, pct, **sr_kwargs):
+        """Call _finalize_turn_result with a given context percentage."""
+        from pathlib import Path
+
+        from summon_claude.sessions.context import ContextUsage
+
+        session._claude_session_id = "already-set"
+        session._last_context = ContextUsage(
+            input_tokens=int(200000 * pct / 100),
+            context_window=200000,
+            percentage=pct,
+        )
+        sr = self._make_stream_result(**sr_kwargs)
+        streamer = self._make_streamer()
+
+        with (
+            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
+            patch(
+                "summon_claude.sessions.session.derive_transcript_path",
+                return_value=Path("/fake"),
+            ),
+            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+        ):
+            await session._finalize_turn_result(rt, streamer, sr)
+
+    async def test_no_warning_below_75pct(self):
+        session = make_session()
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=60.0)
+
+        calls = rt.client.post.call_args_list
+        warning_calls = [c for c in calls if ":warning:" in str(c) or ":rotating_light:" in str(c)]
+        assert len(warning_calls) == 0
+        assert session._context_warned_threshold == 0.0
+
+    async def test_no_context_data_skips_warnings(self):
+        """When _last_context is None, the warning block is skipped entirely."""
+        from pathlib import Path
+
+        session = make_session()
+        session._claude_session_id = "already-set"
+        session._last_context = None
+        rt = make_rt(AsyncMock())
+
+        with (
+            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
+            patch(
+                "summon_claude.sessions.session.derive_transcript_path",
+                return_value=Path("/fake"),
+            ),
+            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+        ):
+            await session._finalize_turn_result(
+                rt, self._make_streamer(), self._make_stream_result()
+            )
+
+        calls = rt.client.post.call_args_list
+        warning_calls = [c for c in calls if ":warning:" in str(c) or ":rotating_light:" in str(c)]
+        assert len(warning_calls) == 0
+        assert session._context_warned_threshold == 0.0
+
+    async def test_exactly_75pct_no_warning(self):
+        """At exactly 75.0%, no warning fires (threshold uses strict >)."""
+        session = make_session()
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=75.0)
+
+        calls = rt.client.post.call_args_list
+        warning_calls = [c for c in calls if ":warning:" in str(c) or ":rotating_light:" in str(c)]
+        assert len(warning_calls) == 0
+        assert session._context_warned_threshold == 0.0
+
+    async def test_75pct_posts_standard_warning(self):
+        session = make_session()
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=80.0)
+
+        calls = rt.client.post.call_args_list
+        warning_calls = [c for c in calls if "getting large" in str(c)]
+        assert len(warning_calls) == 1
+        text = warning_calls[0][0][0]
+        assert ":warning:" in text
+        assert "~80%" in text
+        assert session._context_warned_threshold == 80.0
+
+    async def test_90pct_posts_urgent_warning(self):
+        session = make_session()
+        session._context_warned_threshold = 75.0
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=92.0)
+
+        calls = rt.client.post.call_args_list
+        urgent_calls = [c for c in calls if "critically full" in str(c)]
+        assert len(urgent_calls) == 1
+        text = urgent_calls[0][0][0]
+        assert ":rotating_light:" in text
+        assert "~92%" in text
+        assert session._context_warned_threshold == 92.0
+
+    async def test_95pct_posts_auto_compact_message_and_calls_execute(self):
+        session = make_session()
+        session._context_warned_threshold = 90.0
+        rt = make_rt(AsyncMock())
+
+        with (
+            patch.object(
+                session,
+                "_execute_compact",
+                new_callable=AsyncMock,
+                side_effect=_SessionRestartError(summary="test"),
+            ) as mock_compact,
+            pytest.raises(_SessionRestartError),
+        ):
+            await self._run_finalize(session, rt, pct=97.0)
+
+        mock_compact.assert_awaited_once_with(rt, instructions=None, thread_ts=None)
+        calls = rt.client.post.call_args_list
+        auto_calls = [c for c in calls if "auto-compacting" in str(c)]
+        assert len(auto_calls) == 1
+        assert session._context_warned_threshold == 97.0
+
+    async def test_duplicate_75pct_warning_suppressed(self):
+        session = make_session()
+        session._context_warned_threshold = 80.0  # already warned above 75%
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=82.0)
+
+        calls = rt.client.post.call_args_list
+        warning_calls = [c for c in calls if "getting large" in str(c)]
+        assert len(warning_calls) == 0
+        assert session._context_warned_threshold == 80.0  # unchanged
+
+    async def test_escalation_skips_lower_thresholds(self):
+        """At 92% with threshold=0, the 90% (urgent) warning fires — not the 75% one."""
+        session = make_session()
+        rt = make_rt(AsyncMock())
+        await self._run_finalize(session, rt, pct=92.0)
+
+        calls = rt.client.post.call_args_list
+        urgent = [c for c in calls if "critically full" in str(c)]
+        standard = [c for c in calls if "getting large" in str(c)]
+        assert len(urgent) == 1
+        assert len(standard) == 0
