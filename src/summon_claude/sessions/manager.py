@@ -385,9 +385,11 @@ class SessionManager:
             case "create_auth_session":
                 try:
                     raw_options = msg["options"]
-                    # Force auth_only=True regardless of what was sent
-                    raw_options["auth_only"] = True
-                    options = SessionOptions(**raw_options)
+                    # Allowlist only safe fields — callers must not inject pm_profile,
+                    # project_id, or other privileged options.
+                    safe_fields = {k: v for k, v in raw_options.items() if k in ("cwd", "name")}
+                    safe_fields["auth_only"] = True
+                    options = SessionOptions(**safe_fields)
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
                 session_id = str(uuid.uuid4())
