@@ -1030,19 +1030,17 @@ class TestCompactRouting:
         assert pt.pre_sent is False
 
 
-class TestContextWarningReset:
-    """Tests for _context_warned reset after compact."""
+class TestContextWarningThreshold:
+    """Tests for _context_warned_threshold tracking."""
 
-    def test_context_warned_resets_on_init(self):
+    def test_context_warned_threshold_starts_at_zero(self):
         session = make_session()
-        assert session._context_warned is False
+        assert session._context_warned_threshold == 0.0
 
-    def test_context_warned_flag_exists(self):
+    def test_context_warned_threshold_is_settable(self):
         session = make_session()
-        session._context_warned = True
-        assert session._context_warned is True
-        session._context_warned = False
-        assert session._context_warned is False
+        session._context_warned_threshold = 75.0
+        assert session._context_warned_threshold == 75.0
 
 
 class TestMCPRegistration:
@@ -1691,7 +1689,7 @@ class TestSessionRestartLoop:
         assert _OVERFLOW_RECOVERY_PROMPT in captured_prompts[1]
 
     async def test_restart_resets_session_state(self, registry):
-        """Restart resets _pending_turns, _context_warned, and _resume."""
+        """Restart resets _pending_turns, _context_warned_threshold, and _resume."""
         consumer_call = 0
 
         class _FakeSDKClient:
@@ -1718,7 +1716,7 @@ class TestSessionRestartLoop:
             await asyncio.sleep(999)
 
         session = make_session()
-        session._context_warned = True
+        session._context_warned_threshold = 75.0
         session._resume = "old-session-id"
         rt = make_rt(registry)
         router = AsyncMock()
@@ -1736,5 +1734,5 @@ class TestSessionRestartLoop:
             await session._run_session_tasks(rt, router)
 
         assert session._pending_turns is not old_queue  # New queue
-        assert session._context_warned is False
+        assert session._context_warned_threshold == 0.0
         assert session._resume is None

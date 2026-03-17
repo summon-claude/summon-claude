@@ -146,7 +146,10 @@ _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
 _CLEANUP_TIMEOUT_S = 10.0
-_CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user when context exceeds this %
+_CONTEXT_AGENT_THRESHOLD = 70.0  # Inject context note into agent messages
+_CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
+_CONTEXT_URGENT_THRESHOLD = 90.0  # Urgent warning in Slack
+_CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
 _MAX_CHANNEL_NAME_LEN = 80
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
@@ -649,7 +652,7 @@ class SummonSession:
         # Turn abort infrastructure
         self._current_turn_task: asyncio.Task | None = None
         self._abort_event = asyncio.Event()
-        self._context_warned: bool = False
+        self._context_warned_threshold: float = 0.0
 
         # Session state
         self._last_heartbeat_time: float = 0.0
@@ -1217,20 +1220,20 @@ class SummonSession:
             # After client teardown: restart if compaction requested
             if restart is not None:
                 if restart.summary:
-                    system_prompt_append = (
-                        base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
-                    )
+                    system_prompt_append = base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
                 self._pending_turns = asyncio.Queue()
-                self._context_warned = False
+                self._context_warned_threshold = 0.0
                 self._resume = None
                 logger.info("Session restarting (recovery_mode=%s)", restart.recovery_mode)
                 continue
 
             break  # Normal exit
 
-    async def _run_preprocessor(self, rt: _SessionRuntime, claude: ClaudeSDKClient) -> None:
+    async def _run_preprocessor(  # noqa: PLR0912
+        self, rt: _SessionRuntime, claude: ClaudeSDKClient
+    ) -> None:
         """Dequeue raw Slack events, preprocess, call query(), enqueue _PendingTurn.
 
         Runs concurrently with ``_run_response_consumer``. Calling ``query()``
@@ -1260,6 +1263,21 @@ class SummonSession:
 
                 if not user_message:
                     continue
+
+                # Agent context awareness: prepend context note when usage is high
+                if self._last_context and self._last_context.percentage > _CONTEXT_AGENT_THRESHOLD:
+                    pct = self._last_context.percentage
+                    if pct > _CONTEXT_URGENT_THRESHOLD:
+                        urgency = (
+                            "CRITICALLY HIGH — run !compact immediately or context will overflow."
+                        )
+                    elif pct > _CONTEXT_WARNING_THRESHOLD:
+                        urgency = "Consider running !compact to free up space."
+                    else:
+                        urgency = "No action needed yet."
+                    user_message = (
+                        f"[Context: {pct:.0f}% of window used. {urgency}]\n\n" + user_message
+                    )
 
                 # Pre-send: call query() immediately so SDK queues it
                 message_ts = item.get("ts")
@@ -1418,7 +1436,7 @@ class SummonSession:
                 await rt.client.unreact(pending.message_ts, "gear")
             self._current_turn_task = None
 
-    async def _finalize_turn_result(
+    async def _finalize_turn_result(  # noqa: PLR0912, PLR0915
         self,
         rt: _SessionRuntime,
         streamer: ResponseStreamer,
@@ -1453,7 +1471,8 @@ class SummonSession:
                 logger.warning("Failed to post Claude session ID to Slack", exc_info=True)
         cost = stream_result.result.total_cost_usd or 0.0
         self._total_cost += cost
-        await rt.registry.record_turn(self._session_id, cost)
+        ctx_pct = self._last_context.percentage if self._last_context else None
+        await rt.registry.record_turn(self._session_id, cost, context_pct=ctx_pct)
         if stream_result.model is not None:
             self._last_model_seen = stream_result.model
 
@@ -1477,21 +1496,48 @@ class SummonSession:
             footer = f":checkered_flag: {cost_str}"
         await streamer.post_turn_footer(footer)
 
-        # Proactive context warning
-        if (
-            self._last_context
-            and self._last_context.percentage > _CONTEXT_WARNING_THRESHOLD
-            and not self._context_warned
-        ):
-            try:
-                await rt.client.post(
-                    f":warning: Context is getting large "
-                    f"(~{self._last_context.percentage:.0f}% used). "
-                    "Consider running `!compact` to free up space."
-                )
-            except Exception:
-                logger.debug("Failed to post context warning", exc_info=True)
-            self._context_warned = True
+        # Escalating context warnings + auto-compact
+        if self._last_context:
+            pct = self._last_context.percentage
+            if (
+                pct > _CONTEXT_AUTO_COMPACT_THRESHOLD
+                and self._context_warned_threshold < _CONTEXT_AUTO_COMPACT_THRESHOLD
+            ):
+                self._context_warned_threshold = pct
+                try:
+                    await rt.client.post(
+                        f":rotating_light: Context at ~{pct:.0f}% — "
+                        "auto-compacting to preserve session..."
+                    )
+                except Exception:
+                    logger.debug("Failed to post auto-compact message", exc_info=True)
+                await self._execute_compact(rt, instructions=None, thread_ts=None)
+            elif (
+                pct > _CONTEXT_URGENT_THRESHOLD
+                and self._context_warned_threshold < _CONTEXT_URGENT_THRESHOLD
+            ):
+                self._context_warned_threshold = pct
+                try:
+                    await rt.client.post(
+                        f":rotating_light: Context is critically full "
+                        f"(~{pct:.0f}% used). "
+                        "Run `!compact` now to avoid losing context."
+                    )
+                except Exception:
+                    logger.debug("Failed to post urgent context warning", exc_info=True)
+            elif (
+                pct > _CONTEXT_WARNING_THRESHOLD
+                and self._context_warned_threshold < _CONTEXT_WARNING_THRESHOLD
+            ):
+                self._context_warned_threshold = pct
+                try:
+                    await rt.client.post(
+                        f":warning: Context is getting large "
+                        f"(~{pct:.0f}% used). "
+                        "Consider running `!compact` to free up space."
+                    )
+                except Exception:
+                    logger.debug("Failed to post context warning", exc_info=True)
 
         # Only update topic if model or branch changed
         try:
