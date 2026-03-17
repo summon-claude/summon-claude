@@ -138,6 +138,7 @@ class _SessionLogFilter(logging.Filter):
 
 _HEARTBEAT_INTERVAL_S = 30
 _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
+_MAX_SPAWN_CHILDREN = 5  # max active children from !summon start
 _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
@@ -1740,6 +1741,31 @@ class SummonSession:
 
         from summon_claude.cli import daemon_client  # noqa: PLC0415
         from summon_claude.sessions.auth import generate_spawn_token  # noqa: PLC0415
+
+        # Enforce active-child cap before spawning
+        try:
+            children = await rt.registry.list_children(self._session_id, limit=500)
+            active = [c for c in children if c.get("status") in ("pending_auth", "active")]
+            if len(active) >= _MAX_SPAWN_CHILDREN:
+                try:
+                    await rt.client.post(
+                        f":warning: Spawn limit reached ({len(active)}/{_MAX_SPAWN_CHILDREN}). "
+                        "Stop existing child sessions before starting new ones.",
+                        thread_ts=thread_ts,
+                    )
+                except Exception as e2:
+                    logger.debug("Failed to post spawn limit message: %s", e2)
+                return
+        except Exception as e:
+            logger.error("Failed to verify spawn child limit: %s", e)
+            try:
+                await rt.client.post(
+                    ":warning: Could not verify session limit. Try again.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post spawn limit error: %s", e2)
+            return
 
         try:
             spawn_auth = await generate_spawn_token(
