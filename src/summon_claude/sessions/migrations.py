@@ -78,7 +78,7 @@ async def _migrate_5_to_6(db: aiosqlite.Connection) -> None:
 async def _migrate_6_to_7(db: aiosqlite.Connection) -> None:
     """Add context_pct column for tracking context window usage."""
     # SQLite lacks IF NOT EXISTS for ALTER TABLE ADD COLUMN
-    with contextlib.suppress(Exception):
+    with contextlib.suppress(sqlite3.OperationalError):
         await db.execute("ALTER TABLE sessions ADD COLUMN context_pct REAL")
 
 

@@ -1448,7 +1448,10 @@ class SummonSession:
         finally:
             # Safety net: clean up gear if turn ended without proper emoji transition
             if pending.message_ts and not emoji_finalized:
-                await rt.client.unreact(pending.message_ts, "gear")
+                try:
+                    await rt.client.unreact(pending.message_ts, "gear")
+                except Exception:
+                    logger.debug("Failed to clean up gear emoji", exc_info=True)
             self._current_turn_task = None
 
     async def _finalize_turn_result(  # noqa: PLR0912, PLR0915
