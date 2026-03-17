@@ -93,9 +93,7 @@ class SessionManager:
             The short code for the user to authenticate via ``/summon`` in Slack.
         """
         # Cancel grace timer — a new session has arrived
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         session_id = str(uuid.uuid4())
         auth = await self._generate_auth(session_id)
@@ -170,9 +168,7 @@ class SessionManager:
 
         # Cancel grace timer only after successful verification — prevents
         # invalid tokens from keeping the daemon alive indefinitely.
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         # Enforce the authorized working directory from the spawn token
         options = dataclasses.replace(options, cwd=spawn_auth.cwd)
@@ -225,9 +221,7 @@ class SessionManager:
         Phase 2: Wait up to 30 seconds for tasks to drain.
         Phase 3: Force-cancel any remaining tasks.
         """
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         # Phase 1 — signal
         for session in list(self._sessions.values()):
@@ -392,6 +386,7 @@ class SessionManager:
                     options = SessionOptions(**safe_fields)
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
+                self._cancel_grace_timer()  # a new session has arrived
                 session_id = str(uuid.uuid4())
                 auth = await self._generate_auth(session_id)
                 session = SummonSession(
@@ -499,6 +494,12 @@ class SessionManager:
             "SessionManager: no active sessions — daemon will stop in %.0fs",
             _GRACE_SECONDS,
         )
+
+    def _cancel_grace_timer(self) -> None:
+        """Cancel the daemon auto-stop grace timer if it is running."""
+        if self._grace_timer is not None:
+            self._grace_timer.cancel()
+            self._grace_timer = None
 
     @staticmethod
     def _is_recoverable(exc: Exception) -> bool:
