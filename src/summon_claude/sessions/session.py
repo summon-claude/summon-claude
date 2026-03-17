@@ -1762,7 +1762,8 @@ class SummonSession:
                 logger.debug("Failed to post spawn error: %s", e2)
             return
 
-        child_options = SessionOptions(cwd=self._cwd, name=f"{self._name}-spawn")
+        child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
+        child_options = SessionOptions(cwd=self._cwd, name=child_name)
         try:
             child_session_id = await daemon_client.create_session_with_spawn_token(
                 child_options, spawn_auth.token
