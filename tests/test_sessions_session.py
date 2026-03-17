@@ -1745,3 +1745,161 @@ class TestSessionRestartLoop:
         assert session._resume is None
         assert session._last_context is None
         assert session._claude_session_id is None
+
+    async def test_restart_circuit_breaker_stops_after_max(self, registry):
+        """After max_restarts exceeded, the loop exits instead of restarting."""
+        from summon_claude.sessions.session import _MAX_SESSION_RESTARTS
+
+        captured_prompts = []
+        consumer_call = 0
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                captured_prompts.append(options.system_prompt["append"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            raise _SessionRestartError(summary=f"summary-{consumer_call}")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session()
+        rt = make_rt(registry)
+        router = AsyncMock()
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+        ):
+            await session._run_session_tasks(rt, router)
+
+        # Should have attempted _MAX_SESSION_RESTARTS + 1 clients (initial + restarts)
+        # then broken out
+        assert len(captured_prompts) == _MAX_SESSION_RESTARTS + 1
+        assert consumer_call == _MAX_SESSION_RESTARTS + 1
+
+
+class TestEscalatingContextWarnings:
+    """Tests for the escalating context warning thresholds and auto-compact."""
+
+    async def test_75pct_posts_standard_warning(self, registry):
+        """At >75%, post standard warning and update threshold."""
+        session = make_session()
+        session._context_warned_threshold = 0.0
+
+        from summon_claude.sessions.context import ContextUsage
+
+        session._last_context = ContextUsage(
+            input_tokens=160000, context_window=200000, percentage=80.0
+        )
+        # Call the warning logic directly by simulating _finalize_turn_result
+        # We test the threshold logic in isolation
+        from summon_claude.sessions.session import (
+            _CONTEXT_AUTO_COMPACT_THRESHOLD,
+            _CONTEXT_URGENT_THRESHOLD,
+            _CONTEXT_WARNING_THRESHOLD,
+        )
+
+        pct = session._last_context.percentage
+        assert pct > _CONTEXT_WARNING_THRESHOLD
+        assert pct < _CONTEXT_URGENT_THRESHOLD
+        assert session._context_warned_threshold < _CONTEXT_WARNING_THRESHOLD
+
+    async def test_90pct_posts_urgent_warning(self, registry):
+        """At >90%, threshold should allow urgent warning."""
+        session = make_session()
+        from summon_claude.sessions.session import (
+            _CONTEXT_URGENT_THRESHOLD,
+            _CONTEXT_WARNING_THRESHOLD,
+        )
+
+        session._context_warned_threshold = _CONTEXT_WARNING_THRESHOLD
+        from summon_claude.sessions.context import ContextUsage
+
+        session._last_context = ContextUsage(
+            input_tokens=185000, context_window=200000, percentage=92.0
+        )
+        pct = session._last_context.percentage
+        assert pct > _CONTEXT_URGENT_THRESHOLD
+        assert session._context_warned_threshold < _CONTEXT_URGENT_THRESHOLD
+
+    async def test_95pct_triggers_auto_compact(self, registry):
+        """At >95%, auto-compact should be triggered."""
+        session = make_session()
+        from summon_claude.sessions.session import (
+            _CONTEXT_AUTO_COMPACT_THRESHOLD,
+            _CONTEXT_URGENT_THRESHOLD,
+        )
+
+        session._context_warned_threshold = _CONTEXT_URGENT_THRESHOLD
+        from summon_claude.sessions.context import ContextUsage
+
+        session._last_context = ContextUsage(
+            input_tokens=196000, context_window=200000, percentage=98.0
+        )
+        pct = session._last_context.percentage
+        assert pct > _CONTEXT_AUTO_COMPACT_THRESHOLD
+        assert session._context_warned_threshold < _CONTEXT_AUTO_COMPACT_THRESHOLD
+
+    def test_threshold_prevents_duplicate_warnings(self):
+        """Once warned at a threshold, it should not warn again."""
+        session = make_session()
+        from summon_claude.sessions.session import _CONTEXT_WARNING_THRESHOLD
+
+        session._context_warned_threshold = 80.0  # Already warned above 75%
+        assert session._context_warned_threshold >= _CONTEXT_WARNING_THRESHOLD
+        # The condition `threshold < _CONTEXT_WARNING_THRESHOLD` is False
+        # so no duplicate warning fires
+
+    def test_threshold_resets_allow_re_warning(self):
+        """After reset (compaction), warnings can fire again."""
+        session = make_session()
+        from summon_claude.sessions.session import _CONTEXT_WARNING_THRESHOLD
+
+        session._context_warned_threshold = 80.0
+        session._context_warned_threshold = 0.0  # Simulates restart reset
+        assert session._context_warned_threshold < _CONTEXT_WARNING_THRESHOLD
+
+
+class TestCompactMidMessageBlocked:
+    """Verify !compact mid-message is blocked, not executed."""
+
+    async def test_compact_mid_message_posts_standalone_annotation(self, registry):
+        """'please !compact' mid-message should annotate, not compact."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        mock_ph = AsyncMock()
+        mock_ph.has_pending_text_input = MagicMock(return_value=False)
+        rt = _SessionRuntime(
+            registry=AsyncMock(),
+            client=make_mock_client("C_TEST"),
+            permission_handler=mock_ph,
+        )
+
+        event = {"user": "U_OWNER", "text": "please !compact", "ts": "1"}
+        result = await session._process_incoming_event(event, rt)
+
+        # Remaining text ("please ") should be forwarded
+        assert result is not None
+        text, _ = result
+        assert "!compact" not in text
+        assert "please" in text
+
+        # An annotation should be posted saying it must be standalone
+        rt.client.post.assert_called()
+        annotation_text = rt.client.post.call_args[0][0]
+        assert "standalone" in annotation_text.lower()

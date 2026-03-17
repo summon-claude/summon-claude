@@ -150,6 +150,7 @@ _CONTEXT_AGENT_THRESHOLD = 70.0  # Inject context note into agent messages
 _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
 _CONTEXT_URGENT_THRESHOLD = 90.0  # Urgent warning in Slack
 _CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
+_MAX_SESSION_RESTARTS = 3  # Circuit breaker for compaction restart loop
 _MAX_CHANNEL_NAME_LEN = 80
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
@@ -1125,7 +1126,6 @@ class SummonSession:
         os.environ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = "100"
 
         # System prompt state — modified on compaction restart
-        max_restarts = 3
         restart_count = 0
         base_prompt = _BASE_SYSTEM_APPEND
         if self._canvas_store is not None:
@@ -1226,8 +1226,8 @@ class SummonSession:
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
                 restart_count += 1
-                if restart_count > max_restarts:
-                    logger.warning("Max restart count (%d) exceeded", max_restarts)
+                if restart_count > _MAX_SESSION_RESTARTS:
+                    logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
                     break
                 self._pending_turns = asyncio.Queue()
                 self._context_warned_threshold = 0.0
@@ -1237,7 +1237,7 @@ class SummonSession:
                 logger.info(
                     "Session restarting (%d/%d, recovery_mode=%s)",
                     restart_count,
-                    max_restarts,
+                    _MAX_SESSION_RESTARTS,
                     restart.recovery_mode,
                 )
                 continue
@@ -2249,26 +2249,10 @@ class SummonSession:
                     if result.metadata.get("clear"):
                         await self._post_clear_delineation(rt)
                     if result.metadata.get("compact"):
-                        instructions = result.metadata.get("instructions") or ""
-                        compact_prompt = _COMPACT_PROMPT
-                        if instructions:
-                            compact_prompt += f"\n\nAdditional focus: {instructions}"
-                        pre_sent = False
-                        if claude:
-                            try:
-                                await claude.query(compact_prompt)
-                                pre_sent = True
-                            except Exception as e:
-                                logger.warning("Pre-send compact failed: %s", e)
-                        await self._pending_turns.put(
-                            _PendingTurn(
-                                message=instructions,
-                                thread_ts=thread_ts,
-                                pre_sent=pre_sent,
-                                compact=True,
-                            )
+                        annotations.insert(
+                            0,
+                            f"`!{match.raw_name}` — must be used as a standalone command",
                         )
-                        annotations.insert(0, f"`!{match.raw_name}` — compacting context...")
                     elif result.metadata.get("spawn"):
                         annotations.insert(
                             0,
