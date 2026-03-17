@@ -1125,6 +1125,8 @@ class SummonSession:
         os.environ["CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"] = "100"
 
         # System prompt state — modified on compaction restart
+        max_restarts = 3
+        restart_count = 0
         base_prompt = _BASE_SYSTEM_APPEND
         if self._canvas_store is not None:
             base_prompt += _CANVAS_PROMPT_SECTION
@@ -1223,10 +1225,21 @@ class SummonSession:
                     system_prompt_append = base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
+                restart_count += 1
+                if restart_count > max_restarts:
+                    logger.warning("Max restart count (%d) exceeded", max_restarts)
+                    break
                 self._pending_turns = asyncio.Queue()
                 self._context_warned_threshold = 0.0
+                self._last_context = None
+                self._claude_session_id = None
                 self._resume = None
-                logger.info("Session restarting (recovery_mode=%s)", restart.recovery_mode)
+                logger.info(
+                    "Session restarting (%d/%d, recovery_mode=%s)",
+                    restart_count,
+                    max_restarts,
+                    restart.recovery_mode,
+                )
                 continue
 
             break  # Normal exit
@@ -1473,17 +1486,19 @@ class SummonSession:
                 logger.warning("Failed to post Claude session ID to Slack", exc_info=True)
         cost = stream_result.result.total_cost_usd or 0.0
         self._total_cost += cost
-        ctx_pct = self._last_context.percentage if self._last_context else None
-        await rt.registry.record_turn(self._session_id, cost, context_pct=ctx_pct)
         if stream_result.model is not None:
             self._last_model_seen = stream_result.model
 
-        # Compute accurate context from JSONL transcript (not cumulative usage)
+        # Compute accurate context from JSONL transcript BEFORE recording
+        # so the DB gets current-turn data, not previous-turn
         if self._claude_session_id:
             tp = derive_transcript_path(self._cwd, self._claude_session_id)
             transcript_usage = get_last_step_usage(tp)
             if transcript_usage:
                 self._last_context = compute_context_usage(transcript_usage, self._last_model_seen)
+
+        ctx_pct = self._last_context.percentage if self._last_context else None
+        await rt.registry.record_turn(self._session_id, cost, context_pct=ctx_pct)
 
         summary = streamer.finalize_turn(context=self._last_context)
         await streamer.update_turn_summary(summary)
@@ -2232,11 +2247,13 @@ class SummonSession:
                         await self._post_clear_delineation(rt)
                     if result.metadata.get("compact"):
                         instructions = result.metadata.get("instructions") or ""
-                        compact_query = "/compact" + (f" {instructions}" if instructions else "")
+                        compact_prompt = _COMPACT_PROMPT
+                        if instructions:
+                            compact_prompt += f"\n\nAdditional focus: {instructions}"
                         pre_sent = False
                         if claude:
                             try:
-                                await claude.query(compact_query)
+                                await claude.query(compact_prompt)
                                 pre_sent = True
                             except Exception as e:
                                 logger.warning("Pre-send compact failed: %s", e)

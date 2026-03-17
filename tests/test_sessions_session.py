@@ -1718,6 +1718,13 @@ class TestSessionRestartLoop:
         session = make_session()
         session._context_warned_threshold = 75.0
         session._resume = "old-session-id"
+        session._claude_session_id = "old-claude-sid"
+
+        from summon_claude.sessions.context import ContextUsage
+
+        session._last_context = ContextUsage(
+            input_tokens=100000, context_window=200000, percentage=50.0
+        )
         rt = make_rt(registry)
         router = AsyncMock()
 
@@ -1736,3 +1743,5 @@ class TestSessionRestartLoop:
         assert session._pending_turns is not old_queue  # New queue
         assert session._context_warned_threshold == 0.0
         assert session._resume is None
+        assert session._last_context is None
+        assert session._claude_session_id is None
