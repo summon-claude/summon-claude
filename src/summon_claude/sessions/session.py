@@ -1408,6 +1408,8 @@ class SummonSession:
                 except (asyncio.CancelledError, Exception) as _e:
                     logger.debug("Turn task cancelled: %s", _e)
             raise
+        except _SessionRestartError:
+            raise  # Propagate to TaskGroup for client restart
         except Exception as e:
             logger.exception("Error during Claude response: %s", e)
             # Emoji lifecycle: gear -> warning (error)
