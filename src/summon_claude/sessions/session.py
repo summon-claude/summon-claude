@@ -1752,10 +1752,10 @@ class SummonSession:
                 parent_cwd=self._cwd,
             )
         except Exception as e:
-            logger.warning("Failed to generate spawn token: %s", e)
+            logger.exception("Failed to generate spawn token: %s", e)
             try:
                 await rt.client.post(
-                    f":warning: Failed to prepare spawn: {e}",
+                    ":warning: Failed to prepare spawn. Check logs for details.",
                     thread_ts=thread_ts,
                 )
             except Exception as e2:
@@ -1769,10 +1769,10 @@ class SummonSession:
                 child_options, spawn_auth.token
             )
         except Exception as e:
-            logger.warning("Failed to create spawn session: %s", e)
+            logger.exception("Failed to create spawn session: %s", e)
             try:
                 await rt.client.post(
-                    f":warning: Failed to spawn session: {e}",
+                    ":warning: Failed to spawn session. Check logs for details.",
                     thread_ts=thread_ts,
                 )
             except Exception as e2:
