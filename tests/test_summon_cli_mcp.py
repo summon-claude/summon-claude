@@ -7,9 +7,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN_PM, SessionRegistry
 from summon_claude.summon_cli_mcp import (
-    _MAX_ACTIVE_CHILDREN_PER_PM,
     _SENSITIVE_FIELDS,
     create_summon_cli_mcp_server,
     create_summon_cli_mcp_tools,
@@ -325,7 +324,7 @@ class TestSessionStart:
         assert "new-session-id" in result["content"][0]["text"]
 
     async def test_active_child_cap_enforced(self, registry, tmp_path):
-        """Spawning beyond _MAX_ACTIVE_CHILDREN_PER_PM is rejected with details."""
+        """Spawning beyond MAX_SPAWN_CHILDREN_PM is rejected with details."""
         # Register a parent
         await registry.register(
             session_id="pm-parent",
@@ -336,8 +335,8 @@ class TestSessionStart:
         )
         await registry.update_status("pm-parent", "active", authenticated_user_id="U_PM")
 
-        # Spawn exactly _MAX_ACTIVE_CHILDREN_PER_PM active children
-        for i in range(_MAX_ACTIVE_CHILDREN_PER_PM):
+        # Spawn exactly MAX_SPAWN_CHILDREN_PM active children
+        for i in range(MAX_SPAWN_CHILDREN_PM):
             sid = f"child-{i:04d}"
             await registry.register(
                 session_id=sid,
@@ -364,7 +363,7 @@ class TestSessionStart:
         assert result["is_error"] is True
         text = result["content"][0]["text"]
         assert "limit reached" in text
-        assert f"{_MAX_ACTIVE_CHILDREN_PER_PM}" in text
+        assert f"{MAX_SPAWN_CHILDREN_PM}" in text
         # Should list active session names AND full IDs so the agent can stop them
         assert "child-0" in text
         assert "child-0000" in text  # full session ID included
@@ -381,7 +380,7 @@ class TestSessionStart:
         await registry.update_status("pm-parent-2", "active", authenticated_user_id="U_PM2")
 
         # Spawn _MAX children but mark all as completed
-        for i in range(_MAX_ACTIVE_CHILDREN_PER_PM):
+        for i in range(MAX_SPAWN_CHILDREN_PM):
             sid = f"done-{i:04d}"
             await registry.register(
                 session_id=sid,
@@ -445,7 +444,7 @@ class TestSessionStart:
         assert "could not verify" in result["content"][0]["text"]
 
     def test_max_active_children_constant(self):
-        assert _MAX_ACTIVE_CHILDREN_PER_PM == 15
+        assert MAX_SPAWN_CHILDREN_PM == 15
 
 
 class TestSessionStop:

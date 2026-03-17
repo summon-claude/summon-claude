@@ -17,6 +17,7 @@ from summon_claude.sessions.commands import (
     CommandDef,
     CommandResult,
 )
+from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN, MAX_SPAWN_CHILDREN_PM
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
@@ -1089,3 +1090,212 @@ class TestMCPRegistration:
     def test_session_options_pm_profile_true(self):
         opts = SessionOptions(cwd="/tmp", name="test", pm_profile=True)
         assert opts.pm_profile is True
+
+
+# ------------------------------------------------------------------
+# Spawn session tests
+# ------------------------------------------------------------------
+
+
+class TestHandleSpawn:
+    """Tests for _handle_spawn and !summon dispatch."""
+
+    def _make_rt(self, channel_id: str = "C_TEST") -> _SessionRuntime:
+        return _SessionRuntime(
+            registry=AsyncMock(),
+            client=make_mock_client(channel_id),
+            permission_handler=AsyncMock(),
+        )
+
+    async def test_spawn_rejects_wrong_user(self):
+        """_handle_spawn posts rejection when caller is not the session owner."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Only the session owner" in text
+
+    async def test_spawn_rejects_wrong_user_does_not_call_generate_token(self):
+        """Rejection short-circuits before generating spawn token."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        # Patch at the source module since _handle_spawn uses lazy import
+        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+            await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
+
+        mock_gen.assert_not_called()
+
+    async def test_dispatch_command_spawn_metadata_calls_handle_spawn(self):
+        """_dispatch_command with spawn metadata should call _handle_spawn."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        spawn_result = CommandResult(text=None, metadata={"spawn": True})
+
+        with (
+            patch(
+                "summon_claude.sessions.session.dispatch_command",
+                new=AsyncMock(return_value=spawn_result),
+            ),
+            patch.object(session, "_handle_spawn", new=AsyncMock()) as mock_spawn,
+        ):
+            await session._dispatch_command(rt, "summon", ["start"], "U_OWNER", None)
+
+        mock_spawn.assert_awaited_once_with(rt, "U_OWNER", None)
+
+    async def test_handle_spawn_posts_success_message_on_completion(self, tmp_path):
+        """_handle_spawn posts a success message when daemon_client succeeds."""
+        from summon_claude.sessions.registry import SessionRegistry
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            await registry.register("sess-spawn", 1234, "/tmp")
+
+            session = make_session(session_id="sess-spawn", cwd="/tmp")
+            session._authenticated_user_id = "U_OWNER"
+            session._channel_id = "C_SELF"
+
+            rt = _SessionRuntime(
+                registry=registry,
+                client=make_mock_client("C_SELF"),
+                permission_handler=AsyncMock(),
+            )
+
+            with (
+                patch(
+                    "summon_claude.sessions.auth.generate_spawn_token",
+                    new=AsyncMock(
+                        return_value=AsyncMock(token="tok123", parent_session_id="sess-spawn")
+                    ),
+                ),
+                patch(
+                    "summon_claude.cli.daemon_client.create_session_with_spawn_token",
+                    new=AsyncMock(return_value="child-sess-id"),
+                ),
+            ):
+                await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+            rt.client.post.assert_awaited_once()
+            text = rt.client.post.call_args[0][0]
+            assert "Spawned session started" in text
+
+    async def test_spawn_blocked_at_child_limit(self):
+        """_handle_spawn posts limit message when active children >= limit."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        # Mock list_children returning 5 active children (at the regular limit)
+        rt.registry.list_children = AsyncMock(
+            return_value=[{"session_id": f"child-{i}", "status": "active"} for i in range(5)]
+        )
+
+        await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Too many active child sessions" in text
+        assert "(5)" in text
+
+    async def test_spawn_pm_session_uses_higher_limit(self):
+        """PM sessions should use the higher spawn limit (MAX_SPAWN_CHILDREN_PM)."""
+        session = make_session(pm_profile=True, session_id="pm-sess", cwd="/tmp")
+        session._authenticated_user_id = "U_OWNER"
+        session._channel_id = "C_PM"
+
+        rt = self._make_rt()
+
+        # 10 active children — over regular limit (5) but under PM limit (15)
+        rt.registry.list_children = AsyncMock(
+            return_value=[{"session_id": f"child-{i}", "status": "active"} for i in range(10)]
+        )
+
+        with (
+            patch(
+                "summon_claude.sessions.auth.generate_spawn_token",
+                new=AsyncMock(return_value=AsyncMock(token="tok456", parent_session_id="pm-sess")),
+            ),
+            patch(
+                "summon_claude.cli.daemon_client.create_session_with_spawn_token",
+                new=AsyncMock(return_value="child-sess-pm"),
+            ),
+        ):
+            await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+        # Should succeed — not blocked
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Spawned session started" in text
+
+    async def test_spawn_pm_session_blocked_at_pm_limit(self):
+        """PM sessions should be blocked when active children >= PM limit."""
+        session = make_session(pm_profile=True)
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        # 15 active children — at the PM limit
+        rt.registry.list_children = AsyncMock(
+            return_value=[{"session_id": f"child-{i}", "status": "active"} for i in range(15)]
+        )
+
+        await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Too many active child sessions" in text
+        assert "(15)" in text
+
+    def test_spawn_limits_pinned(self):
+        """Guard test: pin spawn limit constants to prevent accidental drift."""
+        assert MAX_SPAWN_CHILDREN == 5
+        assert MAX_SPAWN_CHILDREN_PM == 15
+
+    async def test_spawn_list_children_failure_blocks_spawn(self):
+        """If list_children raises, spawn should be blocked (fail-closed)."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+
+        rt.registry.list_children = AsyncMock(side_effect=RuntimeError("DB locked"))
+
+        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+            await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+
+        # Should NOT have attempted to generate a token
+        mock_gen.assert_not_called()
+        # Should have posted an error message
+        rt.client.post.assert_awaited_once()
+        text = rt.client.post.call_args[0][0]
+        assert "Could not verify session limit" in text
+
+    async def test_spawn_mid_message_blocked_with_annotation(self):
+        """'please !summon start' mid-message should annotate, not spawn."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        mock_ph = AsyncMock()
+        mock_ph.has_pending_text_input = MagicMock(return_value=False)
+        rt = _SessionRuntime(
+            registry=AsyncMock(),
+            client=make_mock_client("C_TEST"),
+            permission_handler=mock_ph,
+        )
+
+        event = {"user": "U_OWNER", "text": "please !summon start", "ts": "1"}
+        result = await session._process_incoming_event(event, rt)
+
+        # Remaining text ("please ") should be forwarded to Claude
+        assert result is not None
+        text, _ = result
+        assert "!summon" not in text
+        assert "please" in text
+
+        # An annotation should be posted saying it must be standalone
+        rt.client.post.assert_called()
+        annotation_text = rt.client.post.call_args[0][0]
+        assert "standalone" in annotation_text.lower()
