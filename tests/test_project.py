@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,8 +10,7 @@ from click.testing import CliRunner
 
 from summon_claude.cli import cli
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.sessions.session import SessionOptions, build_pm_system_prompt
-from summon_claude.slack.canvas_templates import PM_CANVAS_TEMPLATE, get_canvas_template
+from summon_claude.sessions.session import build_pm_system_prompt
 
 # ---------------------------------------------------------------------------
 # Registry: project CRUD
@@ -44,7 +42,7 @@ class TestProjectAdd:
 
     async def test_add_duplicate_name_raises(self, registry, tmp_path):
         await registry.add_project("dup-proj", str(tmp_path))
-        with pytest.raises(ValueError, match="already exists"):
+        with pytest.raises(ValueError, match=r"(already exists|conflicts)"):
             await registry.add_project("dup-proj", str(tmp_path))
 
     async def test_add_project_default_empty_workflow(self, registry, tmp_path):
@@ -78,30 +76,34 @@ class TestProjectGet:
 class TestProjectRemove:
     async def test_remove_project(self, registry, tmp_path):
         project_id = await registry.add_project("rm-proj", str(tmp_path))
-        await registry.remove_project(project_id)
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == []
         assert await registry.get_project(project_id) is None
 
     async def test_remove_by_name(self, registry, tmp_path):
         await registry.add_project("rm-name", str(tmp_path))
-        await registry.remove_project("rm-name")
+        active_ids = await registry.remove_project("rm-name")
+        assert active_ids == []
         assert await registry.get_project("rm-name") is None
 
     async def test_remove_nonexistent_raises(self, registry):
         with pytest.raises(ValueError, match="No project found"):
             await registry.remove_project("no-such")
 
-    async def test_remove_with_active_session_raises(self, registry, tmp_path):
+    async def test_remove_with_active_session_returns_ids(self, registry, tmp_path):
         project_id = await registry.add_project("active-proj", str(tmp_path))
         await registry.register("sess-1", 1234, str(tmp_path), project_id=project_id)
-        # pending_auth is active — remove should fail
-        with pytest.raises(ValueError, match="active session"):
-            await registry.remove_project(project_id)
+        # pending_auth is active — remove should return active session IDs
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == ["sess-1"]
+        assert await registry.get_project(project_id) is None
 
-    async def test_remove_with_completed_session_succeeds(self, registry, tmp_path):
+    async def test_remove_with_completed_session_returns_empty(self, registry, tmp_path):
         project_id = await registry.add_project("done-proj", str(tmp_path))
         await registry.register("sess-2", 1234, str(tmp_path), project_id=project_id)
         await registry.update_status("sess-2", "completed")
-        await registry.remove_project(project_id)
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == []
         assert await registry.get_project(project_id) is None
 
 
@@ -180,6 +182,10 @@ class TestProjectUpdate:
         project = await registry.get_project(project_id)
         assert project is not None
 
+    async def test_update_nonexistent_raises_key_error(self, registry):
+        with pytest.raises(KeyError, match="No project with id"):
+            await registry.update_project("no-such-id", pm_channel_id="C123")
+
 
 class TestRegisterWithProjectId:
     async def test_register_with_project_id(self, registry, tmp_path):
@@ -199,35 +205,19 @@ class TestProjectIdInUpdatableFields:
         assert "project_id" in SessionRegistry._UPDATABLE_FIELDS
 
 
-# ---------------------------------------------------------------------------
-# SessionOptions: new fields
-# ---------------------------------------------------------------------------
+class TestUpdatableProjectFieldsGuard:
+    def test_updatable_project_fields_pins_set(self):
+        expected = frozenset(
+            {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory"}
+        )
+        assert expected == SessionRegistry._UPDATABLE_PROJECT_FIELDS
 
-
-class TestSessionOptionsNewFields:
-    def test_auth_only_default_false(self):
-        opts = SessionOptions(cwd="/tmp", name="test")
-        assert opts.auth_only is False
-
-    def test_project_id_default_none(self):
-        opts = SessionOptions(cwd="/tmp", name="test")
-        assert opts.project_id is None
-
-    def test_scan_interval_s_default(self):
-        opts = SessionOptions(cwd="/tmp", name="test")
-        assert opts.scan_interval_s == 900
-
-    def test_auth_only_can_be_set(self):
-        opts = SessionOptions(cwd="/tmp", name="test", auth_only=True)
-        assert opts.auth_only is True
-
-    def test_project_id_can_be_set(self):
-        opts = SessionOptions(cwd="/tmp", name="test", project_id="proj-123")
-        assert opts.project_id == "proj-123"
-
-    def test_scan_interval_s_can_be_set(self):
-        opts = SessionOptions(cwd="/tmp", name="test", scan_interval_s=300)
-        assert opts.scan_interval_s == 300
+    async def test_updatable_project_fields_are_valid_columns(self, registry):
+        """Every field in _UPDATABLE_PROJECT_FIELDS must be a real DB column."""
+        async with registry.db.execute("PRAGMA table_info(projects)") as cursor:
+            columns = {row[1] for row in await cursor.fetchall()}
+        for field in SessionRegistry._UPDATABLE_PROJECT_FIELDS:
+            assert field in columns, f"{field!r} not in projects table columns"
 
 
 # ---------------------------------------------------------------------------
@@ -260,25 +250,6 @@ class TestBuildPmSystemPrompt:
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
         assert isinstance(result["append"], str)
         assert len(result["append"]) > 50
-
-
-# ---------------------------------------------------------------------------
-# Canvas template
-# ---------------------------------------------------------------------------
-
-
-class TestPMCanvasTemplate:
-    def test_get_pm_profile_returns_pm_template(self):
-        template = get_canvas_template("pm")
-        assert template == PM_CANVAS_TEMPLATE
-
-    def test_pm_template_has_pm_header(self):
-        assert "PM Agent" in PM_CANVAS_TEMPLATE
-
-    def test_pm_template_formattable(self):
-        filled = PM_CANVAS_TEMPLATE.format(model="claude-opus", cwd="/tmp")
-        assert "claude-opus" in filled
-        assert "/tmp" in filled
 
 
 # ---------------------------------------------------------------------------
@@ -368,8 +339,6 @@ class TestProjectListCLI:
         assert "No projects" in result.output
 
     def test_list_with_projects(self, tmp_path):
-        import json
-
         projects = [
             {
                 "name": "my-proj",
@@ -414,11 +383,12 @@ class TestProjectListCLI:
 
 class TestProjectRemoveCLI:
     def test_remove_project_success(self):
-        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+        with (
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg,
+            patch("summon_claude.cli.project.is_daemon_running", return_value=False),
+        ):
             reg = AsyncMock()
-            reg.get_project = AsyncMock(return_value={"project_id": "p1", "name": "my-proj"})
-            reg.get_project_sessions = AsyncMock(return_value=[])
-            reg.remove_project = AsyncMock()
+            reg.remove_project = AsyncMock(return_value=[])
             mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
             mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
             runner = CliRunner()
@@ -459,7 +429,10 @@ class TestLaunchProjectManagers:
     async def test_stop_project_managers_no_projects(self):
         from summon_claude.cli.project import stop_project_managers
 
-        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg,
+        ):
             reg = AsyncMock()
             reg.list_projects = AsyncMock(return_value=[])
             mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)

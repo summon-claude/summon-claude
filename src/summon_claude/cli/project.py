@@ -10,6 +10,7 @@ from typing import Any
 import click
 
 from summon_claude.cli import daemon_client
+from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.auth import generate_spawn_token
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.sessions.session import SessionOptions
@@ -17,10 +18,10 @@ from summon_claude.sessions.session import SessionOptions
 
 def _resolve_directory(directory: str) -> str:
     """Resolve and validate a directory path. Raises ClickException if invalid."""
-    resolved = str(pathlib.Path(directory).resolve())
-    if not pathlib.Path(resolved).is_dir():
+    resolved = pathlib.Path(directory).resolve()
+    if not resolved.is_dir():
         raise click.ClickException(f"Directory does not exist: {resolved}")
-    return resolved
+    return str(resolved)
 
 
 async def async_project_add(name: str, directory: str) -> str:
@@ -36,12 +37,25 @@ async def async_project_add(name: str, directory: str) -> str:
 
 
 async def async_project_remove(name_or_id: str) -> None:
-    """Remove a project by name or ID."""
+    """Remove a project by name or ID.
+
+    If the project has active sessions, stops them via daemon IPC first.
+    """
+    active_ids: list[str] = []
     async with SessionRegistry() as registry:
         try:
-            await registry.remove_project(name_or_id)
+            active_ids = await registry.remove_project(name_or_id)
         except ValueError as e:
             raise click.ClickException(str(e)) from e
+
+    # Auto-stop any active sessions that were linked to this project
+    if active_ids and is_daemon_running():
+        for sid in active_ids:
+            try:
+                await daemon_client.stop_session(sid)
+                click.echo(f"  Stopped session {sid[:8]}...")
+            except Exception as e:
+                click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
 
 async def async_project_list() -> list[dict[str, Any]]:
@@ -49,7 +63,7 @@ async def async_project_list() -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
         result = await registry.list_projects()
-    return result  # noqa: RET504
+    return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
 _AUTH_POLL_INTERVAL_S = 2.0
@@ -62,20 +76,23 @@ async def _poll_for_completion(session_id: str) -> bool:
     Returns True if completed, False if errored or timeout.
     """
     try:
-        async with asyncio.timeout(_AUTH_POLL_TIMEOUT_S):
+        async with (
+            asyncio.timeout(_AUTH_POLL_TIMEOUT_S),
+            SessionRegistry() as registry,
+        ):
             while True:
                 await asyncio.sleep(_AUTH_POLL_INTERVAL_S)
-                async with SessionRegistry() as registry:
-                    session = await registry.get_session(session_id)
-                    if session is None:
-                        return False
-                    status = session.get("status")
-                    if status == "completed":
-                        return True
-                    if status == "errored":
-                        return False
+                session = await registry.get_session(session_id)
+                if session is None:
+                    return False
+                status = session.get("status")
+                if status == "completed":
+                    return True
+                if status == "errored":
+                    return False
     except TimeoutError:
-        return False
+        pass
+    return False
 
 
 async def launch_project_managers() -> list[str]:
@@ -95,6 +112,7 @@ async def launch_project_managers() -> list[str]:
     if not projects:
         return []
 
+    # pm_running is SQLite int (0/1) — falsy check works correctly
     needing_pm = [p for p in projects if not p.get("pm_running")]
     if not needing_pm:
         return []
@@ -167,25 +185,32 @@ async def stop_project_managers() -> list[str]:
 
     Returns a list of session_ids that were stopped.
     """
+    if not is_daemon_running():
+        click.echo("Daemon is not running. No PM sessions to stop.")
+        return []
+
     projects: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
 
+    if not projects:
+        click.echo("No projects registered.")
+        return []
+
     stopped: list[str] = []
-    for project in projects:
-        sessions: list[dict[str, Any]] = []
-        async with SessionRegistry() as registry:
+    async with SessionRegistry() as registry:
+        for project in projects:
             sessions = await registry.get_project_sessions(project["project_id"])
-        active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]
-        for session in active:
-            sid = session["session_id"]
-            try:
-                found = await daemon_client.stop_session(sid)
-                if found:
-                    stopped.append(sid)
-                    click.echo(f"  Stopped PM for {project['name']!r} (session {sid[:8]}...)")
-            except Exception as e:
-                click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
+            active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]
+            for session in active:
+                sid = session["session_id"]
+                try:
+                    found = await daemon_client.stop_session(sid)
+                    if found:
+                        stopped.append(sid)
+                        click.echo(f"  Stopped PM for {project['name']!r} (session {sid[:8]}...)")
+                except Exception as e:
+                    click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
     if not stopped:
         click.echo("No active PM sessions found.")

@@ -65,6 +65,7 @@ from summon_claude.sessions.registry import (
     MAX_SPAWN_CHILDREN,
     MAX_SPAWN_CHILDREN_PM,
     SessionRegistry,
+    slugify_for_channel,
 )
 from summon_claude.sessions.response import ResponseStreamer, StreamResult
 from summon_claude.sessions.response import split_text as _split_text
@@ -438,10 +439,7 @@ AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
 def _slugify(text: str) -> str:
     """Convert text to a Slack-safe channel name slug."""
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\-]", "-", text)
-    text = re.sub(r"-+", "-", text)
-    return text.strip("-") or "session"
+    return slugify_for_channel(text) or "session"
 
 
 def _make_channel_name(prefix: str, session_name: str) -> str:
@@ -713,6 +711,11 @@ class SummonSession:
     def channel_id(self) -> str | None:
         """Slack channel ID for this session, set after channel creation."""
         return self._channel_id
+
+    @property
+    def is_pm(self) -> bool:
+        """Whether this session is a PM agent session."""
+        return self._pm_profile
 
     @property
     def name(self) -> str:

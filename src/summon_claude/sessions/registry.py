@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -93,6 +95,14 @@ _MAX_FAILED_ATTEMPTS = 5
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def slugify_for_channel(text: str) -> str:
+    """Convert text to a Slack-safe channel name slug (lowercase, alphanumeric + hyphens)."""
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9\-]", "-", text)
+    text = re.sub(r"-+", "-", text)
+    return text.strip("-")
 
 
 def default_db_path() -> Path:
@@ -448,59 +458,64 @@ class SessionRegistry:
         """Register a new project. Returns the generated project_id.
 
         Derives ``channel_prefix`` from the project name using slugification.
-        Raises ``ValueError`` if a project with the same name already exists.
+        Raises ``ValueError`` if a project with the same name or channel prefix
+        already exists.
         """
-        import re  # noqa: PLC0415
-        import uuid  # noqa: PLC0415
-
-        def _slugify_name(text: str) -> str:
-            text = text.lower()
-            text = re.sub(r"[^a-z0-9\-]", "-", text)
-            text = re.sub(r"-+", "-", text)
-            return text.strip("-") or "project"
-
         project_id = str(uuid.uuid4())
-        channel_prefix = _slugify_name(name)[:20].rstrip("-")
+        channel_prefix = slugify_for_channel(name)[:20].rstrip("-") or "project"
         db = self._check_connected()
         async with self._lock:
             try:
                 await db.execute(
                     """
                     INSERT INTO projects
-                        (project_id, name, directory, channel_prefix, workflow_instructions)
-                    VALUES (?, ?, ?, ?, '')
+                        (project_id, name, directory, channel_prefix,
+                         workflow_instructions, created_at)
+                    VALUES (?, ?, ?, ?, '', ?)
                     """,
-                    (project_id, name, directory, channel_prefix),
+                    (project_id, name, directory, channel_prefix, _now()),
                 )
                 await db.commit()
             except sqlite3.IntegrityError as exc:
-                if "UNIQUE constraint failed: projects.name" in str(exc):
+                msg = str(exc)
+                if "UNIQUE constraint failed: projects.name" in msg:
                     raise ValueError(f"A project with name {name!r} already exists.") from exc
+                if "UNIQUE constraint failed: projects.channel_prefix" in msg:
+                    raise ValueError(
+                        f"Channel prefix {channel_prefix!r} (derived from {name!r}) "
+                        "conflicts with an existing project. Use a more distinct name."
+                    ) from exc
                 raise
         return project_id
 
-    async def remove_project(self, project_id_or_name: str) -> None:
+    async def remove_project(self, project_id_or_name: str) -> list[str]:
         """Remove a project by ID or name.
 
-        Raises ``ValueError`` if the project has active sessions or doesn't exist.
+        Returns a list of session_ids that were active and need stopping.
+        Raises ``ValueError`` if the project doesn't exist.
         """
         project = await self.get_project(project_id_or_name)
         if project is None:
             raise ValueError(f"No project found: {project_id_or_name!r}")
 
         project_id = project["project_id"]
-        active = await self.get_project_sessions(project_id)
-        running = [s for s in active if s.get("status") in ("pending_auth", "active")]
-        if running:
-            raise ValueError(
-                f"Project {project['name']!r} has {len(running)} active session(s). "
-                "Stop them before removing the project."
-            )
-
         db = self._check_connected()
         async with self._lock:
+            # Collect active session IDs inside the lock to avoid TOCTOU
+            async with db.execute(
+                "SELECT session_id FROM sessions WHERE project_id = ?"
+                " AND status IN ('pending_auth', 'active')",
+                (project_id,),
+            ) as cursor:
+                active_ids = [row[0] for row in await cursor.fetchall()]
             await db.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+            # NULL out project_id on historical sessions to avoid dangling references
+            await db.execute(
+                "UPDATE sessions SET project_id = NULL WHERE project_id = ?",
+                (project_id,),
+            )
             await db.commit()
+        return active_ids
 
     async def list_projects(self) -> list[dict]:
         """List all projects with a ``pm_running`` boolean field."""
@@ -549,7 +564,10 @@ class SessionRegistry:
     )
 
     async def update_project(self, project_id: str, **kwargs: Any) -> None:
-        """Update mutable project fields (pm_channel_id, workflow_instructions, etc.)."""
+        """Update mutable project fields (pm_channel_id, workflow_instructions, etc.).
+
+        Raises ``KeyError`` if the project_id does not exist.
+        """
         updates: dict[str, Any] = {}
         for key, val in kwargs.items():
             if key in self._UPDATABLE_PROJECT_FIELDS:
@@ -562,8 +580,12 @@ class SessionRegistry:
         set_clause = ", ".join(f"{k} = ?" for k in updates)
         values = [*updates.values(), project_id]
         async with self._lock:
-            await db.execute(f"UPDATE projects SET {set_clause} WHERE project_id = ?", values)
+            cursor = await db.execute(
+                f"UPDATE projects SET {set_clause} WHERE project_id = ?", values
+            )
             await db.commit()
+            if cursor.rowcount == 0:
+                raise KeyError(f"No project with id {project_id!r}")
 
     # --- Canvas methods ---
 
@@ -778,53 +800,34 @@ class SessionRegistry:
             await db.commit()
 
     async def get_project_workflow(self, project_id: str) -> str:
-        """Return per-project workflow instructions, or empty string if unset.
-
-        Requires the ``projects`` table (M2). Returns empty string if the
-        table does not exist yet.
-        """
+        """Return per-project workflow instructions, or empty string if unset."""
         db = self._check_connected()
-        try:
-            async with db.execute(
-                "SELECT workflow_instructions FROM projects WHERE project_id = ?",
-                (project_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else ""
-        except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
-                return ""
-            raise
+        async with db.execute(
+            "SELECT workflow_instructions FROM projects WHERE project_id = ?",
+            (project_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else ""
 
     async def set_project_workflow(self, project_id: str, instructions: str) -> None:
         """Set per-project workflow instructions.
 
-        Requires the ``projects`` table (M2). Raises ``RuntimeError`` if the
-        table does not exist yet. Raises ``KeyError`` if the project_id does
-        not exist in the projects table.
+        Raises ``KeyError`` if the project_id does not exist.
         """
         db = self._check_connected()
-        try:
-            async with self._lock:
-                cursor = await db.execute(
-                    "UPDATE projects SET workflow_instructions = ? WHERE project_id = ?",
-                    (instructions, project_id),
-                )
-                await db.commit()
-                if cursor.rowcount == 0:
-                    raise KeyError(f"No project with id {project_id!r}")
-        except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
-                raise RuntimeError(
-                    "Per-project workflows require the projects table (not yet created)."
-                ) from e
-            raise
+        async with self._lock:
+            cursor = await db.execute(
+                "UPDATE projects SET workflow_instructions = ? WHERE project_id = ?",
+                (instructions, project_id),
+            )
+            await db.commit()
+            if cursor.rowcount == 0:
+                raise KeyError(f"No project with id {project_id!r}")
 
     async def clear_project_workflow(self, project_id: str) -> None:
         """Reset per-project workflow instructions to empty string.
 
-        No-op if the project does not exist. Raises ``RuntimeError`` if the
-        ``projects`` table does not exist yet.
+        No-op if the project does not exist.
         """
         try:
             await self.set_project_workflow(project_id, "")
@@ -835,25 +838,19 @@ class SessionRegistry:
         """Return effective workflow instructions for a project.
 
         Returns per-project override if non-empty, otherwise global defaults.
-        Uses a single query when the projects table exists.
         """
         db = self._check_connected()
-        try:
-            async with db.execute(
-                "SELECT COALESCE("
-                "  NULLIF((SELECT workflow_instructions FROM projects"
-                "          WHERE project_id = ?), ''),"
-                "  (SELECT instructions FROM workflow_defaults WHERE id = 1),"
-                "  ''"
-                ")",
-                (project_id,),
-            ) as cursor:
-                row = await cursor.fetchone()
-                return row[0] if row else ""
-        except sqlite3.OperationalError as e:
-            if "no such table" in str(e).lower():
-                return await self.get_workflow_defaults()
-            raise
+        async with db.execute(
+            "SELECT COALESCE("
+            "  NULLIF((SELECT workflow_instructions FROM projects"
+            "          WHERE project_id = ?), ''),"
+            "  (SELECT instructions FROM workflow_defaults WHERE id = 1),"
+            "  ''"
+            ")",
+            (project_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else ""
 
     # --- Audit log methods ---
 

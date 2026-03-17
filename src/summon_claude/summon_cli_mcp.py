@@ -406,42 +406,18 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
             }
         details = (args.get("details") or "").strip()[:2000]
 
-        status_emoji = {
-            "active": ":green_circle:",
-            "idle": ":white_circle:",
-            "blocked": ":red_circle:",
-            "error": ":x:",
-        }
-        emoji = status_emoji.get(status, ":information_source:")
-        message = f"{emoji} *PM Status [{status}]*: {summary}"
-        if details:
-            message += f"\n\n{details}"
-
         try:
-            # Log to registry for observability
-            calling_session = await registry.get_session(session_id)
-            if calling_session is None:
-                return {
-                    "content": [{"type": "text", "text": "Error: could not find calling session."}],
-                    "is_error": True,
-                }
-            target_channel = channel_id
-            # Log to registry for observability
             await registry.log_event(
                 "pm_status_update",
                 session_id=session_id,
                 user_id=authenticated_user_id,
-                details={"status": status, "summary": summary},
+                details={"status": status, "summary": summary, "details": details},
             )
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": (
-                            f"Status update recorded: [{status}] {summary}. "
-                            f"Channel: {target_channel}. "
-                            "Note: for full Slack posting, use the summon-slack MCP post tool."
-                        ),
+                        "text": f"Status update recorded: [{status}] {summary}.",
                     }
                 ]
             }

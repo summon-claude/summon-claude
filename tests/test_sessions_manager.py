@@ -57,6 +57,7 @@ class _StubSession:
         self._runs = runs
         self._run_count = 0
         self.channel_id: str | None = None
+        self.is_pm: bool = False
         self._shutdown_requested = False
         self._authenticated_user_id: str | None = None
 

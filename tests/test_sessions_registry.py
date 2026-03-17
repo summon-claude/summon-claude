@@ -591,6 +591,7 @@ class TestSchemaVersioning:
             assert "spawn_tokens" in tables
             assert "schema_version" in tables
             assert "workflow_defaults" in tables
+            assert "projects" in tables
 
     async def test_migration_preserves_existing_data(self, tmp_path):
         """Migrations must not destroy existing rows."""

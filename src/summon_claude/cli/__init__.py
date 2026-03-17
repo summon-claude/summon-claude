@@ -386,6 +386,7 @@ def project_add(ctx: click.Context, name: str, directory: str) -> None:
     project_id = asyncio.run(async_project_add(name, directory))
     if not ctx.obj.get("quiet"):
         click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
+        click.echo("Run 'summon project up' to start a PM agent for this project.")
 
 
 @cmd_project.command("remove")
@@ -416,12 +417,20 @@ def project_list(ctx: click.Context, output: str) -> None:
     if not projects:
         click.echo("No projects registered.")
         return
-    click.echo(f"{'NAME':<20} {'DIRECTORY':<40} {'PM':<6} {'ID'}")
-    click.echo("-" * 80)
+    name_w, dir_w = 20, 40
+    click.echo(f"{'NAME':<{name_w}} {'DIRECTORY':<{dir_w}} {'PM':<8} {'ID'}")
+    click.echo("-" * (name_w + dir_w + 8 + 10))
     for p in projects:
+        name = p.get("name", "")
+        directory = p.get("directory", "")
         pm_status = "running" if p.get("pm_running") else "-"
         pid = p.get("project_id", "")[:8]
-        click.echo(f"{p['name']:<20} {p['directory']:<40} {pm_status:<6} {pid}...")
+        # Truncate name with suffix ellipsis, directory with prefix ellipsis
+        if len(name) > name_w:
+            name = name[: name_w - 1] + "\u2026"
+        if len(directory) > dir_w:
+            directory = "\u2026" + directory[-(dir_w - 1) :]
+        click.echo(f"{name:<{name_w}} {directory:<{dir_w}} {pm_status:<8} {pid}...")
 
 
 @cmd_project.command("up")

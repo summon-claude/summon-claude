@@ -444,6 +444,13 @@ class SessionManager:
                         backoff,
                         e,
                     )
+                    # Best-effort: alert channel about retry
+                    await self._alert_channel(
+                        session,
+                        f":warning: *Session error* (attempt {attempt + 1}/"
+                        f"{self.MAX_SESSION_RESTARTS}), restarting in {backoff}s\u2026\n"
+                        f"Error: `{e}`",
+                    )
                     await asyncio.sleep(backoff)
                 else:
                     logger.error(
@@ -451,17 +458,23 @@ class SessionManager:
                         session_id,
                         _SECRET_PATTERN.sub("***", str(e)),
                     )
-                    # Best-effort: post error notice to the session channel
-                    if session.channel_id:
-                        with contextlib.suppress(Exception):
-                            safe_msg = _SECRET_PATTERN.sub(
-                                "***", f":x: Session terminated unexpectedly: {e}"
-                            )
-                            await self._web_client.chat_postMessage(
-                                channel=session.channel_id,
-                                text=safe_msg,
-                            )
+                    recovery_hint = "\nRun `summon project up` to restart." if session.is_pm else ""
+                    await self._alert_channel(
+                        session,
+                        f":x: *Session terminated unexpectedly*: `{e}`{recovery_hint}",
+                    )
                     break
+
+    async def _alert_channel(self, session: SummonSession, message: str) -> None:
+        """Best-effort Slack notification to a session's channel."""
+        if not session.channel_id or not self._web_client:
+            return
+        with contextlib.suppress(Exception):
+            safe_msg = _SECRET_PATTERN.sub("***", message)
+            await self._web_client.chat_postMessage(
+                channel=session.channel_id,
+                text=safe_msg,
+            )
 
     def _on_task_done(self, task: asyncio.Task, session_id: str) -> None:  # type: ignore[type-arg]
         """Cleanup callback fired when a session task finishes (any outcome)."""
