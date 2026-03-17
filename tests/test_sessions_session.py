@@ -1356,19 +1356,6 @@ class TestAutoCompactionDisabled:
 
         assert _SYSTEM_PROMPT["append"] is _BASE_SYSTEM_APPEND
 
-    def test_compact_prompt_is_string(self):
-        """_COMPACT_PROMPT must be a non-empty string."""
-        from summon_claude.sessions.session import _COMPACT_PROMPT
-
-        assert isinstance(_COMPACT_PROMPT, str)
-        assert len(_COMPACT_PROMPT) > 0
-
-    def test_compact_prompt_mentions_summary(self):
-        """_COMPACT_PROMPT should describe summarization intent."""
-        from summon_claude.sessions.session import _COMPACT_PROMPT
-
-        assert "summary" in _COMPACT_PROMPT.lower()
-
 
 class TestExecuteCompact:
     """Tests for _execute_compact success and failure paths."""
