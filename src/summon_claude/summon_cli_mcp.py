@@ -374,17 +374,18 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
             }
 
     @tool(
-        "session_status_update",
+        "session_log_status",
         (
-            "Update the pinned status message in the PM's Slack channel. "
-            "Use this to broadcast current project status, active tasks, and blockers. "
+            "Log a status update to the session registry audit trail. "
+            "Use this to record current project status, active tasks, and blockers. "
+            "Note: this does not post to Slack — use the summon-slack MCP post tool for that. "
             "status: one of 'active', 'idle', 'blocked', or 'error'. "
             "summary: brief status summary (required, max 500 chars). "
             "details: optional structured details (markdown, max 2000 chars)."
         ),
         {"status": str, "summary": str, "details": str},
     )
-    async def session_status_update(args: dict) -> dict:
+    async def session_log_status(args: dict) -> dict:
         valid_statuses = {"active", "idle", "blocked", "error"}
         status = args.get("status", "active")
         if status not in valid_statuses:
@@ -450,7 +451,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [session_list, session_info, session_start, session_stop, session_status_update]
+    return [session_list, session_info, session_start, session_stop, session_log_status]
 
 
 def create_summon_cli_mcp_server(

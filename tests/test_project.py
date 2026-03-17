@@ -469,7 +469,7 @@ class TestLaunchProjectManagers:
 
 
 # ---------------------------------------------------------------------------
-# PM profile: MCP tool session_status_update
+# PM profile: MCP tool session_log_status
 # ---------------------------------------------------------------------------
 
 
@@ -480,7 +480,7 @@ class TestSessionStatusUpdateTool:
         # Register a session for the tool to look up
         await registry.register("test-sid", 1234, "/tmp")
         tools = create_summon_cli_mcp_tools(registry, "test-sid", "uid", "cid", "/tmp")
-        status_tool = next(t for t in tools if t.name == "session_status_update")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
 
         result = await status_tool.handler({"status": "active", "summary": "All good"})
         assert "is_error" not in result or not result.get("is_error")
@@ -489,7 +489,7 @@ class TestSessionStatusUpdateTool:
         from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
 
         tools = create_summon_cli_mcp_tools(registry, "sid", "uid", "cid", "/tmp")
-        status_tool = next(t for t in tools if t.name == "session_status_update")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
 
         result = await status_tool.handler({"status": "bogus", "summary": "test"})
         assert result.get("is_error") is True
@@ -498,7 +498,7 @@ class TestSessionStatusUpdateTool:
         from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
 
         tools = create_summon_cli_mcp_tools(registry, "sid", "uid", "cid", "/tmp")
-        status_tool = next(t for t in tools if t.name == "session_status_update")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
 
         result = await status_tool.handler({"status": "active", "summary": ""})
         assert result.get("is_error") is True
@@ -508,7 +508,7 @@ class TestSessionStatusUpdateTool:
 
         await registry.register("sid-allstatus", 1234, "/tmp")
         tools = create_summon_cli_mcp_tools(registry, "sid-allstatus", "uid", "cid", "/tmp")
-        status_tool = next(t for t in tools if t.name == "session_status_update")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
 
         for status in ("active", "idle", "blocked", "error"):
             result = await status_tool.handler({"status": status, "summary": f"{status} test"})
