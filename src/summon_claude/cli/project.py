@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import pathlib
 import secrets
+from typing import Any
 
 import click
 
@@ -25,6 +26,7 @@ def _resolve_directory(directory: str) -> str:
 async def async_project_add(name: str, directory: str) -> str:
     """Register a new project and return the project_id."""
     resolved = _resolve_directory(directory)
+    project_id: str = ""
     async with SessionRegistry() as registry:
         try:
             project_id = await registry.add_project(name, resolved)
@@ -42,10 +44,12 @@ async def async_project_remove(name_or_id: str) -> None:
             raise click.ClickException(str(e)) from e
 
 
-async def async_project_list() -> list[dict]:
+async def async_project_list() -> list[dict[str, Any]]:
     """Return all projects from the registry."""
+    result: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
-        return await registry.list_projects()
+        result = await registry.list_projects()
+    return result  # noqa: RET504
 
 
 _AUTH_POLL_INTERVAL_S = 2.0
@@ -63,13 +67,13 @@ async def _poll_for_completion(session_id: str) -> bool:
                 await asyncio.sleep(_AUTH_POLL_INTERVAL_S)
                 async with SessionRegistry() as registry:
                     session = await registry.get_session(session_id)
-                if session is None:
-                    return False
-                status = session.get("status")
-                if status == "completed":
-                    return True
-                if status == "errored":
-                    return False
+                    if session is None:
+                        return False
+                    status = session.get("status")
+                    if status == "completed":
+                        return True
+                    if status == "errored":
+                        return False
     except TimeoutError:
         return False
 
@@ -84,6 +88,7 @@ async def launch_project_managers() -> list[str]:
     3. If any need spawning, create one auth-only session and wait for auth
     4. For each project needing a PM, generate spawn token + create session
     """
+    projects: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
 
@@ -111,6 +116,7 @@ async def launch_project_managers() -> list[str]:
         raise click.ClickException("Authentication timed out or failed.")
 
     # Retrieve the authenticated user_id from the completed auth session
+    auth_session: dict[str, Any] | None = None
     async with SessionRegistry() as registry:
         auth_session = await registry.get_session(auth_session_id)
     if auth_session is None:
@@ -120,7 +126,7 @@ async def launch_project_managers() -> list[str]:
         raise click.ClickException("No authenticated user_id found in auth session.")
 
     # Phase 2: spawn a PM session for each project needing one
-    started = []
+    started: list[str] = []
     for project in needing_pm:
         project_dir = project["directory"]
         if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
@@ -130,6 +136,7 @@ async def launch_project_managers() -> list[str]:
             )
             continue
 
+        token = ""
         async with SessionRegistry() as registry:
             spawn_auth = await generate_spawn_token(
                 registry,
@@ -137,6 +144,7 @@ async def launch_project_managers() -> list[str]:
                 cwd=project_dir,
                 spawn_source="cli",
             )
+            token = spawn_auth.token
 
         pm_options = SessionOptions(
             cwd=project_dir,
@@ -145,9 +153,7 @@ async def launch_project_managers() -> list[str]:
             project_id=project["project_id"],
         )
         try:
-            session_id = await daemon_client.create_session_with_spawn_token(
-                pm_options, spawn_auth.token
-            )
+            session_id = await daemon_client.create_session_with_spawn_token(pm_options, token)
             started.append(session_id)
             click.echo(f"  Started PM for {project['name']!r} (session {session_id[:8]}...)")
         except Exception as e:
@@ -161,11 +167,13 @@ async def stop_project_managers() -> list[str]:
 
     Returns a list of session_ids that were stopped.
     """
+    projects: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
 
-    stopped = []
+    stopped: list[str] = []
     for project in projects:
+        sessions: list[dict[str, Any]] = []
         async with SessionRegistry() as registry:
             sessions = await registry.get_project_sessions(project["project_id"])
         active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]

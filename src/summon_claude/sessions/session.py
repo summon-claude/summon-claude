@@ -1119,7 +1119,7 @@ class SummonSession:
                 await web_client.conversations_join(channel=existing_channel_id)
                 # Fetch name for the return value
                 resp = await web_client.conversations_info(channel=existing_channel_id)
-                channel_name: str = resp["channel"]["name"]
+                channel_name: str = resp["channel"]["name"]  # type: ignore[index]
                 logger.info("PM: reusing existing channel #%s", channel_name)
                 return existing_channel_id, channel_name
             except Exception as e:
@@ -1134,8 +1134,8 @@ class SummonSession:
         new_channel_name = f"{channel_prefix}-pm"[:_MAX_CHANNEL_NAME_LEN].lower()
         try:
             resp = await web_client.conversations_create(name=new_channel_name, is_private=True)
-            new_id: str = resp["channel"]["id"]
-            cname: str = resp["channel"]["name"]
+            new_id: str = resp["channel"]["id"]  # type: ignore[index]
+            cname: str = resp["channel"]["name"]  # type: ignore[index]
         except Exception as e:
             if "name_taken" in str(e):
                 # Try to find the existing channel by name
