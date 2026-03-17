@@ -61,7 +61,11 @@ from summon_claude.sessions.context import (
     get_last_step_usage,
 )
 from summon_claude.sessions.permissions import PermissionHandler
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.registry import (
+    MAX_SPAWN_CHILDREN,
+    MAX_SPAWN_CHILDREN_PM,
+    SessionRegistry,
+)
 from summon_claude.sessions.response import ResponseStreamer, StreamResult
 from summon_claude.sessions.response import split_text as _split_text
 from summon_claude.slack.canvas_store import CanvasStore
@@ -138,7 +142,6 @@ class _SessionLogFilter(logging.Filter):
 
 _HEARTBEAT_INTERVAL_S = 30
 _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
-_MAX_SPAWN_CHILDREN = 5  # max active children from !summon start
 _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
@@ -1742,15 +1745,17 @@ class SummonSession:
         from summon_claude.cli import daemon_client  # noqa: PLC0415
         from summon_claude.sessions.auth import generate_spawn_token  # noqa: PLC0415
 
-        # Enforce active-child cap before spawning
+        # Enforce active-child cap before spawning (PM sessions share the
+        # higher limit with the MCP session_spawn tool)
+        child_limit = MAX_SPAWN_CHILDREN_PM if self._pm_profile else MAX_SPAWN_CHILDREN
         try:
             children = await rt.registry.list_children(self._session_id, limit=500)
             active = [c for c in children if c.get("status") in ("pending_auth", "active")]
-            if len(active) >= _MAX_SPAWN_CHILDREN:
+            if len(active) >= child_limit:
                 try:
                     await rt.client.post(
-                        f":warning: Spawn limit reached ({len(active)}/{_MAX_SPAWN_CHILDREN}). "
-                        "Stop existing child sessions before starting new ones.",
+                        f":warning: Too many active child sessions ({len(active)}). "
+                        "Stop some before starting new ones.",
                         thread_ts=thread_ts,
                     )
                 except Exception as e2:
@@ -2051,6 +2056,11 @@ class SummonSession:
                             )
                         )
                         annotations.insert(0, f"`!{match.raw_name}` — compacting context...")
+                    elif result.metadata.get("spawn"):
+                        annotations.insert(
+                            0,
+                            f"`!{match.raw_name}` — must be used as a standalone command",
+                        )
                     elif result.text:
                         annotations.insert(0, f"`!{match.raw_name}` — {result.text}")
                 except Exception as e:

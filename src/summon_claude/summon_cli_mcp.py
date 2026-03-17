@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN_PM, SessionRegistry
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -22,8 +22,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
-
-_MAX_ACTIVE_CHILDREN_PER_PM = 15
 
 _SENSITIVE_FIELDS = frozenset({"pid", "error_message", "authenticated_user_id"})
 
@@ -206,7 +204,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
         try:
             children = await registry.list_children(session_id, limit=500)
             active = [c for c in children if c.get("status") in ("pending_auth", "active")]
-            if len(active) >= _MAX_ACTIVE_CHILDREN_PER_PM:
+            if len(active) >= MAX_SPAWN_CHILDREN_PM:
                 active_list = ", ".join(
                     f"{c.get('session_name', 'unnamed')} ({c['session_id']})" for c in active
                 )
@@ -216,7 +214,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                             "type": "text",
                             "text": (
                                 f"Error: active session limit reached "
-                                f"({len(active)}/{_MAX_ACTIVE_CHILDREN_PER_PM}). "
+                                f"({len(active)}/{MAX_SPAWN_CHILDREN_PM}). "
                                 f"Stop existing sessions before starting new ones.\n"
                                 f"Active sessions: {active_list}"
                             ),

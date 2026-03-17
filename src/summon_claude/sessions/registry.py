@@ -22,6 +22,10 @@ from summon_claude.sessions.migrations import (
 
 logger = logging.getLogger(__name__)
 
+# Shared spawn-child limits — used by both session.py and summon_cli_mcp.py
+MAX_SPAWN_CHILDREN = 5  # regular sessions (!summon start)
+MAX_SPAWN_CHILDREN_PM = 15  # PM sessions (shared pool: MCP + !summon start)
+
 _CREATE_SESSIONS = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
