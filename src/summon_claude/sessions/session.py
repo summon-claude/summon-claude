@@ -1380,7 +1380,11 @@ class SummonSession:
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 
-        # Add GitHub remote MCP if configured
+        # Add GitHub remote MCP if configured.
+        # Resilience: MCP connections are lazy — the SDK subprocess connects on
+        # first tool use, not at startup. If the remote server is unreachable,
+        # individual tool calls return errors and Claude adapts. If the SDK
+        # subprocess itself fails to start, the session error handler catches it.
         gh_mcp = self._config.github_mcp_config()
         if gh_mcp:
             mcp_servers["github"] = gh_mcp
