@@ -2599,13 +2599,21 @@ class SummonSession:
             if self._changed_files:
                 await self._post_change_summary(rt, thread_ts=thread_ts)
             else:
-                await rt.client.post("_No files changed in this session yet._", thread_ts=thread_ts)
+                await rt.client.post(
+                    "_No files changed in this session yet._", thread_ts=thread_ts
+                )
             return
 
         # Handle !diff <file> — show git diff for a specific file
         diff_path = result.metadata.get("diff_file")
         if diff_path:
             await self._handle_diff_file(rt, diff_path, thread_ts)
+            return
+
+        # Handle !summon resume — resume a child session from within active session
+        if result.metadata.get("resume"):
+            target = result.metadata.get("resume_target")
+            await self._handle_resume_from_active(rt, user_id, target, thread_ts)
             return
 
         # Pass-through: translate !cmd args -> /cmd args and enqueue
@@ -2748,6 +2756,90 @@ class SummonSession:
             )
         except Exception as e:
             logger.debug("Failed to post spawn success message: %s", e)
+
+    async def _handle_resume_from_active(
+        self,
+        rt: _SessionRuntime,
+        user_id: str,
+        target_session_id: str | None,
+        thread_ts: str | None,
+    ) -> None:
+        """Handle !summon resume from within an active session."""
+        if user_id != self._authenticated_user_id:
+            try:
+                await rt.client.post(
+                    ":no_entry: Only the session owner can resume sessions.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume rejection: %s", e)
+            return
+
+        if not target_session_id:
+            try:
+                await rt.client.post(
+                    ":warning: Specify a session ID to resume. "
+                    "This channel already has an active session.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume usage: %s", e)
+            return
+
+        # Look up the target session
+        target = await rt.registry.get_session(target_session_id)
+        if target is None:
+            try:
+                await rt.client.post(
+                    f":warning: Session `{target_session_id}` not found.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post session not found: %s", e)
+            return
+
+        if target.get("status") not in ("completed", "errored"):
+            try:
+                await rt.client.post(
+                    f":warning: Session is {target.get('status')} "
+                    "\u2014 can only resume stopped sessions.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post status message: %s", e)
+            return
+
+        target_channel = target.get("slack_channel_id")
+        if target_channel == rt.client.channel_id:
+            try:
+                await rt.client.post(
+                    ":warning: Cannot resume into a channel with an active session. "
+                    "End this session first, then use `!summon resume`.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume conflict: %s", e)
+            return
+
+        from summon_claude.cli import daemon_client  # noqa: PLC0415
+
+        try:
+            result = await daemon_client.resume_session(target_session_id)
+            new_sid = result.get("session_id", "?")
+            target_cid = result.get("channel_id", target_channel)
+            await rt.client.post(
+                f":arrows_counterclockwise: Session resumed (new: `{new_sid[:8]}...`). "
+                f"Channel: <#{target_cid}>",
+                thread_ts=thread_ts,
+            )
+        except Exception as e:
+            try:
+                await rt.client.post(
+                    f":x: Failed to resume: {e}",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post resume error: %s", e2)
 
     def _abort_current_turn(self) -> None:
         """Signal the current Claude turn to abort."""
@@ -2980,6 +3072,7 @@ class SummonSession:
                     standalone_only = (
                         result.metadata.get("compact")
                         or result.metadata.get("spawn")
+                        or result.metadata.get("resume")
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
                     )

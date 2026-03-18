@@ -1007,4 +1007,4 @@ class TestSummonHandler:
         assert "summon" in COMMAND_ACTIONS
         defn = COMMAND_ACTIONS["summon"]
         assert defn.handler is not None
-        assert defn.max_args == 1
+        assert defn.max_args == 2

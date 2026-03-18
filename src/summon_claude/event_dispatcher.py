@@ -15,7 +15,9 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from slack_sdk.web.async_client import AsyncWebClient
 
 if TYPE_CHECKING:
     from summon_claude.sessions.permissions import PermissionHandler
@@ -63,9 +65,10 @@ class EventDispatcher:
     itself without introducing a direct dependency from ``BoltRouter``.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, web_client: AsyncWebClient | None = None) -> None:
         self._sessions: dict[str, SessionHandle] = {}  # channel_id → handle
         self._command_handler: CommandHandler | None = None
+        self._web_client = web_client
 
     # ------------------------------------------------------------------
     # Registry
@@ -93,6 +96,10 @@ class EventDispatcher:
     def all_channel_ids(self) -> list[str]:
         """Return a snapshot of all registered channel IDs."""
         return list(self._sessions.keys())
+
+    def has_handler(self, channel_id: str) -> bool:
+        """Return True if a session is registered for this channel."""
+        return channel_id in self._sessions
 
     # ------------------------------------------------------------------
     # Command handler (for /summon slash commands)
@@ -137,7 +144,76 @@ class EventDispatcher:
                     channel_id,
                 )
         else:
-            logger.debug("EventDispatcher: no session for channel %s — message dropped", channel_id)
+            # Fallback: check for !summon resume in unrouted channels
+            await self._handle_unrouted_message(event)
+
+    async def _handle_unrouted_message(self, event: dict[str, Any]) -> None:
+        """Handle messages in channels with no active session.
+
+        Checks for ``!summon resume`` command and triggers session resume
+        if the channel has a completed session.
+        """
+        text = event.get("text", "")
+        channel_id = event.get("channel", "")
+        user_id = event.get("user", "")
+
+        match = re.match(r"^!summon\s+resume(?:\s+(\S+))?", text, re.IGNORECASE)
+        if not match:
+            return
+
+        target_session_id = match.group(1)
+        await self._handle_resume_request(channel_id, user_id, target_session_id)
+
+    async def _handle_resume_request(
+        self, channel_id: str, user_id: str, target_session_id: str | None
+    ) -> None:
+        """Process a !summon resume request from an unrouted channel."""
+        from summon_claude.cli import daemon_client  # noqa: PLC0415
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        async with SessionRegistry() as registry:
+            channel = await registry.get_channel(channel_id)
+            if not channel:
+                return  # Not a summon-managed channel
+
+            if target_session_id:
+                session = await registry.get_session(target_session_id)
+                if not session or session.get("slack_channel_id") != channel_id:
+                    await self._post_error(channel_id, "Session not found in this channel.")
+                    return
+            else:
+                session = await registry.get_latest_session_for_channel(channel_id)
+                if not session:
+                    await self._post_error(channel_id, "No previous session found in this channel.")
+                    return
+
+            if session["status"] not in ("completed", "errored"):
+                await self._post_error(
+                    channel_id, "Session is still active. Use the existing session."
+                )
+                return
+
+            # Auth check: user must match channel owner
+            if channel.get("authenticated_user_id") != user_id:
+                await self._post_error(
+                    channel_id, ":x: Only the original session owner can resume."
+                )
+                return
+
+        try:
+            await daemon_client.resume_session(session["session_id"])
+        except Exception as e:
+            await self._post_error(channel_id, f":x: Failed to resume: {e}")
+
+    async def _post_error(self, channel_id: str, text: str) -> None:
+        """Best-effort error message to a channel."""
+        if not self._web_client:
+            logger.warning("Cannot post error to %s: no web_client", channel_id)
+            return
+        try:
+            await self._web_client.chat_postMessage(channel=channel_id, text=text)
+        except Exception as e:
+            logger.warning("Failed to post error to %s: %s", channel_id, e)
 
     async def dispatch_action(self, action: dict, body: dict) -> None:  # type: ignore[type-arg]
         """Route a Slack interactive action to the session's permission handler.

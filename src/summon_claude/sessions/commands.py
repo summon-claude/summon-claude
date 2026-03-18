@@ -221,11 +221,24 @@ async def _handle_compact(args: list[str], _ctx: CommandContext) -> CommandResul
 
 
 async def _handle_summon(args: list[str], _ctx: CommandContext) -> CommandResult:
-    if args and args[0].lower() == "start":
-        return CommandResult(text=None, metadata={"spawn": True})
     if not args:
-        return CommandResult(text="Usage: `!summon start` — spawn a new session in this directory")
-    return CommandResult(text=f":question: Unknown subcommand `{args[0]}`. Usage: `!summon start`")
+        return CommandResult(text="Usage: `!summon start` | `!summon resume [session-id]`")
+    match args[0].lower():
+        case "start":
+            return CommandResult(text=None, metadata={"spawn": True})
+        case "resume":
+            target = args[1] if len(args) > 1 else None
+            return CommandResult(
+                text=None,
+                metadata={"resume": True, "resume_target": target},
+            )
+        case _:
+            return CommandResult(
+                text=(
+                    f":question: Unknown subcommand `{args[0]}`. "
+                    "Usage: `!summon start` | `!summon resume [session-id]`"
+                )
+            )
 
 
 async def _handle_diff(args: list[str], _ctx: CommandContext) -> CommandResult:
@@ -293,9 +306,9 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         max_args=None,
     ),
     "summon": CommandDef(
-        description="Spawn a new session",
+        description="Spawn or resume a session",
         handler=_handle_summon,
-        max_args=1,
+        max_args=2,
     ),
     # --- Passthrough (forwarded to Claude CLI) ---
     "review": CommandDef(description="Review code changes"),
