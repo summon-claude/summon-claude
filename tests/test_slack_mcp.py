@@ -184,12 +184,44 @@ class TestPostSnippet:
         assert "Code snippet posted" in result["content"][0]["text"]
         mock_client._web.chat_postMessage.assert_called_once()
 
-    async def test_slack_api_error(self, tools, mock_client):
-        mock_client._web.chat_postMessage.side_effect = Exception("API error")
+    async def test_uses_markdown_block(self, tools, mock_client):
+        await tools["slack_post_snippet"].handler(
+            {"code": "x = 1", "language": "python", "title": "Test"}
+        )
+        call_kwargs = mock_client._web.chat_postMessage.call_args.kwargs
+        blocks = call_kwargs.get("blocks", [])
+        assert any(b.get("type") == "markdown" for b in blocks)
+
+    async def test_large_content_uploads_file(self, tools, mock_client):
+        large_code = "x = 1\n" * 3000  # > 12K chars
+        result = await tools["slack_post_snippet"].handler(
+            {"code": large_code, "language": "python", "title": "Big"}
+        )
+        assert "uploaded" in result["content"][0]["text"].lower()
+        mock_client._web.files_upload_v2.assert_called_once()
+        call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
+        assert call_kwargs["snippet_type"] == "python"
+
+    async def test_lang_alias_resolved_for_upload(self, tools, mock_client):
+        large_code = "echo hi\n" * 3000
+        await tools["slack_post_snippet"].handler(
+            {"code": large_code, "language": "bash", "title": "Script"}
+        )
+        call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
+        assert call_kwargs["snippet_type"] == "shell"
+
+    async def test_slack_api_error_with_fallback(self, tools, mock_client):
+        # First call (markdown) fails, second call (mrkdwn fallback) succeeds
+        mock_client._web.chat_postMessage.side_effect = [
+            Exception("markdown not supported"),
+            {"channel": "C123", "ts": "1.0"},
+        ]
         result = await tools["slack_post_snippet"].handler(
             {"code": "x", "language": "py", "title": "T"}
         )
-        assert result["is_error"] is True
+        # Fallback should succeed
+        assert "Code snippet posted" in result["content"][0]["text"]
+        assert mock_client._web.chat_postMessage.call_count == 2
 
     async def test_posts_to_main_channel(self, tools, mock_client):
         """BEHAVIOR CHANGE: snippet posts to main channel, not active thread."""
@@ -209,9 +241,10 @@ class TestPostSnippetSanitization:
         assert "Code snippet posted" in result["content"][0]["text"]
         call_kwargs = mock_client._web.chat_postMessage.call_args.kwargs
         blocks = call_kwargs.get("blocks")
-        mrkdwn_text = blocks[0]["text"]["text"]
-        assert "\n*bold*" not in mrkdwn_text
-        assert "injected" in mrkdwn_text
+        # Now uses type: markdown — text is a string, not nested dict
+        md_text = blocks[0]["text"]
+        assert "\n*bold*" not in md_text
+        assert "injected" in md_text
 
     async def test_lang_with_backticks_sanitized(self, tools, mock_client):
         result = await tools["slack_post_snippet"].handler(
@@ -220,8 +253,8 @@ class TestPostSnippetSanitization:
         assert "Code snippet posted" in result["content"][0]["text"]
         call_kwargs = mock_client._web.chat_postMessage.call_args.kwargs
         blocks = call_kwargs.get("blocks")
-        mrkdwn_text = blocks[0]["text"]["text"]
-        assert "```\nfake" not in mrkdwn_text
+        md_text = blocks[0]["text"]
+        assert "```\nfake" not in md_text
 
 
 class TestUpdateMessage:
