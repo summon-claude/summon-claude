@@ -9,6 +9,7 @@ import pytest
 from summon_claude.slack.client import (
     MessageRef,
     SlackClient,
+    redact_secrets,
     sanitize_for_mrkdwn,
 )
 
@@ -334,3 +335,44 @@ class TestSlackClient:
         web.files_list = AsyncMock(side_effect=Exception("api error"))
         result = await client.get_canvas_id()
         assert result is None
+
+
+class TestRedactSecrets:
+    def test_classic_pat_redacted(self):
+        text = "Error: auth failed with ghp_abc123XYZ token"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghp_abc123XYZ" not in redact_secrets(text)
+
+    def test_fine_grained_pat_redacted(self):
+        text = "Token github_pat_11ABCDEF_xyz789 is invalid"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "github_pat_11ABCDEF_xyz789" not in redact_secrets(text)
+
+    def test_no_pat_unchanged(self):
+        text = "Normal message without any tokens"
+        assert redact_secrets(text) == text
+
+    def test_multiple_pats_redacted(self):
+        text = "Found ghp_first and github_pat_second tokens"
+        result = redact_secrets(text)
+        assert "ghp_first" not in result
+        assert "github_pat_second" not in result
+        assert result.count("[REDACTED]") == 2
+
+    async def test_post_redacts_pat(self):
+        web = MagicMock()
+        web.chat_postMessage = AsyncMock(return_value={"channel": "C123", "ts": "1.0"})
+        client = SlackClient(web, "C123")
+        await client.post("Error with ghp_secret123 token")
+        call_kwargs = web.chat_postMessage.call_args.kwargs
+        assert "ghp_secret123" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]
+
+    async def test_update_redacts_pat(self):
+        web = MagicMock()
+        web.chat_update = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.update("1.0", "Token: github_pat_leaked123")
+        call_kwargs = web.chat_update.call_args.kwargs
+        assert "github_pat_leaked123" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]

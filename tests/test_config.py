@@ -106,6 +106,36 @@ class TestSummonConfigValidate:
         assert "SUMMON_SLACK_SIGNING_SECRET" in msg
 
 
+class TestGitHubPAT:
+    def test_github_pat_default_none(self):
+        cfg = _make_config()
+        assert cfg.github_pat is None
+
+    def test_github_pat_classic_prefix(self):
+        cfg = _make_config(github_pat="ghp_abc123")
+        assert cfg.github_pat == "ghp_abc123"
+
+    def test_github_pat_fine_grained_prefix(self):
+        cfg = _make_config(github_pat="github_pat_abc123")
+        assert cfg.github_pat == "github_pat_abc123"
+
+    def test_github_pat_invalid_prefix(self):
+        with pytest.raises(ValueError, match=r"ghp_.*github_pat_"):
+            _make_config(github_pat="gho_invalid_token")
+
+    def test_github_mcp_config_returns_none_when_not_set(self):
+        cfg = _make_config()
+        assert cfg.github_mcp_config() is None
+
+    def test_github_mcp_config_returns_dict_when_set(self):
+        cfg = _make_config(github_pat="ghp_testtoken123")
+        result = cfg.github_mcp_config()
+        assert result is not None
+        assert result["type"] == "http"
+        assert result["url"] == "https://api.githubcopilot.com/mcp/"
+        assert result["headers"]["Authorization"] == "Bearer ghp_testtoken123"
+
+
 class TestDiscoverInstalledPlugins:
     def test_missing_registry_returns_empty(self, tmp_path):
         with patch("summon_claude.config.Path.home", return_value=tmp_path):

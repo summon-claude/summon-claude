@@ -1136,6 +1136,49 @@ class TestMCPRegistration:
         opts = SessionOptions(cwd="/tmp", name="test", pm_profile=True)
         assert opts.pm_profile is True
 
+    async def _capture_mcp_servers_with_config(self, **config_overrides) -> dict:
+        """Like _capture_mcp_servers but with custom config overrides."""
+        cfg = make_config(**config_overrides)
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
+        )
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["mcp_servers"] = options.mcp_servers
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured
+
+    async def test_github_mcp_wired_when_configured(self):
+        result = await self._capture_mcp_servers_with_config(github_pat="ghp_test123")
+        assert "github" in result["mcp_servers"]
+        assert result["mcp_servers"]["github"]["type"] == "http"
+
+    async def test_github_mcp_not_wired_when_not_configured(self):
+        result = await self._capture_mcp_servers_with_config()
+        assert "github" not in result["mcp_servers"]
+
 
 # ------------------------------------------------------------------
 # Spawn session tests
