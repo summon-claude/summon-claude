@@ -112,6 +112,7 @@ class CanvasStore:
         session_id: str,
         client: SlackClient,
         registry: SessionRegistry,
+        channel_id: str | None = None,
     ) -> CanvasStore | None:
         """Restore a CanvasStore from SQLite for session resume.
 
@@ -126,6 +127,7 @@ class CanvasStore:
             client=client,
             registry=registry,
             markdown=canvas_markdown or "",
+            channel_id=channel_id,
         )
 
     async def _persist(self) -> None:

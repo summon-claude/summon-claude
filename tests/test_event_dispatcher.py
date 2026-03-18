@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from summon_claude.event_dispatcher import EventDispatcher, SessionHandle
 
@@ -321,6 +321,38 @@ class TestUnroutedMessageFallback:
         event = {"channel": "C_DEAD", "text": "!summon resume sess-abc", "user": "U001"}
         await dispatcher._handle_unrouted_message(event)
         dispatcher._handle_resume_request.assert_awaited_once_with("C_DEAD", "U001", "sess-abc")
+
+    async def test_resume_request_rejects_wrong_user(self):
+        """_handle_resume_request rejects users who don't own the channel."""
+        mock_web = AsyncMock()
+        dispatcher = EventDispatcher(web_client=mock_web)
+        with patch("summon_claude.sessions.registry.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U_OWNER"})
+            mock_reg.get_latest_session_for_channel = AsyncMock(
+                return_value={
+                    "session_id": "old-sess",
+                    "status": "completed",
+                }
+            )
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await dispatcher._handle_resume_request("C_CHAN", "U_INTRUDER", None)
+        # Should post an error about ownership
+        mock_web.chat_postMessage.assert_awaited_once()
+        assert "owner" in mock_web.chat_postMessage.call_args.kwargs.get("text", "").lower()
+
+    async def test_resume_request_unknown_channel_is_noop(self):
+        """_handle_resume_request silently returns for non-summon channels."""
+        mock_web = AsyncMock()
+        dispatcher = EventDispatcher(web_client=mock_web)
+        with patch("summon_claude.sessions.registry.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value=None)
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await dispatcher._handle_resume_request("C_UNKNOWN", "U001", None)
+        mock_web.chat_postMessage.assert_not_awaited()
 
     async def test_unrouted_message_dispatched_for_unregistered_channel(self):
         """Messages in unregistered channels go through the fallback path."""

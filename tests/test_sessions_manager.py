@@ -1709,3 +1709,157 @@ class TestCascadeRestart:
         await asyncio.gather(
             *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
         )
+
+
+# ---------------------------------------------------------------------------
+# send_message IPC handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestSendMessageIPC:
+    """Tests for the send_message IPC dispatch case."""
+
+    async def test_send_message_to_active_session(self):
+        manager, _, _ = _make_manager()
+        stub = _StubSession()
+        stub.channel_id = "C_TARGET"
+        stub.inject_message = AsyncMock(return_value=True)  # type: ignore[attr-defined]
+        manager._sessions["sess-target"] = stub  # type: ignore[assignment]
+
+        result = await manager._dispatch_control(
+            {
+                "type": "send_message",
+                "session_id": "sess-target",
+                "text": "hello from PM",
+                "sender_info": "pm (#C_PM)",
+            }
+        )
+        assert result["type"] == "message_sent"
+        assert result["session_id"] == "sess-target"
+        assert result["channel_id"] == "C_TARGET"
+        stub.inject_message.assert_awaited_once_with(  # type: ignore[union-attr]
+            "hello from PM", sender_info="pm (#C_PM)"
+        )
+
+    async def test_send_message_missing_session(self):
+        manager, _, _ = _make_manager()
+        result = await manager._dispatch_control(
+            {
+                "type": "send_message",
+                "session_id": "nonexistent",
+                "text": "hello",
+            }
+        )
+        assert result["type"] == "error"
+
+    async def test_send_message_missing_text(self):
+        manager, _, _ = _make_manager()
+        result = await manager._dispatch_control(
+            {
+                "type": "send_message",
+                "session_id": "sess-1",
+            }
+        )
+        assert result["type"] == "error"
+
+    async def test_send_message_queue_full(self):
+        manager, _, _ = _make_manager()
+        stub = _StubSession()
+        stub.inject_message = AsyncMock(return_value=False)  # type: ignore[attr-defined]
+        manager._sessions["sess-full"] = stub  # type: ignore[assignment]
+
+        result = await manager._dispatch_control(
+            {
+                "type": "send_message",
+                "session_id": "sess-full",
+                "text": "overflow",
+            }
+        )
+        assert result["type"] == "error"
+        assert "Queue full" in result["message"]
+
+
+# ---------------------------------------------------------------------------
+# resume_session IPC handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestResumeSessionIPC:
+    """Tests for the resume_session IPC dispatch case."""
+
+    async def test_resume_missing_session_id(self):
+        manager, _, _ = _make_manager()
+        result = await manager._dispatch_control({"type": "resume_session"})
+        assert result["type"] == "error"
+        assert "Missing" in result["message"]
+
+    async def test_validate_resume_target_not_found(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_session = AsyncMock(return_value=None)
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._validate_resume_target("nonexistent")
+        assert "error" in result
+        assert "not found" in result["error"]
+
+    async def test_validate_resume_target_still_active(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_session = AsyncMock(
+                return_value={"status": "active", "slack_channel_id": "C1"}
+            )
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._validate_resume_target("active-sess")
+        assert "error" in result
+        assert "still active" in result["error"]
+
+    async def test_concurrent_resume_rejected(self):
+        """Two resume requests for the same channel — second is rejected."""
+        manager, _, _ = _make_manager()
+        manager._resuming_channels.add("C_BUSY")
+
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_session = AsyncMock(
+                return_value={
+                    "status": "completed",
+                    "slack_channel_id": "C_BUSY",
+                    "claude_session_id": "claude-123",
+                    "cwd": "/tmp",
+                }
+            )
+            mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-123"})
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._dispatch_control(
+                {
+                    "type": "resume_session",
+                    "session_id": "old-sess",
+                }
+            )
+        assert result["type"] == "error"
+        assert "already in progress" in result["message"]
+
+    async def test_channel_guard_in_create_session(self):
+        """create_session rejects when channel_id has an active session."""
+        manager, _, _ = _make_manager()
+        stub = _StubSession()
+        stub.channel_id = "C_OCCUPIED"
+        manager._sessions["existing"] = stub  # type: ignore[assignment]
+
+        with pytest.raises(ValueError, match="already has an active session"):
+            await manager.create_session(make_options(channel_id="C_OCCUPIED"))
+
+    async def test_channel_guard_catches_channel_id_option(self):
+        """create_session detects sessions with _channel_id_option but no channel_id yet."""
+        manager, _, _ = _make_manager()
+        stub = _StubSession()
+        stub._channel_id_option = "C_PENDING"  # type: ignore[attr-defined]
+        manager._sessions["pending"] = stub  # type: ignore[assignment]
+
+        with pytest.raises(ValueError, match="already has an active session"):
+            await manager.create_session(make_options(channel_id="C_PENDING"))
