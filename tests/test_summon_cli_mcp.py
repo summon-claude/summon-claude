@@ -538,4 +538,4 @@ class TestMCPServerCreation:
 
     def test_tool_count(self, populated_registry):
         tools = create_summon_cli_mcp_tools(populated_registry, "sid", "uid", "cid", "/tmp")
-        assert len(tools) == 4
+        assert len(tools) == 5

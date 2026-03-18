@@ -23,12 +23,16 @@ class DaemonError(Exception):
     """Raised when the daemon returns an error response."""
 
 
-async def _request(msg: dict[str, Any]) -> dict[str, Any]:
+async def _request(msg: dict[str, Any], *, recv_timeout: float | None = None) -> dict[str, Any]:
     """Send *msg* to the daemon and return the response dict.
 
     Opens a fresh Unix socket connection, sends the message via ``send_msg``,
     reads the response via ``recv_msg``, closes the connection, then returns
     the parsed response.
+
+    Args:
+        msg: The request dict to send.
+        recv_timeout: Override the default recv_msg timeout (seconds).
 
     Raises ``DaemonError`` if the daemon responds with ``type == "error"``.
     """
@@ -41,7 +45,7 @@ async def _request(msg: dict[str, Any]) -> dict[str, Any]:
     reader, writer = await connect_to_daemon()
     try:
         await send_msg(writer, msg)
-        response = await recv_msg(reader)
+        response = await recv_msg(reader, timeout=recv_timeout)
     finally:
         writer.close()
         with contextlib.suppress(Exception):
@@ -84,6 +88,19 @@ async def create_session_with_spawn_token(options: SessionOptions, spawn_token: 
     if response.get("type") != "session_created_spawned":
         raise DaemonError(f"Unexpected daemon response: {response}")
     return response["session_id"]
+
+
+async def project_up(cwd: str) -> dict[str, Any]:
+    """Send a ``project_up`` request to the daemon.
+
+    The daemon checks which projects need PM agents, creates an auth session
+    if needed, and launches a background orchestrator.
+
+    Returns the raw daemon response dict.  Response type is either
+    ``project_up_auth_required`` (with ``short_code``)
+    or ``project_up_complete`` (if no projects need PM).
+    """
+    return await _request({"type": "project_up", "cwd": cwd})
 
 
 async def stop_session(session_id: str) -> bool:

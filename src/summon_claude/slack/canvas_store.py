@@ -173,7 +173,8 @@ class CanvasStore:
                     else _SYNC_DEBOUNCE_S
                 )
                 try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
+                    async with asyncio.timeout(interval):
+                        await self._stop_event.wait()
                     break  # stop_event was set
                 except TimeoutError:
                     pass

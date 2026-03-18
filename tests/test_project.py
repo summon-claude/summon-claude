@@ -1,0 +1,854 @@
+"""Tests for PM track: project registry CRUD, CLI commands, launcher, PM session behavior."""
+
+from __future__ import annotations
+
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from click.testing import CliRunner
+
+from summon_claude.cli import cli
+from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.session import build_pm_system_prompt
+
+# ---------------------------------------------------------------------------
+# Registry: project CRUD
+# ---------------------------------------------------------------------------
+
+
+class TestProjectAdd:
+    async def test_add_project_returns_uuid(self, registry, tmp_path):
+        project_id = await registry.add_project("my-proj", str(tmp_path))
+        assert len(project_id) == 36  # UUID format
+
+    async def test_add_project_creates_record(self, registry, tmp_path):
+        project_id = await registry.add_project("my-proj", str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert project is not None
+        assert project["name"] == "my-proj"
+        assert project["directory"] == str(tmp_path)
+
+    async def test_add_project_derives_channel_prefix(self, registry, tmp_path):
+        project_id = await registry.add_project("My Cool Project", str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert project["channel_prefix"] == "my-cool-project"
+
+    async def test_add_project_truncates_prefix(self, registry, tmp_path):
+        long_name = "a" * 30
+        project_id = await registry.add_project(long_name, str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert len(project["channel_prefix"]) <= 20
+
+    async def test_add_duplicate_name_raises(self, registry, tmp_path):
+        await registry.add_project("dup-proj", str(tmp_path))
+        with pytest.raises(ValueError, match=r"(already exists|conflicts)"):
+            await registry.add_project("dup-proj", str(tmp_path))
+
+    async def test_add_project_default_empty_workflow(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-proj", str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert project["workflow_instructions"] == ""
+
+    async def test_add_project_no_pm_channel_initially(self, registry, tmp_path):
+        project_id = await registry.add_project("ch-proj", str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert project["pm_channel_id"] is None
+
+    async def test_add_project_empty_name_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="must not be empty"):
+            await registry.add_project("", str(tmp_path))
+
+    async def test_add_project_whitespace_name_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="must not be empty"):
+            await registry.add_project("   ", str(tmp_path))
+
+    async def test_add_project_no_alphanumeric_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="alphanumeric"):
+            await registry.add_project("---!!!", str(tmp_path))
+
+
+class TestProjectGet:
+    async def test_get_by_id(self, registry, tmp_path):
+        project_id = await registry.add_project("get-proj", str(tmp_path))
+        project = await registry.get_project(project_id)
+        assert project["project_id"] == project_id
+
+    async def test_get_by_name(self, registry, tmp_path):
+        await registry.add_project("named-proj", str(tmp_path))
+        project = await registry.get_project("named-proj")
+        assert project is not None
+        assert project["name"] == "named-proj"
+
+    async def test_get_nonexistent_returns_none(self, registry):
+        result = await registry.get_project("no-such-project")
+        assert result is None
+
+
+class TestProjectRemove:
+    async def test_remove_project(self, registry, tmp_path):
+        project_id = await registry.add_project("rm-proj", str(tmp_path))
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == []
+        assert await registry.get_project(project_id) is None
+
+    async def test_remove_by_name(self, registry, tmp_path):
+        await registry.add_project("rm-name", str(tmp_path))
+        active_ids = await registry.remove_project("rm-name")
+        assert active_ids == []
+        assert await registry.get_project("rm-name") is None
+
+    async def test_remove_nonexistent_raises(self, registry):
+        with pytest.raises(ValueError, match="No project found"):
+            await registry.remove_project("no-such")
+
+    async def test_remove_with_active_session_returns_ids(self, registry, tmp_path):
+        project_id = await registry.add_project("active-proj", str(tmp_path))
+        await registry.register("sess-1", 1234, str(tmp_path), project_id=project_id)
+        # pending_auth is active — remove should return active session IDs
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == ["sess-1"]
+        assert await registry.get_project(project_id) is None
+
+    async def test_remove_with_completed_session_returns_empty(self, registry, tmp_path):
+        project_id = await registry.add_project("done-proj", str(tmp_path))
+        await registry.register("sess-2", 1234, str(tmp_path), project_id=project_id)
+        await registry.update_status("sess-2", "completed")
+        active_ids = await registry.remove_project(project_id)
+        assert active_ids == []
+        assert await registry.get_project(project_id) is None
+
+
+class TestProjectList:
+    async def test_list_empty(self, registry):
+        projects = await registry.list_projects()
+        assert projects == []
+
+    async def test_list_returns_all_projects(self, registry, tmp_path):
+        await registry.add_project("proj-a", str(tmp_path))
+        await registry.add_project("proj-b", str(tmp_path))
+        projects = await registry.list_projects()
+        names = [p["name"] for p in projects]
+        assert "proj-a" in names
+        assert "proj-b" in names
+
+    async def test_list_includes_pm_running_false(self, registry, tmp_path):
+        await registry.add_project("idle-proj", str(tmp_path))
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "idle-proj")
+        assert proj["pm_running"] == 0  # SQLite stores bool as int
+        assert proj["last_pm_status"] is None
+        assert proj["last_pm_error"] is None
+
+    async def test_list_includes_pm_running_true(self, registry, tmp_path):
+        project_id = await registry.add_project("running-proj", str(tmp_path))
+        await registry.register(
+            "sess-pm",
+            1234,
+            str(tmp_path),
+            name="running-pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("sess-pm", "active")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "running-proj")
+        assert proj["pm_running"] == 1  # has an active PM session
+        assert proj["last_pm_status"] == "active"
+
+    async def test_list_shows_errored_status(self, registry, tmp_path):
+        project_id = await registry.add_project("err-proj", str(tmp_path))
+        await registry.register(
+            "sess-err",
+            1234,
+            str(tmp_path),
+            name="err-pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("sess-err", "errored", error_message="SDK crash")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "err-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "errored"
+        assert proj["last_pm_error"] == "SDK crash"
+
+    async def test_list_shows_completed_status(self, registry, tmp_path):
+        project_id = await registry.add_project("done-proj", str(tmp_path))
+        await registry.register(
+            "sess-done",
+            1234,
+            str(tmp_path),
+            name="done-pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("sess-done", "completed")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "done-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "completed"
+
+    async def test_list_excludes_child_sessions_from_pm_status(self, registry, tmp_path):
+        """Child sessions with the same project_id must not affect PM status."""
+        project_id = await registry.add_project("parent-proj", str(tmp_path))
+        # PM session is running
+        await registry.register(
+            "pm-sess",
+            1234,
+            str(tmp_path),
+            name="parent-pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("pm-sess", "active")
+        # Child session errored (more recently)
+        await registry.register(
+            "child-sess",
+            1234,
+            str(tmp_path),
+            name="child-task-xyz",
+            project_id=project_id,
+        )
+        await registry.update_status("child-sess", "errored", error_message="child failed")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "parent-proj")
+        # PM status should reflect the PM session, not the child
+        assert proj["pm_running"] == 1
+        assert proj["last_pm_status"] == "active"
+        assert proj["last_pm_error"] is None
+
+    async def test_list_ordered_by_name(self, registry, tmp_path):
+        await registry.add_project("z-proj", str(tmp_path))
+        await registry.add_project("a-proj", str(tmp_path))
+        projects = await registry.list_projects()
+        names = [p["name"] for p in projects]
+        assert names.index("a-proj") < names.index("z-proj")
+
+
+class TestProjectSessions:
+    async def test_get_project_sessions_empty(self, registry, tmp_path):
+        project_id = await registry.add_project("emp-proj", str(tmp_path))
+        sessions = await registry.get_project_sessions(project_id)
+        assert sessions == []
+
+    async def test_get_project_sessions_returns_linked(self, registry, tmp_path):
+        project_id = await registry.add_project("link-proj", str(tmp_path))
+        await registry.register("sess-linked", 1234, str(tmp_path), project_id=project_id)
+        sessions = await registry.get_project_sessions(project_id)
+        ids = [s["session_id"] for s in sessions]
+        assert "sess-linked" in ids
+
+    async def test_get_project_sessions_excludes_others(self, registry, tmp_path):
+        project_id = await registry.add_project("excl-proj", str(tmp_path))
+        await registry.register("sess-other", 1234, str(tmp_path))  # no project_id
+        sessions = await registry.get_project_sessions(project_id)
+        assert all(s["session_id"] != "sess-other" for s in sessions)
+
+
+class TestProjectUpdate:
+    async def test_update_pm_channel_id(self, registry, tmp_path):
+        project_id = await registry.add_project("upd-proj", str(tmp_path))
+        await registry.update_project(project_id, pm_channel_id="C_NEW_CHANNEL")
+        project = await registry.get_project(project_id)
+        assert project["pm_channel_id"] == "C_NEW_CHANNEL"
+
+    async def test_update_workflow_instructions(self, registry, tmp_path):
+        project_id = await registry.add_project("wi-proj", str(tmp_path))
+        await registry.update_project(project_id, workflow_instructions="Use TDD.")
+        project = await registry.get_project(project_id)
+        assert project["workflow_instructions"] == "Use TDD."
+
+    async def test_update_ignores_unknown_fields(self, registry, tmp_path):
+        project_id = await registry.add_project("unk-proj", str(tmp_path))
+        # Should not raise
+        await registry.update_project(project_id, nonexistent_field="value")
+        project = await registry.get_project(project_id)
+        assert project is not None
+
+    async def test_update_nonexistent_raises_key_error(self, registry):
+        with pytest.raises(KeyError, match="No project with id"):
+            await registry.update_project("no-such-id", pm_channel_id="C123")
+
+
+class TestRegisterWithProjectId:
+    async def test_register_with_project_id(self, registry, tmp_path):
+        project_id = await registry.add_project("reg-proj", str(tmp_path))
+        await registry.register("sess-proj", 1234, str(tmp_path), project_id=project_id)
+        session = await registry.get_session("sess-proj")
+        assert session["project_id"] == project_id
+
+    async def test_register_without_project_id(self, registry, tmp_path):
+        await registry.register("sess-noproj", 1234, str(tmp_path))
+        session = await registry.get_session("sess-noproj")
+        assert session["project_id"] is None
+
+
+class TestProjectIdInUpdatableFields:
+    def test_project_id_in_updatable_fields(self):
+        assert "project_id" in SessionRegistry._UPDATABLE_FIELDS
+
+
+class TestUpdatableProjectFieldsGuard:
+    def test_updatable_project_fields_pins_set(self):
+        expected = frozenset(
+            {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory"}
+        )
+        assert expected == SessionRegistry._UPDATABLE_PROJECT_FIELDS
+
+    async def test_updatable_project_fields_are_valid_columns(self, registry):
+        """Every field in _UPDATABLE_PROJECT_FIELDS must be a real DB column."""
+        async with registry.db.execute("PRAGMA table_info(projects)") as cursor:
+            columns = {row[1] for row in await cursor.fetchall()}
+        for field in SessionRegistry._UPDATABLE_PROJECT_FIELDS:
+            assert field in columns, f"{field!r} not in projects table columns"
+
+
+# ---------------------------------------------------------------------------
+# PM system prompt
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPmSystemPrompt:
+    def test_returns_dict(self):
+        result = build_pm_system_prompt(cwd="/tmp/project", scan_interval_s=900)
+        assert isinstance(result, dict)
+
+    def test_uses_preset_claude_code(self):
+        result = build_pm_system_prompt(cwd="/tmp/project", scan_interval_s=900)
+        assert result.get("preset") == "claude_code"
+
+    def test_includes_cwd(self):
+        result = build_pm_system_prompt(cwd="/my/project/dir", scan_interval_s=900)
+        assert "/my/project/dir" in result["append"]
+
+    def test_includes_scan_interval_minutes(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=600)
+        assert "10 minutes" in result["append"]
+
+    def test_15min_interval(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "15 minutes" in result["append"]
+
+    def test_scan_interval_singular_minute(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=60)
+        assert "1 minute" in result["append"]
+        assert "1 minutes" not in result["append"]
+
+    def test_scan_interval_mixed_minutes_and_seconds(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=90)
+        assert "1 minute 30 seconds" in result["append"]
+
+    def test_scan_interval_singular_second(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=121)
+        assert "2 minutes 1 second" in result["append"]
+        assert "1 seconds" not in result["append"]
+
+    def test_append_is_string(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert isinstance(result["append"], str)
+        assert len(result["append"]) > 50
+
+
+# ---------------------------------------------------------------------------
+# CLI: project commands
+# ---------------------------------------------------------------------------
+
+
+class TestProjectCLICommands:
+    def test_project_group_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "--help"])
+        assert result.exit_code == 0
+        assert "Manage summon projects" in result.output
+
+    def test_project_alias_p_works(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["p", "--help"])
+        assert result.exit_code == 0
+        assert "Manage summon projects" in result.output
+
+    def test_project_add_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "add", "--help"])
+        assert result.exit_code == 0
+        assert "NAME" in result.output
+
+    def test_project_remove_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "remove", "--help"])
+        assert result.exit_code == 0
+
+    def test_project_list_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "list", "--help"])
+        assert result.exit_code == 0
+
+    def test_project_up_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "up", "--help"])
+        assert result.exit_code == 0
+
+    def test_project_down_exists(self):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "down", "--help"])
+        assert result.exit_code == 0
+
+
+class TestProjectAddCLI:
+    def test_add_project_invalid_directory(self, tmp_path):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "add", "bad-proj", str(tmp_path / "nonexistent")])
+        assert result.exit_code != 0
+
+    def test_add_project_success(self, tmp_path):
+        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+            reg = AsyncMock()
+            reg.add_project = AsyncMock(return_value="proj-123-id")
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "add", "cli-success-proj", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "registered" in result.output
+
+    def test_add_project_quiet_mode(self, tmp_path):
+        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+            reg = AsyncMock()
+            reg.add_project = AsyncMock(return_value="proj-quiet-id")
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["-q", "project", "add", "cli-quiet-proj", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "registered" not in result.output
+
+
+class TestProjectListCLI:
+    def test_list_empty(self):
+        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=[])
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "list"])
+        assert result.exit_code == 0
+        assert "No projects" in result.output
+
+    def test_list_with_projects(self, tmp_path):
+        projects = [
+            {
+                "name": "my-proj",
+                "directory": str(tmp_path),
+                "pm_running": 0,
+                "project_id": "abc123-def456",
+                "channel_prefix": "my-proj",
+            }
+        ]
+        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "list"])
+        assert result.exit_code == 0
+        assert "my-proj" in result.output
+
+    def test_list_json_output(self, tmp_path):
+        import json
+
+        projects = [
+            {
+                "name": "j-proj",
+                "directory": str(tmp_path),
+                "pm_running": False,
+                "project_id": "uuid-123",
+            }
+        ]
+        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "list", "--output", "json"])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output)
+        assert isinstance(parsed, list)
+
+
+class TestProjectRemoveCLI:
+    def test_remove_project_success(self):
+        with (
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg,
+            patch("summon_claude.cli.project.is_daemon_running", return_value=False),
+        ):
+            reg = AsyncMock()
+            reg.remove_project = AsyncMock(return_value=[])
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "remove", "my-proj"])
+        assert result.exit_code == 0
+        assert "removed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Launcher logic
+# ---------------------------------------------------------------------------
+
+
+class TestLaunchProjectManagers:
+    async def test_launch_no_projects(self):
+        from summon_claude.cli.project import launch_project_managers
+
+        with patch("summon_claude.cli.project.daemon_client") as mock_dc:
+            mock_dc.project_up = AsyncMock(return_value={"type": "project_up_complete"})
+            result = await launch_project_managers()
+        assert result is None
+
+    async def test_launch_with_auth_and_projects(self):
+        from summon_claude.cli.project import launch_project_managers
+
+        with patch("summon_claude.cli.project.daemon_client") as mock_dc:
+            mock_dc.project_up = AsyncMock(
+                return_value={
+                    "type": "project_up_auth_required",
+                    "short_code": "abc123",
+                    "project_count": 1,
+                }
+            )
+            result = await launch_project_managers()
+        assert result is None
+
+    async def test_stop_project_managers_no_projects(self):
+        from summon_claude.cli.project import stop_project_managers
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg,
+        ):
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=[])
+            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await stop_project_managers()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# PM profile: MCP tool session_log_status
+# ---------------------------------------------------------------------------
+
+
+class TestSessionStatusUpdateTool:
+    async def test_status_update_valid(self, registry):
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        # Register a session for the tool to look up
+        await registry.register("test-sid", 1234, "/tmp")
+        tools = create_summon_cli_mcp_tools(registry, "test-sid", "uid", "cid", "/tmp")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
+
+        result = await status_tool.handler({"status": "active", "summary": "All good"})
+        assert "is_error" not in result or not result.get("is_error")
+
+    async def test_status_update_invalid_status(self, registry):
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        tools = create_summon_cli_mcp_tools(registry, "sid", "uid", "cid", "/tmp")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
+
+        result = await status_tool.handler({"status": "bogus", "summary": "test"})
+        assert result.get("is_error") is True
+
+    async def test_status_update_missing_summary(self, registry):
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        tools = create_summon_cli_mcp_tools(registry, "sid", "uid", "cid", "/tmp")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
+
+        result = await status_tool.handler({"status": "active", "summary": ""})
+        assert result.get("is_error") is True
+
+    async def test_status_update_all_valid_statuses(self, registry):
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        await registry.register("sid-allstatus", 1234, "/tmp")
+        tools = create_summon_cli_mcp_tools(registry, "sid-allstatus", "uid", "cid", "/tmp")
+        status_tool = next(t for t in tools if t.name == "session_log_status")
+
+        for status in ("active", "idle", "blocked", "error"):
+            result = await status_tool.handler({"status": status, "summary": f"{status} test"})
+            assert "is_error" not in result or not result.get("is_error"), (
+                f"Expected success for status={status!r}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Scan timer loop behavior (unit tests with mock)
+# ---------------------------------------------------------------------------
+
+
+class TestScanTimerLoop:
+    async def test_scan_timer_exits_on_shutdown(self):
+        """_scan_timer_loop should exit immediately when shutdown is set."""
+
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="pm-test", pm_profile=True, scan_interval_s=3600)
+        session = SummonSession(config=config, options=options, session_id="test-scan")
+        # Set shutdown immediately
+        session._shutdown_event.set()
+        # Should exit without delay
+        await asyncio.wait_for(session._scan_timer_loop("U_TEST"), timeout=1.0)
+
+    async def test_scan_timer_injects_event(self):
+        """_scan_timer_loop injects a scan trigger after interval."""
+
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="pm-scan", pm_profile=True, scan_interval_s=30)
+        session = SummonSession(config=config, options=options, session_id="test-scan-inject")
+        session._scan_interval_s = 1  # bypass floor for fast testing
+
+        # Run timer for just past 1 second, then set shutdown
+        async def _stop_after():
+            await asyncio.sleep(1.5)
+            session._shutdown_event.set()
+
+        await asyncio.gather(session._scan_timer_loop("U_TEST"), _stop_after())
+        # Should have received the synthetic scan event
+        assert not session._raw_event_queue.empty()
+        event = session._raw_event_queue.get_nowait()
+        assert event is not None
+        assert "SCAN TRIGGER" in event.get("text", "")
+
+
+# ---------------------------------------------------------------------------
+# project down: suspended status + output differentiation
+# ---------------------------------------------------------------------------
+
+
+class TestStopProjectManagersOutput:
+    async def test_stop_pm_and_child_sessions(self):
+        """project down stops PMs normally and marks children as suspended."""
+        from summon_claude.cli.project import stop_project_managers
+
+        projects = [
+            {
+                "project_id": "p1",
+                "name": "my-proj",
+                "channel_prefix": "my-proj",
+            }
+        ]
+        sessions = [
+            {
+                "session_id": "pm-sid",
+                "session_name": "my-proj-pm-abc123",
+                "status": "active",
+            },
+            {
+                "session_id": "child-sid",
+                "session_name": "my-proj-def456",
+                "status": "active",
+            },
+        ]
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.project.daemon_client") as mock_dc,
+        ):
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            reg.get_project_sessions = AsyncMock(return_value=sessions)
+            reg.update_status = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_dc.stop_session = AsyncMock(return_value=True)
+
+            result = await stop_project_managers()
+
+        assert "pm-sid" in result
+        assert "child-sid" in result
+        # Child session should be marked suspended
+        reg.update_status.assert_called_once_with("child-sid", "suspended")
+
+    async def test_stop_daemon_not_running(self):
+        """project down returns empty when daemon is not running."""
+        from summon_claude.cli.project import stop_project_managers
+
+        with patch("summon_claude.cli.project.is_daemon_running", return_value=False):
+            result = await stop_project_managers()
+        assert result == []
+
+    async def test_stop_only_pm_sessions(self):
+        """When no child sessions exist, only PMs are stopped (no suspended)."""
+        from summon_claude.cli.project import stop_project_managers
+
+        projects = [{"project_id": "p1", "name": "proj"}]
+        sessions = [
+            {
+                "session_id": "pm-only",
+                "session_name": "proj-pm-aaa",
+                "status": "active",
+            }
+        ]
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.project.daemon_client") as mock_dc,
+        ):
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            reg.get_project_sessions = AsyncMock(return_value=sessions)
+            reg.update_status = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_dc.stop_session = AsyncMock(return_value=True)
+
+            result = await stop_project_managers()
+
+        assert result == ["pm-only"]
+        reg.update_status.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# suspended status: registry + session cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestSuspendedStatus:
+    async def test_suspended_is_valid_status(self, registry):
+        """Sessions can be marked as suspended."""
+        await registry.register("susp-sid", 1234, "/tmp")
+        await registry.update_status("susp-sid", "suspended")
+        session = await registry.get_session("susp-sid")
+        assert session["status"] == "suspended"
+
+    async def test_suspended_not_counted_as_pm_running(self, registry, tmp_path):
+        """Suspended PM sessions do NOT count as pm_running."""
+        project_id = await registry.add_project("susp-proj", str(tmp_path))
+        await registry.register(
+            "susp-pm",
+            1234,
+            str(tmp_path),
+            name="susp-proj-pm-aaa",
+            project_id=project_id,
+        )
+        await registry.update_status("susp-pm", "suspended")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "susp-proj")
+        assert proj["pm_running"] == 0
+
+    async def test_suspended_preserved_over_completed(self, registry):
+        """Session cleanup must not overwrite suspended with completed.
+
+        Simulates the race: project down sets 'suspended', then session
+        cleanup tries to set 'completed'. The final status must be 'suspended'.
+        """
+        await registry.register("race-sid", 1234, "/tmp")
+        await registry.update_status("race-sid", "suspended")
+        # Simulate session cleanup checking status before writing
+        current = await registry.get_session("race-sid")
+        final_status = (
+            "suspended" if current and current.get("status") == "suspended" else "completed"
+        )
+        await registry.update_status("race-sid", final_status)
+        result = await registry.get_session("race-sid")
+        assert result["status"] == "suspended"
+
+    async def test_suspended_preserved_over_errored(self, registry):
+        """Finally block must not overwrite suspended with errored.
+
+        Simulates the finally block in start() checking status before writing.
+        """
+        await registry.register("race-err-sid", 1234, "/tmp")
+        await registry.update_status("race-err-sid", "suspended")
+        # Simulate finally block checking status
+        current = await registry.get_session("race-err-sid")
+        final = "suspended" if current and current.get("status") == "suspended" else "errored"
+        await registry.update_status("race-err-sid", final)
+        result = await registry.get_session("race-err-sid")
+        assert result["status"] == "suspended"
+
+
+# ---------------------------------------------------------------------------
+# summon stop: PM-awareness
+# ---------------------------------------------------------------------------
+
+
+class TestStopPMAwareness:
+    async def test_check_pm_stop_non_pm_returns_true(self):
+        """Non-PM sessions pass through without warning."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {"session_id": "s1", "session_name": "my-proj-abc", "project_id": "p1"}
+        ctx = MagicMock()
+        assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_no_project_returns_true(self):
+        """Sessions without project_id pass through."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {"session_id": "s1", "session_name": "my-proj-pm-abc"}
+        ctx = MagicMock()
+        assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_no_children_returns_true(self):
+        """PM with no active children passes through."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {
+            "session_id": "pm-1",
+            "session_name": "proj-pm-abc",
+            "project_id": "p1",
+        }
+        ctx = MagicMock()
+
+        with patch("summon_claude.cli.stop.SessionRegistry") as mock_reg_cls:
+            reg = AsyncMock()
+            reg.get_project_sessions = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_with_children_prompts(self):
+        """PM with active children warns and returns False in non-interactive mode."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        pm_session = {
+            "session_id": "pm-1",
+            "session_name": "proj-pm-abc",
+            "project_id": "p1",
+        }
+        child_session = {
+            "session_id": "child-1",
+            "session_name": "proj-def",
+            "status": "active",
+            "project_id": "p1",
+        }
+        ctx = MagicMock()
+
+        with (
+            patch("summon_claude.cli.stop.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.stop.is_interactive", return_value=False),
+        ):
+            reg = AsyncMock()
+            reg.get_project_sessions = AsyncMock(return_value=[pm_session, child_session])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _check_pm_stop(pm_session, ctx)
+
+        assert result is False
+
+    async def test_notify_pm_no_project_id_is_noop(self):
+        """_notify_pm_of_child_stop does nothing if session has no project_id."""
+        from summon_claude.cli.stop import _notify_pm_of_child_stop
+
+        session = {"session_id": "s1", "session_name": "test"}
+        await _notify_pm_of_child_stop(session)  # should not raise

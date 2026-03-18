@@ -65,6 +65,7 @@ from summon_claude.sessions.registry import (
     MAX_SPAWN_CHILDREN,
     MAX_SPAWN_CHILDREN_PM,
     SessionRegistry,
+    slugify_for_channel,
 )
 from summon_claude.sessions.response import ResponseStreamer, StreamResult
 from summon_claude.sessions.response import split_text as _split_text
@@ -260,6 +261,67 @@ _OVERFLOW_RECOVERY_PROMPT = (
 )
 
 
+_PM_SYSTEM_PROMPT_APPEND = (
+    "You are a Project Manager (PM) agent running headlessly via summon-claude, "
+    "bridged to a private Slack channel. There is no terminal, no visible desktop. "
+    "The user interacts through Slack messages. Use standard markdown formatting. "
+    "Your output is auto-converted for Slack display.\n\n"
+    "Your role: orchestrate work across multiple Claude Code sub-sessions for a "
+    "single software project. You have access to summon-cli MCP tools to:\n"
+    "- session_list: view active sessions\n"
+    "- session_start: spawn a new coding sub-session\n"
+    "- session_stop: stop a running session\n"
+    "- session_info: get details on a specific session\n"
+    "- session_log_status: log a status update to the audit trail\n\n"
+    "Scan protocol (triggered every {scan_interval}):\n"
+    "1. Check child session statuses via session_list\n"
+    "2. Identify completed, stuck, or failed sessions\n"
+    "3. Take corrective actions (stop, restart, or report to user)\n"
+    "4. Update the session canvas with current task status\n\n"
+    "Project directory: {cwd}\n"
+    "Working directory constraint: all sub-sessions MUST use directories within "
+    "this project directory. Do NOT spawn sessions outside this path.\n\n"
+    "The user can message you directly in Slack with instructions, status requests, "
+    "or updates. Acknowledge user messages and include them in your task tracking. "
+    "Use !commands (e.g. !help, !status, !stop) for session control."
+)
+
+
+def _format_interval(seconds: int) -> str:
+    """Format a duration in seconds as a human-readable string.
+
+    Examples:
+        >>> _format_interval(900)
+        '15 minutes'
+        >>> _format_interval(60)
+        '1 minute'
+        >>> _format_interval(90)
+        '1 minute 30 seconds'
+        >>> _format_interval(121)
+        '2 minutes 1 second'
+    """
+    minutes, secs = divmod(seconds, 60)
+    parts: list[str] = []
+    if minutes:
+        parts.append(f"{minutes} {'minute' if minutes == 1 else 'minutes'}")
+    if secs:
+        parts.append(f"{secs} {'second' if secs == 1 else 'seconds'}")
+    return " ".join(parts) or "0 seconds"
+
+
+def build_pm_system_prompt(*, cwd: str, scan_interval_s: int) -> dict:
+    """Build the PM system prompt with interpolated project context."""
+    append_text = _PM_SYSTEM_PROMPT_APPEND.format(
+        scan_interval=_format_interval(scan_interval_s),
+        cwd=cwd,
+    )
+    return {
+        "type": "preset",
+        "preset": "claude_code",
+        "append": append_text,
+    }
+
+
 def _build_google_workspace_mcp(services: str) -> dict:
     """Build MCP server config for Google Workspace (workspace-mcp).
 
@@ -399,10 +461,7 @@ AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
 def _slugify(text: str) -> str:
     """Convert text to a Slack-safe channel name slug."""
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9\-]", "-", text)
-    text = re.sub(r"-+", "-", text)
-    return text.strip("-") or "session"
+    return slugify_for_channel(text) or "session"
 
 
 def _make_channel_name(prefix: str, session_name: str) -> str:
@@ -533,6 +592,9 @@ class SessionOptions:
     effort: str = "high"
     resume: str | None = None
     pm_profile: bool = False
+    auth_only: bool = False
+    project_id: str | None = None
+    scan_interval_s: int = 900
 
 
 @dataclass(frozen=True, slots=True)
@@ -607,6 +669,9 @@ class SummonSession:
     ) -> None:
         self._config = config
         self._pm_profile = options.pm_profile
+        self._auth_only = options.auth_only
+        self._project_id = options.project_id
+        self._scan_interval_s = max(30, options.scan_interval_s)
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -670,6 +735,11 @@ class SummonSession:
         return self._channel_id
 
     @property
+    def is_pm(self) -> bool:
+        """Whether this session is a PM agent session."""
+        return self._pm_profile
+
+    @property
     def name(self) -> str:
         """Session name (from SessionOptions)."""
         return self._name
@@ -701,7 +771,7 @@ class SummonSession:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self) -> bool:  # noqa: PLR0912
+    async def start(self) -> bool:  # noqa: PLR0912, PLR0915
         """Main entry point. Runs the full session lifecycle.
 
         In the daemon architecture:
@@ -724,6 +794,7 @@ class SummonSession:
                 model=self._model,
                 parent_session_id=self._parent_session_id,
                 authenticated_user_id=self._authenticated_user_id,
+                project_id=self._project_id,
             )
             await registry.log_event(
                 "session_created",
@@ -737,7 +808,7 @@ class SummonSession:
 
                 if auth_status == "authenticated":
                     logger.info("Authenticated! Setting up session...")
-                    await self._run_session(registry)
+                    await self._run_authenticated(registry)
                     return True
                 if auth_status == "timed_out":
                     if self._auth:
@@ -776,10 +847,18 @@ class SummonSession:
                 self._remove_session_log_handler(session_log_handler)
                 if not self._shutdown_completed:
                     try:
+                        # Don't overwrite "suspended" (set by project down)
+                        current = await registry.get_session(self._session_id)
+                        if current and current.get("status") == "suspended":
+                            final = "suspended"
+                            err_msg = None
+                        else:
+                            final = "errored"
+                            err_msg = "Session terminated unexpectedly"
                         await registry.update_status(
                             self._session_id,
-                            "errored",
-                            error_message="Session terminated unexpectedly",
+                            final,
+                            error_message=err_msg,
                             ended_at=datetime.now(UTC).isoformat(),
                         )
                     except Exception as e:
@@ -841,6 +920,28 @@ class SummonSession:
                     logger.info("Waiting for authentication... %.0fs remaining", remaining)
                 next_countdown += _AUTH_COUNTDOWN_INTERVAL_S
 
+    async def _run_authenticated(self, registry: SessionRegistry) -> None:
+        """Dispatch after authentication: auth-only sessions complete immediately,
+        normal sessions proceed to _run_session."""
+        if self._auth_only:
+            logger.info("Auth-only session authenticated, completing.")
+            await registry.update_status(
+                self._session_id,
+                "completed",
+                authenticated_user_id=self._authenticated_user_id,
+                authenticated_at=datetime.now(UTC).isoformat(),
+                ended_at=datetime.now(UTC).isoformat(),
+            )
+            await registry.log_event(
+                "session_completed",
+                session_id=self._session_id,
+                user_id=self._authenticated_user_id,
+                details={"auth_only": True},
+            )
+            self._shutdown_completed = True
+            return
+        await self._run_session(registry)
+
     async def _run_session(self, registry: SessionRegistry) -> None:  # noqa: PLR0912, PLR0915
         """Create channel, register with dispatcher, connect Claude, run message loop."""
         # In daemon mode, web_client is pre-provided by SessionManager.
@@ -856,7 +957,12 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
-        channel_id, channel_name = await self._create_channel(web_client)
+        if self._pm_profile and self._project_id:
+            channel_id, channel_name = await self._get_or_create_pm_channel(
+                web_client, registry, self._project_id
+            )
+        else:
+            channel_id, channel_name = await self._create_channel(web_client)
 
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
@@ -1022,6 +1128,93 @@ class SummonSession:
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
 
+    async def _get_or_create_pm_channel(  # noqa: PLR0912
+        self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
+    ) -> tuple[str, str]:
+        """Reuse the existing PM channel for this project, or create a new one.
+
+        If the project already has a ``pm_channel_id``, joins it and returns it.
+        Otherwise creates a new channel named ``{channel_prefix}-pm`` and
+        persists the channel ID back to the project record.
+        """
+        project = await registry.get_project(project_id)
+        if project is None:
+            logger.warning(
+                "Project %s not found — falling back to normal channel creation",
+                project_id,
+            )
+            return await self._create_channel(web_client)
+
+        existing_channel_id = project.get("pm_channel_id")
+        if existing_channel_id:
+            # Attempt to join (bot may already be a member — that's fine)
+            try:
+                await web_client.conversations_join(channel=existing_channel_id)
+                # Fetch name for the return value
+                resp = await web_client.conversations_info(channel=existing_channel_id)
+                channel_name: str = resp["channel"]["name"]  # type: ignore[index]
+                logger.info("PM: reusing existing channel #%s", channel_name)
+                return existing_channel_id, channel_name
+            except Exception as e:
+                logger.warning(
+                    "PM: could not join existing channel %s (%s) — creating new channel",
+                    existing_channel_id,
+                    e,
+                )
+
+        # Create a new PM channel
+        channel_prefix = project.get("channel_prefix", _slugify(project.get("name", "pm")))
+        new_channel_name = f"{channel_prefix}-pm"[:_MAX_CHANNEL_NAME_LEN].lower()
+        new_id = ""
+        cname = ""
+        try:
+            resp = await web_client.conversations_create(name=new_channel_name, is_private=True)
+            new_id = resp["channel"]["id"]  # type: ignore[index]
+            cname = resp["channel"]["name"]  # type: ignore[index]
+        except Exception as e:
+            if "name_taken" in str(e):
+                # Paginate through all private channels to find the existing one.
+                # Slack has no search-by-name API for private channels, so we
+                # iterate with cursor-based pagination (200 per page, Slack max).
+                found = False
+                cursor: str | None = None
+                max_pages = 50
+                for _page in range(max_pages):
+                    kwargs: dict[str, object] = {"types": "private_channel", "limit": 200}
+                    if cursor:
+                        kwargs["cursor"] = cursor
+                    resp = await web_client.conversations_list(**kwargs)
+                    channels = resp.get("channels", [])
+                    for ch in channels:
+                        if ch.get("name") == new_channel_name:
+                            new_id = ch["id"]
+                            cname = ch["name"]
+                            found = True
+                            break
+                    if found:
+                        break
+                    cursor = resp.get("response_metadata", {}).get("next_cursor")
+                    if not cursor:
+                        raise RuntimeError(
+                            f"Channel {new_channel_name!r} exists but bot cannot access it"
+                        ) from e
+                else:
+                    raise RuntimeError(
+                        f"Channel {new_channel_name!r} exists but bot cannot find it"
+                        f" after {max_pages} pages"
+                    ) from e
+            else:
+                raise
+
+        # Persist the channel ID to the project
+        try:
+            await registry.update_project(project_id, pm_channel_id=new_id)
+        except Exception as e:
+            logger.warning("PM: failed to persist pm_channel_id: %s", e)
+
+        logger.info("PM: created new channel #%s", cname)
+        return new_id, cname
+
     async def _init_canvas(
         self, client: SlackClient, registry: SessionRegistry
     ) -> CanvasStore | None:
@@ -1029,7 +1222,8 @@ class SummonSession:
 
         Canvas failure is non-fatal — returns ``None`` on any error.
         """
-        template = get_canvas_template("agent")
+        profile = "pm" if self._pm_profile else "agent"
+        template = get_canvas_template(profile)
         markdown = template.format(model=self._model or "unknown", cwd=self._cwd)
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
@@ -1102,10 +1296,11 @@ class SummonSession:
             )
             mcp_servers["summon-canvas"] = canvas_mcp
 
+        pm_user_id: str | None = None
         if is_pm:
-            assert self._authenticated_user_id is not None, (
-                "_run_message_loop reached without authenticated_user_id"
-            )
+            if self._authenticated_user_id is None:
+                raise RuntimeError("_run_message_loop reached without authenticated_user_id")
+            pm_user_id = self._authenticated_user_id
             cli_mcp = create_summon_cli_mcp_server(
                 registry=rt.registry,
                 session_id=self._session_id,
@@ -1114,6 +1309,8 @@ class SummonSession:
                 cwd=self._cwd,
             )
             mcp_servers["summon-cli"] = cli_mcp
+
+        setting_sources = ["user"] if is_pm else ["user", "project"]
 
         streamer = ResponseStreamer(
             router=router,
@@ -1133,17 +1330,22 @@ class SummonSession:
         system_prompt_append = base_prompt
 
         while True:
-            system_prompt = {
-                "type": "preset",
-                "preset": "claude_code",
-                "append": system_prompt_append,
-            }
+            if is_pm:
+                system_prompt = build_pm_system_prompt(
+                    cwd=self._cwd, scan_interval_s=self._scan_interval_s
+                )
+            else:
+                system_prompt = {
+                    "type": "preset",
+                    "preset": "claude_code",
+                    "append": system_prompt_append,
+                }
             options = ClaudeAgentOptions(
                 cwd=self._cwd,
                 resume=self._resume,
                 system_prompt=system_prompt,
                 include_partial_messages=True,
-                setting_sources=["user", "project"],
+                setting_sources=setting_sources,
                 plugins=discover_installed_plugins(),
                 can_use_tool=rt.permission_handler.handle,
                 mcp_servers=mcp_servers,
@@ -1193,6 +1395,9 @@ class SummonSession:
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(self._run_preprocessor(rt, claude))
                             tg.create_task(self._run_response_consumer(rt, claude, streamer))
+                            if is_pm:
+                                assert pm_user_id is not None  # narrowed above
+                                tg.create_task(self._scan_timer_loop(pm_user_id))
                     except ExceptionGroup as eg:
                         restart_exc = next(
                             (e for e in eg.exceptions if isinstance(e, _SessionRestartError)),
@@ -1321,6 +1526,43 @@ class SummonSession:
             # Always unblock consumer — even on crash
             with contextlib.suppress(Exception):
                 self._pending_turns.put_nowait(None)
+
+    async def _scan_timer_loop(self, authenticated_user_id: str) -> None:
+        """Inject periodic scan-trigger messages for PM sessions.
+
+        Waits ``self._scan_interval_s`` between triggers.  When the shutdown
+        event is set the loop exits cleanly without injecting a trigger.
+        """
+        scan_interval = self._scan_interval_s
+        logger.info("PM scan timer started (interval: %ds)", scan_interval)
+        while not self._shutdown_event.is_set():
+            try:
+                async with asyncio.timeout(scan_interval):
+                    await self._shutdown_event.wait()
+                # Shutdown event fired — exit cleanly
+                return
+            except TimeoutError:
+                pass
+
+            if self._shutdown_event.is_set():
+                return
+
+            # Inject scan trigger into the raw event queue
+            scan_event = {
+                "type": "message",
+                "text": (
+                    "[SCAN TRIGGER] Perform your scheduled project scan now. "
+                    "Check all active sub-sessions, identify any that need attention, "
+                    "and update the canvas with current status."
+                ),
+                "user": authenticated_user_id,
+                "_synthetic": True,
+            }
+            try:
+                self._raw_event_queue.put_nowait(scan_event)
+                logger.info("PM: scan trigger injected")
+            except asyncio.QueueFull:
+                logger.debug("PM: scan trigger dropped (queue full)")
 
     async def _run_response_consumer(
         self,
@@ -1615,12 +1857,16 @@ class SummonSession:
         # Post disconnect message (channel is preserved, not archived)
         await self._post_disconnect_message(rt)
 
-        # Update registry
+        # Update registry — don't overwrite "suspended" (set by project down)
         try:
+            current = await rt.registry.get_session(self._session_id)
+            final_status = (
+                "suspended" if current and current.get("status") == "suspended" else "completed"
+            )
             await asyncio.wait_for(
                 rt.registry.update_status(
                     self._session_id,
-                    "completed",
+                    final_status,
                     ended_at=datetime.now(UTC).isoformat(),
                 ),
                 timeout=_CLEANUP_TIMEOUT_S,
@@ -2117,6 +2363,12 @@ class SummonSession:
         subtype = event.get("subtype")
         user_id = event.get("user", "")
         text = event.get("text", "")
+
+        # Synthetic events (e.g. scan triggers) bypass all Slack preprocessing
+        if event.get("_synthetic"):
+            if not text:
+                return None
+            return text, None
 
         # 1 & 2: Drop bot/system messages and empty content
         if subtype or not text or not user_id:

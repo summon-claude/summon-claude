@@ -263,10 +263,15 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 parent_cwd=cwd,
             )
 
+            # Auto-propagate project_id from calling session to spawned sessions
+            calling_session = await registry.get_session(session_id)
+            parent_project_id = calling_session.get("project_id") if calling_session else None
+
             options = SessionOptions(
                 cwd=target_cwd,
                 name=name,
                 model=model,
+                project_id=parent_project_id,
             )
 
             new_session_id = await ipc_create(options, spawn_auth.token)
@@ -368,7 +373,72 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [session_list, session_info, session_start, session_stop]
+    @tool(
+        "session_log_status",
+        (
+            "Log a status update to the session registry audit trail. "
+            "Use this to record current project status, active tasks, and blockers. "
+            "Note: this does not post to Slack — use the summon-slack MCP post tool for that. "
+            "status: one of 'active', 'idle', 'blocked', or 'error'. "
+            "summary: brief status summary (required, max 500 chars). "
+            "details: optional structured details (markdown, max 2000 chars)."
+        ),
+        {"status": str, "summary": str, "details": str},
+    )
+    async def session_log_status(args: dict) -> dict:
+        valid_statuses = {"active", "idle", "blocked", "error"}
+        status = args.get("status", "active")
+        if status not in valid_statuses:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Error: status must be one of {sorted(valid_statuses)}.",
+                    }
+                ],
+                "is_error": True,
+            }
+        raw_summary = (args.get("summary") or "").strip()
+        summary = raw_summary[:500]
+        if not summary:
+            return {
+                "content": [{"type": "text", "text": "Error: summary is required."}],
+                "is_error": True,
+            }
+        raw_details = (args.get("details") or "").strip()
+        details = raw_details[:2000]
+
+        truncated_parts: list[str] = []
+        if len(raw_summary) > 500:
+            truncated_parts.append(f"summary truncated from {len(raw_summary)} to 500 chars")
+        if len(raw_details) > 2000:
+            truncated_parts.append(f"details truncated from {len(raw_details)} to 2000 chars")
+
+        try:
+            await registry.log_event(
+                "pm_status_update",
+                session_id=session_id,
+                user_id=authenticated_user_id,
+                details={"status": status, "summary": summary, "details": details},
+            )
+            msg = f"Status update recorded: [{status}] {summary}."
+            if truncated_parts:
+                msg += f" (Warning: {'; '.join(truncated_parts)})"
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": msg,
+                    }
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error updating status: {e}"}],
+                "is_error": True,
+            }
+
+    return [session_list, session_info, session_start, session_stop, session_log_status]
 
 
 def create_summon_cli_mcp_server(

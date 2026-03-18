@@ -19,10 +19,12 @@ import contextlib
 import dataclasses
 import logging
 import os
+import pathlib
+import secrets
 import time
 import uuid
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -73,6 +75,8 @@ class SessionManager:
         self._grace_timer: asyncio.TimerHandle | None = None
         self._shutdown_event = asyncio.Event()
         self._start_time: float = time.monotonic()
+        self._project_up_in_flight = False  # guard against concurrent project_up
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Public lifecycle API
@@ -93,9 +97,7 @@ class SessionManager:
             The short code for the user to authenticate via ``/summon`` in Slack.
         """
         # Cancel grace timer — a new session has arrived
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         session_id = str(uuid.uuid4())
         auth = await self._generate_auth(session_id)
@@ -170,9 +172,7 @@ class SessionManager:
 
         # Cancel grace timer only after successful verification — prevents
         # invalid tokens from keeping the daemon alive indefinitely.
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         # Enforce the authorized working directory from the spawn token
         options = dataclasses.replace(options, cwd=spawn_auth.cwd)
@@ -225,19 +225,20 @@ class SessionManager:
         Phase 2: Wait up to 30 seconds for tasks to drain.
         Phase 3: Force-cancel any remaining tasks.
         """
-        if self._grace_timer is not None:
-            self._grace_timer.cancel()
-            self._grace_timer = None
+        self._cancel_grace_timer()
 
         # Phase 1 — signal
         for session in list(self._sessions.values()):
             session.request_shutdown()
 
+        # Cancel background tasks (orchestrators, etc.)
+        for bg_task in list(self._background_tasks):
+            bg_task.cancel()
+
         # Phase 2 — wait (bounded)
-        if self._tasks:
-            _done, pending = await asyncio.wait(
-                list(self._tasks.values()), timeout=_SHUTDOWN_WAIT_TIMEOUT
-            )
+        all_tasks = list(self._tasks.values()) + list(self._background_tasks)
+        if all_tasks:
+            _done, pending = await asyncio.wait(all_tasks, timeout=_SHUTDOWN_WAIT_TIMEOUT)
             # Phase 3 — force cancel
             for task in pending:
                 task.cancel()
@@ -382,6 +383,9 @@ class SessionManager:
                     return {"type": "error", "message": str(e)}
                 return {"type": "session_created_spawned", "session_id": session_id}
 
+            case "project_up":
+                return await self._handle_project_up(msg)
+
             case _:
                 return {"type": "error", "message": f"Unknown command: {msg.get('type')}"}
 
@@ -414,6 +418,13 @@ class SessionManager:
                         backoff,
                         e,
                     )
+                    # Best-effort: alert channel about retry
+                    await self._alert_channel(
+                        session,
+                        f":warning: *Session error* (attempt {attempt + 1}/"
+                        f"{self.MAX_SESSION_RESTARTS}), restarting in {backoff}s\u2026\n"
+                        f"Error: `{e}`",
+                    )
                     await asyncio.sleep(backoff)
                 else:
                     logger.error(
@@ -421,17 +432,260 @@ class SessionManager:
                         session_id,
                         _SECRET_PATTERN.sub("***", str(e)),
                     )
-                    # Best-effort: post error notice to the session channel
-                    if session.channel_id:
-                        with contextlib.suppress(Exception):
-                            safe_msg = _SECRET_PATTERN.sub(
-                                "***", f":x: Session terminated unexpectedly: {e}"
-                            )
-                            await self._web_client.chat_postMessage(
-                                channel=session.channel_id,
-                                text=safe_msg,
-                            )
+                    recovery_hint = "\nRun `summon project up` to restart." if session.is_pm else ""
+                    await self._alert_channel(
+                        session,
+                        f":x: *Session terminated unexpectedly*: `{e}`{recovery_hint}",
+                    )
                     break
+
+    # ------------------------------------------------------------------
+    # project up — daemon-side orchestration
+    # ------------------------------------------------------------------
+
+    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """IPC handler for ``project_up``.
+
+        Checks which projects need a PM, creates an auth session if any do,
+        launches a background orchestrator, and returns immediately with the
+        short code for the user to authenticate.
+        """
+        if self._project_up_in_flight:
+            return {"type": "error", "message": "A project_up operation is already in progress"}
+
+        # Set the flag before any work — cleared in orchestrator's finally
+        # (or in the except block if we fail before the orchestrator starts).
+        self._project_up_in_flight = True
+
+        try:
+            # Check if any projects need PM before creating an auth session
+            projects: list[dict[str, Any]] = []
+            async with SessionRegistry() as registry:
+                projects = await registry.list_projects()
+            needing_pm = [p for p in projects if not p.get("pm_running")]
+            if not needing_pm:
+                self._project_up_in_flight = False
+                return {"type": "project_up_complete"}
+
+            cwd = msg.get("cwd", str(pathlib.Path.cwd()))
+
+            # Create auth-only session
+            self._cancel_grace_timer()
+            session_id = str(uuid.uuid4())
+            auth = await self._generate_auth(session_id)
+            options = SessionOptions(
+                cwd=cwd,
+                name=f"pm-auth-{secrets.token_hex(3)}",
+                auth_only=True,
+            )
+            session = SummonSession(
+                config=self._config,
+                options=options,
+                auth=auth,
+                session_id=session_id,
+                web_client=self._web_client,
+                dispatcher=self._dispatcher,
+                bot_user_id=self._bot_user_id,
+            )
+            self._sessions[session_id] = session
+            task = asyncio.create_task(
+                self._supervised_session(session, session_id),
+                name=f"session-auth-{session_id}",
+            )
+            task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+            self._tasks[session_id] = task
+
+            bg_task = asyncio.create_task(
+                self._project_up_orchestrator(session, needing_pm),
+                name=f"project-up-{session_id}",
+            )
+            self._background_tasks.add(bg_task)
+            bg_task.add_done_callback(self._on_background_task_done)
+
+            logger.info(
+                "SessionManager: project_up started (auth session %s, %d projects)",
+                session_id,
+                len(needing_pm),
+            )
+            return {
+                "type": "project_up_auth_required",
+                "short_code": auth.short_code,
+                "project_count": len(needing_pm),
+            }
+        except Exception:
+            self._project_up_in_flight = False
+            raise
+
+    async def _project_up_orchestrator(
+        self,
+        auth_session: SummonSession,
+        needing_pm: list[dict[str, Any]],
+    ) -> None:
+        """Background task: wait for auth, then create PM + restart suspended sessions."""
+        try:
+            async with asyncio.timeout(360):
+                await auth_session._authenticated_event.wait()  # noqa: SLF001
+            user_id = auth_session._authenticated_user_id  # noqa: SLF001
+            if user_id is None:
+                raise RuntimeError("Auth session completed without setting user_id")
+
+            for project in needing_pm:
+                try:
+                    self._start_pm_for_project(project, user_id)
+                except Exception as e:
+                    logger.error(
+                        "PM: failed to start session for project %s: %s",
+                        project.get("name", "?"),
+                        e,
+                    )
+
+            # Cascade restart: revive sessions suspended by project down
+            await self._restart_suspended_sessions(needing_pm, user_id)
+
+        except TimeoutError:
+            logger.error("project_up orchestrator: authentication timed out")
+        except Exception as e:
+            logger.error("project_up orchestrator failed: %s", e, exc_info=True)
+        finally:
+            self._project_up_in_flight = False
+
+    async def _restart_suspended_sessions(
+        self,
+        projects: list[dict[str, Any]],
+        user_id: str,
+    ) -> None:
+        """Restart sessions that were suspended by ``project down``."""
+        async with SessionRegistry() as registry:
+            for project in projects:
+                project_id = project["project_id"]
+                sessions = await registry.get_project_sessions(project_id)
+                suspended = [s for s in sessions if s.get("status") == "suspended"]
+                for sess in suspended:
+                    try:
+                        self._start_child_session(
+                            project=project,
+                            user_id=user_id,
+                            cwd=sess.get("cwd", project["directory"]),
+                            model=sess.get("model"),
+                        )
+                        # Mark old suspended session as completed
+                        await registry.update_status(sess["session_id"], "completed")
+                        logger.info(
+                            "PM: restarted suspended session %s for project %s",
+                            sess["session_id"][:8],
+                            project["name"],
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "PM: failed to restart suspended session %s: %s",
+                            sess.get("session_id", "?")[:8],
+                            e,
+                        )
+                        # Mark as errored to prevent infinite retry on next project up
+                        with contextlib.suppress(Exception):
+                            await registry.update_status(
+                                sess["session_id"],
+                                "errored",
+                                error_message=f"Restart failed: {e}",
+                            )
+
+    def _start_child_session(
+        self,
+        project: dict[str, Any],
+        user_id: str,
+        cwd: str,
+        model: str | None = None,
+    ) -> None:
+        """Create and start a regular (non-PM) child session for *project*."""
+        if not pathlib.Path(cwd).is_dir():
+            raise FileNotFoundError(f"Directory not found: {cwd}")
+
+        new_session_id = str(uuid.uuid4())
+        options = SessionOptions(
+            cwd=cwd,
+            name=f"{project['channel_prefix']}-{secrets.token_hex(3)}",
+            model=model,
+            project_id=project["project_id"],
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+        )
+        new_session.authenticate(user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-child-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info(
+            "SessionManager: started child session %s for project %s (cwd=%s)",
+            new_session_id,
+            project["name"],
+            cwd,
+        )
+
+    def _start_pm_for_project(self, project: dict[str, Any], user_id: str) -> None:
+        """Create and start a single PM session for *project*."""
+        project_dir = project["directory"]
+        if not pathlib.Path(project_dir).is_dir():
+            raise FileNotFoundError(f"Directory not found: {project_dir}")
+
+        new_session_id = str(uuid.uuid4())
+        pm_options = SessionOptions(
+            cwd=project_dir,
+            name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
+            pm_profile=True,
+            project_id=project["project_id"],
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=pm_options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+        )
+        new_session.authenticate(user_id)
+
+        # Cancel grace timer — it may have been (re)started by
+        # _on_task_done after the auth-only session completed.
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-pm-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info(
+            "SessionManager: started PM session %s for project %s",
+            new_session_id,
+            project["name"],
+        )
+
+    async def _alert_channel(self, session: SummonSession, message: str) -> None:
+        """Best-effort Slack notification to a session's channel."""
+        if not session.channel_id or not self._web_client:
+            logger.debug("_alert_channel skipped (no channel or web_client)")
+            return
+        with contextlib.suppress(Exception):
+            safe_msg = _SECRET_PATTERN.sub("***", message)
+            await self._web_client.chat_postMessage(
+                channel=session.channel_id,
+                text=safe_msg,
+            )
 
     def _on_task_done(self, task: asyncio.Task, session_id: str) -> None:  # type: ignore[type-arg]
         """Cleanup callback fired when a session task finishes (any outcome)."""
@@ -451,6 +705,14 @@ class SessionManager:
         if not self._sessions:
             self._start_grace_timer()
 
+    def _on_background_task_done(self, task: asyncio.Task) -> None:  # type: ignore[type-arg]
+        """Cleanup callback for background tasks (orchestrators, etc.)."""
+        self._background_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error("Background task %s failed: %s", task.get_name(), exc)
+
     def _start_grace_timer(self) -> None:
         """Schedule daemon auto-stop after ``_GRACE_SECONDS`` with no sessions."""
         try:
@@ -464,6 +726,12 @@ class SessionManager:
             "SessionManager: no active sessions — daemon will stop in %.0fs",
             _GRACE_SECONDS,
         )
+
+    def _cancel_grace_timer(self) -> None:
+        """Cancel the daemon auto-stop grace timer if it is running."""
+        if self._grace_timer is not None:
+            self._grace_timer.cancel()
+            self._grace_timer = None
 
     @staticmethod
     def _is_recoverable(exc: Exception) -> bool:

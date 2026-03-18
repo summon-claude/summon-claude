@@ -18,6 +18,7 @@ import logging
 import os
 import pathlib
 import secrets
+import shutil
 import sys
 import threading
 
@@ -35,6 +36,13 @@ from summon_claude.cli.config import (
 )
 from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
+from summon_claude.cli.project import (
+    async_project_add,
+    async_project_list,
+    async_project_remove,
+    launch_project_managers,
+    stop_project_managers,
+)
 from summon_claude.cli.session import (
     async_session_cleanup,
     async_session_list,
@@ -44,6 +52,7 @@ from summon_claude.cli.session import (
 from summon_claude.cli.start import async_start
 from summon_claude.cli.stop import async_stop
 from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
+from summon_claude.daemon import start_daemon
 from summon_claude.sessions import registry as _registry
 
 _BANNER_WIDTH = 50
@@ -84,7 +93,7 @@ def _setup_logging(verbose: bool = False) -> None:
 class AliasedGroup(click.Group):
     """Click group with command alias support."""
 
-    _ALIASES: dict[str, str] = {"s": "session"}
+    _ALIASES: dict[str, str] = {"s": "session", "p": "project"}
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         rv = click.Group.get_command(self, ctx, cmd_name)
@@ -203,8 +212,6 @@ def cmd_start(
     effort: str | None,
 ) -> None:
     """Start a new summon session (thin client — delegates to the daemon)."""
-    import shutil  # noqa: PLC0415
-
     if not shutil.which("claude"):
         click.echo("Error: Claude CLI not found in PATH.", err=True)
         click.echo("", err=True)
@@ -357,6 +364,132 @@ def session_logs(ctx: click.Context, session: str | None, tail: int) -> None:
 def session_cleanup(ctx: click.Context, archive: bool) -> None:
     """Mark sessions with dead processes as errored."""
     asyncio.run(async_session_cleanup(ctx, archive=archive))
+
+
+# ---------------------------------------------------------------------------
+# project command group (alias: p)
+# ---------------------------------------------------------------------------
+
+
+@cli.group("project")
+def cmd_project() -> None:
+    """Manage summon projects."""
+
+
+@cmd_project.command("add")
+@click.argument("name")
+@click.argument("directory", default=".", type=click.Path())
+@click.pass_context
+def project_add(ctx: click.Context, name: str, directory: str) -> None:
+    """Register a project directory for PM agent management."""
+    project_id = asyncio.run(async_project_add(name, directory))
+    if not ctx.obj.get("quiet"):
+        click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
+        click.echo("Run 'summon project up' to start a PM agent for this project.")
+
+
+@cmd_project.command("remove")
+@click.argument("name_or_id")
+@click.pass_context
+def project_remove(ctx: click.Context, name_or_id: str) -> None:
+    """Remove a registered project."""
+    asyncio.run(async_project_remove(name_or_id))
+    if not ctx.obj.get("quiet"):
+        click.echo(f"Project {name_or_id!r} removed.")
+
+
+@cmd_project.command("list")
+@click.option(
+    "-o",
+    "--output",
+    type=click.Choice(["json", "table"]),
+    default="table",
+    help="Output format",
+)
+@click.pass_context
+def project_list(ctx: click.Context, output: str) -> None:
+    """List all registered projects."""
+    projects = asyncio.run(async_project_list())
+    if output == "json":
+        click.echo(json.dumps(projects, indent=2))
+        return
+    if not projects:
+        click.echo("No projects registered.")
+        return
+    name_w, dir_w = 20, 40
+    click.echo(f"{'NAME':<{name_w}} {'DIRECTORY':<{dir_w}} {'PM':<10} {'ID'}")
+    click.echo("-" * (name_w + dir_w + 10 + 10))
+    for p in projects:
+        name = p.get("name", "")
+        directory = p.get("directory", "")
+        pid = p.get("project_id", "")[:8]
+        # Truncate name with suffix ellipsis, directory with prefix ellipsis
+        if len(name) > name_w:
+            name = name[: name_w - 1] + "\u2026"
+        if len(directory) > dir_w:
+            directory = "\u2026" + directory[-(dir_w - 1) :]
+        # PM status: running > errored > completed > -
+        if p.get("pm_running"):
+            pm_status = "running"
+        elif p.get("last_pm_status") == "errored":
+            pm_status = "errored"
+        elif p.get("last_pm_status") == "completed":
+            pm_status = "stopped"
+        elif p.get("last_pm_status") == "pending_auth":
+            pm_status = "auth…"
+        else:
+            pm_status = "-"
+        click.echo(f"{name:<{name_w}} {directory:<{dir_w}} {pm_status:<10} {pid}...")
+        # Show last error inline if the PM errored
+        if pm_status == "errored" and p.get("last_pm_error"):
+            err = p["last_pm_error"]
+            if len(err) > name_w + dir_w:
+                err = err[: name_w + dir_w - 1] + "\u2026"
+            click.echo(f"  └ {err}", err=True)
+
+
+@cmd_project.command("up")
+@click.pass_context
+def project_up(ctx: click.Context) -> None:
+    """Start PM agents for all registered projects that don't have one running."""
+    if not shutil.which("claude"):
+        click.echo("Error: Claude CLI not found in PATH.", err=True)
+        raise SystemExit(1)
+
+    config_path_override = ctx.obj.get("config_path") if ctx.obj else None
+    try:
+        config = SummonConfig.from_file(config_path_override)
+        config.validate()
+    except Exception as e:
+        click.echo(f"Configuration error: {e}", err=True)
+        raise SystemExit(1) from e
+
+    try:
+        start_daemon(config)
+    except Exception as e:
+        click.echo(f"Error starting daemon: {e}", err=True)
+        raise SystemExit(1) from e
+
+    try:
+        asyncio.run(launch_project_managers())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
+
+
+@cmd_project.command("down")
+@click.pass_context
+def project_down(ctx: click.Context) -> None:
+    """Stop all active PM sessions for registered projects."""
+    try:
+        asyncio.run(stop_project_managers())
+    except click.ClickException:
+        raise
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 # ---------------------------------------------------------------------------
