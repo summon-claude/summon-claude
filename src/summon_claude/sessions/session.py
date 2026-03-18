@@ -1855,17 +1855,18 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post context warning", exc_info=True)
 
-        # Only update topic if model or branch changed
-        try:
-            current_model = self._last_model_seen or self._model
-            git_branch = await _get_git_branch(self._cwd)
-            if current_model != self._last_topic_model or git_branch != self._last_topic_branch:
-                topic = _format_topic(model=current_model, cwd=self._cwd, git_branch=git_branch)
-                await rt.client.set_topic(topic)
-                self._last_topic_model = current_model
-                self._last_topic_branch = git_branch
-        except Exception:
-            logger.warning("Post-turn topic update failed", exc_info=True)
+        # Only update topic if model or branch changed (PM manages its own topic)
+        if not self._pm_profile:
+            try:
+                current_model = self._last_model_seen or self._model
+                git_branch = await _get_git_branch(self._cwd)
+                if current_model != self._last_topic_model or git_branch != self._last_topic_branch:
+                    topic = _format_topic(model=current_model, cwd=self._cwd, git_branch=git_branch)
+                    await rt.client.set_topic(topic)
+                    self._last_topic_model = current_model
+                    self._last_topic_branch = git_branch
+            except Exception:
+                logger.warning("Post-turn topic update failed", exc_info=True)
 
     async def _heartbeat_loop(self, rt: _SessionRuntime) -> None:
         """Update registry heartbeat every 30 seconds."""
