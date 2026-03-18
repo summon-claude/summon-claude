@@ -637,6 +637,8 @@ class ResponseStreamer:
         except Exception:
             # Fallback: post mrkdwn diff inline
             logger.warning("Diff upload failed for %s, using mrkdwn fallback", filename)
+            if not diff_lines:
+                return
             try:
                 diff_text = "".join(diff_lines)
                 header = f"*Edit:* `{filename}`\n"

@@ -716,6 +716,36 @@ class TestUploadDiff:
                 all_blocks.extend(c.kwargs["blocks"])
         assert any("Updated" in str(b) for b in all_blocks)
 
+    async def test_write_md_fallback_to_plain_text(self):
+        """When type: markdown blocks fail, should fall back to plain text."""
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+
+        # Make post fail on markdown blocks, succeed on plain text
+        call_count = 0
+        original_post = client.post
+
+        async def selective_fail(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            blocks = kwargs.get("blocks", [])
+            if any(b.get("type") == "markdown" for b in blocks):
+                raise Exception("markdown blocks not supported")
+            return await original_post(*args, **kwargs)
+
+        client.post = AsyncMock(side_effect=selective_fail)
+
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/README.md", "content": "# Hello"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+
+        # Should have attempted markdown block and fallen back to plain text
+        assert call_count >= 3  # header + markdown attempt + plain text fallback
+
 
 class TestSplitTextAdditional:
     """Additional split_text tests absorbed from test_content_display.py."""
