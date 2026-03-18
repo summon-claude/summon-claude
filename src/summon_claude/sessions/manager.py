@@ -19,10 +19,12 @@ import contextlib
 import dataclasses
 import logging
 import os
+import pathlib
+import secrets
 import time
 import uuid
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
@@ -73,6 +75,9 @@ class SessionManager:
         self._grace_timer: asyncio.TimerHandle | None = None
         self._shutdown_event = asyncio.Event()
         self._start_time: float = time.monotonic()
+        self._project_up_futures: dict[str, asyncio.Future[dict[str, Any]]] = {}
+        self._project_up_in_flight = False  # guard against concurrent project_up
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------
     # Public lifecycle API
@@ -227,11 +232,14 @@ class SessionManager:
         for session in list(self._sessions.values()):
             session.request_shutdown()
 
+        # Cancel background tasks (orchestrators, etc.)
+        for bg_task in list(self._background_tasks):
+            bg_task.cancel()
+
         # Phase 2 — wait (bounded)
-        if self._tasks:
-            _done, pending = await asyncio.wait(
-                list(self._tasks.values()), timeout=_SHUTDOWN_WAIT_TIMEOUT
-            )
+        all_tasks = list(self._tasks.values()) + list(self._background_tasks)
+        if all_tasks:
+            _done, pending = await asyncio.wait(all_tasks, timeout=_SHUTDOWN_WAIT_TIMEOUT)
             # Phase 3 — force cancel
             for task in pending:
                 task.cancel()
@@ -376,41 +384,11 @@ class SessionManager:
                     return {"type": "error", "message": str(e)}
                 return {"type": "session_created_spawned", "session_id": session_id}
 
-            case "create_auth_session":
-                try:
-                    raw_options = msg["options"]
-                    # Allowlist only safe fields — callers must not inject pm_profile,
-                    # project_id, or other privileged options.
-                    safe_fields = {k: v for k, v in raw_options.items() if k in ("cwd", "name")}
-                    safe_fields["auth_only"] = True
-                    options = SessionOptions(**safe_fields)
-                except (TypeError, KeyError) as e:
-                    return {"type": "error", "message": f"Invalid session options: {e}"}
-                self._cancel_grace_timer()  # a new session has arrived
-                session_id = str(uuid.uuid4())
-                auth = await self._generate_auth(session_id)
-                session = SummonSession(
-                    config=self._config,
-                    options=options,
-                    auth=auth,
-                    session_id=session_id,
-                    web_client=self._web_client,
-                    dispatcher=self._dispatcher,
-                    bot_user_id=self._bot_user_id,
-                )
-                self._sessions[session_id] = session
-                task = asyncio.create_task(
-                    self._supervised_session(session, session_id),
-                    name=f"session-auth-{session_id}",
-                )
-                task.add_done_callback(partial(self._on_task_done, session_id=session_id))
-                self._tasks[session_id] = task
-                logger.info("SessionManager: created auth-only session %s", session_id)
-                return {
-                    "type": "auth_session_created",
-                    "short_code": auth.short_code,
-                    "session_id": session_id,
-                }
+            case "project_up":
+                return await self._handle_project_up(msg)
+
+            case "project_up_await":
+                return await self._handle_project_up_await(msg)
 
             case _:
                 return {"type": "error", "message": f"Unknown command: {msg.get('type')}"}
@@ -465,6 +443,211 @@ class SessionManager:
                     )
                     break
 
+    # ------------------------------------------------------------------
+    # project up — daemon-side orchestration
+    # ------------------------------------------------------------------
+
+    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """IPC handler for ``project_up``.
+
+        Checks which projects need a PM, creates an auth session if any do,
+        launches a background orchestrator, and returns immediately with the
+        short code for the user to authenticate.
+        """
+        if self._project_up_in_flight:
+            return {"type": "error", "message": "A project_up operation is already in progress"}
+
+        # Set the flag before any work — cleared in orchestrator's finally.
+        self._project_up_in_flight = True
+
+        # Check if any projects need PM before creating an auth session
+        projects: list[dict[str, Any]] = []
+        async with SessionRegistry() as registry:
+            projects = await registry.list_projects()
+        needing_pm = [p for p in projects if not p.get("pm_running")]
+        if not needing_pm:
+            self._project_up_in_flight = False
+            return {"type": "project_up_complete", "started": [], "errors": []}
+
+        cwd = msg.get("cwd", str(pathlib.Path.cwd()))
+
+        # Create auth-only session
+        self._cancel_grace_timer()
+        session_id = str(uuid.uuid4())
+        auth = await self._generate_auth(session_id)
+        options = SessionOptions(
+            cwd=cwd,
+            name=f"pm-auth-{secrets.token_hex(3)}",
+            auth_only=True,
+        )
+        session = SummonSession(
+            config=self._config,
+            options=options,
+            auth=auth,
+            session_id=session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+        )
+        self._sessions[session_id] = session
+        task = asyncio.create_task(
+            self._supervised_session(session, session_id),
+            name=f"session-auth-{session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+        self._tasks[session_id] = task
+
+        # Create future for result and launch background orchestrator
+        request_id = str(uuid.uuid4())
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict[str, Any]] = loop.create_future()
+        self._project_up_futures[request_id] = future
+
+        bg_task = asyncio.create_task(
+            self._project_up_orchestrator(request_id, session, needing_pm),
+            name=f"project-up-{request_id}",
+        )
+        self._background_tasks.add(bg_task)
+        bg_task.add_done_callback(self._on_background_task_done)
+
+        logger.info(
+            "SessionManager: project_up started (auth session %s, %d projects)",
+            session_id,
+            len(needing_pm),
+        )
+        return {
+            "type": "project_up_auth_required",
+            "short_code": auth.short_code,
+            "request_id": request_id,
+            "project_count": len(needing_pm),
+        }
+
+    async def _handle_project_up_await(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """IPC handler for ``project_up_await``.
+
+        Long-polls on the future created by ``project_up`` until the
+        background orchestrator finishes spawning PM sessions.
+        """
+        request_id = msg.get("request_id")
+        if not request_id or request_id not in self._project_up_futures:
+            return {"type": "error", "message": "Unknown or expired request_id"}
+
+        future = self._project_up_futures[request_id]
+        try:
+            result = await asyncio.wait_for(future, timeout=420)
+            return {"type": "project_up_complete", **result}
+        except TimeoutError:
+            return {"type": "error", "message": "Timed out waiting for project launch"}
+        finally:
+            self._project_up_futures.pop(request_id, None)
+
+    async def _project_up_orchestrator(
+        self,
+        request_id: str,
+        auth_session: SummonSession,
+        needing_pm: list[dict[str, Any]],
+    ) -> None:
+        """Background task: wait for auth, then create PM sessions directly.
+
+        Resolves the ``project_up_futures[request_id]`` future with the result.
+        No spawn tokens or IPC round-trips — sessions are created in-process.
+        """
+        future = self._project_up_futures.get(request_id)
+        if future is None:
+            return
+
+        try:
+            # Wait for the auth session to authenticate
+            await asyncio.wait_for(
+                auth_session._authenticated_event.wait(),  # noqa: SLF001
+                timeout=360,
+            )
+            user_id = auth_session._authenticated_user_id  # noqa: SLF001
+            if user_id is None:
+                raise RuntimeError("Auth session completed without setting user_id")
+
+            started: list[dict[str, str]] = []
+            errors: list[dict[str, str]] = []
+
+            for project in needing_pm:
+                project_dir = project["directory"]
+                if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
+                    errors.append(
+                        {
+                            "project": project["name"],
+                            "error": f"Directory not found: {project_dir}",
+                        }
+                    )
+                    continue
+
+                new_session_id = str(uuid.uuid4())
+                pm_options = SessionOptions(
+                    cwd=project_dir,
+                    name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
+                    pm_profile=True,
+                    project_id=project["project_id"],
+                )
+                new_session = SummonSession(
+                    config=self._config,
+                    options=pm_options,
+                    auth=None,
+                    session_id=new_session_id,
+                    web_client=self._web_client,
+                    dispatcher=self._dispatcher,
+                    bot_user_id=self._bot_user_id,
+                )
+                new_session.authenticate(user_id)
+
+                self._cancel_grace_timer()
+                self._sessions[new_session_id] = new_session
+                task = asyncio.create_task(
+                    self._supervised_session(new_session, new_session_id),
+                    name=f"session-pm-{new_session_id}",
+                )
+                task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+                self._tasks[new_session_id] = task
+
+                started.append(
+                    {
+                        "session_id": new_session_id,
+                        "project": project["name"],
+                    }
+                )
+                logger.info(
+                    "SessionManager: started PM session %s for project %s",
+                    new_session_id,
+                    project["name"],
+                )
+
+            if not future.done():
+                future.set_result({"started": started, "errors": errors})
+
+        except TimeoutError:
+            if not future.done():
+                future.set_result(
+                    {
+                        "started": [],
+                        "errors": [{"project": "*", "error": "Authentication timed out"}],
+                    }
+                )
+        except Exception as e:
+            logger.error("project_up orchestrator failed: %s", e, exc_info=True)
+            if not future.done():
+                future.set_result({"started": [], "errors": [{"project": "*", "error": str(e)}]})
+        finally:
+            self._project_up_in_flight = False
+
+            # Clean up the future after a grace period. If the CLI calls
+            # project_up_await, it pops the entry in its own finally.
+            # This handles the case where the CLI never connects.
+            async def _deferred_cleanup() -> None:
+                await asyncio.sleep(120)
+                self._project_up_futures.pop(request_id, None)
+
+            cleanup_task = asyncio.create_task(_deferred_cleanup(), name=f"cleanup-{request_id}")
+            self._background_tasks.add(cleanup_task)
+            cleanup_task.add_done_callback(self._on_background_task_done)
+
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""
         if not session.channel_id or not self._web_client:
@@ -493,6 +676,14 @@ class SessionManager:
         # Start grace timer when no sessions remain
         if not self._sessions:
             self._start_grace_timer()
+
+    def _on_background_task_done(self, task: asyncio.Task) -> None:  # type: ignore[type-arg]
+        """Cleanup callback for background tasks (orchestrators, etc.)."""
+        self._background_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.error("Background task %s failed: %s", task.get_name(), exc)
 
     def _start_grace_timer(self) -> None:
         """Schedule daemon auto-stop after ``_GRACE_SECONDS`` with no sessions."""

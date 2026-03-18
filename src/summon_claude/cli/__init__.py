@@ -18,6 +18,7 @@ import logging
 import os
 import pathlib
 import secrets
+import shutil
 import sys
 import threading
 
@@ -211,8 +212,6 @@ def cmd_start(
     effort: str | None,
 ) -> None:
     """Start a new summon session (thin client — delegates to the daemon)."""
-    import shutil  # noqa: PLC0415
-
     if not shutil.which("claude"):
         click.echo("Error: Claude CLI not found in PATH.", err=True)
         click.echo("", err=True)
@@ -437,8 +436,6 @@ def project_list(ctx: click.Context, output: str) -> None:
 @click.pass_context
 def project_up(ctx: click.Context) -> None:
     """Start PM agents for all registered projects that don't have one running."""
-    import shutil  # noqa: PLC0415
-
     if not shutil.which("claude"):
         click.echo("Error: Claude CLI not found in PATH.", err=True)
         raise SystemExit(1)

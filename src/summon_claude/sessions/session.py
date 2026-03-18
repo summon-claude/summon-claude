@@ -271,8 +271,9 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "- session_list: view active sessions\n"
     "- session_start: spawn a new coding sub-session\n"
     "- session_stop: stop a running session\n"
-    "- session_info: get details on a specific session\n\n"
-    "Scan protocol (triggered every {scan_interval_minutes} minutes):\n"
+    "- session_info: get details on a specific session\n"
+    "- session_log_status: log a status update to the audit trail\n\n"
+    "Scan protocol (triggered every {scan_interval}):\n"
     "1. Check child session statuses via session_list\n"
     "2. Identify completed, stuck, or failed sessions\n"
     "3. Take corrective actions (stop, restart, or report to user)\n"
@@ -286,11 +287,32 @@ _PM_SYSTEM_PROMPT_APPEND = (
 )
 
 
+def _format_interval(seconds: int) -> str:
+    """Format a duration in seconds as a human-readable string.
+
+    Examples:
+        >>> _format_interval(900)
+        '15 minutes'
+        >>> _format_interval(60)
+        '1 minute'
+        >>> _format_interval(90)
+        '1 minute 30 seconds'
+        >>> _format_interval(121)
+        '2 minutes 1 second'
+    """
+    minutes, secs = divmod(seconds, 60)
+    parts: list[str] = []
+    if minutes:
+        parts.append(f"{minutes} {'minute' if minutes == 1 else 'minutes'}")
+    if secs:
+        parts.append(f"{secs} {'second' if secs == 1 else 'seconds'}")
+    return " ".join(parts) or "0 seconds"
+
+
 def build_pm_system_prompt(*, cwd: str, scan_interval_s: int) -> dict:
     """Build the PM system prompt with interpolated project context."""
-    scan_interval_minutes = scan_interval_s // 60
     append_text = _PM_SYSTEM_PROMPT_APPEND.format(
-        scan_interval_minutes=scan_interval_minutes,
+        scan_interval=_format_interval(scan_interval_s),
         cwd=cwd,
     )
     return {
@@ -1096,7 +1118,7 @@ class SummonSession:
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
 
-    async def _get_or_create_pm_channel(
+    async def _get_or_create_pm_channel(  # noqa: PLR0912, PLR0915
         self, web_client: AsyncWebClient, registry: SessionRegistry
     ) -> tuple[str, str]:
         """Reuse the existing PM channel for this project, or create a new one.
@@ -1135,24 +1157,45 @@ class SummonSession:
         # Create a new PM channel
         channel_prefix = project.get("channel_prefix", _slugify(project.get("name", "pm")))
         new_channel_name = f"{channel_prefix}-pm"[:_MAX_CHANNEL_NAME_LEN].lower()
+        new_id = ""
+        cname = ""
         try:
             resp = await web_client.conversations_create(name=new_channel_name, is_private=True)
-            new_id: str = resp["channel"]["id"]  # type: ignore[index]
-            cname: str = resp["channel"]["name"]  # type: ignore[index]
+            new_id = resp["channel"]["id"]  # type: ignore[index]
+            cname = resp["channel"]["name"]  # type: ignore[index]
         except Exception as e:
             if "name_taken" in str(e):
-                # Try to find the existing channel by name
-                resp = await web_client.conversations_list(types="private_channel", limit=200)
-                channels = resp.get("channels", [])
-                for ch in channels:
-                    if ch.get("name") == new_channel_name:
-                        new_id = ch["id"]
-                        cname = ch["name"]
+                # Paginate through all private channels to find the existing one.
+                # Slack has no search-by-name API for private channels, so we
+                # iterate with cursor-based pagination (200 per page, Slack max).
+                found = False
+                cursor: str | None = None
+                max_pages = 50
+                for _page in range(max_pages):
+                    kwargs: dict[str, object] = {"types": "private_channel", "limit": 200}
+                    if cursor:
+                        kwargs["cursor"] = cursor
+                    resp = await web_client.conversations_list(**kwargs)
+                    channels = resp.get("channels", [])
+                    for ch in channels:
+                        if ch.get("name") == new_channel_name:
+                            new_id = ch["id"]
+                            cname = ch["name"]
+                            found = True
+                            break
+                    if found:
                         break
+                    cursor = resp.get("response_metadata", {}).get("next_cursor")
+                    if not cursor:
+                        raise RuntimeError(
+                            f"Channel {new_channel_name!r} exists but bot cannot access it"
+                        ) from e
                 else:
-                    raise RuntimeError(
-                        f"Channel {new_channel_name!r} exists but bot cannot access it"
-                    ) from e
+                    if not found:
+                        raise RuntimeError(
+                            f"Channel {new_channel_name!r} exists but bot cannot find it"
+                            f" after {max_pages} pages"
+                        ) from e
             else:
                 raise
 
@@ -1246,10 +1289,11 @@ class SummonSession:
             )
             mcp_servers["summon-canvas"] = canvas_mcp
 
+        pm_user_id: str | None = None
         if is_pm:
-            assert self._authenticated_user_id is not None, (
-                "_run_message_loop reached without authenticated_user_id"
-            )
+            if self._authenticated_user_id is None:
+                raise RuntimeError("_run_message_loop reached without authenticated_user_id")
+            pm_user_id = self._authenticated_user_id
             cli_mcp = create_summon_cli_mcp_server(
                 registry=rt.registry,
                 session_id=self._session_id,
@@ -1482,7 +1526,7 @@ class SummonSession:
             with contextlib.suppress(Exception):
                 self._pending_turns.put_nowait(None)
 
-    async def _scan_timer_loop(self) -> None:
+    async def _scan_timer_loop(self, authenticated_user_id: str) -> None:
         """Inject periodic scan-trigger messages for PM sessions.
 
         Waits ``self._scan_interval_s`` between triggers.  When the shutdown
@@ -1509,7 +1553,7 @@ class SummonSession:
                     "Check all active sub-sessions, identify any that need attention, "
                     "and update the canvas with current status."
                 ),
-                "user": self._authenticated_user_id or "",
+                "user": authenticated_user_id,
                 "ts": None,
                 "_synthetic": True,
             }
@@ -2314,6 +2358,12 @@ class SummonSession:
         subtype = event.get("subtype")
         user_id = event.get("user", "")
         text = event.get("text", "")
+
+        # Synthetic events (e.g. scan triggers) bypass all Slack preprocessing
+        if event.get("_synthetic"):
+            if not text:
+                return None
+            return text, None
 
         # 1 & 2: Drop bot/system messages and empty content
         if subtype or not text or not user_id:

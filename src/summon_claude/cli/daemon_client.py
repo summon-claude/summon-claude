@@ -23,12 +23,17 @@ class DaemonError(Exception):
     """Raised when the daemon returns an error response."""
 
 
-async def _request(msg: dict[str, Any]) -> dict[str, Any]:
+async def _request(msg: dict[str, Any], *, recv_timeout: float | None = None) -> dict[str, Any]:
     """Send *msg* to the daemon and return the response dict.
 
     Opens a fresh Unix socket connection, sends the message via ``send_msg``,
     reads the response via ``recv_msg``, closes the connection, then returns
     the parsed response.
+
+    Args:
+        msg: The request dict to send.
+        recv_timeout: Override the default recv_msg timeout (seconds).
+            Use for long-poll IPC calls where the daemon blocks before responding.
 
     Raises ``DaemonError`` if the daemon responds with ``type == "error"``.
     """
@@ -41,7 +46,7 @@ async def _request(msg: dict[str, Any]) -> dict[str, Any]:
     reader, writer = await connect_to_daemon()
     try:
         await send_msg(writer, msg)
-        response = await recv_msg(reader)
+        response = await recv_msg(reader, timeout=recv_timeout)
     finally:
         writer.close()
         with contextlib.suppress(Exception):
@@ -86,21 +91,30 @@ async def create_session_with_spawn_token(options: SessionOptions, spawn_token: 
     return response["session_id"]
 
 
-async def create_auth_session(options: SessionOptions) -> tuple[str, str]:
-    """Send a ``create_auth_session`` request to the daemon.
+async def project_up(cwd: str) -> dict[str, Any]:
+    """Send a ``project_up`` request to the daemon.
 
-    The session runs auth-only (no Claude, no Slack channel).
+    The daemon checks which projects need PM agents, creates an auth session
+    if needed, and launches a background orchestrator.
 
-    Returns:
-        ``(short_code, session_id)`` — short_code for /summon auth,
-        session_id for polling the registry for completion.
+    Returns the raw daemon response dict.  Response type is either
+    ``project_up_auth_required`` (with ``short_code`` and ``request_id``)
+    or ``project_up_complete`` (if no projects need PM).
     """
-    response = await _request(
-        {"type": "create_auth_session", "options": dataclasses.asdict(options)}
+    return await _request({"type": "project_up", "cwd": cwd})
+
+
+async def project_up_await(request_id: str) -> dict[str, Any]:
+    """Long-poll the daemon until project-up orchestration completes.
+
+    Blocks until the daemon finishes spawning PM sessions (after the user
+    authenticates).  Uses a 450s recv timeout to accommodate the daemon's
+    420s internal wait.
+    """
+    return await _request(
+        {"type": "project_up_await", "request_id": request_id},
+        recv_timeout=450.0,
     )
-    if response.get("type") != "auth_session_created":
-        raise DaemonError(f"Unexpected daemon response: {response}")
-    return response["short_code"], response["session_id"]
 
 
 async def stop_session(session_id: str) -> bool:

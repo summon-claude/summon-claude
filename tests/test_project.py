@@ -55,6 +55,18 @@ class TestProjectAdd:
         project = await registry.get_project(project_id)
         assert project["pm_channel_id"] is None
 
+    async def test_add_project_empty_name_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="must not be empty"):
+            await registry.add_project("", str(tmp_path))
+
+    async def test_add_project_whitespace_name_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="must not be empty"):
+            await registry.add_project("   ", str(tmp_path))
+
+    async def test_add_project_no_alphanumeric_raises(self, registry, tmp_path):
+        with pytest.raises(ValueError, match="alphanumeric"):
+            await registry.add_project("---!!!", str(tmp_path))
+
 
 class TestProjectGet:
     async def test_get_by_id(self, registry, tmp_path):
@@ -240,11 +252,25 @@ class TestBuildPmSystemPrompt:
 
     def test_includes_scan_interval_minutes(self):
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=600)
-        assert "10" in result["append"]  # 600s = 10 minutes
+        assert "10 minutes" in result["append"]
 
     def test_15min_interval(self):
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "15" in result["append"]
+        assert "15 minutes" in result["append"]
+
+    def test_scan_interval_singular_minute(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=60)
+        assert "1 minute" in result["append"]
+        assert "1 minutes" not in result["append"]
+
+    def test_scan_interval_mixed_minutes_and_seconds(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=90)
+        assert "1 minute 30 seconds" in result["append"]
+
+    def test_scan_interval_singular_second(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=121)
+        assert "2 minutes 1 second" in result["append"]
+        assert "1 seconds" not in result["append"]
 
     def test_append_is_string(self):
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
@@ -406,25 +432,34 @@ class TestLaunchProjectManagers:
     async def test_launch_no_projects(self):
         from summon_claude.cli.project import launch_project_managers
 
-        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
-            reg = AsyncMock()
-            reg.list_projects = AsyncMock(return_value=[])
-            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
-            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch("summon_claude.cli.project.daemon_client") as mock_dc:
+            mock_dc.project_up = AsyncMock(
+                return_value={"type": "project_up_complete", "started": [], "errors": []}
+            )
             result = await launch_project_managers()
         assert result == []
 
-    async def test_launch_all_pm_running(self):
+    async def test_launch_with_auth_and_projects(self):
         from summon_claude.cli.project import launch_project_managers
 
-        projects = [{"project_id": "p1", "name": "proj1", "pm_running": 1, "directory": "/tmp"}]
-        with patch("summon_claude.cli.project.SessionRegistry") as mock_reg:
-            reg = AsyncMock()
-            reg.list_projects = AsyncMock(return_value=projects)
-            mock_reg.return_value.__aenter__ = AsyncMock(return_value=reg)
-            mock_reg.return_value.__aexit__ = AsyncMock(return_value=False)
+        with patch("summon_claude.cli.project.daemon_client") as mock_dc:
+            mock_dc.project_up = AsyncMock(
+                return_value={
+                    "type": "project_up_auth_required",
+                    "short_code": "abc123",
+                    "request_id": "req-1",
+                    "project_count": 1,
+                }
+            )
+            mock_dc.project_up_await = AsyncMock(
+                return_value={
+                    "type": "project_up_complete",
+                    "started": [{"session_id": "sid-pm-1", "project": "my-proj"}],
+                    "errors": [],
+                }
+            )
             result = await launch_project_managers()
-        assert result == []
+        assert result == ["sid-pm-1"]
 
     async def test_stop_project_managers_no_projects(self):
         from summon_claude.cli.project import stop_project_managers
@@ -508,7 +543,7 @@ class TestScanTimerLoop:
         # Set shutdown immediately
         session._shutdown_event.set()
         # Should exit without delay
-        await asyncio.wait_for(session._scan_timer_loop(), timeout=1.0)
+        await asyncio.wait_for(session._scan_timer_loop("U_TEST"), timeout=1.0)
 
     async def test_scan_timer_injects_event(self):
         """_scan_timer_loop injects a scan trigger after interval."""
@@ -525,7 +560,7 @@ class TestScanTimerLoop:
             await asyncio.sleep(1.5)
             session._shutdown_event.set()
 
-        await asyncio.gather(session._scan_timer_loop(), _stop_after())
+        await asyncio.gather(session._scan_timer_loop("U_TEST"), _stop_after())
         # Should have received the synthetic scan event
         assert not session._raw_event_queue.empty()
         event = session._raw_event_queue.get_nowait()

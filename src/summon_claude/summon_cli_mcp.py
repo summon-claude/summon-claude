@@ -398,13 +398,21 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 ],
                 "is_error": True,
             }
-        summary = (args.get("summary") or "").strip()[:500]
+        raw_summary = (args.get("summary") or "").strip()
+        summary = raw_summary[:500]
         if not summary:
             return {
                 "content": [{"type": "text", "text": "Error: summary is required."}],
                 "is_error": True,
             }
-        details = (args.get("details") or "").strip()[:2000]
+        raw_details = (args.get("details") or "").strip()
+        details = raw_details[:2000]
+
+        truncated_parts: list[str] = []
+        if len(raw_summary) > 500:
+            truncated_parts.append(f"summary truncated from {len(raw_summary)} to 500 chars")
+        if len(raw_details) > 2000:
+            truncated_parts.append(f"details truncated from {len(raw_details)} to 2000 chars")
 
         try:
             await registry.log_event(
@@ -413,11 +421,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 user_id=authenticated_user_id,
                 details={"status": status, "summary": summary, "details": details},
             )
+            msg = f"Status update recorded: [{status}] {summary}."
+            if truncated_parts:
+                msg += f" (Warning: {'; '.join(truncated_parts)})"
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": f"Status update recorded: [{status}] {summary}.",
+                        "text": msg,
                     }
                 ]
             }

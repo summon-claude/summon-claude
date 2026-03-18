@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import pathlib
-import secrets
 from typing import Any
 
 import click
 
 from summon_claude.cli import daemon_client
 from summon_claude.daemon import is_daemon_running
-from summon_claude.sessions.auth import generate_spawn_token
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.sessions.session import SessionOptions
 
 
 def _resolve_directory(directory: str) -> str:
@@ -66,118 +62,45 @@ async def async_project_list() -> list[dict[str, Any]]:
     return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
-_AUTH_POLL_INTERVAL_S = 2.0
-_AUTH_POLL_TIMEOUT_S = 360.0  # 6 minutes
-
-
-async def _poll_for_completion(session_id: str) -> bool:
-    """Poll the registry until a session reaches completed/errored status.
-
-    Returns True if completed, False if errored or timeout.
-    """
-    try:
-        async with (
-            asyncio.timeout(_AUTH_POLL_TIMEOUT_S),
-            SessionRegistry() as registry,
-        ):
-            while True:
-                await asyncio.sleep(_AUTH_POLL_INTERVAL_S)
-                session = await registry.get_session(session_id)
-                if session is None:
-                    return False
-                status = session.get("status")
-                if status == "completed":
-                    return True
-                if status == "errored":
-                    return False
-    except TimeoutError:
-        pass
-    return False
-
-
 async def launch_project_managers() -> list[str]:
     """Start PM sessions for all registered projects that don't have one running.
 
+    Sends a single ``project_up`` IPC to the daemon, which handles all
+    orchestration: auth, project discovery, and PM session creation.
+
     Returns a list of session_ids that were started.
-    Steps:
-    1. Load all projects
-    2. Check which already have an active PM session
-    3. If any need spawning, create one auth-only session and wait for auth
-    4. For each project needing a PM, generate spawn token + create session
     """
-    projects: list[dict[str, Any]] = []
-    async with SessionRegistry() as registry:
-        projects = await registry.list_projects()
+    response = await daemon_client.project_up(cwd=str(pathlib.Path.cwd()))
 
-    if not projects:
+    # No projects need PM — daemon responded immediately
+    if response.get("type") == "project_up_complete":
         return []
 
-    # pm_running is SQLite int (0/1) — falsy check works correctly
-    needing_pm = [p for p in projects if not p.get("pm_running")]
-    if not needing_pm:
-        return []
+    if response.get("type") != "project_up_auth_required":
+        raise click.ClickException(
+            f"Unexpected daemon response: {response.get('message', response.get('type'))}"
+        )
 
-    click.echo(f"Starting PM agents for {len(needing_pm)} project(s)...")
+    short_code = response["short_code"]
+    request_id = response["request_id"]
+    project_count = response.get("project_count", 0)
 
-    # Phase 1: authenticate once via auth-only session
-    auth_options = SessionOptions(
-        cwd=str(pathlib.Path.cwd()),
-        name=f"pm-auth-{secrets.token_hex(3)}",
-        auth_only=True,
-    )
-
-    short_code, auth_session_id = await daemon_client.create_auth_session(auth_options)
+    click.echo(f"Starting PM agents for {project_count} project(s)...")
     click.echo(f"\nAuthenticate in Slack: /summon {short_code}")
 
-    authenticated = await _poll_for_completion(auth_session_id)
-    if not authenticated:
-        raise click.ClickException("Authentication timed out or failed.")
+    # Long-poll the daemon until orchestration completes (after user authenticates).
+    # DaemonError is raised by _request() if the daemon returns type=error.
+    result = await daemon_client.project_up_await(request_id)
 
-    # Retrieve the authenticated user_id from the completed auth session
-    auth_session: dict[str, Any] | None = None
-    async with SessionRegistry() as registry:
-        auth_session = await registry.get_session(auth_session_id)
-    if auth_session is None:
-        raise click.ClickException("Auth session not found after completion.")
-    user_id = auth_session.get("authenticated_user_id")
-    if not user_id:
-        raise click.ClickException("No authenticated user_id found in auth session.")
+    started = result.get("started", [])
+    errors = result.get("errors", [])
 
-    # Phase 2: spawn a PM session for each project needing one
-    started: list[str] = []
-    for project in needing_pm:
-        project_dir = project["directory"]
-        if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
-            click.echo(
-                f"  Skipping {project['name']!r}: directory not found ({project_dir})",
-                err=True,
-            )
-            continue
+    for item in started:
+        click.echo(f"  Started PM for {item['project']!r} (session {item['session_id'][:8]}...)")
+    for item in errors:
+        click.echo(f"  Error ({item['project']}): {item['error']}", err=True)
 
-        token = ""
-        async with SessionRegistry() as registry:
-            spawn_auth = await generate_spawn_token(
-                registry,
-                target_user_id=user_id,
-                cwd=project_dir,
-                spawn_source="cli",
-            )
-            token = spawn_auth.token
-
-        pm_options = SessionOptions(
-            cwd=project_dir,
-            name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
-            pm_profile=True,
-            project_id=project["project_id"],
-        )
-        try:
-            session_id = await daemon_client.create_session_with_spawn_token(pm_options, token)
-            started.append(session_id)
-            click.echo(f"  Started PM for {project['name']!r} (session {session_id[:8]}...)")
-        except Exception as e:
-            click.echo(f"  Failed to start PM for {project['name']!r}: {e}", err=True)
-
-    return started
+    return [item["session_id"] for item in started]
 
 
 async def stop_project_managers() -> list[str]:
@@ -189,16 +112,13 @@ async def stop_project_managers() -> list[str]:
         click.echo("Daemon is not running. No PM sessions to stop.")
         return []
 
-    projects: list[dict[str, Any]] = []
-    async with SessionRegistry() as registry:
-        projects = await registry.list_projects()
-
-    if not projects:
-        click.echo("No projects registered.")
-        return []
-
     stopped: list[str] = []
     async with SessionRegistry() as registry:
+        projects = await registry.list_projects()
+        if not projects:
+            click.echo("No projects registered.")
+            return []
+
         for project in projects:
             sessions = await registry.get_project_sessions(project["project_id"])
             active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]

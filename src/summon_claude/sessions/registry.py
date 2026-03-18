@@ -458,11 +458,18 @@ class SessionRegistry:
         """Register a new project. Returns the generated project_id.
 
         Derives ``channel_prefix`` from the project name using slugification.
-        Raises ``ValueError`` if a project with the same name or channel prefix
-        already exists.
+        Raises ``ValueError`` if the name is empty, contains no alphanumeric
+        characters, or a project with the same name/channel prefix already exists.
         """
+        if not name or not name.strip():
+            raise ValueError("Project name must not be empty.")
+        slug = slugify_for_channel(name)
+        if not slug:
+            raise ValueError(
+                f"Project name {name!r} must contain at least one alphanumeric character."
+            )
         project_id = str(uuid.uuid4())
-        channel_prefix = slugify_for_channel(name)[:20].rstrip("-") or "project"
+        channel_prefix = slug[:20].rstrip("-") or "project"
         db = self._check_connected()
         async with self._lock:
             try:

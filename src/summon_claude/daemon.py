@@ -61,20 +61,29 @@ async def send_msg(writer: asyncio.StreamWriter, data: dict) -> None:  # type: i
     await writer.drain()
 
 
-async def recv_msg(reader: asyncio.StreamReader) -> dict:  # type: ignore[type-arg]
+async def recv_msg(
+    reader: asyncio.StreamReader,
+    *,
+    timeout: float | None = None,  # noqa: ASYNC109
+) -> dict:  # type: ignore[type-arg]
     """Read a length-prefixed message from *reader* and return the decoded dict.
+
+    Args:
+        reader: The stream to read from.
+        timeout: Per-read timeout in seconds.  Defaults to ``_RECV_TIMEOUT``.
 
     Raises:
         ValueError: If the declared message length exceeds MAX_MESSAGE_SIZE.
         asyncio.IncompleteReadError: If the connection closes before a full
             message is received.
-        TimeoutError: If the message is not fully received within ``_RECV_TIMEOUT``.
+        TimeoutError: If the message is not fully received within *timeout*.
     """
-    header: bytes = await asyncio.wait_for(reader.readexactly(4), timeout=_RECV_TIMEOUT)
+    t = timeout if timeout is not None else _RECV_TIMEOUT
+    header: bytes = await asyncio.wait_for(reader.readexactly(4), timeout=t)
     length: int = struct.unpack(">I", header)[0]
     if length > MAX_MESSAGE_SIZE:
         raise ValueError(f"Message too large: {length} bytes (max {MAX_MESSAGE_SIZE})")
-    payload: bytes = await asyncio.wait_for(reader.readexactly(length), timeout=_RECV_TIMEOUT)
+    payload: bytes = await asyncio.wait_for(reader.readexactly(length), timeout=t)
     return json.loads(payload)  # type: ignore[no-any-return]
 
 
