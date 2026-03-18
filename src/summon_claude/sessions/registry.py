@@ -527,6 +527,9 @@ class SessionRegistry:
     async def list_projects(self) -> list[dict]:
         """List all projects with PM status fields.
 
+        Only considers PM sessions (name matching ``%-pm-%``) to avoid
+        pollution from child sessions that inherit the project_id.
+
         Each row includes:
         - ``pm_running``: 1 if an active/pending_auth PM session exists
         - ``last_pm_status``: status of the most recent PM session (or NULL)
@@ -538,15 +541,18 @@ class SessionRegistry:
             "  EXISTS("
             "    SELECT 1 FROM sessions s"
             "    WHERE s.project_id = p.project_id"
+            "      AND s.session_name LIKE '%-pm-%'"
             "      AND s.status IN ('pending_auth', 'active')"
             "  ) AS pm_running,"
             "  (SELECT s2.status FROM sessions s2"
             "   WHERE s2.project_id = p.project_id"
+            "     AND s2.session_name LIKE '%-pm-%'"
             "   ORDER BY s2.started_at DESC LIMIT 1"
             "  ) AS last_pm_status,"
-            "  (SELECT s3.error_message FROM sessions s3"
-            "   WHERE s3.project_id = p.project_id"
-            "   ORDER BY s3.started_at DESC LIMIT 1"
+            "  (SELECT s2.error_message FROM sessions s2"
+            "   WHERE s2.project_id = p.project_id"
+            "     AND s2.session_name LIKE '%-pm-%'"
+            "   ORDER BY s2.started_at DESC LIMIT 1"
             "  ) AS last_pm_error"
             " FROM projects p ORDER BY p.name"
         ) as cursor:

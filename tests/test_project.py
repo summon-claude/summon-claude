@@ -142,16 +142,28 @@ class TestProjectList:
 
     async def test_list_includes_pm_running_true(self, registry, tmp_path):
         project_id = await registry.add_project("running-proj", str(tmp_path))
-        await registry.register("sess-pm", 1234, str(tmp_path), project_id=project_id)
+        await registry.register(
+            "sess-pm",
+            1234,
+            str(tmp_path),
+            name="running-pm-abc123",
+            project_id=project_id,
+        )
         await registry.update_status("sess-pm", "active")
         projects = await registry.list_projects()
         proj = next(p for p in projects if p["name"] == "running-proj")
-        assert proj["pm_running"] == 1  # has an active session
+        assert proj["pm_running"] == 1  # has an active PM session
         assert proj["last_pm_status"] == "active"
 
     async def test_list_shows_errored_status(self, registry, tmp_path):
         project_id = await registry.add_project("err-proj", str(tmp_path))
-        await registry.register("sess-err", 1234, str(tmp_path), project_id=project_id)
+        await registry.register(
+            "sess-err",
+            1234,
+            str(tmp_path),
+            name="err-pm-abc123",
+            project_id=project_id,
+        )
         await registry.update_status("sess-err", "errored", error_message="SDK crash")
         projects = await registry.list_projects()
         proj = next(p for p in projects if p["name"] == "err-proj")
@@ -161,12 +173,46 @@ class TestProjectList:
 
     async def test_list_shows_completed_status(self, registry, tmp_path):
         project_id = await registry.add_project("done-proj", str(tmp_path))
-        await registry.register("sess-done", 1234, str(tmp_path), project_id=project_id)
+        await registry.register(
+            "sess-done",
+            1234,
+            str(tmp_path),
+            name="done-pm-abc123",
+            project_id=project_id,
+        )
         await registry.update_status("sess-done", "completed")
         projects = await registry.list_projects()
         proj = next(p for p in projects if p["name"] == "done-proj")
         assert proj["pm_running"] == 0
         assert proj["last_pm_status"] == "completed"
+
+    async def test_list_excludes_child_sessions_from_pm_status(self, registry, tmp_path):
+        """Child sessions with the same project_id must not affect PM status."""
+        project_id = await registry.add_project("parent-proj", str(tmp_path))
+        # PM session is running
+        await registry.register(
+            "pm-sess",
+            1234,
+            str(tmp_path),
+            name="parent-pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("pm-sess", "active")
+        # Child session errored (more recently)
+        await registry.register(
+            "child-sess",
+            1234,
+            str(tmp_path),
+            name="child-task-xyz",
+            project_id=project_id,
+        )
+        await registry.update_status("child-sess", "errored", error_message="child failed")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "parent-proj")
+        # PM status should reflect the PM session, not the child
+        assert proj["pm_running"] == 1
+        assert proj["last_pm_status"] == "active"
+        assert proj["last_pm_error"] is None
 
     async def test_list_ordered_by_name(self, registry, tmp_path):
         await registry.add_project("z-proj", str(tmp_path))
@@ -455,9 +501,7 @@ class TestLaunchProjectManagers:
         from summon_claude.cli.project import launch_project_managers
 
         with patch("summon_claude.cli.project.daemon_client") as mock_dc:
-            mock_dc.project_up = AsyncMock(
-                return_value={"type": "project_up_complete", "started": [], "errors": []}
-            )
+            mock_dc.project_up = AsyncMock(return_value={"type": "project_up_complete"})
             result = await launch_project_managers()
         assert result is None
 

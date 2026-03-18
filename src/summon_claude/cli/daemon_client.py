@@ -33,7 +33,6 @@ async def _request(msg: dict[str, Any], *, recv_timeout: float | None = None) ->
     Args:
         msg: The request dict to send.
         recv_timeout: Override the default recv_msg timeout (seconds).
-            Use for long-poll IPC calls where the daemon blocks before responding.
 
     Raises ``DaemonError`` if the daemon responds with ``type == "error"``.
     """

@@ -983,8 +983,6 @@ class TestProjectUpOrchestration:
             response = await manager._dispatch_control({"type": "project_up", "cwd": "/tmp"})
 
         assert response["type"] == "project_up_complete"
-        assert response["started"] == []
-        assert response["errors"] == []
         assert manager._project_up_in_flight is False
 
     async def test_project_up_all_already_running_returns_complete(self):
@@ -1003,7 +1001,7 @@ class TestProjectUpOrchestration:
         assert manager._project_up_in_flight is False
 
     async def test_project_up_returns_auth_required(self):
-        """When projects need PM, returns auth_required with short_code and request_id."""
+        """When projects need PM, returns auth_required with short_code."""
         manager, _, _ = _make_manager()
         mock_reg = AsyncMock()
         mock_reg.list_projects = AsyncMock(return_value=[_mock_project(pm_running=False)])
@@ -1145,6 +1143,47 @@ class TestProjectUpOrchestration:
             )
 
         assert len(manager._tasks) == 2
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_partial_failure_continues(self):
+        """If one project fails, remaining projects still get PM sessions."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        needing_pm = [
+            _mock_project(name="bad", project_id="p-bad", directory="/tmp/bad"),
+            _mock_project(name="good", project_id="p-good", directory="/tmp/good"),
+        ]
+
+        call_count = 0
+
+        def make_pm_stub(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("config exploded")
+            return _StubSession()
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", side_effect=make_pm_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(auth_stub, needing_pm),  # type: ignore[arg-type]
+                timeout=5,
+            )
+
+        # First project failed, second succeeded
+        assert len(manager._tasks) == 1
+        assert manager._project_up_in_flight is False
 
         for t in list(manager._background_tasks):
             t.cancel()

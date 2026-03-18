@@ -465,7 +465,7 @@ class SessionManager:
             needing_pm = [p for p in projects if not p.get("pm_running")]
             if not needing_pm:
                 self._project_up_in_flight = False
-                return {"type": "project_up_complete", "started": [], "errors": []}
+                return {"type": "project_up_complete"}
 
             cwd = msg.get("cwd", str(pathlib.Path.cwd()))
 
@@ -532,47 +532,14 @@ class SessionManager:
                 raise RuntimeError("Auth session completed without setting user_id")
 
             for project in needing_pm:
-                project_dir = project["directory"]
-                if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
+                try:
+                    self._start_pm_for_project(project, user_id)
+                except Exception as e:
                     logger.error(
-                        "PM: skipping project %s — directory not found: %s",
-                        project["name"],
-                        project_dir,
+                        "PM: failed to start session for project %s: %s",
+                        project.get("name", "?"),
+                        e,
                     )
-                    continue
-
-                new_session_id = str(uuid.uuid4())
-                pm_options = SessionOptions(
-                    cwd=project_dir,
-                    name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
-                    pm_profile=True,
-                    project_id=project["project_id"],
-                )
-                new_session = SummonSession(
-                    config=self._config,
-                    options=pm_options,
-                    auth=None,
-                    session_id=new_session_id,
-                    web_client=self._web_client,
-                    dispatcher=self._dispatcher,
-                    bot_user_id=self._bot_user_id,
-                )
-                new_session.authenticate(user_id)
-
-                self._cancel_grace_timer()
-                self._sessions[new_session_id] = new_session
-                task = asyncio.create_task(
-                    self._supervised_session(new_session, new_session_id),
-                    name=f"session-pm-{new_session_id}",
-                )
-                task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
-                self._tasks[new_session_id] = task
-
-                logger.info(
-                    "SessionManager: started PM session %s for project %s",
-                    new_session_id,
-                    project["name"],
-                )
 
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
@@ -580,6 +547,47 @@ class SessionManager:
             logger.error("project_up orchestrator failed: %s", e, exc_info=True)
         finally:
             self._project_up_in_flight = False
+
+    def _start_pm_for_project(self, project: dict[str, Any], user_id: str) -> None:
+        """Create and start a single PM session for *project*."""
+        project_dir = project["directory"]
+        if not pathlib.Path(project_dir).is_dir():
+            raise FileNotFoundError(f"Directory not found: {project_dir}")
+
+        new_session_id = str(uuid.uuid4())
+        pm_options = SessionOptions(
+            cwd=project_dir,
+            name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
+            pm_profile=True,
+            project_id=project["project_id"],
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=pm_options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+        )
+        new_session.authenticate(user_id)
+
+        # Cancel grace timer — it may have been (re)started by
+        # _on_task_done after the auth-only session completed.
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-pm-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info(
+            "SessionManager: started PM session %s for project %s",
+            new_session_id,
+            project["name"],
+        )
 
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""
