@@ -1474,9 +1474,9 @@ class SummonSession:
                 # ThinkingConfigEnabled(budget_tokens=N) when enable_thinking
                 # is True + budget set; adaptive remains the default.
                 thinking=(
-                    ThinkingConfigAdaptive()
+                    ThinkingConfigAdaptive(type="adaptive")
                     if self._config.enable_thinking
-                    else ThinkingConfigDisabled()
+                    else ThinkingConfigDisabled(type="disabled")
                 ),
                 effort=self._effort,
             )
