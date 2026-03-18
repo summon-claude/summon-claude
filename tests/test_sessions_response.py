@@ -666,18 +666,55 @@ class TestUploadDiff:
         client.upload.assert_called_once()
         assert "output.py" in client.upload.call_args.args[1]
 
-    async def test_write_md_skips_content_upload(self):
+    async def test_write_md_renders_markdown_blocks(self):
         streamer, router, client = make_streamer()
         router.active_thread_ts = "thread_1"
         write_block = make_tool_use_block(
             "Write",
-            {"file_path": "/src/README.md", "content": "# Hello"},
+            {"file_path": "/src/README.md", "content": "# Hello\n\nWorld"},
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
         await asyncio.sleep(0.05)
-        # .md files should NOT trigger upload (Task 9 handles them)
+        # .md files should NOT trigger upload — they use markdown blocks
         client.upload.assert_not_called()
+        # Should post header and markdown block
+        all_blocks = []
+        for c in client.post.call_args_list:
+            if c.kwargs.get("blocks"):
+                all_blocks.extend(c.kwargs["blocks"])
+        # Should contain a markdown type block
+        assert any(b.get("type") == "markdown" for b in all_blocks), (
+            f"Expected type: markdown block, got: {all_blocks}"
+        )
+
+    async def test_write_md_repeated_shows_update(self):
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/README.md", "content": "# V1"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+        client.post.reset_mock()
+
+        # Second write to same path
+        write_block2 = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/README.md", "content": "# V2"},
+        )
+        msg2 = make_assistant_message([write_block2])
+        await streamer._handle_assistant_message(msg2)
+        await asyncio.sleep(0.05)
+
+        # Should show "Updated" not full re-render
+        all_blocks = []
+        for c in client.post.call_args_list:
+            if c.kwargs.get("blocks"):
+                all_blocks.extend(c.kwargs["blocks"])
+        assert any("Updated" in str(b) for b in all_blocks)
 
 
 class TestSplitTextAdditional:

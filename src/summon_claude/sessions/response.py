@@ -515,15 +515,20 @@ class ResponseStreamer:
             task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             await self._fire_file_change(filename, old_str, new_str)
 
-        # Fire-and-forget content upload for Write (non-.md files)
+        # Fire-and-forget content upload for Write
         elif tool_name == "Write":
             filepath = input_data.get("file_path", input_data.get("path", ""))
             content = input_data.get("content", "")
-            if filepath and content and not filepath.endswith(".md"):
-                basename = PurePosixPath(filepath).name
-                thread_ts = self._resolve_upload_thread(parent_id)
-                task = asyncio.create_task(self._upload_write(content, basename, thread_ts))
-                task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            if filepath and content:
+                if filepath.endswith(".md"):
+                    # Render .md files with type: markdown blocks
+                    task = asyncio.create_task(self._render_md_write(filepath, content, parent_id))
+                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                else:
+                    basename = PurePosixPath(filepath).name
+                    thread_ts = self._resolve_upload_thread(parent_id)
+                    task = asyncio.create_task(self._upload_write(content, basename, thread_ts))
+                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
             await self._fire_file_change(filepath, "", content)
 
     async def _post_tool_result(self, block: ToolResultBlock, parent_id: str | None = None) -> None:
@@ -646,6 +651,70 @@ class ResponseStreamer:
                     await self._router.post_to_active_thread(f"Edit: {filename}", blocks=blocks)
             except Exception:
                 logger.warning("Diff mrkdwn fallback also failed for %s", filename)
+
+    async def _render_md_write(
+        self,
+        filepath: str,
+        content: str,
+        parent_id: str | None,  # noqa: ARG002
+    ) -> None:
+        """Render a Write-created .md file with type: markdown blocks."""
+        from summon_claude.slack.markdown_split import split_markdown  # noqa: PLC0415
+
+        basename = PurePosixPath(filepath).name
+        n_chars = len(content)
+
+        # Skip re-rendering same path in same turn
+        if filepath in self._turn.md_rendered_paths:
+            blocks = [
+                {
+                    "type": "context",
+                    "elements": [
+                        {
+                            "type": "mrkdwn",
+                            "text": (f":page_facing_up: *Updated:* `{basename}` ({n_chars} chars)"),
+                        }
+                    ],
+                }
+            ]
+            try:
+                await self._router.post_to_active_thread(f"Updated: {basename}", blocks=blocks)
+            except Exception:
+                logger.warning("Failed to post .md update notice for %s", basename)
+            return
+
+        self._turn.md_rendered_paths.add(filepath)
+
+        # Post context header
+        header_blocks = [
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (f":page_facing_up: *Created:* `{basename}` ({n_chars} chars)"),
+                    }
+                ],
+            }
+        ]
+        try:
+            await self._router.post_to_active_thread(f"Created: {basename}", blocks=header_blocks)
+        except Exception:
+            logger.warning("Failed to post .md header for %s", basename)
+
+        # Split and post markdown blocks
+        chunks = split_markdown(content, limit=12000)
+        for chunk in chunks:
+            md_blocks = [{"type": "markdown", "text": chunk}]
+            try:
+                await self._router.post_to_active_thread(chunk, blocks=md_blocks)
+            except Exception:
+                # Fallback: post as plain text if markdown blocks fail
+                logger.warning("Markdown block failed for %s, using plain text", basename)
+                try:
+                    await self._router.post_to_active_thread(chunk)
+                except Exception:
+                    logger.warning("Plain text fallback also failed for %s", basename)
 
     async def _upload_write(
         self,
