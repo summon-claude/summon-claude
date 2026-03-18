@@ -1239,13 +1239,33 @@ class SummonSession:
         return new_id, cname
 
     async def _post_pm_welcome(self, client: SlackClient, web_client: AsyncWebClient) -> None:
-        """Post the PM welcome message and pin it (non-fatal)."""
+        """Post the PM welcome message and pin it (non-fatal).
+
+        On channel reuse (PM restart), old pins are removed first to
+        prevent accumulation of stale status messages.
+        """
         welcome_text = (
             "*Project Manager Status*\n"
             "---\n"
             "No active sessions.\n\n"
             "_Send a message to start working._"
         )
+        # Remove stale pins from previous PM sessions (non-fatal)
+        try:
+            pins_resp = await web_client.pins_list(channel=client.channel_id)
+            for item in pins_resp.get("items", []):
+                msg = item.get("message", {})
+                if msg.get("text", "").startswith("*Project Manager Status*"):
+                    try:
+                        await web_client.pins_remove(
+                            channel=client.channel_id,
+                            timestamp=msg["ts"],
+                        )
+                    except Exception:
+                        logger.debug("PM: failed to unpin old status")
+        except Exception as e:
+            logger.debug("PM: failed to clean up old pins: %s", e)
+
         try:
             msg_ref = await client.post(welcome_text)
             # Pin the status message

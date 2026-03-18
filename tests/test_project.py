@@ -417,6 +417,7 @@ class TestPostPmWelcome:
         client.post = AsyncMock(return_value=msg_ref)
 
         web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(return_value={"items": []})
 
         await session._post_pm_welcome(client, web_client)
 
@@ -440,6 +441,7 @@ class TestPostPmWelcome:
         client.post = AsyncMock(return_value=msg_ref)
 
         web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(return_value={"items": []})
 
         await session._post_pm_welcome(client, web_client)
 
@@ -460,6 +462,7 @@ class TestPostPmWelcome:
         client.post = AsyncMock(return_value=msg_ref)
 
         web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(return_value={"items": []})
         web_client.pins_add = AsyncMock(side_effect=Exception("Slack API error"))
 
         # Should not raise
@@ -478,9 +481,90 @@ class TestPostPmWelcome:
         client.post = AsyncMock(side_effect=Exception("Post failed"))
 
         web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(return_value={"items": []})
 
         # Should not raise
         await session._post_pm_welcome(client, web_client)
+
+    async def test_pm_welcome_removes_old_pins(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-old-pins")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        msg_ref = MagicMock()
+        msg_ref.ts = "9999.0000"
+        client.post = AsyncMock(return_value=msg_ref)
+
+        web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(
+            return_value={
+                "items": [
+                    {"message": {"ts": "1111.0000", "text": "*Project Manager Status*\n---\nOld"}},
+                    {"message": {"ts": "2222.0000", "text": "Some other pinned message"}},
+                ]
+            }
+        )
+
+        await session._post_pm_welcome(client, web_client)
+
+        # Should unpin old PM status but not unrelated pins
+        web_client.pins_remove.assert_called_once_with(channel="C_PM", timestamp="1111.0000")
+        # Should still pin the new message
+        web_client.pins_add.assert_called_once_with(channel="C_PM", timestamp="9999.0000")
+
+    async def test_pm_welcome_survives_pin_cleanup_failure(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-cleanup-fail")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        msg_ref = MagicMock()
+        msg_ref.ts = "9999.0000"
+        client.post = AsyncMock(return_value=msg_ref)
+
+        web_client = AsyncMock()
+        web_client.pins_list = AsyncMock(side_effect=Exception("API error"))
+
+        # Should not raise — cleanup failure is non-fatal
+        await session._post_pm_welcome(client, web_client)
+
+        # Should still post and pin the new message
+        client.post.assert_called_once()
+        web_client.pins_add.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# PM topic guard
+# ---------------------------------------------------------------------------
+
+
+class TestPmTopicGuard:
+    def test_pm_session_has_pm_profile_flag(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="pm-test", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-topic-guard")
+        assert session._pm_profile is True
+
+    def test_non_pm_session_has_no_pm_profile(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="regular")
+        session = SummonSession(config=config, options=options, session_id="non-pm-guard")
+        assert session._pm_profile is False
 
 
 # ---------------------------------------------------------------------------
