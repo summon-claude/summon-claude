@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import click
 
 from summon_claude.cli import daemon_client
@@ -28,6 +30,25 @@ async def async_start(  # noqa: PLR0913
         effort=effort or config.default_effort,
         resume=resume,
     )
+
+    # When --resume is provided, look up the original session's channel
+    # and Claude session ID for channel reuse
+    if resume:
+        async with SessionRegistry() as reg:
+            old_session = await reg.get_session(resume)
+            if old_session and old_session.get("slack_channel_id"):
+                channel = await reg.get_channel(old_session["slack_channel_id"])
+                claude_sid = (
+                    channel["claude_session_id"]
+                    if channel and channel.get("claude_session_id")
+                    else old_session.get("claude_session_id")
+                )
+                if claude_sid:
+                    options = dataclasses.replace(
+                        options,
+                        channel_id=old_session["slack_channel_id"],
+                        resume=claude_sid,
+                    )
 
     # Phase 0: Run DB migration if needed (fast, ~10ms)
     async with SessionRegistry() as reg:
