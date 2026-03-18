@@ -342,7 +342,7 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
 
-    async def _dispatch_control(self, msg: dict) -> dict:  # type: ignore[type-arg]
+    async def _dispatch_control(self, msg: dict) -> dict:  # type: ignore[type-arg]  # noqa: PLR0912
         """Route a control message to the appropriate handler and return a response."""
         match msg.get("type"):
             case "create_session":
@@ -394,6 +394,30 @@ class SessionManager:
                 except ValueError as e:
                     return {"type": "error", "message": str(e)}
                 return {"type": "session_created_spawned", "session_id": session_id}
+
+            case "send_message":
+                session_id = msg.get("session_id")
+                text = msg.get("text")
+                sender_info = msg.get("sender_info")
+                if not session_id or not text:
+                    return {"type": "error", "message": "Missing session_id or text"}
+                session = self._sessions.get(session_id)
+                if session is None:
+                    return {
+                        "type": "error",
+                        "message": f"Session {session_id} not found or not active",
+                    }
+                ok = await session.inject_message(text, sender_info=sender_info)
+                if not ok:
+                    return {
+                        "type": "error",
+                        "message": "Queue full or session shutting down",
+                    }
+                return {
+                    "type": "message_sent",
+                    "session_id": session_id,
+                    "channel_id": session.channel_id,
+                }
 
             case "project_up":
                 return await self._handle_project_up(msg)
