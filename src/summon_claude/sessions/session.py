@@ -459,12 +459,21 @@ def build_scribe_system_prompt(
     external_slack_section = (
         "- External Slack: check monitored channels for new messages\n" if slack_enabled else ""
     )
-    append_text = _SCRIBE_SYSTEM_PROMPT_APPEND.format(
-        scan_interval=scan_interval,
-        user_mention=user_mention,
-        importance_keywords=importance_keywords or "urgent, action required, deadline",
-        google_section=google_section,
-        external_slack_section=external_slack_section,
+    # Use .replace() instead of .format() so user-supplied values
+    # (e.g. importance_keywords) containing curly braces don't crash.
+    # The template uses {{ts}}/{{summary}} for literal braces in output,
+    # so we convert those after placeholder replacement.
+    append_text = (
+        _SCRIBE_SYSTEM_PROMPT_APPEND.replace("{scan_interval}", str(scan_interval))
+        .replace("{user_mention}", user_mention)
+        .replace(
+            "{importance_keywords}",
+            importance_keywords or "urgent, action required, deadline",
+        )
+        .replace("{google_section}", google_section)
+        .replace("{external_slack_section}", external_slack_section)
+        .replace("{{", "{")
+        .replace("}}", "}")
     )
     return {
         "type": "preset",
