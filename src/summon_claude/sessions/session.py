@@ -825,6 +825,34 @@ class SummonSession:
         self._auth = None  # clear token from memory after successful auth
         logger.info("Session %s: authenticated by user %s", self._session_id, user_id)
 
+    async def inject_message(self, text: str, sender_info: str | None = None) -> bool:
+        """Inject an external message into this session's processing queue.
+
+        The message is processed as a regular user turn. This bypasses Slack
+        event dispatch — the message goes directly into the internal queue.
+
+        Args:
+            text: Message text to inject.
+            sender_info: Human-readable source (e.g., "myapp-pm (#C12345)").
+
+        Returns:
+            True if enqueued successfully, False if session is shutting down
+            or queue is full.
+        """
+        if self._shutdown_event.is_set():
+            logger.debug("inject_message rejected: session %s is shutting down", self._session_id)
+            return False
+        pending = _PendingTurn(message=text, pre_sent=False)
+        try:
+            self._pending_turns.put_nowait(pending)
+        except asyncio.QueueFull:
+            logger.warning("inject_message rejected: queue full for session %s", self._session_id)
+            return False
+        logger.info(
+            "Injected external message from %s into session %s", sender_info, self._session_id
+        )
+        return True
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
