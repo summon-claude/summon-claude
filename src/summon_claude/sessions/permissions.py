@@ -56,6 +56,20 @@ _GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
     "mcp__github__search_",
 )
 
+# GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
+# even if SDK suggestions say "allow". Defense-in-depth against broad
+# allowedTools patterns in settings.json bypassing HITL for destructive ops.
+_GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
+    [
+        "mcp__github__merge_pull_request",
+        "mcp__github__delete_branch",
+        "mcp__github__close_pull_request",
+        "mcp__github__close_issue",
+        "mcp__github__update_pull_request_branch",
+        "mcp__github__push_files",
+    ]
+)
+
 _PERMISSION_TIMEOUT_S = 300  # 5 minutes
 
 
@@ -169,6 +183,12 @@ class PermissionHandler:
         ):
             logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
             return PermissionResultAllow()
+
+        # 2c. Destructive GitHub MCP tools always require Slack approval —
+        # skip SDK allow suggestions to prevent broad allowedTools bypass
+        if tool_name in _GITHUB_MCP_REQUIRE_APPROVAL:
+            logger.info("Destructive GitHub MCP tool requires approval: %s", tool_name)
+            return await self._request_approval(tool_name, input_data, context)
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist
         if context is not None:

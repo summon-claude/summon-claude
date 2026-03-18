@@ -510,3 +510,34 @@ class TestGitHubMCPDestructiveToolsRequireApproval:
         result = await handler.handle("mcp__github__delete_branch", {}, None)
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_called()
+
+    async def test_merge_ignores_sdk_allow_suggestion(self):
+        """Destructive tools must require Slack approval even when SDK suggests allow."""
+        from unittest.mock import MagicMock
+
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+
+        suggestion = MagicMock()
+        suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+
+        result = await handler.handle("mcp__github__merge_pull_request", {}, context)
+        assert isinstance(result, PermissionResultAllow)
+        # Must have gone through Slack approval, NOT auto-approved by SDK suggestion
+        provider.post_ephemeral.assert_called()
+
+    async def test_close_pull_request_requires_approval(self):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle("mcp__github__close_pull_request", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+    async def test_close_issue_requires_approval(self):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle("mcp__github__close_issue", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
