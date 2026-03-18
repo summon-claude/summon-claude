@@ -1450,6 +1450,8 @@ class SummonSession:
                 authenticated_user_id=self._authenticated_user_id,
                 channel_id=rt.client.channel_id,
                 cwd=self._cwd,
+                session_name=self._name,
+                web_client=self._web_client,
             )
             mcp_servers["summon-cli"] = cli_mcp
 

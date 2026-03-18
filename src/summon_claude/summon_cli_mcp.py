@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
+_MAX_MESSAGE_CHARS = 10_000
 
 _SENSITIVE_FIELDS = frozenset({"pid", "error_message", "authenticated_user_id"})
 
@@ -31,16 +32,19 @@ def _sanitize_session(session: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in session.items() if k not in _SENSITIVE_FIELDS}
 
 
-def create_summon_cli_mcp_tools(  # noqa: PLR0915
+def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
     registry: SessionRegistry,
     session_id: str,
     authenticated_user_id: str,
     channel_id: str,
     cwd: str,
     *,
+    session_name: str = "",
     _generate_spawn_token: Callable[..., Awaitable[Any]] | None = None,
     _ipc_create_session: Callable[..., Awaitable[str]] | None = None,
     _ipc_stop_session: Callable[..., Awaitable[bool]] | None = None,
+    _ipc_send_message: Callable[..., Awaitable[dict]] | None = None,
+    _web_client: Any | None = None,
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances for session lifecycle management.
 
@@ -50,9 +54,12 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
         authenticated_user_id: For spawn token generation and scope guards.
         channel_id: For spawn token's parent_channel_id.
         cwd: Calling session's working directory, default for spawned sessions.
+        session_name: Calling session's name (for sender_info attribution).
         _generate_spawn_token: Override for generate_spawn_token (testing).
         _ipc_create_session: Override for daemon IPC create (testing).
         _ipc_stop_session: Override for daemon IPC stop (testing).
+        _ipc_send_message: Override for daemon IPC send_message (testing).
+        _web_client: AsyncWebClient for cross-channel Slack posts (testing).
     """
 
     @tool(
@@ -466,18 +473,154 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [session_list, session_info, session_start, session_stop, session_log_status]
+    @tool(
+        "session_message",
+        (
+            "Send a message to a running session. The message is injected into "
+            "the session's processing queue and processed as a new turn. "
+            "Also posts the message to the target session's Slack channel for "
+            "observability, with source attribution. "
+            "session_id: the target session's ID. "
+            "text: the message text to send."
+        ),
+        {"session_id": str, "text": str},
+    )
+    async def session_message(args: dict) -> dict:  # noqa: PLR0911
+        target_id = args.get("session_id", "")
+        text = args.get("text", "")
+
+        if not target_id:
+            return {
+                "content": [{"type": "text", "text": "Error: session_id is required."}],
+                "is_error": True,
+            }
+        if not text:
+            return {
+                "content": [{"type": "text", "text": "Error: text is required."}],
+                "is_error": True,
+            }
+        if target_id == session_id:
+            return {
+                "content": [
+                    {"type": "text", "text": "Error: cannot send a message to your own session."}
+                ],
+                "is_error": True,
+            }
+        if len(text) > _MAX_MESSAGE_CHARS:
+            text = text[:_MAX_MESSAGE_CHARS]
+
+        try:
+            target = await registry.get_session(target_id)
+
+            # Scope guard: session must exist and belong to same user
+            if target is None or target.get("authenticated_user_id") != authenticated_user_id:
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Error: session '{target_id}' not found."}
+                    ],
+                    "is_error": True,
+                }
+
+            # Parent-child scope guard: caller must be the parent
+            if target.get("parent_session_id") != session_id:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: can only message sessions you spawned.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Target must be active
+            if target.get("status") != "active":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Error: session '{target_id}' is "
+                                f"{target.get('status', 'not active')}. "
+                                "Can only message active sessions."
+                            ),
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Send via daemon IPC
+            ipc_send = _ipc_send_message
+            if ipc_send is None:
+                from summon_claude.cli.daemon_client import (  # noqa: PLC0415
+                    send_message_to_session,
+                )
+
+                ipc_send = send_message_to_session
+
+            sender_info = f"{session_name} (#{channel_id})" if session_name else channel_id
+            result = await ipc_send(
+                session_id=target_id,
+                text=text,
+                sender_info=sender_info,
+            )
+
+            # Observability: post to target's Slack channel (best-effort)
+            target_channel_id = result.get("channel_id") or target.get("slack_channel_id")
+            if target_channel_id and _web_client:
+                attribution = f"_Message from {sender_info}:_\n{text}"
+                try:
+                    await _web_client.chat_postMessage(channel=target_channel_id, text=attribution)
+                except Exception:
+                    logger.warning("Failed to post observability message to %s", target_channel_id)
+
+            target_name = target.get("session_name") or target_id[:8]
+            target_channel_name = target.get("slack_channel_name") or target_channel_id or "?"
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Message sent to session '{target_name}' ({target_id}). "
+                            f"Channel: #{target_channel_name}"
+                        ),
+                    }
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error sending message: {e}"}],
+                "is_error": True,
+            }
+
+    return [
+        session_list,
+        session_info,
+        session_start,
+        session_stop,
+        session_log_status,
+        session_message,
+    ]
 
 
-def create_summon_cli_mcp_server(
+def create_summon_cli_mcp_server(  # noqa: PLR0913
     registry: SessionRegistry,
     session_id: str,
     authenticated_user_id: str,
     channel_id: str,
     cwd: str,
+    *,
+    session_name: str = "",
+    web_client: Any | None = None,
 ) -> McpSdkServerConfig:
     """Create an MCP server with session lifecycle tools."""
     tools = create_summon_cli_mcp_tools(
-        registry, session_id, authenticated_user_id, channel_id, cwd
+        registry,
+        session_id,
+        authenticated_user_id,
+        channel_id,
+        cwd,
+        session_name=session_name,
+        _web_client=web_client,
     )
     return create_sdk_mcp_server(name="summon-cli", version="1.0.0", tools=tools)
