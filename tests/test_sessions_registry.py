@@ -101,6 +101,7 @@ class TestUpdatableFields:
             "ended_at",
             "error_message",
             "model",
+            "effort",
             "canvas_id",
             "canvas_markdown",
             "project_id",
