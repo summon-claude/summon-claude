@@ -671,7 +671,7 @@ class SummonSession:
         self._pm_profile = options.pm_profile
         self._auth_only = options.auth_only
         self._project_id = options.project_id
-        self._scan_interval_s = options.scan_interval_s
+        self._scan_interval_s = max(30, options.scan_interval_s)
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -950,7 +950,9 @@ class SummonSession:
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
         if self._pm_profile and self._project_id:
-            channel_id, channel_name = await self._get_or_create_pm_channel(web_client, registry)
+            channel_id, channel_name = await self._get_or_create_pm_channel(
+                web_client, registry, self._project_id
+            )
         else:
             channel_id, channel_name = await self._create_channel(web_client)
 
@@ -1118,8 +1120,8 @@ class SummonSession:
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
 
-    async def _get_or_create_pm_channel(  # noqa: PLR0912, PLR0915
-        self, web_client: AsyncWebClient, registry: SessionRegistry
+    async def _get_or_create_pm_channel(  # noqa: PLR0912
+        self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
     ) -> tuple[str, str]:
         """Reuse the existing PM channel for this project, or create a new one.
 
@@ -1127,13 +1129,11 @@ class SummonSession:
         Otherwise creates a new channel named ``{channel_prefix}-pm`` and
         persists the channel ID back to the project record.
         """
-        assert self._project_id is not None  # guarded by caller
-
-        project = await registry.get_project(self._project_id)
+        project = await registry.get_project(project_id)
         if project is None:
             logger.warning(
                 "Project %s not found — falling back to normal channel creation",
-                self._project_id,
+                project_id,
             )
             return await self._create_channel(web_client)
 
@@ -1191,17 +1191,16 @@ class SummonSession:
                             f"Channel {new_channel_name!r} exists but bot cannot access it"
                         ) from e
                 else:
-                    if not found:
-                        raise RuntimeError(
-                            f"Channel {new_channel_name!r} exists but bot cannot find it"
-                            f" after {max_pages} pages"
-                        ) from e
+                    raise RuntimeError(
+                        f"Channel {new_channel_name!r} exists but bot cannot find it"
+                        f" after {max_pages} pages"
+                    ) from e
             else:
                 raise
 
         # Persist the channel ID to the project
         try:
-            await registry.update_project(self._project_id, pm_channel_id=new_id)
+            await registry.update_project(project_id, pm_channel_id=new_id)
         except Exception as e:
             logger.warning("PM: failed to persist pm_channel_id: %s", e)
 

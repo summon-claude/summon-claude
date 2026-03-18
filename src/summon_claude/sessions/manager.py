@@ -457,70 +457,75 @@ class SessionManager:
         if self._project_up_in_flight:
             return {"type": "error", "message": "A project_up operation is already in progress"}
 
-        # Set the flag before any work — cleared in orchestrator's finally.
+        # Set the flag before any work — cleared in orchestrator's finally
+        # (or in the except block if we fail before the orchestrator starts).
         self._project_up_in_flight = True
 
-        # Check if any projects need PM before creating an auth session
-        projects: list[dict[str, Any]] = []
-        async with SessionRegistry() as registry:
-            projects = await registry.list_projects()
-        needing_pm = [p for p in projects if not p.get("pm_running")]
-        if not needing_pm:
+        try:
+            # Check if any projects need PM before creating an auth session
+            projects: list[dict[str, Any]] = []
+            async with SessionRegistry() as registry:
+                projects = await registry.list_projects()
+            needing_pm = [p for p in projects if not p.get("pm_running")]
+            if not needing_pm:
+                self._project_up_in_flight = False
+                return {"type": "project_up_complete", "started": [], "errors": []}
+
+            cwd = msg.get("cwd", str(pathlib.Path.cwd()))
+
+            # Create auth-only session
+            self._cancel_grace_timer()
+            session_id = str(uuid.uuid4())
+            auth = await self._generate_auth(session_id)
+            options = SessionOptions(
+                cwd=cwd,
+                name=f"pm-auth-{secrets.token_hex(3)}",
+                auth_only=True,
+            )
+            session = SummonSession(
+                config=self._config,
+                options=options,
+                auth=auth,
+                session_id=session_id,
+                web_client=self._web_client,
+                dispatcher=self._dispatcher,
+                bot_user_id=self._bot_user_id,
+            )
+            self._sessions[session_id] = session
+            task = asyncio.create_task(
+                self._supervised_session(session, session_id),
+                name=f"session-auth-{session_id}",
+            )
+            task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+            self._tasks[session_id] = task
+
+            # Create future for result and launch background orchestrator
+            request_id = str(uuid.uuid4())
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future[dict[str, Any]] = loop.create_future()
+            self._project_up_futures[request_id] = future
+
+            bg_task = asyncio.create_task(
+                self._project_up_orchestrator(request_id, session, needing_pm),
+                name=f"project-up-{request_id}",
+            )
+            self._background_tasks.add(bg_task)
+            bg_task.add_done_callback(self._on_background_task_done)
+
+            logger.info(
+                "SessionManager: project_up started (auth session %s, %d projects)",
+                session_id,
+                len(needing_pm),
+            )
+            return {
+                "type": "project_up_auth_required",
+                "short_code": auth.short_code,
+                "request_id": request_id,
+                "project_count": len(needing_pm),
+            }
+        except Exception:
             self._project_up_in_flight = False
-            return {"type": "project_up_complete", "started": [], "errors": []}
-
-        cwd = msg.get("cwd", str(pathlib.Path.cwd()))
-
-        # Create auth-only session
-        self._cancel_grace_timer()
-        session_id = str(uuid.uuid4())
-        auth = await self._generate_auth(session_id)
-        options = SessionOptions(
-            cwd=cwd,
-            name=f"pm-auth-{secrets.token_hex(3)}",
-            auth_only=True,
-        )
-        session = SummonSession(
-            config=self._config,
-            options=options,
-            auth=auth,
-            session_id=session_id,
-            web_client=self._web_client,
-            dispatcher=self._dispatcher,
-            bot_user_id=self._bot_user_id,
-        )
-        self._sessions[session_id] = session
-        task = asyncio.create_task(
-            self._supervised_session(session, session_id),
-            name=f"session-auth-{session_id}",
-        )
-        task.add_done_callback(partial(self._on_task_done, session_id=session_id))
-        self._tasks[session_id] = task
-
-        # Create future for result and launch background orchestrator
-        request_id = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        self._project_up_futures[request_id] = future
-
-        bg_task = asyncio.create_task(
-            self._project_up_orchestrator(request_id, session, needing_pm),
-            name=f"project-up-{request_id}",
-        )
-        self._background_tasks.add(bg_task)
-        bg_task.add_done_callback(self._on_background_task_done)
-
-        logger.info(
-            "SessionManager: project_up started (auth session %s, %d projects)",
-            session_id,
-            len(needing_pm),
-        )
-        return {
-            "type": "project_up_auth_required",
-            "short_code": auth.short_code,
-            "request_id": request_id,
-            "project_count": len(needing_pm),
-        }
+            raise
 
     async def _handle_project_up_await(self, msg: dict[str, Any]) -> dict[str, Any]:
         """IPC handler for ``project_up_await``.
@@ -598,6 +603,8 @@ class SessionManager:
                 )
                 new_session.authenticate(user_id)
 
+                # Cancel grace timer — it may have been (re)started by
+                # _on_task_done after the auth-only session completed.
                 self._cancel_grace_timer()
                 self._sessions[new_session_id] = new_session
                 task = asyncio.create_task(

@@ -60,6 +60,7 @@ class _StubSession:
         self.is_pm: bool = False
         self._shutdown_requested = False
         self._authenticated_user_id: str | None = None
+        self._authenticated_event = asyncio.Event()
 
     async def start(self) -> bool:
         self._run_count += 1
@@ -73,6 +74,7 @@ class _StubSession:
 
     def authenticate(self, user_id: str) -> None:
         self._authenticated_user_id = user_id
+        self._authenticated_event.set()
 
 
 def _make_manager(
@@ -928,3 +930,625 @@ class TestDispatchSpawnToken:
         assert response["type"] == "session_created_spawned"
         assert "session_id" in response
         await manager.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Helpers: project up
+# ---------------------------------------------------------------------------
+
+
+def _mock_registry_ctx(mock_registry: AsyncMock) -> MagicMock:
+    """Build a mock SessionRegistry class whose async-context returns *mock_registry*."""
+    cls = MagicMock()
+    cls.return_value.__aenter__ = AsyncMock(return_value=mock_registry)
+    cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    return cls
+
+
+def _mock_project(
+    name: str = "test-project",
+    *,
+    pm_running: bool = False,
+    directory: str = "/tmp/test-project",
+    channel_prefix: str = "test-project",
+    project_id: str = "proj-1",
+) -> dict:
+    return {
+        "project_id": project_id,
+        "name": name,
+        "directory": directory,
+        "channel_prefix": channel_prefix,
+        "pm_running": pm_running,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tests: project up orchestration
+# ---------------------------------------------------------------------------
+
+
+class TestProjectUpOrchestration:
+    """Tests for _handle_project_up, _handle_project_up_await, and
+    _project_up_orchestrator."""
+
+    async def test_project_up_no_projects_returns_complete(self):
+        """When no projects need PM, returns project_up_complete immediately."""
+        manager, _, _ = _make_manager()
+        mock_reg = AsyncMock()
+        mock_reg.list_projects = AsyncMock(return_value=[])
+
+        with patch(
+            "summon_claude.sessions.manager.SessionRegistry",
+            _mock_registry_ctx(mock_reg),
+        ):
+            response = await manager._dispatch_control({"type": "project_up", "cwd": "/tmp"})
+
+        assert response["type"] == "project_up_complete"
+        assert response["started"] == []
+        assert response["errors"] == []
+        assert manager._project_up_in_flight is False
+
+    async def test_project_up_all_already_running_returns_complete(self):
+        """Projects that already have PM running are excluded."""
+        manager, _, _ = _make_manager()
+        mock_reg = AsyncMock()
+        mock_reg.list_projects = AsyncMock(return_value=[_mock_project(pm_running=True)])
+
+        with patch(
+            "summon_claude.sessions.manager.SessionRegistry",
+            _mock_registry_ctx(mock_reg),
+        ):
+            response = await manager._dispatch_control({"type": "project_up", "cwd": "/tmp"})
+
+        assert response["type"] == "project_up_complete"
+        assert manager._project_up_in_flight is False
+
+    async def test_project_up_returns_auth_required(self):
+        """When projects need PM, returns auth_required with short_code and request_id."""
+        manager, _, _ = _make_manager()
+        mock_reg = AsyncMock()
+        mock_reg.list_projects = AsyncMock(return_value=[_mock_project(pm_running=False)])
+        mock_auth = SessionAuth(
+            short_code="PM123456",
+            session_id="placeholder",
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        )
+
+        with (
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+            patch(
+                "summon_claude.sessions.manager.generate_session_token",
+                new_callable=AsyncMock,
+                return_value=mock_auth,
+            ),
+            patch("summon_claude.sessions.manager.SummonSession") as mock_ss,
+        ):
+            mock_ss.return_value = _StubSession()
+            response = await manager._dispatch_control({"type": "project_up", "cwd": "/tmp"})
+
+        assert response["type"] == "project_up_auth_required"
+        assert response["short_code"] == "PM123456"
+        assert "request_id" in response
+        assert response["project_count"] == 1
+        assert manager._project_up_in_flight is True
+
+        # Cleanup
+        await manager.shutdown()
+
+    async def test_project_up_concurrent_guard(self):
+        """A second project_up while one is in flight returns an error."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        response = await manager._dispatch_control({"type": "project_up", "cwd": "/tmp"})
+
+        assert response["type"] == "error"
+        assert "already in progress" in response["message"]
+
+    async def test_project_up_clears_flag_on_exception(self):
+        """_project_up_in_flight is cleared if _handle_project_up raises.
+
+        If an exception occurs after setting the flag but before the
+        orchestrator starts, the flag must be cleared so future calls
+        aren't permanently blocked.
+        """
+        manager, _, _ = _make_manager()
+
+        mock_reg = AsyncMock()
+        mock_reg.list_projects = AsyncMock(return_value=[_mock_project(pm_running=False)])
+
+        with (
+            pytest.raises(RuntimeError, match="DB exploded"),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+            patch(
+                "summon_claude.sessions.manager.generate_session_token",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("DB exploded"),
+            ),
+        ):
+            await manager._handle_project_up({"cwd": "/tmp"})
+
+        assert manager._project_up_in_flight is False
+
+    async def test_project_up_await_unknown_request_id(self):
+        """project_up_await with an unknown request_id returns error."""
+        manager, _, _ = _make_manager()
+
+        response = await manager._dispatch_control(
+            {"type": "project_up_await", "request_id": "nonexistent"}
+        )
+
+        assert response["type"] == "error"
+        assert "Unknown or expired" in response["message"]
+
+    async def test_project_up_await_missing_request_id(self):
+        """project_up_await without request_id returns error."""
+        manager, _, _ = _make_manager()
+
+        response = await manager._dispatch_control({"type": "project_up_await"})
+
+        assert response["type"] == "error"
+        assert "Unknown or expired" in response["message"]
+
+    async def test_project_up_await_resolves_on_result(self):
+        """project_up_await returns the future's result when it resolves."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        future.set_result({"started": [{"session_id": "s1", "project": "p1"}], "errors": []})
+        manager._project_up_futures["req-1"] = future
+
+        response = await asyncio.wait_for(
+            manager._dispatch_control({"type": "project_up_await", "request_id": "req-1"}),
+            timeout=5,
+        )
+
+        assert response["type"] == "project_up_complete"
+        assert len(response["started"]) == 1
+        assert response["started"][0]["project"] == "p1"
+        # Future should be popped after await
+        assert "req-1" not in manager._project_up_futures
+
+    async def test_project_up_await_timeout(self):
+        """project_up_await returns error when the future does not resolve in time."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()  # never resolved
+        manager._project_up_futures["req-timeout"] = future
+
+        with patch("summon_claude.sessions.manager.asyncio.wait_for", side_effect=TimeoutError):
+            response = await manager._handle_project_up_await({"request_id": "req-timeout"})
+
+        assert response["type"] == "error"
+        assert "Timed out" in response["message"]
+        # Future should still be popped in finally
+        assert "req-timeout" not in manager._project_up_futures
+
+    async def test_orchestrator_happy_path(self):
+        """Orchestrator waits for auth, creates PM sessions, resolves future."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-happy"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        # Auth session stub — will be authenticated shortly
+        auth_stub = _StubSession()
+
+        needing_pm = [_mock_project(name="proj-a", directory="/tmp/test-project")]
+
+        # Mock SummonSession so the orchestrator can create PM sessions
+        pm_stub = _StubSession()
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=pm_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            # Start the orchestrator
+            orch_task = asyncio.create_task(
+                manager._project_up_orchestrator(request_id, auth_stub, needing_pm)  # type: ignore[arg-type]
+            )
+
+            # Give the orchestrator a moment to start waiting
+            await asyncio.sleep(0)
+
+            # Authenticate the auth session
+            auth_stub.authenticate("U999")
+
+            # Wait for orchestrator to finish
+            await asyncio.wait_for(orch_task, timeout=5)
+
+        result = future.result()
+        assert len(result["started"]) == 1
+        assert result["started"][0]["project"] == "proj-a"
+        assert result["errors"] == []
+        assert manager._project_up_in_flight is False
+
+        # Cleanup — cancel background tasks (deferred cleanup sleeps 120s)
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_multiple_projects(self):
+        """Orchestrator creates PM sessions for each project needing PM."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-multi"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U123")
+
+        needing_pm = [
+            _mock_project(name="alpha", project_id="p-1", directory="/tmp/alpha"),
+            _mock_project(name="beta", project_id="p-2", directory="/tmp/beta"),
+        ]
+
+        pm_stubs = []
+
+        def make_pm_stub(**kwargs):
+            s = _StubSession()
+            pm_stubs.append(s)
+            return s
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", side_effect=make_pm_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(request_id, auth_stub, needing_pm),  # type: ignore[arg-type]
+                timeout=5,
+            )
+
+        result = future.result()
+        assert len(result["started"]) == 2
+        project_names = {s["project"] for s in result["started"]}
+        assert project_names == {"alpha", "beta"}
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_missing_directory_records_error(self):
+        """Projects with missing directories are recorded as errors."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-missing"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U123")
+
+        needing_pm = [
+            _mock_project(name="gone", directory="/nonexistent/path/gone"),
+        ]
+
+        with patch("pathlib.Path.is_dir", return_value=False):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(request_id, auth_stub, needing_pm),  # type: ignore[arg-type]
+                timeout=5,
+            )
+
+        result = future.result()
+        assert result["started"] == []
+        assert len(result["errors"]) == 1
+        assert result["errors"][0]["project"] == "gone"
+        assert "not found" in result["errors"][0]["error"].lower()
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_auth_timeout(self):
+        """Orchestrator sets auth timeout error when session never authenticates."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-timeout"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        # Auth session that never authenticates
+        auth_stub = _StubSession()
+        needing_pm = [_mock_project()]
+
+        # Patch asyncio.wait_for inside the orchestrator to raise TimeoutError immediately
+        original_wait_for = asyncio.wait_for
+
+        async def fast_timeout(coro, *, timeout=None):
+            # Only intercept the auth wait (Event.wait()), let others through
+            if timeout == 360:
+                raise TimeoutError
+            return await original_wait_for(coro, timeout=timeout)
+
+        with patch("summon_claude.sessions.manager.asyncio.wait_for", side_effect=fast_timeout):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(request_id, auth_stub, needing_pm),  # type: ignore[arg-type]
+                timeout=5,
+            )
+
+        result = future.result()
+        assert result["started"] == []
+        assert len(result["errors"]) == 1
+        assert "timed out" in result["errors"][0]["error"].lower()
+        assert manager._project_up_in_flight is False
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_clears_in_flight_flag(self):
+        """_project_up_in_flight is False after orchestrator completes (happy path)."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-flag"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    request_id,
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        assert manager._project_up_in_flight is False
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_clears_in_flight_on_exception(self):
+        """_project_up_in_flight is cleared even when orchestrator raises."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-exc"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        with (
+            patch(
+                "summon_claude.sessions.manager.SummonSession",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    request_id,
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        assert manager._project_up_in_flight is False
+        # Future should have the error recorded
+        result = future.result()
+        assert len(result["errors"]) == 1
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_creates_deferred_cleanup(self):
+        """Orchestrator creates a deferred cleanup task in _background_tasks."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-cleanup"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    request_id,
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        # The orchestrator itself runs as a background task, and it adds a cleanup task
+        cleanup_tasks = [
+            t for t in manager._background_tasks if f"cleanup-{request_id}" in t.get_name()
+        ]
+        assert len(cleanup_tasks) == 1
+
+        # Cleanup
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_authenticates_pm_sessions(self):
+        """PM sessions are authenticated with the auth session's user_id."""
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-auth"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("UAUTH")
+
+        pm_sessions_created = []
+
+        class _CapturePMSession(_StubSession):
+            def authenticate(self, user_id):
+                super().authenticate(user_id)
+                pm_sessions_created.append(user_id)
+
+        with (
+            patch(
+                "summon_claude.sessions.manager.SummonSession",
+                return_value=_CapturePMSession(),
+            ),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    request_id,
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        assert pm_sessions_created == ["UAUTH"]
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_orchestrator_cancels_grace_timer_before_adding_sessions(self):
+        """Grace timer started by auth session completion must be cancelled by orchestrator.
+
+        Race: auth-only session completes → _on_task_done → _sessions empty →
+        grace timer starts.  Orchestrator then creates PM sessions — if it
+        doesn't cancel the grace timer, the daemon shuts down 60s later,
+        killing the PM sessions.
+        """
+        manager, _, _ = _make_manager()
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[dict] = loop.create_future()
+        request_id = "orch-grace"
+        manager._project_up_futures[request_id] = future
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        # Simulate the grace timer having been started (by _on_task_done
+        # after the auth session completed while no other sessions exist).
+        fired = []
+        manager._grace_timer = loop.call_later(9999, lambda: fired.append(True))
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
+            patch("pathlib.Path.is_dir", return_value=True),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    request_id,
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        # Grace timer must have been cancelled by orchestrator before adding PM sessions
+        assert manager._grace_timer is None
+        assert fired == []
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+
+# ---------------------------------------------------------------------------
+# Tests: _on_background_task_done
+# ---------------------------------------------------------------------------
+
+
+class TestBackgroundTaskDone:
+    """_on_background_task_done discards tasks and handles exceptions."""
+
+    async def test_background_task_done_discards_from_set(self):
+        """Completed background task is removed from _background_tasks."""
+        manager, _, _ = _make_manager()
+
+        async def noop():
+            pass
+
+        task = asyncio.create_task(noop())
+        manager._background_tasks.add(task)
+        task.add_done_callback(manager._on_background_task_done)
+
+        await task
+        await asyncio.sleep(0)  # allow callback to fire
+
+        assert task not in manager._background_tasks
+
+    async def test_background_task_done_logs_exception(self):
+        """Failed background task is discarded and does not re-raise."""
+        manager, _, _ = _make_manager()
+
+        async def failing():
+            raise RuntimeError("background boom")
+
+        task = asyncio.create_task(failing())
+        manager._background_tasks.add(task)
+        task.add_done_callback(manager._on_background_task_done)
+
+        # Wait for task to fail — gather suppresses the exception
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)  # allow callback to fire
+
+        assert task not in manager._background_tasks
+
+    async def test_background_task_done_cancelled_no_error(self):
+        """Cancelled background task is discarded without logging an error."""
+        manager, _, _ = _make_manager()
+
+        async def sleeper():
+            await asyncio.sleep(9999)
+
+        task = asyncio.create_task(sleeper())
+        manager._background_tasks.add(task)
+        task.add_done_callback(manager._on_background_task_done)
+
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await asyncio.sleep(0)
+
+        assert task not in manager._background_tasks

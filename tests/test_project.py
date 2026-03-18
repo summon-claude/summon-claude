@@ -552,8 +552,9 @@ class TestScanTimerLoop:
         from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock(spec=SummonConfig)
-        options = SessionOptions(cwd="/tmp", name="pm-scan", pm_profile=True, scan_interval_s=1)
+        options = SessionOptions(cwd="/tmp", name="pm-scan", pm_profile=True, scan_interval_s=30)
         session = SummonSession(config=config, options=options, session_id="test-scan-inject")
+        session._scan_interval_s = 1  # bypass floor for fast testing
 
         # Run timer for just past 1 second, then set shutdown
         async def _stop_after():
