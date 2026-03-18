@@ -1254,7 +1254,7 @@ class SummonSession:
         # Remove stale pins from previous PM sessions (non-fatal)
         try:
             pins_resp = await web_client.pins_list(channel=client.channel_id)
-            for item in pins_resp.get("items", []):
+            for item in pins_resp.get("items") or []:
                 msg = item.get("message", {})
                 if msg.get("text", "").startswith("*Project Manager Status*"):
                     try:
@@ -1289,7 +1289,7 @@ class SummonSession:
         """
         profile = "pm" if self._pm_profile else "agent"
         template = get_canvas_template(profile)
-        markdown = template.format(model=self._model or "unknown", cwd=self._cwd)
+        markdown = template.replace("{model}", self._model or "unknown").replace("{cwd}", self._cwd)
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
         if not canvas_id:

@@ -318,10 +318,12 @@ class TestBuildPmSystemPrompt:
     def test_includes_cwd(self):
         result = build_pm_system_prompt(cwd="/my/project/dir", scan_interval_s=900)
         assert "/my/project/dir" in result["append"]
+        assert "{cwd}" not in result["append"]
 
     def test_includes_scan_interval_minutes(self):
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=600)
         assert "10 minutes" in result["append"]
+        assert "{scan_interval}" not in result["append"]
 
     def test_15min_interval(self):
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
