@@ -1377,6 +1377,11 @@ class SummonSession:
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 
+        # Add GitHub remote MCP if configured
+        gh_mcp = self._config.github_mcp_config()
+        if gh_mcp:
+            mcp_servers["github"] = gh_mcp
+
         if self._canvas_store is not None and self._authenticated_user_id is not None:
             canvas_mcp = create_canvas_mcp_server(
                 canvas_store=self._canvas_store,

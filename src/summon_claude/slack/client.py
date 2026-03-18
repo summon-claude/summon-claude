@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,14 @@ def sanitize_for_mrkdwn(text: str, max_len: int = 100) -> str:
     return sanitized if max_len >= len(sanitized) else sanitized[:max_len]
 
 
+_SECRET_RE = re.compile(r"ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+")
+
+
+def redact_secrets(text: str) -> str:
+    """Replace GitHub PAT patterns with [REDACTED] to prevent token leakage."""
+    return _SECRET_RE.sub("[REDACTED]", text)
+
+
 class SlackClient:
     """Channel-bound Slack output client (Layer 1).
 
@@ -56,6 +65,7 @@ class SlackClient:
         blocks: list[dict[str, Any]] | None = None,
     ) -> MessageRef:
         """Post a message to the channel."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {"channel": self.channel_id, "text": text}
         if blocks:
             kwargs["blocks"] = blocks
@@ -72,6 +82,7 @@ class SlackClient:
         blocks: list[dict[str, Any]] | None = None,
     ) -> None:
         """Post an ephemeral message visible only to user_id."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "user": user_id,
@@ -93,6 +104,7 @@ class SlackClient:
         channel: str | None = None,
     ) -> None:
         """Update an existing message."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {"channel": channel or self.channel_id, "ts": ts, "text": text}
         if blocks:
             kwargs["blocks"] = blocks
