@@ -310,12 +310,27 @@ def _format_interval(seconds: int) -> str:
     return " ".join(parts) or "0 seconds"
 
 
-def build_pm_system_prompt(*, cwd: str, scan_interval_s: int) -> dict:
-    """Build the PM system prompt with interpolated project context."""
+def build_pm_system_prompt(
+    *, cwd: str, scan_interval_s: int, workflow_instructions: str = ""
+) -> dict:
+    """Build the PM system prompt with interpolated project context.
+
+    When *workflow_instructions* is non-empty, a "Workflow Instructions"
+    section is appended to the system prompt.  These instructions survive
+    compaction (they live in the ``append`` field of the preset).
+    """
     append_text = _PM_SYSTEM_PROMPT_APPEND.format(
         scan_interval=_format_interval(scan_interval_s),
         cwd=cwd,
     )
+    if workflow_instructions:
+        append_text += (
+            "\n\n## Workflow Instructions\n\n"
+            "The following workflow instructions define how you must operate. "
+            "Follow these instructions precisely — your Global PM will audit "
+            "your compliance.\n\n"
+            f"{workflow_instructions}"
+        )
     return {
         "type": "preset",
         "preset": "claude_code",
@@ -1013,10 +1028,17 @@ class SummonSession:
 
         await _post_session_header(client, self._cwd, self._model, self._session_id)
 
+        # PM-specific: welcome message, pinned status, and PM topic
+        if self._pm_profile:
+            await self._post_pm_welcome(client, web_client)
+
         git_branch = await _get_git_branch(self._cwd)
         self._last_topic_model = self._model
         self._last_topic_branch = git_branch
-        topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
+        if self._pm_profile:
+            topic = "Project Manager | 0 active sessions | idle"
+        else:
+            topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
         try:
             await client.set_topic(topic)
         except Exception as e:
@@ -1216,6 +1238,27 @@ class SummonSession:
         logger.info("PM: created new channel #%s", cname)
         return new_id, cname
 
+    async def _post_pm_welcome(self, client: SlackClient, web_client: AsyncWebClient) -> None:
+        """Post the PM welcome message and pin it (non-fatal)."""
+        welcome_text = (
+            "*Project Manager Status*\n"
+            "---\n"
+            "No active sessions.\n\n"
+            "_Send a message to start working._"
+        )
+        try:
+            msg_ref = await client.post(welcome_text)
+            # Pin the status message
+            try:
+                await web_client.pins_add(
+                    channel=client.channel_id,
+                    timestamp=msg_ref.ts,
+                )
+            except Exception as e:
+                logger.debug("PM: failed to pin status message: %s", e)
+        except Exception as e:
+            logger.debug("PM: failed to post welcome message: %s", e)
+
     async def _init_canvas(
         self, client: SlackClient, registry: SessionRegistry
     ) -> CanvasStore | None:
@@ -1330,10 +1373,20 @@ class SummonSession:
             base_prompt += _CANVAS_PROMPT_SECTION
         system_prompt_append = base_prompt
 
+        # Fetch workflow instructions once for PM sessions (survives compaction restarts)
+        pm_workflow = ""
+        if is_pm and self._project_id:
+            try:
+                pm_workflow = await rt.registry.get_effective_workflow(self._project_id)
+            except Exception as e:
+                logger.warning("Failed to fetch workflow instructions: %s", e)
+
         while True:
             if is_pm:
                 system_prompt = build_pm_system_prompt(
-                    cwd=self._cwd, scan_interval_s=self._scan_interval_s
+                    cwd=self._cwd,
+                    scan_interval_s=self._scan_interval_s,
+                    workflow_instructions=pm_workflow,
                 )
             else:
                 system_prompt = {

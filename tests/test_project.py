@@ -348,6 +348,142 @@ class TestBuildPmSystemPrompt:
 
 
 # ---------------------------------------------------------------------------
+# PM system prompt: workflow injection
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPmSystemPromptWorkflow:
+    def test_no_workflow_by_default(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "Workflow Instructions" not in result["append"]
+
+    def test_empty_workflow_excluded(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, workflow_instructions="")
+        assert "Workflow Instructions" not in result["append"]
+
+    def test_workflow_instructions_appended(self):
+        instructions = "Always use TDD. Run tests before committing."
+        result = build_pm_system_prompt(
+            cwd="/tmp", scan_interval_s=900, workflow_instructions=instructions
+        )
+        assert "## Workflow Instructions" in result["append"]
+        assert instructions in result["append"]
+
+    def test_workflow_instructions_include_compliance_notice(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp", scan_interval_s=900, workflow_instructions="Use TDD."
+        )
+        assert "Global PM will audit" in result["append"]
+
+    def test_workflow_instructions_after_base_prompt(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp", scan_interval_s=900, workflow_instructions="custom rule"
+        )
+        append = result["append"]
+        # Base prompt content comes before workflow section
+        base_idx = append.index("Project Manager")
+        wf_idx = append.index("## Workflow Instructions")
+        assert base_idx < wf_idx
+
+    def test_workflow_preserves_structure(self):
+        result = build_pm_system_prompt(
+            cwd="/my/dir", scan_interval_s=600, workflow_instructions="rule1"
+        )
+        assert result["type"] == "preset"
+        assert result["preset"] == "claude_code"
+        assert "/my/dir" in result["append"]
+        assert "10 minutes" in result["append"]
+        assert "rule1" in result["append"]
+
+
+# ---------------------------------------------------------------------------
+# PM welcome message
+# ---------------------------------------------------------------------------
+
+
+class TestPostPmWelcome:
+    async def test_pm_welcome_posts_message(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-welcome-test")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        msg_ref = MagicMock()
+        msg_ref.ts = "1234.5678"
+        client.post = AsyncMock(return_value=msg_ref)
+
+        web_client = AsyncMock()
+
+        await session._post_pm_welcome(client, web_client)
+
+        client.post.assert_called_once()
+        posted_text = client.post.call_args[0][0]
+        assert "Project Manager Status" in posted_text
+        assert "No active sessions" in posted_text
+
+    async def test_pm_welcome_pins_message(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-pin-test")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        msg_ref = MagicMock()
+        msg_ref.ts = "1234.5678"
+        client.post = AsyncMock(return_value=msg_ref)
+
+        web_client = AsyncMock()
+
+        await session._post_pm_welcome(client, web_client)
+
+        web_client.pins_add.assert_called_once_with(channel="C_PM", timestamp="1234.5678")
+
+    async def test_pm_welcome_survives_pin_failure(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-pin-fail")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        msg_ref = MagicMock()
+        msg_ref.ts = "1234.5678"
+        client.post = AsyncMock(return_value=msg_ref)
+
+        web_client = AsyncMock()
+        web_client.pins_add = AsyncMock(side_effect=Exception("Slack API error"))
+
+        # Should not raise
+        await session._post_pm_welcome(client, web_client)
+
+    async def test_pm_welcome_survives_post_failure(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="test-pm", pm_profile=True)
+        session = SummonSession(config=config, options=options, session_id="pm-post-fail")
+
+        client = MagicMock()
+        client.channel_id = "C_PM"
+        client.post = AsyncMock(side_effect=Exception("Post failed"))
+
+        web_client = AsyncMock()
+
+        # Should not raise
+        await session._post_pm_welcome(client, web_client)
+
+
+# ---------------------------------------------------------------------------
 # CLI: project commands
 # ---------------------------------------------------------------------------
 
@@ -856,6 +992,45 @@ class TestSuspendedStatus:
         await registry.update_status("race-err-sid", final)
         result = await registry.get_session("race-err-sid")
         assert result["status"] == "suspended"
+
+
+# ---------------------------------------------------------------------------
+# Workflow instructions: registry integration
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowInstructionsRegistry:
+    async def test_effective_workflow_returns_project_override(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-proj", str(tmp_path))
+        await registry.set_project_workflow(project_id, "project-specific rules")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "project-specific rules"
+
+    async def test_effective_workflow_falls_back_to_global(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-fallback", str(tmp_path))
+        await registry.set_workflow_defaults("global defaults")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "global defaults"
+
+    async def test_effective_workflow_project_overrides_global(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-override", str(tmp_path))
+        await registry.set_workflow_defaults("global defaults")
+        await registry.set_project_workflow(project_id, "project override")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "project override"
+
+    async def test_effective_workflow_empty_when_neither_set(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-empty", str(tmp_path))
+        result = await registry.get_effective_workflow(project_id)
+        assert result == ""
+
+    async def test_clear_project_workflow_falls_back(self, registry, tmp_path):
+        project_id = await registry.add_project("wf-clear", str(tmp_path))
+        await registry.set_workflow_defaults("global defaults")
+        await registry.set_project_workflow(project_id, "project rules")
+        await registry.clear_project_workflow(project_id)
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "global defaults"
 
 
 # ---------------------------------------------------------------------------
