@@ -68,7 +68,7 @@ def make_auth(**overrides) -> SessionAuth:
 
 
 def make_session(session_id: str = "test-session", **overrides) -> SummonSession:
-    opt_fields = ("cwd", "name", "model", "effort", "resume", "pm_profile")
+    opt_fields = ("cwd", "name", "model", "effort", "resume", "channel_id", "pm_profile")
     opts_kw = {k: overrides.pop(k) for k in list(overrides) if k in opt_fields}
     auth_fields = ("short_code", "expires_at")
     auth_kw = {k: overrides.pop(k) for k in list(overrides) if k in auth_fields}

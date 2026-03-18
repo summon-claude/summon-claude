@@ -643,6 +643,7 @@ class SessionOptions:
     model: str | None = None
     effort: str = "high"
     resume: str | None = None
+    channel_id: str | None = None
     pm_profile: bool = False
     auth_only: bool = False
     project_id: str | None = None
@@ -730,6 +731,7 @@ class SummonSession:
         self._model = options.model
         self._effort = options.effort
         self._resume = options.resume
+        self._channel_id_option = options.channel_id
 
         self._auth: SessionAuth | None = auth
         self._claude: ClaudeSDKClient | None = None
@@ -1099,7 +1101,17 @@ class SummonSession:
         # --- NOW create the channel-bound SlackClient ---
         client = SlackClient(web_client, channel_id)
 
-        await _post_session_header(client, self._cwd, self._model, self._session_id)
+        if self._channel_id_option:
+            # Resume banner instead of full header
+            try:
+                await client.post(
+                    ":arrows_counterclockwise: Session resumed"
+                    " \u2014 continuing previous conversation."
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume banner: %s", e)
+        else:
+            await _post_session_header(client, self._cwd, self._model, self._session_id)
 
         # PM-specific: welcome message, pinned status, and PM topic
         if self._pm_profile:
@@ -1118,12 +1130,36 @@ class SummonSession:
             logger.debug("Failed to set initial topic: %s", e)
 
         # --- Canvas initialization (non-fatal) ---
-        try:
-            canvas_store = await self._init_canvas(client, registry)
-            self._canvas_store = canvas_store
-        except Exception as e:
-            logger.warning("Canvas initialization failed (non-fatal): %s", redact_secrets(str(e)))
-            self._canvas_store = None
+        if self._channel_id_option:
+            # Resume: load canvas from channels table
+            try:
+                channel_row = await registry.get_channel(channel_id)
+                if channel_row and channel_row.get("canvas_id"):
+                    self._canvas_store = CanvasStore(
+                        session_id=self._session_id,
+                        canvas_id=channel_row["canvas_id"],
+                        client=client,
+                        registry=registry,
+                        markdown=channel_row.get("canvas_markdown") or "",
+                    )
+                    self._canvas_store.start_sync()
+                else:
+                    self._canvas_store = None
+            except Exception as e:
+                logger.warning(
+                    "Canvas resume failed (non-fatal): %s", redact_secrets(str(e))
+                )
+                self._canvas_store = None
+        else:
+            try:
+                canvas_store = await self._init_canvas(client, registry)
+                self._canvas_store = canvas_store
+            except Exception as e:
+                logger.warning(
+                    "Canvas initialization failed (non-fatal): %s",
+                    redact_secrets(str(e)),
+                )
+                self._canvas_store = None
 
         # Notify the authenticating user
         if self._authenticated_user_id:
@@ -1223,6 +1259,59 @@ class SummonSession:
         raise RuntimeError(
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
+
+    async def _handle_archived_channel(
+        self,
+        web_client: AsyncWebClient,
+        registry: SessionRegistry,
+        channel_id: str,
+        info: dict,
+    ) -> tuple[str, str]:
+        """Handle an archived channel during resume.
+
+        Tries to unarchive first, falls back to creating a replacement channel.
+        Returns ``(channel_id, channel_name)``.
+        """
+        # Try to unarchive
+        try:
+            await web_client.conversations_unarchive(channel=channel_id)
+            channel_name = info["channel"]["name"]
+            logger.info("Unarchived channel %s for resume", channel_id)
+            return channel_id, channel_name
+        except Exception as e:
+            logger.warning("Cannot unarchive %s: %s — creating replacement", channel_id, e)
+
+        # Fallback: create new channel with same name (Slack allows for archived channels)
+        old_name = info["channel"]["name"]
+        try:
+            resp = await web_client.conversations_create(name=old_name, is_private=True)
+            new_id: str = resp["channel"]["id"]
+            new_name: str = resp["channel"]["name"]
+        except Exception:
+            # Name might not be available — use suffixed name
+            new_name_try = f"{old_name[:70]}-resumed"
+            resp = await web_client.conversations_create(name=new_name_try, is_private=True)
+            new_id = resp["channel"]["id"]
+            new_name = resp["channel"]["name"]
+
+        # Update channels table with new channel_id
+        old_channel = await registry.get_channel(channel_id)
+        if old_channel:
+            await registry.register_channel(
+                channel_id=new_id,
+                channel_name=new_name,
+                cwd=old_channel.get("cwd", self._cwd),
+                authenticated_user_id=old_channel.get("authenticated_user_id"),
+            )
+            if old_channel.get("claude_session_id"):
+                await registry.update_channel_claude_session(
+                    new_id, old_channel["claude_session_id"]
+                )
+
+        logger.info(
+            "Created replacement channel %s -> %s for archived %s", old_name, new_id, channel_id
+        )
+        return new_id, new_name
 
     async def _get_or_create_pm_channel(  # noqa: PLR0912
         self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
@@ -1881,6 +1970,12 @@ class SummonSession:
             await rt.registry.update_status(
                 self._session_id, "active", claude_session_id=claude_sid
             )
+            # Also update channels table to track latest Claude session
+            if self._channel_id:
+                try:
+                    await rt.registry.update_channel_claude_session(self._channel_id, claude_sid)
+                except Exception as e:
+                    logger.debug("Failed to update channel claude_session_id: %s", e)
             logger.info("Captured Claude session ID: %s", claude_sid[:16])
             try:
                 await rt.client.post(
