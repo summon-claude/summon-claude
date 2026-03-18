@@ -94,6 +94,25 @@ class TestUploadFile:
         # No thread_ts in the call — main channel
         assert call_kwargs.get("thread_ts") is None
 
+    async def test_snippet_type_forwarded(self, tools, mock_client):
+        args = {
+            "content": "diff content",
+            "filename": "test.diff",
+            "title": "Diff",
+            "snippet_type": "diff",
+        }
+        result = await tools["slack_upload_file"].handler(args)
+        assert "Uploaded" in result["content"][0]["text"]
+        call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
+        assert call_kwargs["snippet_type"] == "diff"
+
+    async def test_snippet_type_omitted_when_absent(self, tools, mock_client):
+        await tools["slack_upload_file"].handler(
+            {"content": "data", "filename": "f.txt", "title": "T"}
+        )
+        call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
+        assert "snippet_type" not in call_kwargs
+
 
 class TestCreateThread:
     async def test_happy_path(self, tools, mock_client):

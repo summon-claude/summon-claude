@@ -225,9 +225,11 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         (
             "Upload a file to the Slack session channel. "
             "content: file text content. filename: name with extension (e.g. 'output.txt'). "
-            "title: display title shown in Slack."
+            "title: display title shown in Slack. "
+            "snippet_type: optional syntax highlighting type (e.g. 'diff', 'python', 'json'). "
+            "Enables Slack's native syntax highlighting for the uploaded file."
         ),
-        {"content": str, "filename": str, "title": str},
+        {"content": str, "filename": str, "title": str, "snippet_type": str},
     )
     async def upload_file(args: dict) -> dict:
         try:
@@ -245,6 +247,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                 args["content"],
                 args["filename"],
                 title=args.get("title", args["filename"]),
+                snippet_type=args.get("snippet_type"),
             )
         except Exception:
             return {
