@@ -37,6 +37,25 @@ _AUTO_APPROVE_TOOLS = frozenset(
     ]
 )
 
+# GitHub MCP tools that are always auto-approved (read-only or non-destructive creates)
+_GITHUB_MCP_AUTO_APPROVE = frozenset(
+    [
+        "mcp__github__pull_request_read",
+        "mcp__github__get_file_contents",
+        "mcp__github__create_pull_request",
+        "mcp__github__create_issue",
+        "mcp__github__add_issue_comment",
+        "mcp__github__pull_request_review_write",
+    ]
+)
+
+# GitHub MCP tool name prefixes that are auto-approved
+_GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
+    "mcp__github__get_",
+    "mcp__github__list_",
+    "mcp__github__search_",
+)
+
 _PERMISSION_TIMEOUT_S = 300  # 5 minutes
 
 
@@ -142,6 +161,13 @@ class PermissionHandler:
         # 2. Static auto-approve list is the primary gate for allowing tools
         if tool_name in _AUTO_APPROVE_TOOLS:
             logger.debug("Auto-approving tool: %s", tool_name)
+            return PermissionResultAllow()
+
+        # 2b. GitHub MCP auto-approve: exact names and prefix matches
+        if tool_name in _GITHUB_MCP_AUTO_APPROVE or tool_name.startswith(
+            _GITHUB_MCP_AUTO_APPROVE_PREFIXES
+        ):
+            logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
             return PermissionResultAllow()
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist
