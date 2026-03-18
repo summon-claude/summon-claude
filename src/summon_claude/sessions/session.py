@@ -1849,12 +1849,16 @@ class SummonSession:
         # Post disconnect message (channel is preserved, not archived)
         await self._post_disconnect_message(rt)
 
-        # Update registry
+        # Update registry — don't overwrite "suspended" (set by project down)
         try:
+            current = await rt.registry.get_session(self._session_id)
+            final_status = (
+                "suspended" if current and current.get("status") == "suspended" else "completed"
+            )
             await asyncio.wait_for(
                 rt.registry.update_status(
                     self._session_id,
-                    "completed",
+                    final_status,
                     ended_at=datetime.now(UTC).isoformat(),
                 ),
                 timeout=_CLEANUP_TIMEOUT_S,

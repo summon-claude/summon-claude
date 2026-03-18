@@ -1083,10 +1083,16 @@ class TestProjectUpOrchestration:
         needing_pm = [_mock_project(name="proj-a", directory="/tmp/test-project")]
 
         # Mock SummonSession so the orchestrator can create PM sessions
-        pm_stub = _StubSession()
+        mock_ss = MagicMock(return_value=_StubSession())
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
-            patch("summon_claude.sessions.manager.SummonSession", return_value=pm_stub),
+            patch("summon_claude.sessions.manager.SummonSession", mock_ss),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             # Start the orchestrator
             orch_task = asyncio.create_task(
@@ -1103,8 +1109,8 @@ class TestProjectUpOrchestration:
             await asyncio.wait_for(orch_task, timeout=5)
 
         assert manager._project_up_in_flight is False
-        # Verify PM session was created
-        assert len(manager._tasks) >= 1
+        # Verify PM session was created (stub completes instantly, so check constructor calls)
+        assert mock_ss.call_count >= 1
 
         # Cleanup
         for t in list(manager._background_tasks):
@@ -1133,16 +1139,22 @@ class TestProjectUpOrchestration:
             pm_stubs.append(s)
             return s
 
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
             patch("summon_claude.sessions.manager.SummonSession", side_effect=make_pm_stub),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(auth_stub, needing_pm),  # type: ignore[arg-type]
                 timeout=5,
             )
 
-        assert len(manager._tasks) == 2
+        assert len(pm_stubs) == 2
 
         for t in list(manager._background_tasks):
             t.cancel()
@@ -1172,17 +1184,23 @@ class TestProjectUpOrchestration:
                 raise RuntimeError("config exploded")
             return _StubSession()
 
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
             patch("summon_claude.sessions.manager.SummonSession", side_effect=make_pm_stub),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(auth_stub, needing_pm),  # type: ignore[arg-type]
                 timeout=5,
             )
 
-        # First project failed, second succeeded
-        assert len(manager._tasks) == 1
+        # First project failed (call_count=1 raised), second succeeded (call_count=2)
+        assert call_count == 2
         assert manager._project_up_in_flight is False
 
         for t in list(manager._background_tasks):
@@ -1203,13 +1221,21 @@ class TestProjectUpOrchestration:
             _mock_project(name="gone", directory="/nonexistent/path/gone"),
         ]
 
-        with patch("pathlib.Path.is_dir", return_value=False):
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
+        with (
+            patch("pathlib.Path.is_dir", return_value=False),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(auth_stub, needing_pm),  # type: ignore[arg-type]
                 timeout=5,
             )
 
-        # No PM sessions should have been created
+        # No PM sessions should have been created (directory doesn't exist)
         assert len(manager._tasks) == 0
 
         for t in list(manager._background_tasks):
@@ -1251,10 +1277,16 @@ class TestProjectUpOrchestration:
         manager._project_up_in_flight = True
 
         auth_stub = _StubSession()
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
 
         with (
             patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             orch_task = asyncio.create_task(
                 manager._project_up_orchestrator(
@@ -1282,12 +1314,18 @@ class TestProjectUpOrchestration:
         auth_stub = _StubSession()
         auth_stub.authenticate("U001")
 
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
             patch(
                 "summon_claude.sessions.manager.SummonSession",
                 side_effect=RuntimeError("boom"),
             ),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(
@@ -1320,12 +1358,18 @@ class TestProjectUpOrchestration:
                 super().authenticate(user_id)
                 pm_sessions_created.append(user_id)
 
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
             patch(
                 "summon_claude.sessions.manager.SummonSession",
                 return_value=_CapturePMSession(),
             ),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(
@@ -1363,9 +1407,15 @@ class TestProjectUpOrchestration:
         fired = []
         manager._grace_timer = loop.call_later(9999, lambda: fired.append(True))
 
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
         with (
             patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
             patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
         ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(
@@ -1443,3 +1493,155 @@ class TestBackgroundTaskDone:
         await asyncio.sleep(0)
 
         assert task not in manager._background_tasks
+
+
+# ---------------------------------------------------------------------------
+# Tests: cascade restart of suspended sessions
+# ---------------------------------------------------------------------------
+
+
+class TestCascadeRestart:
+    """_restart_suspended_sessions revives sessions stopped by project down."""
+
+    async def test_restart_suspended_sessions(self):
+        """Orchestrator restarts sessions with status 'suspended'."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        suspended_session = {
+            "session_id": "old-sess-1",
+            "session_name": "test-proj-abc123",
+            "cwd": "/tmp/test-project",
+            "model": "opus",
+            "status": "suspended",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.update_status = AsyncMock()
+
+        child_stubs = []
+
+        def make_stub(**kwargs):
+            s = _StubSession()
+            child_stubs.append(s)
+            return s
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", side_effect=make_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        # 1 PM session + 1 restarted child session = 2 SummonSession() calls
+        assert len(child_stubs) == 2
+        # Old suspended session should be marked completed
+        mock_reg.update_status.assert_any_call("old-sess-1", "completed")
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_no_suspended_sessions_is_noop(self):
+        """When no sessions are suspended, no child sessions are created."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
+
+        mock_ss = MagicMock(return_value=_StubSession())
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", mock_ss),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        # Only the PM session, no child restarts
+        assert mock_ss.call_count == 1
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+    async def test_suspended_restart_failure_continues(self):
+        """If one suspended session fails to restart, others still proceed."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        suspended_sessions = [
+            {"session_id": "s1", "cwd": "/tmp/bad", "status": "suspended"},
+            {"session_id": "s2", "cwd": "/tmp/good", "status": "suspended"},
+        ]
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=suspended_sessions)
+        mock_reg.update_status = AsyncMock()
+
+        call_count = 0
+
+        def make_stub(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            # PM session (1st call) succeeds, child #1 (2nd) fails, child #2 (3rd) succeeds
+            if call_count == 2:
+                raise RuntimeError("bad cwd")
+            return _StubSession()
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", side_effect=make_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(
+                    auth_stub,
+                    [_mock_project()],  # type: ignore[arg-type]
+                ),
+                timeout=5,
+            )
+
+        # s1 failed, s2 succeeded → only s2 marked completed
+        mock_reg.update_status.assert_called_once_with("s2", "completed")
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )

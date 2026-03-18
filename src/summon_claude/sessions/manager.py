@@ -521,7 +521,7 @@ class SessionManager:
         auth_session: SummonSession,
         needing_pm: list[dict[str, Any]],
     ) -> None:
-        """Background task: wait for auth, then create PM sessions directly."""
+        """Background task: wait for auth, then create PM + restart suspended sessions."""
         try:
             async with asyncio.timeout(360):
                 await auth_session._authenticated_event.wait()  # noqa: SLF001
@@ -539,12 +539,93 @@ class SessionManager:
                         e,
                     )
 
+            # Cascade restart: revive sessions suspended by project down
+            await self._restart_suspended_sessions(needing_pm, user_id)
+
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
             logger.error("project_up orchestrator failed: %s", e, exc_info=True)
         finally:
             self._project_up_in_flight = False
+
+    async def _restart_suspended_sessions(
+        self,
+        projects: list[dict[str, Any]],
+        user_id: str,
+    ) -> None:
+        """Restart sessions that were suspended by ``project down``."""
+        async with SessionRegistry() as registry:
+            for project in projects:
+                project_id = project["project_id"]
+                sessions = await registry.get_project_sessions(project_id)
+                suspended = [s for s in sessions if s.get("status") == "suspended"]
+                for sess in suspended:
+                    try:
+                        self._start_child_session(
+                            project=project,
+                            user_id=user_id,
+                            cwd=sess.get("cwd", project["directory"]),
+                            model=sess.get("model"),
+                        )
+                        # Mark old suspended session as completed
+                        await registry.update_status(sess["session_id"], "completed")
+                        logger.info(
+                            "PM: restarted suspended session %s for project %s",
+                            sess["session_id"][:8],
+                            project["name"],
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "PM: failed to restart suspended session %s: %s",
+                            sess.get("session_id", "?")[:8],
+                            e,
+                        )
+
+    def _start_child_session(
+        self,
+        project: dict[str, Any],
+        user_id: str,
+        cwd: str,
+        model: str | None = None,
+    ) -> None:
+        """Create and start a regular (non-PM) child session for *project*."""
+        if not pathlib.Path(cwd).is_dir():
+            raise FileNotFoundError(f"Directory not found: {cwd}")
+
+        new_session_id = str(uuid.uuid4())
+        options = SessionOptions(
+            cwd=cwd,
+            name=f"{project['channel_prefix']}-{secrets.token_hex(3)}",
+            model=model,
+            project_id=project["project_id"],
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+        )
+        new_session.authenticate(user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-child-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info(
+            "SessionManager: started child session %s for project %s (cwd=%s)",
+            new_session_id,
+            project["name"],
+            cwd,
+        )
 
     def _start_pm_for_project(self, project: dict[str, Any], user_id: str) -> None:
         """Create and start a single PM session for *project*."""

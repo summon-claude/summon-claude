@@ -120,7 +120,7 @@ class TestUpdatableFields:
 class TestValidStatuses:
     def test_valid_statuses_matches_expected(self):
         """Guard against accidental addition/removal of valid statuses."""
-        expected = {"pending_auth", "active", "completed", "errored"}
+        expected = {"pending_auth", "active", "completed", "errored", "suspended"}
         assert expected == SessionRegistry._VALID_STATUSES
 
     async def test_update_status_rejects_invalid_status(self, registry):

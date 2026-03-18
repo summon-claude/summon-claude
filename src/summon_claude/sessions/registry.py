@@ -243,7 +243,9 @@ class SessionRegistry:
                 raise
             await db.commit()
 
-    _VALID_STATUSES: frozenset[str] = frozenset({"pending_auth", "active", "completed", "errored"})
+    _VALID_STATUSES: frozenset[str] = frozenset(
+        {"pending_auth", "active", "completed", "errored", "suspended"}
+    )
 
     _UPDATABLE_FIELDS: frozenset[str] = frozenset(
         {

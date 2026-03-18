@@ -90,7 +90,10 @@ async def launch_project_managers() -> None:
 
 
 async def stop_project_managers() -> list[str]:
-    """Stop all active PM sessions for registered projects.
+    """Stop all active project sessions (PM + children) for registered projects.
+
+    PM sessions are stopped normally. Child sessions are marked ``suspended``
+    so ``project up`` can deterministically restart them.
 
     Returns a list of session_ids that were stopped.
     """
@@ -99,6 +102,7 @@ async def stop_project_managers() -> list[str]:
         return []
 
     stopped: list[str] = []
+    suspended: list[str] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
         if not projects:
@@ -106,18 +110,36 @@ async def stop_project_managers() -> list[str]:
             return []
 
         for project in projects:
+            pname = project["name"]
             sessions = await registry.get_project_sessions(project["project_id"])
             active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]
             for session in active:
                 sid = session["session_id"]
+                sname = session.get("session_name", "")
+                is_pm = "-pm-" in sname
                 try:
                     found = await daemon_client.stop_session(sid)
-                    if found:
+                    if not found:
+                        continue
+                    if is_pm:
                         stopped.append(sid)
-                        click.echo(f"  Stopped PM for {project['name']!r} (session {sid[:8]}...)")
+                        click.echo(f"  Stopped PM for {pname!r} ({sid[:8]}...)")
+                    else:
+                        # Mark child session as suspended for cascade restart
+                        await registry.update_status(sid, "suspended")
+                        suspended.append(sid)
+                        label = sname or sid[:8]
+                        click.echo(f"  Suspended {label!r} for {pname!r}")
                 except Exception as e:
                     click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
-    if not stopped:
-        click.echo("No active PM sessions found.")
-    return stopped
+    if not stopped and not suspended:
+        click.echo("No active project sessions found.")
+    else:
+        parts: list[str] = []
+        if stopped:
+            parts.append(f"{len(stopped)} PM")
+        if suspended:
+            parts.append(f"{len(suspended)} subsession{'s' if len(suspended) != 1 else ''}")
+        click.echo(f"Stopped {', '.join(parts)}.")
+    return stopped + suspended
