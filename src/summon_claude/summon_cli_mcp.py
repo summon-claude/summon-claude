@@ -44,6 +44,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
     _ipc_create_session: Callable[..., Awaitable[str]] | None = None,
     _ipc_stop_session: Callable[..., Awaitable[bool]] | None = None,
     _ipc_send_message: Callable[..., Awaitable[dict]] | None = None,
+    _ipc_resume_session: Callable[..., Awaitable[dict]] | None = None,
     _web_client: Any | None = None,
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances for session lifecycle management.
@@ -59,6 +60,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         _ipc_create_session: Override for daemon IPC create (testing).
         _ipc_stop_session: Override for daemon IPC stop (testing).
         _ipc_send_message: Override for daemon IPC send_message (testing).
+        _ipc_resume_session: Override for daemon IPC resume (testing).
         _web_client: AsyncWebClient for cross-channel Slack posts (testing).
     """
 
@@ -593,6 +595,102 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 "is_error": True,
             }
 
+    @tool(
+        "session_resume",
+        (
+            "Resume a completed or errored session. Creates a new Summon "
+            "session connected to the same Slack channel with Claude SDK "
+            "transcript continuity. The channel is bound to one Claude "
+            "session chain — all resumes continue the same conversation. "
+            "session_id: the stopped session's ID. "
+            "model: optional model override."
+        ),
+        {"session_id": str, "model": str},
+    )
+    async def session_resume(args: dict) -> dict:  # noqa: PLR0911
+        target_id = args.get("session_id", "")
+        if not target_id:
+            return {
+                "content": [{"type": "text", "text": "Error: session_id is required."}],
+                "is_error": True,
+            }
+
+        try:
+            target = await registry.get_session(target_id)
+
+            # Scope guard: session must exist and belong to same user
+            if target is None or target.get("authenticated_user_id") != authenticated_user_id:
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Error: session '{target_id}' not found."}
+                    ],
+                    "is_error": True,
+                }
+
+            # Parent-child scope guard
+            if target.get("parent_session_id") != session_id:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: can only resume sessions you spawned.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Target must be completed or errored
+            if target.get("status") not in ("completed", "errored"):
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Error: session '{target_id}' is "
+                                f"{target.get('status', 'unknown')}. "
+                                "Can only resume completed or errored sessions."
+                            ),
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            if not target.get("slack_channel_id"):
+                return {
+                    "content": [{"type": "text", "text": "Error: session has no Slack channel."}],
+                    "is_error": True,
+                }
+
+            ipc_resume = _ipc_resume_session
+            if ipc_resume is None:
+                from summon_claude.cli.daemon_client import (  # noqa: PLC0415
+                    resume_session as _resume,
+                )
+
+                ipc_resume = _resume
+
+            model = args.get("model")
+            result = await ipc_resume(session_id=target_id, model=model)
+
+            new_sid = result.get("session_id", "?")
+            target_name = target.get("session_name") or target_id[:8]
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Session '{target_name}' resumed (new session: {new_sid}). "
+                            f"Channel: <#{target.get('slack_channel_id')}>"
+                        ),
+                    }
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error resuming session: {e}"}],
+                "is_error": True,
+            }
+
     return [
         session_list,
         session_info,
@@ -600,6 +698,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         session_stop,
         session_log_status,
         session_message,
+        session_resume,
     ]
 
 

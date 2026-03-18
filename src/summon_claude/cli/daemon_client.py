@@ -123,6 +123,23 @@ async def send_message_to_session(
     )
 
 
+async def resume_session(
+    session_id: str,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Resume a stopped session via daemon IPC.
+
+    Returns the daemon response dict with new ``session_id`` and ``channel_id``.
+    """
+    return await _request(
+        {
+            "type": "resume_session",
+            "session_id": session_id,
+            "model": model,
+        }
+    )
+
+
 async def stop_session(session_id: str) -> bool:
     """Send a ``stop_session`` request to the daemon.
 

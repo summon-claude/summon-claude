@@ -77,6 +77,7 @@ class SessionManager:
         self._shutdown_event = asyncio.Event()
         self._start_time: float = time.monotonic()
         self._project_up_in_flight = False  # guard against concurrent project_up
+        self._resuming_channels: set[str] = set()  # guard against concurrent resume
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
 
@@ -419,6 +420,9 @@ class SessionManager:
                     "channel_id": session.channel_id,
                 }
 
+            case "resume_session":
+                return await self._handle_resume_session(msg)
+
             case "project_up":
                 return await self._handle_project_up(msg)
 
@@ -478,6 +482,111 @@ class SessionManager:
                         f":x: *Session terminated unexpectedly*: `{e}`{recovery_hint}",
                     )
                     break
+
+    # ------------------------------------------------------------------
+    # project up — daemon-side orchestration
+    # ------------------------------------------------------------------
+
+    async def _handle_resume_session(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """IPC handler for ``resume_session``.
+
+        Looks up the old session, validates state, and creates a new session
+        connected to the same channel with Claude SDK transcript continuity.
+        """
+        old_session_id = msg.get("session_id")
+        if not old_session_id:
+            return {"type": "error", "message": "Missing session_id"}
+
+        async with SessionRegistry() as registry:
+            old_session = await registry.get_session(old_session_id)
+            if not old_session:
+                return {"type": "error", "message": f"Session {old_session_id} not found"}
+            if old_session["status"] not in ("completed", "errored"):
+                return {
+                    "type": "error",
+                    "message": "Session is still active — use session_message instead",
+                }
+            channel_id = old_session.get("slack_channel_id")
+            if not channel_id:
+                return {"type": "error", "message": "Session has no associated channel"}
+
+            channel = await registry.get_channel(channel_id)
+            claude_session_id = (
+                channel["claude_session_id"]
+                if channel and channel.get("claude_session_id")
+                else old_session.get("claude_session_id")
+            )
+            if not claude_session_id:
+                return {"type": "error", "message": "No Claude session ID to resume from"}
+
+        # Atomic guard: reject if channel already resuming or has active session
+        if channel_id in self._resuming_channels:
+            return {"type": "error", "message": "Resume already in progress for this channel"}
+        active = [
+            s for s in self._sessions.values() if getattr(s, "channel_id", None) == channel_id
+        ]
+        if active:
+            return {"type": "error", "message": "Channel already has an active session"}
+
+        self._resuming_channels.add(channel_id)
+        try:
+            options = SessionOptions(
+                cwd=old_session["cwd"],
+                name=old_session.get("session_name") or "",
+                model=msg.get("model") or old_session.get("model"),
+                effort=old_session.get("effort") or "high",
+                resume=claude_session_id,
+                channel_id=channel_id,
+            )
+            session_id = await self.create_resumed_session(
+                options,
+                authenticated_user_id=old_session.get("authenticated_user_id"),
+                parent_session_id=old_session.get("parent_session_id"),
+            )
+            return {
+                "type": "session_resumed",
+                "session_id": session_id,
+                "channel_id": channel_id,
+            }
+        finally:
+            self._resuming_channels.discard(channel_id)
+
+    async def create_resumed_session(
+        self,
+        options: SessionOptions,
+        authenticated_user_id: str | None = None,
+        parent_session_id: str | None = None,
+    ) -> str:
+        """Create a pre-authenticated session for resume (no spawn token needed).
+
+        Similar to ``create_session_with_spawn_token`` but uses the old
+        session's auth identity directly.
+        """
+        self._cancel_grace_timer()
+        session_id = str(uuid.uuid4())
+
+        session = SummonSession(
+            config=self._config,
+            options=options,
+            auth=None,
+            session_id=session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            parent_session_id=parent_session_id,
+        )
+        if authenticated_user_id:
+            session.authenticate(authenticated_user_id)
+
+        self._sessions[session_id] = session
+        task = asyncio.create_task(
+            self._supervised_session(session, session_id),
+            name=f"session-resume-{session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+        self._tasks[session_id] = task
+        logger.info("SessionManager: created resumed session %s", session_id)
+        return session_id
 
     # ------------------------------------------------------------------
     # project up — daemon-side orchestration
