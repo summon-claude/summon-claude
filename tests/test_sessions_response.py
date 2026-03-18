@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -605,49 +606,78 @@ class TestResponseStreamerUserPing:
 
 
 # ---------------------------------------------------------------------------
-# Tests absorbed from test_content_display.py
+# Tests for diff upload behavior (replaces old _format_diff tests)
 # ---------------------------------------------------------------------------
 
 
-def make_streamer_for_display() -> ResponseStreamer:
-    """Create a ResponseStreamer for _format_diff tests."""
-    client = make_mock_slack_client()
-    router = ThreadRouter(client)
-    return ResponseStreamer(router)
+class TestUploadDiff:
+    async def test_no_change_posts_context_block(self):
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+        await streamer._upload_diff("same", "same", "file.py", "thread_1")
+        # Should post a "No changes" context block
+        assert client.post.call_count >= 1
+        blocks = client.post.call_args.kwargs.get("blocks", [])
+        assert any("No changes" in str(b) for b in blocks)
 
+    async def test_change_uploads_diff_file(self):
+        streamer, router, client = make_streamer()
+        await streamer._upload_diff("old\n", "new\n", "/src/file.py", "thread_1")
+        client.upload.assert_called_once()
+        call_kwargs = client.upload.call_args.kwargs
+        assert call_kwargs["snippet_type"] == "diff"
+        assert call_kwargs["thread_ts"] == "thread_1"
+        assert "file.py.diff" in client.upload.call_args.args[1]
 
-class TestFormatDiff:
-    def test_no_change_returns_no_changes_message(self):
-        streamer = make_streamer_for_display()
-        blocks = streamer._format_diff("same", "same", "file.py")
-        assert len(blocks) == 1
-        assert "No changes" in blocks[0]["text"]["text"]
+    async def test_upload_failure_falls_back_to_mrkdwn(self):
+        streamer, router, client = make_streamer()
+        client.upload.side_effect = Exception("API error")
+        router.active_thread_ts = "thread_1"
+        # Should not raise — falls back to mrkdwn
+        await streamer._upload_diff("old\n", "new\n", "file.py", "thread_1")
+        # Fallback posts mrkdwn blocks
+        assert client.post.call_count >= 1
 
-    def test_change_returns_diff_block(self):
-        streamer = make_streamer_for_display()
-        blocks = streamer._format_diff("old line\n", "new line\n", "file.py")
-        assert len(blocks) >= 1
-        assert "file.py" in blocks[0]["text"]["text"]
+    async def test_edit_tool_triggers_diff_upload(self):
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+        # Give fire-and-forget task a moment
+        await asyncio.sleep(0.05)
+        client.upload.assert_called_once()
+        call_kwargs = client.upload.call_args.kwargs
+        assert call_kwargs["snippet_type"] == "diff"
 
-    def test_diff_contains_code_fence(self):
-        streamer = make_streamer_for_display()
-        blocks = streamer._format_diff("a\n", "b\n", "test.txt")
-        text = blocks[0]["text"]["text"]
-        assert "```" in text
+    async def test_write_tool_triggers_content_upload(self):
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/output.py", "content": "print('hello')"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+        client.upload.assert_called_once()
+        assert "output.py" in client.upload.call_args.args[1]
 
-    def test_large_diff_splits_into_multiple_blocks(self):
-        streamer = make_streamer_for_display()
-        old = "\n".join(f"line {i}" for i in range(500))
-        new = "\n".join(f"changed {i}" for i in range(500))
-        blocks = streamer._format_diff(old, new, "big.py")
-        assert len(blocks) >= 1
-        for block in blocks:
-            assert len(block["text"]["text"]) <= 3000
-
-    def test_first_block_has_filename_header(self):
-        streamer = make_streamer_for_display()
-        blocks = streamer._format_diff("a", "b", "myfile.rs")
-        assert "myfile.rs" in blocks[0]["text"]["text"]
+    async def test_write_md_skips_content_upload(self):
+        streamer, router, client = make_streamer()
+        router.active_thread_ts = "thread_1"
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/README.md", "content": "# Hello"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+        # .md files should NOT trigger upload (Task 9 handles them)
+        client.upload.assert_not_called()
 
 
 class TestSplitTextAdditional:
@@ -945,3 +975,70 @@ class TestPostTurnFooter:
         await streamer.post_turn_footer(":checkered_flag: $0.01")
         blocks = provider.post.call_args.kwargs["blocks"]
         assert any(b["type"] == "divider" for b in blocks)
+
+
+class TestFileChangeCallback:
+    async def test_edit_fires_callback(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+        streamer._current_turn_number = 1
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+
+        assert len(changes) == 1
+        assert changes[0].path == "/src/main.py"
+        assert changes[0].change_type == "modified"
+        assert changes[0].turn_number == 1
+
+    async def test_write_fires_callback_as_created(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+        streamer._current_turn_number = 2
+
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/new_file.py", "content": "line1\nline2\n"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+
+        assert len(changes) == 1
+        assert changes[0].path == "/src/new_file.py"
+        assert changes[0].change_type == "created"
+        assert changes[0].additions == 2
+
+    async def test_no_callback_when_none(self):
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=None)
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        # Should not raise
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
