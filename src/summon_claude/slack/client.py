@@ -37,7 +37,10 @@ def sanitize_for_mrkdwn(text: str, max_len: int = 100) -> str:
     return sanitized if max_len >= len(sanitized) else sanitized[:max_len]
 
 
-_SECRET_RE = re.compile(r"ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+")
+_SECRET_RE = re.compile(
+    r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
+    r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
+)
 
 
 def redact_secrets(text: str) -> str:

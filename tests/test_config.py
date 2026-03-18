@@ -119,6 +119,10 @@ class TestGitHubPAT:
         cfg = _make_config(github_pat="github_pat_abc123")
         assert cfg.github_pat == "github_pat_abc123"
 
+    def test_github_pat_empty_string_treated_as_unset(self):
+        cfg = _make_config(github_pat="")
+        assert cfg.github_mcp_config() is None
+
     def test_github_pat_invalid_prefix(self):
         with pytest.raises(ValueError, match=r"ghp_.*github_pat_"):
             _make_config(github_pat="gho_invalid_token")

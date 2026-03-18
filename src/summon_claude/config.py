@@ -405,7 +405,7 @@ class SummonConfig(BaseSettings):
     @field_validator("github_pat")
     @classmethod
     def _check_github_pat(cls, v: str | None) -> str | None:
-        if v is not None and not v.startswith(("ghp_", "github_pat_")):
+        if v and not v.startswith(("ghp_", "github_pat_")):
             msg = "github_pat must start with 'ghp_' (classic) or 'github_pat_' (fine-grained)"
             raise ValueError(msg)
         return v

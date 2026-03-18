@@ -368,6 +368,15 @@ class TestRedactSecrets:
         assert "ghp_secret123" not in call_kwargs["text"]
         assert "[REDACTED]" in call_kwargs["text"]
 
+    async def test_post_ephemeral_redacts_pat(self):
+        web = MagicMock()
+        web.chat_postEphemeral = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.post_ephemeral("U_USER", "Token: ghp_ephemeral_secret")
+        call_kwargs = web.chat_postEphemeral.call_args.kwargs
+        assert "ghp_ephemeral_secret" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]
+
     async def test_update_redacts_pat(self):
         web = MagicMock()
         web.chat_update = AsyncMock(return_value={})

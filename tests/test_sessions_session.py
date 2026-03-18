@@ -25,6 +25,7 @@ from summon_claude.sessions.registry import (
     MAX_SPAWN_DEPTH,
 )
 from summon_claude.sessions.session import (
+    _SECRET_PATTERN,
     SessionOptions,
     SummonSession,
     _format_file_references,
@@ -1178,6 +1179,30 @@ class TestMCPRegistration:
     async def test_github_mcp_not_wired_when_not_configured(self):
         result = await self._capture_mcp_servers_with_config()
         assert "github" not in result["mcp_servers"]
+
+
+class TestSecretPatternRedaction:
+    """_SECRET_PATTERN must redact all known secret formats in error messages."""
+
+    def test_redacts_github_classic_pat(self):
+        text = "ConnectionError: auth failed for ghp_abc123XYZ token"
+        assert "ghp_abc123XYZ" not in _SECRET_PATTERN.sub("***", text)
+
+    def test_redacts_github_fine_grained_pat(self):
+        text = "Error: github_pat_11ABCDEF_xyz789 rejected"
+        assert "github_pat_11ABCDEF_xyz789" not in _SECRET_PATTERN.sub("***", text)
+
+    def test_redacts_slack_bot_token(self):
+        text = "Error: xoxb-123-456-abc invalid"
+        assert "xoxb-123-456-abc" not in _SECRET_PATTERN.sub("***", text)
+
+    def test_redacts_slack_app_token(self):
+        text = "Error: xapp-1-A1234-567890 invalid"
+        assert "xapp-1-A1234-567890" not in _SECRET_PATTERN.sub("***", text)
+
+    def test_redacts_anthropic_key(self):
+        text = "Error: sk-ant-api03-secretkey invalid"
+        assert "sk-ant-api03-secretkey" not in _SECRET_PATTERN.sub("***", text)
 
 
 # ------------------------------------------------------------------

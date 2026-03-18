@@ -179,7 +179,10 @@ _THINKING_TRIGGERS = frozenset(
 )
 
 # Patterns that may appear in exception messages and should not be stored in the audit log
-_SECRET_PATTERN = re.compile(r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+")
+_SECRET_PATTERN = re.compile(
+    r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
+    r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
+)
 
 _BASE_SYSTEM_APPEND = (
     "You are running headlessly via summon-claude, bridged to a private Slack channel. "
