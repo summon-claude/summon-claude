@@ -98,23 +98,10 @@ async def project_up(cwd: str) -> dict[str, Any]:
     if needed, and launches a background orchestrator.
 
     Returns the raw daemon response dict.  Response type is either
-    ``project_up_auth_required`` (with ``short_code`` and ``request_id``)
+    ``project_up_auth_required`` (with ``short_code``)
     or ``project_up_complete`` (if no projects need PM).
     """
     return await _request({"type": "project_up", "cwd": cwd})
-
-
-async def project_up_await(request_id: str) -> dict[str, Any]:
-    """Long-poll the daemon until project-up orchestration completes.
-
-    Blocks until the daemon finishes spawning PM sessions (after the user
-    authenticates).  Uses a 450s recv timeout to accommodate the daemon's
-    420s internal wait.
-    """
-    return await _request(
-        {"type": "project_up_await", "request_id": request_id},
-        recv_timeout=450.0,
-    )
 
 
 async def stop_session(session_id: str) -> bool:

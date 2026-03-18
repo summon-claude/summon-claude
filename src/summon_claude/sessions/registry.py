@@ -525,15 +525,29 @@ class SessionRegistry:
         return active_ids
 
     async def list_projects(self) -> list[dict]:
-        """List all projects with a ``pm_running`` boolean field."""
+        """List all projects with PM status fields.
+
+        Each row includes:
+        - ``pm_running``: 1 if an active/pending_auth PM session exists
+        - ``last_pm_status``: status of the most recent PM session (or NULL)
+        - ``last_pm_error``: error_message from the most recent PM session (or NULL)
+        """
         db = self._check_connected()
         async with db.execute(
-            "SELECT p.*, "
+            "SELECT p.*,"
             "  EXISTS("
             "    SELECT 1 FROM sessions s"
             "    WHERE s.project_id = p.project_id"
             "      AND s.status IN ('pending_auth', 'active')"
-            "  ) AS pm_running"
+            "  ) AS pm_running,"
+            "  (SELECT s2.status FROM sessions s2"
+            "   WHERE s2.project_id = p.project_id"
+            "   ORDER BY s2.started_at DESC LIMIT 1"
+            "  ) AS last_pm_status,"
+            "  (SELECT s3.error_message FROM sessions s3"
+            "   WHERE s3.project_id = p.project_id"
+            "   ORDER BY s3.started_at DESC LIMIT 1"
+            "  ) AS last_pm_error"
             " FROM projects p ORDER BY p.name"
         ) as cursor:
             rows = await cursor.fetchall()

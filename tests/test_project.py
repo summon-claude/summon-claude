@@ -137,6 +137,8 @@ class TestProjectList:
         projects = await registry.list_projects()
         proj = next(p for p in projects if p["name"] == "idle-proj")
         assert proj["pm_running"] == 0  # SQLite stores bool as int
+        assert proj["last_pm_status"] is None
+        assert proj["last_pm_error"] is None
 
     async def test_list_includes_pm_running_true(self, registry, tmp_path):
         project_id = await registry.add_project("running-proj", str(tmp_path))
@@ -145,6 +147,26 @@ class TestProjectList:
         projects = await registry.list_projects()
         proj = next(p for p in projects if p["name"] == "running-proj")
         assert proj["pm_running"] == 1  # has an active session
+        assert proj["last_pm_status"] == "active"
+
+    async def test_list_shows_errored_status(self, registry, tmp_path):
+        project_id = await registry.add_project("err-proj", str(tmp_path))
+        await registry.register("sess-err", 1234, str(tmp_path), project_id=project_id)
+        await registry.update_status("sess-err", "errored", error_message="SDK crash")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "err-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "errored"
+        assert proj["last_pm_error"] == "SDK crash"
+
+    async def test_list_shows_completed_status(self, registry, tmp_path):
+        project_id = await registry.add_project("done-proj", str(tmp_path))
+        await registry.register("sess-done", 1234, str(tmp_path), project_id=project_id)
+        await registry.update_status("sess-done", "completed")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "done-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "completed"
 
     async def test_list_ordered_by_name(self, registry, tmp_path):
         await registry.add_project("z-proj", str(tmp_path))
@@ -437,7 +459,7 @@ class TestLaunchProjectManagers:
                 return_value={"type": "project_up_complete", "started": [], "errors": []}
             )
             result = await launch_project_managers()
-        assert result == []
+        assert result is None
 
     async def test_launch_with_auth_and_projects(self):
         from summon_claude.cli.project import launch_project_managers
@@ -447,19 +469,11 @@ class TestLaunchProjectManagers:
                 return_value={
                     "type": "project_up_auth_required",
                     "short_code": "abc123",
-                    "request_id": "req-1",
                     "project_count": 1,
                 }
             )
-            mock_dc.project_up_await = AsyncMock(
-                return_value={
-                    "type": "project_up_complete",
-                    "started": [{"session_id": "sid-pm-1", "project": "my-proj"}],
-                    "errors": [],
-                }
-            )
             result = await launch_project_managers()
-        assert result == ["sid-pm-1"]
+        assert result is None
 
     async def test_stop_project_managers_no_projects(self):
         from summon_claude.cli.project import stop_project_managers

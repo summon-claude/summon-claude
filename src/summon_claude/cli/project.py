@@ -62,19 +62,18 @@ async def async_project_list() -> list[dict[str, Any]]:
     return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
-async def launch_project_managers() -> list[str]:
+async def launch_project_managers() -> None:
     """Start PM sessions for all registered projects that don't have one running.
 
-    Sends a single ``project_up`` IPC to the daemon, which handles all
+    Sends a ``project_up`` IPC to the daemon, which handles all
     orchestration: auth, project discovery, and PM session creation.
-
-    Returns a list of session_ids that were started.
+    The daemon works in the background — results visible via ``project list``.
     """
     response = await daemon_client.project_up(cwd=str(pathlib.Path.cwd()))
 
-    # No projects need PM — daemon responded immediately
     if response.get("type") == "project_up_complete":
-        return []
+        click.echo("All projects already have PM agents running.")
+        return
 
     if response.get("type") != "project_up_auth_required":
         raise click.ClickException(
@@ -82,25 +81,12 @@ async def launch_project_managers() -> list[str]:
         )
 
     short_code = response["short_code"]
-    request_id = response["request_id"]
     project_count = response.get("project_count", 0)
 
     click.echo(f"Starting PM agents for {project_count} project(s)...")
     click.echo(f"\nAuthenticate in Slack: /summon {short_code}")
-
-    # Long-poll the daemon until orchestration completes (after user authenticates).
-    # DaemonError is raised by _request() if the daemon returns type=error.
-    result = await daemon_client.project_up_await(request_id)
-
-    started = result.get("started", [])
-    errors = result.get("errors", [])
-
-    for item in started:
-        click.echo(f"  Started PM for {item['project']!r} (session {item['session_id'][:8]}...)")
-    for item in errors:
-        click.echo(f"  Error ({item['project']}): {item['error']}", err=True)
-
-    return [item["session_id"] for item in started]
+    click.echo("\nPM sessions will start after authentication.")
+    click.echo("Run 'summon project list' to check status.")
 
 
 async def stop_project_managers() -> list[str]:

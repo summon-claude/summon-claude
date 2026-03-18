@@ -417,19 +417,35 @@ def project_list(ctx: click.Context, output: str) -> None:
         click.echo("No projects registered.")
         return
     name_w, dir_w = 20, 40
-    click.echo(f"{'NAME':<{name_w}} {'DIRECTORY':<{dir_w}} {'PM':<8} {'ID'}")
-    click.echo("-" * (name_w + dir_w + 8 + 10))
+    click.echo(f"{'NAME':<{name_w}} {'DIRECTORY':<{dir_w}} {'PM':<10} {'ID'}")
+    click.echo("-" * (name_w + dir_w + 10 + 10))
     for p in projects:
         name = p.get("name", "")
         directory = p.get("directory", "")
-        pm_status = "running" if p.get("pm_running") else "-"
         pid = p.get("project_id", "")[:8]
         # Truncate name with suffix ellipsis, directory with prefix ellipsis
         if len(name) > name_w:
             name = name[: name_w - 1] + "\u2026"
         if len(directory) > dir_w:
             directory = "\u2026" + directory[-(dir_w - 1) :]
-        click.echo(f"{name:<{name_w}} {directory:<{dir_w}} {pm_status:<8} {pid}...")
+        # PM status: running > errored > completed > -
+        if p.get("pm_running"):
+            pm_status = "running"
+        elif p.get("last_pm_status") == "errored":
+            pm_status = "errored"
+        elif p.get("last_pm_status") == "completed":
+            pm_status = "stopped"
+        elif p.get("last_pm_status") == "pending_auth":
+            pm_status = "auth…"
+        else:
+            pm_status = "-"
+        click.echo(f"{name:<{name_w}} {directory:<{dir_w}} {pm_status:<10} {pid}...")
+        # Show last error inline if the PM errored
+        if pm_status == "errored" and p.get("last_pm_error"):
+            err = p["last_pm_error"]
+            if len(err) > name_w + dir_w:
+                err = err[: name_w + dir_w - 1] + "\u2026"
+            click.echo(f"  └ {err}", err=True)
 
 
 @cmd_project.command("up")

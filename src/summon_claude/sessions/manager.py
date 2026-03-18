@@ -75,7 +75,6 @@ class SessionManager:
         self._grace_timer: asyncio.TimerHandle | None = None
         self._shutdown_event = asyncio.Event()
         self._start_time: float = time.monotonic()
-        self._project_up_futures: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._project_up_in_flight = False  # guard against concurrent project_up
         self._background_tasks: set[asyncio.Task[None]] = set()
 
@@ -387,9 +386,6 @@ class SessionManager:
             case "project_up":
                 return await self._handle_project_up(msg)
 
-            case "project_up_await":
-                return await self._handle_project_up_await(msg)
-
             case _:
                 return {"type": "error", "message": f"Unknown command: {msg.get('type')}"}
 
@@ -499,15 +495,9 @@ class SessionManager:
             task.add_done_callback(partial(self._on_task_done, session_id=session_id))
             self._tasks[session_id] = task
 
-            # Create future for result and launch background orchestrator
-            request_id = str(uuid.uuid4())
-            loop = asyncio.get_running_loop()
-            future: asyncio.Future[dict[str, Any]] = loop.create_future()
-            self._project_up_futures[request_id] = future
-
             bg_task = asyncio.create_task(
-                self._project_up_orchestrator(request_id, session, needing_pm),
-                name=f"project-up-{request_id}",
+                self._project_up_orchestrator(session, needing_pm),
+                name=f"project-up-{session_id}",
             )
             self._background_tasks.add(bg_task)
             bg_task.add_done_callback(self._on_background_task_done)
@@ -520,49 +510,19 @@ class SessionManager:
             return {
                 "type": "project_up_auth_required",
                 "short_code": auth.short_code,
-                "request_id": request_id,
                 "project_count": len(needing_pm),
             }
         except Exception:
             self._project_up_in_flight = False
             raise
 
-    async def _handle_project_up_await(self, msg: dict[str, Any]) -> dict[str, Any]:
-        """IPC handler for ``project_up_await``.
-
-        Long-polls on the future created by ``project_up`` until the
-        background orchestrator finishes spawning PM sessions.
-        """
-        request_id = msg.get("request_id")
-        if not request_id or request_id not in self._project_up_futures:
-            return {"type": "error", "message": "Unknown or expired request_id"}
-
-        future = self._project_up_futures[request_id]
-        try:
-            result = await asyncio.wait_for(future, timeout=420)
-            return {"type": "project_up_complete", **result}
-        except TimeoutError:
-            return {"type": "error", "message": "Timed out waiting for project launch"}
-        finally:
-            self._project_up_futures.pop(request_id, None)
-
     async def _project_up_orchestrator(
         self,
-        request_id: str,
         auth_session: SummonSession,
         needing_pm: list[dict[str, Any]],
     ) -> None:
-        """Background task: wait for auth, then create PM sessions directly.
-
-        Resolves the ``project_up_futures[request_id]`` future with the result.
-        No spawn tokens or IPC round-trips — sessions are created in-process.
-        """
-        future = self._project_up_futures.get(request_id)
-        if future is None:
-            return
-
+        """Background task: wait for auth, then create PM sessions directly."""
         try:
-            # Wait for the auth session to authenticate
             await asyncio.wait_for(
                 auth_session._authenticated_event.wait(),  # noqa: SLF001
                 timeout=360,
@@ -571,17 +531,13 @@ class SessionManager:
             if user_id is None:
                 raise RuntimeError("Auth session completed without setting user_id")
 
-            started: list[dict[str, str]] = []
-            errors: list[dict[str, str]] = []
-
             for project in needing_pm:
                 project_dir = project["directory"]
                 if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
-                    errors.append(
-                        {
-                            "project": project["name"],
-                            "error": f"Directory not found: {project_dir}",
-                        }
+                    logger.error(
+                        "PM: skipping project %s — directory not found: %s",
+                        project["name"],
+                        project_dir,
                     )
                     continue
 
@@ -603,8 +559,6 @@ class SessionManager:
                 )
                 new_session.authenticate(user_id)
 
-                # Cancel grace timer — it may have been (re)started by
-                # _on_task_done after the auth-only session completed.
                 self._cancel_grace_timer()
                 self._sessions[new_session_id] = new_session
                 task = asyncio.create_task(
@@ -614,46 +568,18 @@ class SessionManager:
                 task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
                 self._tasks[new_session_id] = task
 
-                started.append(
-                    {
-                        "session_id": new_session_id,
-                        "project": project["name"],
-                    }
-                )
                 logger.info(
                     "SessionManager: started PM session %s for project %s",
                     new_session_id,
                     project["name"],
                 )
 
-            if not future.done():
-                future.set_result({"started": started, "errors": errors})
-
         except TimeoutError:
-            if not future.done():
-                future.set_result(
-                    {
-                        "started": [],
-                        "errors": [{"project": "*", "error": "Authentication timed out"}],
-                    }
-                )
+            logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
             logger.error("project_up orchestrator failed: %s", e, exc_info=True)
-            if not future.done():
-                future.set_result({"started": [], "errors": [{"project": "*", "error": str(e)}]})
         finally:
             self._project_up_in_flight = False
-
-            # Clean up the future after a grace period. If the CLI calls
-            # project_up_await, it pops the entry in its own finally.
-            # This handles the case where the CLI never connects.
-            async def _deferred_cleanup() -> None:
-                await asyncio.sleep(120)
-                self._project_up_futures.pop(request_id, None)
-
-            cleanup_task = asyncio.create_task(_deferred_cleanup(), name=f"cleanup-{request_id}")
-            self._background_tasks.add(cleanup_task)
-            cleanup_task.add_done_callback(self._on_background_task_done)
 
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""
