@@ -522,7 +522,12 @@ class ResponseStreamer:
             if filepath and content:
                 if filepath.endswith(".md"):
                     # Render .md files with type: markdown blocks
-                    task = asyncio.create_task(self._render_md_write(filepath, content, parent_id))
+                    # Capture turn state at creation time — task may outlive the turn
+                    thread_ts = self._resolve_upload_thread(parent_id)
+                    rendered = self._turn.md_rendered_paths
+                    task = asyncio.create_task(
+                        self._render_md_write(filepath, content, thread_ts, rendered)
+                    )
                     task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
                 else:
                     basename = PurePosixPath(filepath).name
@@ -651,7 +656,9 @@ class ResponseStreamer:
                             "text": {"type": "mrkdwn", "text": chunk},
                         }
                     ]
-                    await self._router.post_to_active_thread(f"Edit: {filename}", blocks=blocks)
+                    await self._router.client.post(
+                        f"Edit: {filename}", blocks=blocks, thread_ts=thread_ts
+                    )
             except Exception:
                 logger.warning("Diff mrkdwn fallback also failed for %s", filename)
 
@@ -659,16 +666,23 @@ class ResponseStreamer:
         self,
         filepath: str,
         content: str,
-        parent_id: str | None,  # noqa: ARG002
+        thread_ts: str | None,
+        rendered_paths: set[str],
     ) -> None:
-        """Render a Write-created .md file with type: markdown blocks."""
+        """Render a Write-created .md file with type: markdown blocks.
+
+        Args:
+            thread_ts: Captured at task creation time to avoid race with turn reset.
+            rendered_paths: Reference to the originating turn's md_rendered_paths set.
+        """
         from summon_claude.slack.markdown_split import split_markdown  # noqa: PLC0415
 
+        client = self._router.client
         basename = PurePosixPath(filepath).name
         n_chars = len(content)
 
         # Skip re-rendering same path in same turn
-        if filepath in self._turn.md_rendered_paths:
+        if filepath in rendered_paths:
             blocks = [
                 {
                     "type": "context",
@@ -681,12 +695,12 @@ class ResponseStreamer:
                 }
             ]
             try:
-                await self._router.post_to_active_thread(f"Updated: {basename}", blocks=blocks)
+                await client.post(f"Updated: {basename}", blocks=blocks, thread_ts=thread_ts)
             except Exception:
                 logger.warning("Failed to post .md update notice for %s", basename)
             return
 
-        self._turn.md_rendered_paths.add(filepath)
+        rendered_paths.add(filepath)
 
         # Post context header
         header_blocks = [
@@ -701,7 +715,7 @@ class ResponseStreamer:
             }
         ]
         try:
-            await self._router.post_to_active_thread(f"Created: {basename}", blocks=header_blocks)
+            await client.post(f"Created: {basename}", blocks=header_blocks, thread_ts=thread_ts)
         except Exception:
             logger.warning("Failed to post .md header for %s", basename)
 
@@ -710,12 +724,12 @@ class ResponseStreamer:
         for chunk in chunks:
             md_blocks = [{"type": "markdown", "text": chunk}]
             try:
-                await self._router.post_to_active_thread(chunk, blocks=md_blocks)
+                await client.post(chunk, blocks=md_blocks, thread_ts=thread_ts)
             except Exception:
                 # Fallback: post as plain text if markdown blocks fail
                 logger.warning("Markdown block failed for %s, using plain text", basename)
                 try:
-                    await self._router.post_to_active_thread(chunk)
+                    await client.post(chunk, thread_ts=thread_ts)
                 except Exception:
                     logger.warning("Plain text fallback also failed for %s", basename)
 
