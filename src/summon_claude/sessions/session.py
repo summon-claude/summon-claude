@@ -2026,6 +2026,8 @@ class SummonSession:
 
     async def _on_file_change(self, change: FileChange) -> None:
         """Callback from ResponseStreamer when a file is changed."""
+        if change.path in self._changed_files:
+            change.change_type = "modified"
         self._changed_files[change.path] = change
         # Canvas update for Changed Files section (Task 7)
         if self._canvas_store is not None:

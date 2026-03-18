@@ -1038,6 +1038,8 @@ class TestFileChangeCallback:
         assert len(changes) == 1
         assert changes[0].path == "/src/main.py"
         assert changes[0].change_type == "modified"
+        assert changes[0].additions == 1
+        assert changes[0].deletions == 1
         assert changes[0].turn_number == 1
 
     async def test_write_fires_callback_as_created(self):

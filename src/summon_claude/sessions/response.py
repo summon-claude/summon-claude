@@ -746,8 +746,19 @@ class ResponseStreamer:
         old_lines = old_content.splitlines() if old_content else []
         new_lines = new_content.splitlines() if new_content else []
         change_type = "modified" if old_content else "created"
-        additions = max(0, len(new_lines) - len(old_lines)) if old_content else len(new_lines)
-        deletions = max(0, len(old_lines) - len(new_lines)) if old_content else 0
+        if old_content:
+            # Count actual changed lines via unified diff
+            diff = difflib.unified_diff(old_lines, new_lines)
+            additions = 0
+            deletions = 0
+            for line in diff:
+                if line.startswith("+") and not line.startswith("+++"):
+                    additions += 1
+                elif line.startswith("-") and not line.startswith("---"):
+                    deletions += 1
+        else:
+            additions = len(new_lines)
+            deletions = 0
         change = FileChange(
             path=filepath,
             change_type=change_type,
