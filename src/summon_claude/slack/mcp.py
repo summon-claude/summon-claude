@@ -388,6 +388,11 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         except ValueError as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
         code = args["code"]
+        if len(code.encode("utf-8", errors="replace")) > _MAX_UPLOAD_BYTES:
+            return {
+                "content": [{"type": "text", "text": "Error: code content exceeds 10 MB limit"}],
+                "is_error": True,
+            }
         lang = _sanitize_mrkdwn_meta(args.get("language", ""))
         title = _sanitize_mrkdwn_meta(args.get("title", "Code"))
 
@@ -423,7 +428,9 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         except Exception:
             # Fallback to section/mrkdwn if markdown blocks fail
             try:
-                truncated = code[: _MAX_TEXT_CHARS - 20]
+                # Account for title/lang/fence overhead in 3K section limit
+                overhead = len(f"*{title}*\n```{lang}\n\n```")
+                truncated = code[: max(_MAX_TEXT_CHARS - overhead, 100)]
                 fallback_blocks = [
                     {
                         "type": "section",

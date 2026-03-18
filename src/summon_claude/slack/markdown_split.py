@@ -117,9 +117,10 @@ def _pack_blocks(blocks: list[str], limit: int) -> list[str]:
         block_len = len(block)
 
         # Block fits in current chunk
-        if current_len + block_len + (1 if current else 0) <= limit:
+        separator = 1 if current else 0
+        if current_len + block_len + separator <= limit:
             current.append(block)
-            current_len += block_len + (1 if current_len > 0 else 0)
+            current_len += block_len + separator
             continue
 
         # Flush current chunk if non-empty

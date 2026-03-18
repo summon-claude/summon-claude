@@ -627,7 +627,9 @@ class ResponseStreamer:
                         ],
                     }
                 ]
-                await self._router.post_to_active_thread(f"No changes in {filename}", blocks=blocks)
+                await self._router.client.post(
+                    f"No changes in {filename}", blocks=blocks, thread_ts=thread_ts
+                )
                 return
 
             diff_text = "".join(diff_lines)
