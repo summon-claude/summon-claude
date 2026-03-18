@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import logging
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1594,6 +1595,98 @@ class TestHandleSpawn:
         rt.client.post.assert_called()
         annotation_text = rt.client.post.call_args[0][0]
         assert "standalone" in annotation_text.lower()
+
+
+# ------------------------------------------------------------------
+# Inject message tests
+# ------------------------------------------------------------------
+
+
+class TestInjectMessage:
+    """Tests for SummonSession.inject_message."""
+
+    async def test_enqueues_pending_turn(self):
+        session = make_session()
+        ok = await session.inject_message("hello", sender_info="test")
+        assert ok is True
+        assert session._pending_turns.qsize() == 1
+        pending = session._pending_turns.get_nowait()
+        assert pending.message == "hello"
+        assert pending.pre_sent is False
+        assert pending.message_ts is None
+
+    async def test_rejected_during_shutdown(self):
+        session = make_session()
+        session._shutdown_event.set()
+        ok = await session.inject_message("hello")
+        assert ok is False
+        assert session._pending_turns.qsize() == 0
+
+    async def test_sender_info_logged(self, caplog):
+        session = make_session()
+        with caplog.at_level(logging.INFO):
+            await session.inject_message("hello", sender_info="my-pm (#C123)")
+        assert "my-pm (#C123)" in caplog.text
+
+
+# ------------------------------------------------------------------
+# Resume from active session tests
+# ------------------------------------------------------------------
+
+
+class TestHandleResumeFromActive:
+    """Tests for _handle_resume_from_active."""
+
+    def _make_rt(self, channel_id: str = "C_TEST") -> _SessionRuntime:
+        return _SessionRuntime(
+            registry=AsyncMock(),
+            client=make_mock_client(channel_id),
+            permission_handler=AsyncMock(),
+        )
+
+    async def test_rejects_wrong_user(self):
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+        await session._handle_resume_from_active(rt, "U_INTRUDER", "some-id", None)
+        rt.client.post.assert_awaited_once()
+        assert "Only the session owner" in rt.client.post.call_args[0][0]
+
+    async def test_no_target_shows_usage(self):
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+        await session._handle_resume_from_active(rt, "U_OWNER", None, None)
+        rt.client.post.assert_awaited_once()
+        assert "Specify a session ID" in rt.client.post.call_args[0][0]
+
+    async def test_blocks_resume_into_own_channel(self):
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt("C_SELF")
+        rt.registry.get_session = AsyncMock(
+            return_value={"status": "completed", "slack_channel_id": "C_SELF"}
+        )
+        await session._handle_resume_from_active(rt, "U_OWNER", "old-id", None)
+        rt.client.post.assert_awaited_once()
+        assert "End this session first" in rt.client.post.call_args[0][0]
+
+
+# ------------------------------------------------------------------
+# Session options tests
+# ------------------------------------------------------------------
+
+
+class TestSessionOptionsChannelId:
+    """Tests for channel_id field on SessionOptions."""
+
+    def test_channel_id_default_none(self):
+        opts = SessionOptions(cwd="/tmp", name="test")
+        assert opts.channel_id is None
+
+    def test_channel_id_set(self):
+        opts = SessionOptions(cwd="/tmp", name="test", channel_id="C123")
+        assert opts.channel_id == "C123"
 
 
 # ------------------------------------------------------------------

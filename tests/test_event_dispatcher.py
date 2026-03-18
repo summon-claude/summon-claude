@@ -272,3 +272,59 @@ class TestDispatchReaction:
 
         await dispatcher.dispatch_reaction({"item": {"channel": "C001"}})
         abort.assert_not_called()
+
+
+class TestHasHandler:
+    """Tests for has_handler()."""
+
+    def test_registered_channel_returns_true(self):
+        dispatcher = EventDispatcher()
+        dispatcher.register("C001", _make_handle(channel_id="C001"))
+        assert dispatcher.has_handler("C001") is True
+
+    def test_unregistered_channel_returns_false(self):
+        dispatcher = EventDispatcher()
+        assert dispatcher.has_handler("C999") is False
+
+    def test_after_unregister_returns_false(self):
+        dispatcher = EventDispatcher()
+        dispatcher.register("C001", _make_handle(channel_id="C001"))
+        dispatcher.unregister("C001")
+        assert dispatcher.has_handler("C001") is False
+
+
+class TestUnroutedMessageFallback:
+    """Tests for _handle_unrouted_message fallback."""
+
+    async def test_ignores_non_resume_messages(self):
+        """Non-!summon messages in unrouted channels are silently dropped."""
+        mock_web = AsyncMock()
+        dispatcher = EventDispatcher(web_client=mock_web)
+        event = {"channel": "C_DEAD", "text": "hello", "user": "U001"}
+        await dispatcher._handle_unrouted_message(event)
+        mock_web.chat_postMessage.assert_not_awaited()
+
+    async def test_resume_command_triggers_handler(self):
+        """!summon resume in an unrouted channel triggers _handle_resume_request."""
+        mock_web = AsyncMock()
+        dispatcher = EventDispatcher(web_client=mock_web)
+        # Patch _handle_resume_request to verify it's called
+        dispatcher._handle_resume_request = AsyncMock()  # type: ignore[method-assign]
+        event = {"channel": "C_DEAD", "text": "!summon resume", "user": "U001"}
+        await dispatcher._handle_unrouted_message(event)
+        dispatcher._handle_resume_request.assert_awaited_once_with("C_DEAD", "U001", None)
+
+    async def test_resume_with_session_id(self):
+        """!summon resume <id> passes the session ID."""
+        dispatcher = EventDispatcher()
+        dispatcher._handle_resume_request = AsyncMock()  # type: ignore[method-assign]
+        event = {"channel": "C_DEAD", "text": "!summon resume sess-abc", "user": "U001"}
+        await dispatcher._handle_unrouted_message(event)
+        dispatcher._handle_resume_request.assert_awaited_once_with("C_DEAD", "U001", "sess-abc")
+
+    async def test_unrouted_message_dispatched_for_unregistered_channel(self):
+        """Messages in unregistered channels go through the fallback path."""
+        dispatcher = EventDispatcher()
+        dispatcher._handle_unrouted_message = AsyncMock()  # type: ignore[method-assign]
+        await dispatcher.dispatch_message({"channel": "C_DEAD", "text": "!summon resume"})
+        dispatcher._handle_unrouted_message.assert_awaited_once()

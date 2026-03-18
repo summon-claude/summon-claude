@@ -1031,3 +1031,84 @@ class TestCanvasMethods:
         session = await registry.get_session("sess-cvs")
         assert session["canvas_id"] == "F_C1"
         assert session["canvas_markdown"] == "# Test"
+
+
+class TestChannelsMethods:
+    """Tests for the channels table methods."""
+
+    async def test_register_channel(self, registry):
+        await registry.register_channel("C_CH1", "test-channel", "/tmp", "U_OWNER")
+        channel = await registry.get_channel("C_CH1")
+        assert channel is not None
+        assert channel["channel_id"] == "C_CH1"
+        assert channel["channel_name"] == "test-channel"
+        assert channel["cwd"] == "/tmp"
+        assert channel["authenticated_user_id"] == "U_OWNER"
+
+    async def test_update_channel_claude_session(self, registry):
+        await registry.register_channel("C_CH2", "chan2", "/tmp")
+        await registry.update_channel_claude_session("C_CH2", "claude-abc")
+        channel = await registry.get_channel("C_CH2")
+        assert channel["claude_session_id"] == "claude-abc"
+
+    async def test_update_channel_canvas(self, registry):
+        await registry.register_channel("C_CH3", "chan3", "/tmp")
+        await registry.update_channel_canvas("C_CH3", "F_CANVAS", "# Hello")
+        channel = await registry.get_channel("C_CH3")
+        assert channel["canvas_id"] == "F_CANVAS"
+        assert channel["canvas_markdown"] == "# Hello"
+
+    async def test_get_channel_by_name(self, registry):
+        await registry.register_channel("C_CH4", "unique-name", "/tmp")
+        channel = await registry.get_channel_by_name("unique-name")
+        assert channel is not None
+        assert channel["channel_id"] == "C_CH4"
+
+    async def test_get_channel_by_name_missing(self, registry):
+        channel = await registry.get_channel_by_name("nonexistent")
+        assert channel is None
+
+    async def test_get_channel_missing(self, registry):
+        channel = await registry.get_channel("C_MISSING")
+        assert channel is None
+
+    async def test_get_latest_session_for_channel(self, registry):
+        await registry.register("sess-old", 111, "/tmp")
+        await registry.update_status(
+            "sess-old",
+            "completed",
+            slack_channel_id="C_LATEST",
+            ended_at="2026-03-17T00:00:00+00:00",
+        )
+        await registry.register("sess-new", 222, "/tmp")
+        await registry.update_status(
+            "sess-new",
+            "errored",
+            slack_channel_id="C_LATEST",
+            ended_at="2026-03-18T00:00:00+00:00",
+        )
+        latest = await registry.get_latest_session_for_channel("C_LATEST")
+        assert latest is not None
+        assert latest["session_id"] == "sess-new"
+
+    async def test_get_latest_session_skips_active(self, registry):
+        await registry.register("sess-act", 111, "/tmp")
+        await registry.update_status("sess-act", "active", slack_channel_id="C_ACT")
+        latest = await registry.get_latest_session_for_channel("C_ACT")
+        assert latest is None
+
+    async def test_register_channel_ignore_duplicate(self, registry):
+        await registry.register_channel("C_DUP", "dup-chan", "/tmp")
+        # Second insert should be ignored (INSERT OR IGNORE)
+        await registry.register_channel("C_DUP", "dup-chan-2", "/other")
+        channel = await registry.get_channel("C_DUP")
+        assert channel["channel_name"] == "dup-chan"  # original kept
+
+    async def test_effort_in_updatable_fields(self):
+        assert "effort" in SessionRegistry._UPDATABLE_FIELDS
+
+    async def test_effort_column_exists(self, registry):
+        await registry.register("sess-eff", 111, "/tmp")
+        await registry.update_status("sess-eff", "active", effort="low")
+        session = await registry.get_session("sess-eff")
+        assert session["effort"] == "low"

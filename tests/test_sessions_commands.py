@@ -1002,6 +1002,27 @@ class TestSummonHandler:
         assert "foo" in result.text
         assert result.metadata.get("spawn") is not True
 
+    async def test_summon_resume_returns_metadata(self, make_context):
+        """!summon resume should return metadata with resume=True."""
+        context = make_context()
+        result = await dispatch("summon", ["resume"], context)
+        assert result.metadata.get("resume") is True
+        assert result.metadata.get("resume_target") is None
+        assert result.text is None
+
+    async def test_summon_resume_with_session_id(self, make_context):
+        """!summon resume <id> should pass the target session ID."""
+        context = make_context()
+        result = await dispatch("summon", ["resume", "sess-abc"], context)
+        assert result.metadata.get("resume") is True
+        assert result.metadata.get("resume_target") == "sess-abc"
+
+    async def test_summon_no_subcommand_shows_resume_in_usage(self, make_context):
+        """!summon with no args should mention resume in usage text."""
+        context = make_context()
+        result = await dispatch("summon", [], context)
+        assert "resume" in result.text.lower()
+
     def test_summon_in_command_actions(self):
         """!summon should be registered in COMMAND_ACTIONS with a handler."""
         assert "summon" in COMMAND_ACTIONS
