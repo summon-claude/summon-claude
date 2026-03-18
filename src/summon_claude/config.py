@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -277,10 +277,10 @@ class SummonConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Slack credentials
-    slack_bot_token: str
-    slack_app_token: str  # Socket Mode app-level token (xapp-)
-    slack_signing_secret: str
+    # Slack credentials — repr=False to prevent leakage in logs/tracebacks
+    slack_bot_token: str = Field(repr=False)
+    slack_app_token: str = Field(repr=False)  # Socket Mode app-level token (xapp-)
+    slack_signing_secret: str = Field(repr=False)
 
     # Claude model
     default_model: str | None = None
@@ -305,7 +305,7 @@ class SummonConfig(BaseSettings):
     # GitHub integration
     # ------------------------------------------------------------------
 
-    github_pat: str | None = None  # GitHub PAT for remote MCP (ghp_ or github_pat_)
+    github_pat: str | None = Field(default=None, repr=False)  # GitHub PAT for remote MCP
 
     # ------------------------------------------------------------------
     # Scribe agent settings

@@ -1794,7 +1794,7 @@ class SummonSession:
                 session_id=self._session_id,
                 details={
                     "error_type": error_type,
-                    "error": _SECRET_PATTERN.sub("***", f"{error_type}: {str(e)[:200]}"),
+                    "error": _SECRET_PATTERN.sub("[REDACTED]", f"{error_type}: {str(e)[:200]}"),
                 },
             )
             try:

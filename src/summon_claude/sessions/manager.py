@@ -450,7 +450,7 @@ class SessionManager:
                     logger.error(
                         "Session %s failed permanently: %s",
                         session_id,
-                        _SECRET_PATTERN.sub("***", str(e)),
+                        _SECRET_PATTERN.sub("[REDACTED]", str(e)),
                     )
                     recovery_hint = "\nRun `summon project up` to restart." if session.is_pm else ""
                     await self._alert_channel(
@@ -710,7 +710,7 @@ class SessionManager:
             logger.debug("_alert_channel skipped (no channel or web_client)")
             return
         with contextlib.suppress(Exception):
-            safe_msg = _SECRET_PATTERN.sub("***", message)
+            safe_msg = _SECRET_PATTERN.sub("[REDACTED]", message)
             await self._web_client.chat_postMessage(
                 channel=session.channel_id,
                 text=safe_msg,

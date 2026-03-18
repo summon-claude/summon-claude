@@ -140,6 +140,18 @@ class TestGitHubPAT:
         assert result["headers"]["Authorization"] == "Bearer ghp_testtoken123"
 
 
+class TestSecretFieldsHiddenFromRepr:
+    """Sensitive fields must not appear in repr() or str() output."""
+
+    def test_repr_hides_secrets(self):
+        cfg = _make_config(github_pat="ghp_shouldntsee")
+        r = repr(cfg)
+        assert "ghp_shouldntsee" not in r
+        assert "xoxb-test-token" not in r
+        assert "xapp-test-token" not in r
+        assert "test-secret" not in r
+
+
 class TestDiscoverInstalledPlugins:
     def test_missing_registry_returns_empty(self, tmp_path):
         with patch("summon_claude.config.Path.home", return_value=tmp_path):

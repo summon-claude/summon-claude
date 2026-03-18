@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -385,3 +386,32 @@ class TestRedactSecrets:
         call_kwargs = web.chat_update.call_args.kwargs
         assert "github_pat_leaked123" not in call_kwargs["text"]
         assert "[REDACTED]" in call_kwargs["text"]
+
+    async def test_post_redacts_blocks(self):
+        web = MagicMock()
+        web.chat_postMessage = AsyncMock(return_value={"channel": "C123", "ts": "1.0"})
+        client = SlackClient(web, "C123")
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Token: ghp_blocktoken123"}}
+        ]
+        await client.post("fallback", blocks=blocks)
+        sent_blocks = web.chat_postMessage.call_args.kwargs["blocks"]
+        assert "ghp_blocktoken123" not in json.dumps(sent_blocks)
+        assert "[REDACTED]" in json.dumps(sent_blocks)
+
+    async def test_upload_redacts_content(self):
+        web = MagicMock()
+        web.files_upload_v2 = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.upload("config: ghp_uploadtoken456", "config.txt")
+        call_kwargs = web.files_upload_v2.call_args.kwargs
+        assert "ghp_uploadtoken456" not in call_kwargs["content"]
+        assert "[REDACTED]" in call_kwargs["content"]
+
+    async def test_set_topic_redacts(self):
+        web = MagicMock()
+        web.conversations_setTopic = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.set_topic("Topic with ghp_topictoken789")
+        call_kwargs = web.conversations_setTopic.call_args.kwargs
+        assert "ghp_topictoken789" not in call_kwargs["topic"]
