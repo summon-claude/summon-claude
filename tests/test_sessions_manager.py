@@ -1637,8 +1637,14 @@ class TestCascadeRestart:
                 timeout=5,
             )
 
-        # s1 failed, s2 succeeded → only s2 marked completed
-        mock_reg.update_status.assert_called_once_with("s2", "completed")
+        # s1 failed → marked errored; s2 succeeded → marked completed
+        calls = mock_reg.update_status.call_args_list
+        assert len(calls) == 2
+        # s1 errored (order: errored first since s1 is processed first)
+        assert calls[0].args == ("s1", "errored")
+        assert "bad cwd" in calls[0].kwargs.get("error_message", "")
+        # s2 completed
+        assert calls[1].args == ("s2", "completed")
 
         for t in list(manager._background_tasks):
             t.cancel()

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
+import logging
 from typing import Any
 
 import click
@@ -12,6 +12,8 @@ from summon_claude.cli.helpers import resolve_or_pick, stop_and_report
 from summon_claude.cli.interactive import format_session_option, interactive_select, is_interactive
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.registry import SessionRegistry
+
+logger = logging.getLogger(__name__)
 
 
 async def _check_pm_stop(session: dict[str, Any], ctx: click.Context) -> bool:
@@ -40,7 +42,7 @@ async def _check_pm_stop(session: dict[str, Any], ctx: click.Context) -> bool:
         "Stopping it will orphan them."
     )
     if not is_interactive(ctx):
-        click.echo("Use --force or stop via 'summon project down' for clean shutdown.", err=True)
+        click.echo("Use 'summon project down' for a clean cascading shutdown.", err=True)
         return False
     return click.confirm("Continue?", default=False)
 
@@ -62,7 +64,7 @@ async def _notify_pm_of_child_stop(session: dict[str, Any]) -> None:
         return
 
     label = sname or session.get("session_id", "?")[:8]
-    with contextlib.suppress(Exception):
+    try:
         from slack_sdk.web.async_client import AsyncWebClient  # noqa: PLC0415
 
         from summon_claude.config import SummonConfig  # noqa: PLC0415
@@ -73,6 +75,8 @@ async def _notify_pm_of_child_stop(session: dict[str, Any]) -> None:
             channel=pm_channel_id,
             text=f":information_source: Subsession *{label}* was stopped by the user via CLI.",
         )
+    except Exception:
+        logger.debug("Failed to notify PM channel %s about child stop", pm_channel_id)
 
 
 async def async_stop(ctx: click.Context, session: str | None, stop_all: bool) -> None:
@@ -107,8 +111,10 @@ async def async_stop(ctx: click.Context, session: str | None, stop_all: bool) ->
                     click.echo("No session selected.")
                     return
                 resolved_id = active[result[1]]["session_id"]
-            # PM-awareness for interactive pick
-            picked = next((s for s in active if s["session_id"] == resolved_id), None)
+            # Enrich sparse daemon dict with full registry data for PM-awareness
+            picked: dict[str, Any] | None = None
+            async with SessionRegistry() as registry:
+                picked = await registry.get_session(resolved_id)
             if picked and not await _check_pm_stop(picked, ctx):
                 return
             await stop_and_report(resolved_id)

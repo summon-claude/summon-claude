@@ -581,6 +581,13 @@ class SessionManager:
                             sess.get("session_id", "?")[:8],
                             e,
                         )
+                        # Mark as errored to prevent infinite retry on next project up
+                        with contextlib.suppress(Exception):
+                            await registry.update_status(
+                                sess["session_id"],
+                                "errored",
+                                error_message=f"Restart failed: {e}",
+                            )
 
     def _start_child_session(
         self,

@@ -518,6 +518,12 @@ class SessionRegistry:
             ) as cursor:
                 active_ids = [row[0] for row in await cursor.fetchall()]
             await db.execute("DELETE FROM projects WHERE project_id = ?", (project_id,))
+            # Clear suspended sessions — they can't be restarted without a project
+            await db.execute(
+                "UPDATE sessions SET status = 'completed' WHERE project_id = ?"
+                " AND status = 'suspended'",
+                (project_id,),
+            )
             # NULL out project_id on historical sessions to avoid dangling references
             await db.execute(
                 "UPDATE sessions SET project_id = NULL WHERE project_id = ?",

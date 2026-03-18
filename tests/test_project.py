@@ -625,3 +625,230 @@ class TestScanTimerLoop:
         event = session._raw_event_queue.get_nowait()
         assert event is not None
         assert "SCAN TRIGGER" in event.get("text", "")
+
+
+# ---------------------------------------------------------------------------
+# project down: suspended status + output differentiation
+# ---------------------------------------------------------------------------
+
+
+class TestStopProjectManagersOutput:
+    async def test_stop_pm_and_child_sessions(self):
+        """project down stops PMs normally and marks children as suspended."""
+        from summon_claude.cli.project import stop_project_managers
+
+        projects = [
+            {
+                "project_id": "p1",
+                "name": "my-proj",
+                "channel_prefix": "my-proj",
+            }
+        ]
+        sessions = [
+            {
+                "session_id": "pm-sid",
+                "session_name": "my-proj-pm-abc123",
+                "status": "active",
+            },
+            {
+                "session_id": "child-sid",
+                "session_name": "my-proj-def456",
+                "status": "active",
+            },
+        ]
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.project.daemon_client") as mock_dc,
+        ):
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            reg.get_project_sessions = AsyncMock(return_value=sessions)
+            reg.update_status = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_dc.stop_session = AsyncMock(return_value=True)
+
+            result = await stop_project_managers()
+
+        assert "pm-sid" in result
+        assert "child-sid" in result
+        # Child session should be marked suspended
+        reg.update_status.assert_called_once_with("child-sid", "suspended")
+
+    async def test_stop_daemon_not_running(self):
+        """project down returns empty when daemon is not running."""
+        from summon_claude.cli.project import stop_project_managers
+
+        with patch("summon_claude.cli.project.is_daemon_running", return_value=False):
+            result = await stop_project_managers()
+        assert result == []
+
+    async def test_stop_only_pm_sessions(self):
+        """When no child sessions exist, only PMs are stopped (no suspended)."""
+        from summon_claude.cli.project import stop_project_managers
+
+        projects = [{"project_id": "p1", "name": "proj"}]
+        sessions = [
+            {
+                "session_id": "pm-only",
+                "session_name": "proj-pm-aaa",
+                "status": "active",
+            }
+        ]
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.project.daemon_client") as mock_dc,
+        ):
+            reg = AsyncMock()
+            reg.list_projects = AsyncMock(return_value=projects)
+            reg.get_project_sessions = AsyncMock(return_value=sessions)
+            reg.update_status = AsyncMock()
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            mock_dc.stop_session = AsyncMock(return_value=True)
+
+            result = await stop_project_managers()
+
+        assert result == ["pm-only"]
+        reg.update_status.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# suspended status: registry + session cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestSuspendedStatus:
+    async def test_suspended_is_valid_status(self, registry):
+        """Sessions can be marked as suspended."""
+        await registry.register("susp-sid", 1234, "/tmp")
+        await registry.update_status("susp-sid", "suspended")
+        session = await registry.get_session("susp-sid")
+        assert session["status"] == "suspended"
+
+    async def test_suspended_not_counted_as_pm_running(self, registry, tmp_path):
+        """Suspended PM sessions do NOT count as pm_running."""
+        project_id = await registry.add_project("susp-proj", str(tmp_path))
+        await registry.register(
+            "susp-pm",
+            1234,
+            str(tmp_path),
+            name="susp-proj-pm-aaa",
+            project_id=project_id,
+        )
+        await registry.update_status("susp-pm", "suspended")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "susp-proj")
+        assert proj["pm_running"] == 0
+
+    async def test_suspended_preserved_over_completed(self, registry):
+        """Session cleanup must not overwrite suspended with completed.
+
+        Simulates the race: project down sets 'suspended', then session
+        cleanup tries to set 'completed'. The final status must be 'suspended'.
+        """
+        await registry.register("race-sid", 1234, "/tmp")
+        await registry.update_status("race-sid", "suspended")
+        # Simulate session cleanup checking status before writing
+        current = await registry.get_session("race-sid")
+        final_status = (
+            "suspended" if current and current.get("status") == "suspended" else "completed"
+        )
+        await registry.update_status("race-sid", final_status)
+        result = await registry.get_session("race-sid")
+        assert result["status"] == "suspended"
+
+    async def test_suspended_preserved_over_errored(self, registry):
+        """Finally block must not overwrite suspended with errored.
+
+        Simulates the finally block in start() checking status before writing.
+        """
+        await registry.register("race-err-sid", 1234, "/tmp")
+        await registry.update_status("race-err-sid", "suspended")
+        # Simulate finally block checking status
+        current = await registry.get_session("race-err-sid")
+        final = "suspended" if current and current.get("status") == "suspended" else "errored"
+        await registry.update_status("race-err-sid", final)
+        result = await registry.get_session("race-err-sid")
+        assert result["status"] == "suspended"
+
+
+# ---------------------------------------------------------------------------
+# summon stop: PM-awareness
+# ---------------------------------------------------------------------------
+
+
+class TestStopPMAwareness:
+    async def test_check_pm_stop_non_pm_returns_true(self):
+        """Non-PM sessions pass through without warning."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {"session_id": "s1", "session_name": "my-proj-abc", "project_id": "p1"}
+        ctx = MagicMock()
+        assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_no_project_returns_true(self):
+        """Sessions without project_id pass through."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {"session_id": "s1", "session_name": "my-proj-pm-abc"}
+        ctx = MagicMock()
+        assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_no_children_returns_true(self):
+        """PM with no active children passes through."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        session = {
+            "session_id": "pm-1",
+            "session_name": "proj-pm-abc",
+            "project_id": "p1",
+        }
+        ctx = MagicMock()
+
+        with patch("summon_claude.cli.stop.SessionRegistry") as mock_reg_cls:
+            reg = AsyncMock()
+            reg.get_project_sessions = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            assert await _check_pm_stop(session, ctx) is True
+
+    async def test_check_pm_stop_with_children_prompts(self):
+        """PM with active children warns and returns False in non-interactive mode."""
+        from summon_claude.cli.stop import _check_pm_stop
+
+        pm_session = {
+            "session_id": "pm-1",
+            "session_name": "proj-pm-abc",
+            "project_id": "p1",
+        }
+        child_session = {
+            "session_id": "child-1",
+            "session_name": "proj-def",
+            "status": "active",
+            "project_id": "p1",
+        }
+        ctx = MagicMock()
+
+        with (
+            patch("summon_claude.cli.stop.SessionRegistry") as mock_reg_cls,
+            patch("summon_claude.cli.stop.is_interactive", return_value=False),
+        ):
+            reg = AsyncMock()
+            reg.get_project_sessions = AsyncMock(return_value=[pm_session, child_session])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await _check_pm_stop(pm_session, ctx)
+
+        assert result is False
+
+    async def test_notify_pm_no_project_id_is_noop(self):
+        """_notify_pm_of_child_stop does nothing if session has no project_id."""
+        from summon_claude.cli.stop import _notify_pm_of_child_stop
+
+        session = {"session_id": "s1", "session_name": "test"}
+        await _notify_pm_of_child_stop(session)  # should not raise

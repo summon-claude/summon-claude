@@ -771,7 +771,7 @@ class SummonSession:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self) -> bool:  # noqa: PLR0912
+    async def start(self) -> bool:  # noqa: PLR0912, PLR0915
         """Main entry point. Runs the full session lifecycle.
 
         In the daemon architecture:
@@ -847,10 +847,18 @@ class SummonSession:
                 self._remove_session_log_handler(session_log_handler)
                 if not self._shutdown_completed:
                     try:
+                        # Don't overwrite "suspended" (set by project down)
+                        current = await registry.get_session(self._session_id)
+                        if current and current.get("status") == "suspended":
+                            final = "suspended"
+                            err_msg = None
+                        else:
+                            final = "errored"
+                            err_msg = "Session terminated unexpectedly"
                         await registry.update_status(
                             self._session_id,
-                            "errored",
-                            error_message="Session terminated unexpectedly",
+                            final,
+                            error_message=err_msg,
                             ended_at=datetime.now(UTC).isoformat(),
                         )
                     except Exception as e:
