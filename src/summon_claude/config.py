@@ -302,6 +302,12 @@ class SummonConfig(BaseSettings):
     show_thinking: bool = False  # Route ThinkingBlock content to Slack turn thread
 
     # ------------------------------------------------------------------
+    # GitHub integration
+    # ------------------------------------------------------------------
+
+    github_pat: str | None = None  # GitHub PAT for remote MCP (ghp_ or github_pat_)
+
+    # ------------------------------------------------------------------
     # Scribe agent settings
     # ------------------------------------------------------------------
 
@@ -395,6 +401,26 @@ class SummonConfig(BaseSettings):
         if v and not v.startswith("xapp-"):
             raise ValueError("SUMMON_SLACK_APP_TOKEN must start with 'xapp-'")
         return v
+
+    @field_validator("github_pat")
+    @classmethod
+    def _check_github_pat(cls, v: str | None) -> str | None:
+        if v is not None and not v.startswith(("ghp_", "github_pat_")):
+            msg = "github_pat must start with 'ghp_' (classic) or 'github_pat_' (fine-grained)"
+            raise ValueError(msg)
+        return v
+
+    def github_mcp_config(self) -> dict | None:
+        """Return GitHub remote MCP server config, or None if not configured."""
+        if not self.github_pat:
+            return None
+        return {
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": f"Bearer {self.github_pat}",
+            },
+        }
 
     @classmethod
     def from_file(cls, config_path: str | None = None) -> SummonConfig:
