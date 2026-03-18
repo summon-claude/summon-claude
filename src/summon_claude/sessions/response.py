@@ -599,6 +599,7 @@ class ResponseStreamer:
         thread_ts: str | None,
     ) -> None:
         """Upload a unified diff as a snippet_type=diff file (fire-and-forget)."""
+        diff_lines: list[str] = []
         try:
             diff_lines = list(
                 difflib.unified_diff(

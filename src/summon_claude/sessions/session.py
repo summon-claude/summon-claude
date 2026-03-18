@@ -2084,10 +2084,10 @@ class SummonSession:
                 "diff",
                 "--",
                 resolved,
-                cwd=self._cwd,
+                cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "GIT_CEILING_DIRECTORIES": self._cwd},
+                env={**os.environ, "GIT_CEILING_DIRECTORIES": cwd},
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
