@@ -70,6 +70,7 @@ from summon_claude.sessions.registry import (
 )
 from summon_claude.sessions.response import ResponseStreamer, StreamResult
 from summon_claude.sessions.response import split_text as _split_text
+from summon_claude.sessions.types import FileChange
 from summon_claude.slack.canvas_store import CanvasStore
 from summon_claude.slack.canvas_templates import get_canvas_template
 from summon_claude.slack.client import SlackClient
@@ -760,6 +761,7 @@ class SummonSession:
         self._last_heartbeat_time: float = 0.0
         self._channel_id: str | None = None  # set after channel creation
         self._canvas_store: CanvasStore | None = None
+        self._changed_files: dict[str, FileChange] = {}
 
     # ------------------------------------------------------------------
     # Public API (called by SessionManager / BoltRouter)
@@ -1403,6 +1405,7 @@ class SummonSession:
             user_id=self._authenticated_user_id,
             show_thinking=self._config.show_thinking,
             max_inline_chars=self._config.max_inline_chars,
+            on_file_change=self._on_file_change,
         )
 
         # Disable auto-compaction — we handle compaction via !compact
@@ -1958,6 +1961,16 @@ class SummonSession:
             "Session ended. Turns: %d, Total cost: $%.4f", self._total_turns, self._total_cost
         )
 
+        # Post change summary before disconnect (Task 6)
+        if self._changed_files:
+            try:
+                await asyncio.wait_for(
+                    self._post_change_summary(rt),
+                    timeout=_CLEANUP_TIMEOUT_S,
+                )
+            except Exception:
+                logger.debug("Change summary at shutdown failed", exc_info=True)
+
         # Post disconnect message (channel is preserved, not archived)
         await self._post_disconnect_message(rt)
 
@@ -2010,6 +2023,148 @@ class SummonSession:
             )
         except Exception as e:
             logger.warning("Failed to post disconnect message: %s", e)
+
+    async def _on_file_change(self, change: FileChange) -> None:
+        """Callback from ResponseStreamer when a file is changed."""
+        self._changed_files[change.path] = change
+        # Canvas update for Changed Files section (Task 7)
+        if self._canvas_store is not None:
+            table = self._render_changed_files_table()
+            try:
+                await self._canvas_store.update_section("Changed Files", table)
+            except Exception:
+                logger.debug("Canvas Changed Files update failed", exc_info=True)
+
+    def _render_changed_files_table(self) -> str:
+        """Render the Changed Files canvas section as a markdown table."""
+        if not self._changed_files:
+            return "_No files changed yet._"
+        lines = ["| File | Type | +/- |", "|------|------|-----|"]
+        for path, change in self._changed_files.items():
+            short = path.rsplit("/", 1)[-1] if "/" in path else path
+            lines.append(
+                f"| `{short}` | {change.change_type} | +{change.additions}/-{change.deletions} |"
+            )
+        return "\n".join(lines)
+
+    async def _handle_diff_file(
+        self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
+    ) -> None:
+        """Handle !diff <file> — show git diff for a specific file."""
+        cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
+        try:
+            resolved = os.path.realpath(f"{self._cwd}/{user_path}")  # noqa: ASYNC240
+            if not resolved.startswith(cwd + os.sep) and resolved != cwd:
+                await rt.client.post(
+                    ":warning: Path must be within the session directory.",
+                    thread_ts=thread_ts,
+                )
+                return
+        except Exception:
+            await rt.client.post(":warning: Invalid path.", thread_ts=thread_ts)
+            return
+
+        # Show tracked info if available
+        change = self._changed_files.get(user_path) or self._changed_files.get(resolved)
+        if change:
+            try:
+                await rt.client.post(
+                    f"`{change.path}` \u2014 {change.change_type} "
+                    f"(+{change.additions}/-{change.deletions})",
+                    thread_ts=thread_ts,
+                )
+            except Exception:
+                logger.debug("Failed to post tracked change info for %s", user_path)
+
+        # Git diff for the file
+        basename = resolved.rsplit("/", 1)[-1]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "diff",
+                "--",
+                resolved,
+                cwd=self._cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "GIT_CEILING_DIRECTORIES": self._cwd},
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            if stdout:
+                diff_output = stdout.decode(errors="replace")
+                # Cap at 500KB
+                if len(diff_output) > 500_000:
+                    diff_output = diff_output[:500_000] + "\n... (truncated)"
+                await rt.client.upload(
+                    diff_output,
+                    f"{basename}.diff",
+                    title=f"git diff: {basename}",
+                    thread_ts=thread_ts,
+                    snippet_type="diff",
+                )
+            else:
+                await rt.client.post(
+                    f"_No uncommitted changes for `{user_path}`._",
+                    thread_ts=thread_ts,
+                )
+        except Exception:
+            logger.debug("git diff failed for %s", user_path, exc_info=True)
+            await rt.client.post(
+                f":warning: Could not run git diff for `{user_path}`.",
+                thread_ts=thread_ts,
+            )
+
+    async def _post_change_summary(self, rt: _SessionRuntime) -> None:
+        """Post a summary of all changed files to the channel."""
+        if not self._changed_files:
+            return
+        total_add = sum(c.additions for c in self._changed_files.values())
+        total_del = sum(c.deletions for c in self._changed_files.values())
+        n = len(self._changed_files)
+        header = (
+            f"\U0001f4cb *Session Changes* \u2014 "
+            f"{n} file{'s' if n != 1 else ''} \u00b7 +{total_add}/-{total_del} lines"
+        )
+        try:
+            ref = await rt.client.post(header)
+        except Exception as e:
+            logger.warning("Failed to post change summary header: %s", e)
+            return
+
+        # Threaded per-file details
+        for path, change in self._changed_files.items():
+            detail = (
+                f"`{path}` \u2014 {change.change_type} (+{change.additions}/-{change.deletions})"
+            )
+            try:
+                await rt.client.post(detail, thread_ts=ref.ts)
+                await asyncio.sleep(1.2)  # Tier 3 rate limit
+            except Exception as e:
+                logger.warning("Failed to post change detail: %s", e)
+
+        # Git diff --stat upload
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                "diff",
+                "--stat",
+                cwd=self._cwd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "GIT_CEILING_DIRECTORIES": self._cwd},
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
+            if stdout:
+                await asyncio.sleep(3.0)  # Tier 2 rate limit for file uploads
+                await rt.client.upload(
+                    stdout.decode(errors="replace"),
+                    "changes.diff",
+                    title="git diff --stat",
+                    thread_ts=ref.ts,
+                    snippet_type="diff",
+                )
+        except Exception:
+            logger.debug("git diff --stat failed", exc_info=True)
 
     async def _post_clear_delineation(self, rt: _SessionRuntime) -> None:
         """Post a visual delineation block to mark conversation history cleared."""
@@ -2256,6 +2411,17 @@ class SummonSession:
         # Handle !summon start — spawn a child session
         if result.metadata.get("spawn"):
             await self._handle_spawn(rt, user_id, thread_ts)
+            return
+
+        # Handle !changes — show all changed files
+        if result.metadata.get("show_changes"):
+            await self._post_change_summary(rt)
+            return
+
+        # Handle !diff <file> — show git diff for a specific file
+        diff_path = result.metadata.get("diff_file")
+        if diff_path:
+            await self._handle_diff_file(rt, diff_path, thread_ts)
             return
 
         # Pass-through: translate !cmd args -> /cmd args and enqueue
@@ -2620,7 +2786,13 @@ class SummonSession:
                         await self._execute_effort(rt, new_effort, thread_ts)
                     if result.metadata.get("clear"):
                         await self._post_clear_delineation(rt)
-                    if result.metadata.get("compact") or result.metadata.get("spawn"):
+                    standalone_only = (
+                        result.metadata.get("compact")
+                        or result.metadata.get("spawn")
+                        or result.metadata.get("show_changes")
+                        or result.metadata.get("diff_file")
+                    )
+                    if standalone_only:
                         annotations.insert(
                             0,
                             f"`!{match.raw_name}` — must be used as a standalone command",
