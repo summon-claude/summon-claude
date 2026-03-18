@@ -570,7 +570,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             # Observability: post to target's Slack channel (best-effort)
             target_channel_id = result.get("channel_id") or target.get("slack_channel_id")
             if target_channel_id and _web_client:
-                safe_text = text.replace("<!channel>", "channel").replace("<!here>", "here")
+                safe_text = re.sub(r"<!(channel|here|everyone)>", r"\1", text)
+                safe_text = re.sub(r"<@(U\w+)>", r"user:\1", safe_text)
+                safe_text = re.sub(r"<!subteam\^[^>]+>", "group", safe_text)
                 attribution = f"_Message from {sender_info}:_\n{safe_text}"
                 try:
                     await _web_client.chat_postMessage(channel=target_channel_id, text=attribution)

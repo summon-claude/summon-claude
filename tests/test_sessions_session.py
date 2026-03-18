@@ -1041,9 +1041,9 @@ class TestShutdownSentinels:
         session = make_session()
         assert session._raw_event_queue.maxsize == 100
 
-    def test_pending_turns_queue_unbounded(self):
+    def test_pending_turns_queue_has_backpressure(self):
         session = make_session()
-        assert session._pending_turns.maxsize == 0
+        assert session._pending_turns.maxsize > 0
 
 
 class TestThinkingTriggers:
@@ -1751,6 +1751,28 @@ class TestReuseChannel:
         cid, cname = await session._reuse_channel(web, registry, "C_ARCH")
         assert cid == "C_ARCH"
         web.conversations_unarchive.assert_awaited_once()
+
+    async def test_archived_fallback_to_create_channel_on_double_failure(self):
+        """If both channel name attempts fail, falls back to _create_channel."""
+        session = make_session(channel_id="C_ARCH")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(
+            return_value={"channel": {"name": "arch-chan", "is_archived": True}}
+        )
+        web.conversations_unarchive = AsyncMock(side_effect=Exception("cant unarchive"))
+        web.conversations_create = AsyncMock(side_effect=Exception("name_taken"))
+        registry = AsyncMock()
+        # _create_channel is also called via fallback — mock it
+        with patch.object(session, "_create_channel", new_callable=AsyncMock) as mock_create:
+            mock_create.return_value = ("C_FRESH", "fresh-chan")
+            cid, cname = await session._reuse_channel(web, registry, "C_ARCH")
+        assert cid == "C_FRESH"
+        assert cname == "fresh-chan"
+
+    async def test_pending_turns_queue_has_maxsize(self):
+        """_pending_turns must have a maxsize for backpressure."""
+        session = make_session()
+        assert session._pending_turns.maxsize > 0
 
 
 # ------------------------------------------------------------------

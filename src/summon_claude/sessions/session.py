@@ -171,6 +171,7 @@ _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
 _CONTEXT_URGENT_THRESHOLD = 90.0  # Urgent warning in Slack
 _CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
 _MAX_SESSION_RESTARTS = 3  # Circuit breaker for compaction restart loop
+_MAX_PENDING_TURNS = 100  # Backpressure for inject_message
 _MAX_CHANNEL_NAME_LEN = 80
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
@@ -748,7 +749,9 @@ class SummonSession:
         self._raw_event_queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=100)
 
         # Pending turns: preprocessed messages ready for response consumer
-        self._pending_turns: asyncio.Queue[_PendingTurn | None] = asyncio.Queue()
+        self._pending_turns: asyncio.Queue[_PendingTurn | None] = asyncio.Queue(
+            maxsize=_MAX_PENDING_TURNS
+        )
 
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
@@ -1156,6 +1159,7 @@ class SummonSession:
                         client=client,
                         registry=registry,
                         markdown=channel_row.get("canvas_markdown") or "",
+                        channel_id=channel_id,
                     )
                     self._canvas_store.start_sync()
                 else:
@@ -1167,7 +1171,7 @@ class SummonSession:
                 self._canvas_store = None
         else:
             try:
-                canvas_store = await self._init_canvas(client, registry)
+                canvas_store = await self._init_canvas(client, registry, channel_id)
                 self._canvas_store = canvas_store
             except Exception as e:
                 logger.warning(
@@ -1303,11 +1307,14 @@ class SummonSession:
             new_id: str = resp["channel"]["id"]  # type: ignore[index]
             new_name: str = resp["channel"]["name"]  # type: ignore[index]
         except Exception:
-            # Name might not be available — use suffixed name
-            new_name_try = f"{old_name[:70]}-resumed"
-            resp = await web_client.conversations_create(name=new_name_try, is_private=True)
-            new_id = resp["channel"]["id"]  # type: ignore[index]
-            new_name = resp["channel"]["name"]  # type: ignore[index]
+            try:
+                new_name_try = f"{old_name[:70]}-resumed"
+                resp = await web_client.conversations_create(name=new_name_try, is_private=True)
+                new_id = resp["channel"]["id"]  # type: ignore[index]
+                new_name = resp["channel"]["name"]  # type: ignore[index]
+            except Exception:
+                logger.warning("All archived channel recovery failed — creating fresh channel")
+                return await self._create_channel(web_client)
 
         # Update channels table with new channel_id
         old_channel = await registry.get_channel(channel_id)
@@ -1486,7 +1493,7 @@ class SummonSession:
             logger.debug("PM: failed to post welcome message: %s", e)
 
     async def _init_canvas(
-        self, client: SlackClient, registry: SessionRegistry
+        self, client: SlackClient, registry: SessionRegistry, channel_id: str | None = None
     ) -> CanvasStore | None:
         """Create a channel canvas and start background sync.
 
@@ -1510,6 +1517,7 @@ class SummonSession:
             client=client,
             registry=registry,
             markdown=markdown,
+            channel_id=channel_id,
         )
         store.start_sync()
         logger.info("Canvas initialized: %s for session %s", canvas_id, self._session_id)
@@ -1737,7 +1745,7 @@ class SummonSession:
                 if restart_count > _MAX_SESSION_RESTARTS:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
                     break
-                self._pending_turns = asyncio.Queue()
+                self._pending_turns = asyncio.Queue(maxsize=_MAX_PENDING_TURNS)
                 self._context_warned_threshold = 0.0
                 self._last_context = None
                 self._claude_session_id = None

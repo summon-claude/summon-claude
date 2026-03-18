@@ -436,3 +436,41 @@ class TestCanvasStoreSyncLifecycle:
         # Don't wait for sync loop, just stop immediately
         await store.stop_sync()
         # Should not raise — contextlib.suppress handles CancelledError
+
+
+class TestCanvasStoreChannelSync:
+    """Tests for canvas data syncing to channels table."""
+
+    async def test_persist_syncs_to_channels_table(self, canvas_registry):
+        """When channel_id is set, _persist writes to both sessions and channels."""
+        await canvas_registry.register_channel("C_CANVAS", "canvas-chan", "/tmp")
+        client = _make_mock_client()
+        store = CanvasStore(
+            session_id="sess-cv",
+            canvas_id="F_CH",
+            client=client,
+            registry=canvas_registry,
+            markdown="# Initial",
+            channel_id="C_CANVAS",
+        )
+        await store.write("# Updated via channel")
+        channel = await canvas_registry.get_channel("C_CANVAS")
+        assert channel is not None
+        assert channel["canvas_id"] == "F_CH"
+        assert channel["canvas_markdown"] == "# Updated via channel"
+
+    async def test_persist_without_channel_id_skips_channel_table(self, canvas_registry):
+        """When no channel_id, only sessions table is updated."""
+        client = _make_mock_client()
+        store = CanvasStore(
+            session_id="sess-cv",
+            canvas_id="F_NO_CH",
+            client=client,
+            registry=canvas_registry,
+            markdown="# Initial",
+        )
+        await store.write("# No channel sync")
+        # Sessions table should have the canvas
+        cid, md = await canvas_registry.get_canvas("sess-cv")
+        assert cid == "F_NO_CH"
+        assert md == "# No channel sync"

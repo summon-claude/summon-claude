@@ -29,7 +29,7 @@ class CanvasStore:
     rapid updates.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         session_id: str,
@@ -37,12 +37,14 @@ class CanvasStore:
         client: SlackClient,
         registry: SessionRegistry,
         markdown: str = "",
+        channel_id: str | None = None,
     ) -> None:
         self._session_id = session_id
         self._canvas_id = canvas_id
         self._client = client
         self._registry = registry
         self._markdown = markdown
+        self._channel_id = channel_id
         self._dirty = False
         self._consecutive_failures = 0
         self._write_lock = asyncio.Lock()
@@ -127,11 +129,18 @@ class CanvasStore:
         )
 
     async def _persist(self) -> None:
-        """Write current markdown to SQLite."""
+        """Write current markdown to SQLite (sessions + channels tables)."""
         try:
             await self._registry.update_canvas(self._session_id, self._canvas_id, self._markdown)
         except Exception as e:
             logger.warning("Failed to persist canvas to SQLite: %s", e)
+        if self._channel_id:
+            try:
+                await self._registry.update_channel_canvas(
+                    self._channel_id, self._canvas_id, self._markdown
+                )
+            except Exception as e:
+                logger.debug("Failed to persist canvas to channels table: %s", e)
 
     async def _flush(self) -> None:
         """Sync markdown to Slack and clear dirty flag."""
