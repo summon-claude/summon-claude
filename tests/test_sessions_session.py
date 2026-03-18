@@ -1660,12 +1660,31 @@ class TestHandleResumeFromActive:
         rt.client.post.assert_awaited_once()
         assert "Specify a session ID" in rt.client.post.call_args[0][0]
 
+    async def test_rejects_target_owned_by_different_user(self):
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+        rt.registry.get_session = AsyncMock(
+            return_value={
+                "status": "completed",
+                "slack_channel_id": "C_OTHER",
+                "authenticated_user_id": "U_DIFFERENT",
+            }
+        )
+        await session._handle_resume_from_active(rt, "U_OWNER", "other-id", None)
+        rt.client.post.assert_awaited_once()
+        assert "not found" in rt.client.post.call_args[0][0]
+
     async def test_blocks_resume_into_own_channel(self):
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt("C_SELF")
         rt.registry.get_session = AsyncMock(
-            return_value={"status": "completed", "slack_channel_id": "C_SELF"}
+            return_value={
+                "status": "completed",
+                "slack_channel_id": "C_SELF",
+                "authenticated_user_id": "U_OWNER",
+            }
         )
         await session._handle_resume_from_active(rt, "U_OWNER", "old-id", None)
         rt.client.post.assert_awaited_once()
@@ -1687,6 +1706,51 @@ class TestSessionOptionsChannelId:
     def test_channel_id_set(self):
         opts = SessionOptions(cwd="/tmp", name="test", channel_id="C123")
         assert opts.channel_id == "C123"
+
+
+# ------------------------------------------------------------------
+# Channel reuse tests
+# ------------------------------------------------------------------
+
+
+class TestReuseChannel:
+    """Tests for _reuse_channel method."""
+
+    async def test_reuse_active_channel(self):
+        session = make_session(channel_id="C_REUSE")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(
+            return_value={"channel": {"name": "old-channel", "is_archived": False}}
+        )
+        registry = AsyncMock()
+        cid, cname = await session._reuse_channel(web, registry, "C_REUSE")
+        assert cid == "C_REUSE"
+        assert cname == "old-channel"
+        web.conversations_join.assert_awaited_once_with(channel="C_REUSE")
+
+    async def test_fallback_on_lookup_error(self):
+        session = make_session(channel_id="C_GONE")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(side_effect=Exception("channel_not_found"))
+        web.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_NEW", "name": "new-chan"}}
+        )
+        registry = AsyncMock()
+        cid, cname = await session._reuse_channel(web, registry, "C_GONE")
+        assert cid == "C_NEW"
+        web.conversations_create.assert_awaited_once()
+
+    async def test_delegates_archived_channel(self):
+        session = make_session(channel_id="C_ARCH")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(
+            return_value={"channel": {"name": "arch-chan", "is_archived": True}}
+        )
+        web.conversations_unarchive = AsyncMock()
+        registry = AsyncMock()
+        cid, cname = await session._reuse_channel(web, registry, "C_ARCH")
+        assert cid == "C_ARCH"
+        web.conversations_unarchive.assert_awaited_once()
 
 
 # ------------------------------------------------------------------

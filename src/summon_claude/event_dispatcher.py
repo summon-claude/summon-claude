@@ -200,8 +200,9 @@ class EventDispatcher:
                 )
                 return
 
+        # session is guaranteed bound here — all unbound paths return above
         try:
-            await daemon_client.resume_session(session["session_id"])
+            await daemon_client.resume_session(session["session_id"])  # type: ignore[possibly-undefined]
         except Exception as e:
             await self._post_error(channel_id, f":x: Failed to resume: {e}")
 

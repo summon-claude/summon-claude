@@ -1048,7 +1048,11 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
-        if self._pm_profile and self._project_id:
+        if self._channel_id_option:
+            channel_id, channel_name = await self._reuse_channel(
+                web_client, registry, self._channel_id_option
+            )
+        elif self._pm_profile and self._project_id:
             channel_id, channel_name = await self._get_or_create_pm_channel(
                 web_client, registry, self._project_id
             )
@@ -1057,6 +1061,17 @@ class SummonSession:
 
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
+
+        # Register in channels table (INSERT OR IGNORE — safe for resume/reuse)
+        try:
+            await registry.register_channel(
+                channel_id=channel_id,
+                channel_name=channel_name,
+                cwd=self._cwd,
+                authenticated_user_id=self._authenticated_user_id,
+            )
+        except Exception as e:
+            logger.debug("Failed to register channel: %s", e)
 
         # Invite the authenticating user to the private channel
         # Skip invite if user is the bot (bot already created the channel)
@@ -1282,17 +1297,17 @@ class SummonSession:
             logger.warning("Cannot unarchive %s: %s — creating replacement", channel_id, e)
 
         # Fallback: create new channel with same name (Slack allows for archived channels)
-        old_name = info["channel"]["name"]
+        old_name: str = info["channel"]["name"]  # type: ignore[index]
         try:
             resp = await web_client.conversations_create(name=old_name, is_private=True)
-            new_id: str = resp["channel"]["id"]
-            new_name: str = resp["channel"]["name"]
+            new_id: str = resp["channel"]["id"]  # type: ignore[index]
+            new_name: str = resp["channel"]["name"]  # type: ignore[index]
         except Exception:
             # Name might not be available — use suffixed name
             new_name_try = f"{old_name[:70]}-resumed"
             resp = await web_client.conversations_create(name=new_name_try, is_private=True)
-            new_id = resp["channel"]["id"]
-            new_name = resp["channel"]["name"]
+            new_id = resp["channel"]["id"]  # type: ignore[index]
+            new_name = resp["channel"]["name"]  # type: ignore[index]
 
         # Update channels table with new channel_id
         old_channel = await registry.get_channel(channel_id)
@@ -1312,6 +1327,38 @@ class SummonSession:
             "Created replacement channel %s -> %s for archived %s", old_name, new_id, channel_id
         )
         return new_id, new_name
+
+    async def _reuse_channel(
+        self,
+        web_client: AsyncWebClient,
+        registry: SessionRegistry,
+        channel_id: str,
+    ) -> tuple[str, str]:
+        """Reuse an existing channel for a resumed session.
+
+        Joins the channel and returns ``(channel_id, channel_name)``.
+        Handles archived channels via unarchive or replacement.
+        Falls back to creating a new channel on unexpected errors.
+        """
+        try:
+            info = await web_client.conversations_info(channel=channel_id)
+        except Exception as e:
+            logger.warning("Cannot look up channel %s: %s — creating new channel", channel_id, e)
+            return await self._create_channel(web_client)
+
+        if info["channel"].get("is_archived"):  # type: ignore[index]
+            return await self._handle_archived_channel(web_client, registry, channel_id, info)
+
+        channel_name: str = info["channel"]["name"]  # type: ignore[index]
+
+        # Rejoin — bot may have been removed since last session
+        try:
+            await web_client.conversations_join(channel=channel_id)
+        except Exception as e:
+            logger.debug("conversations_join for %s: %s (may already be a member)", channel_id, e)
+
+        logger.info("Resuming in existing channel #%s (%s)", channel_name, channel_id)
+        return channel_id, channel_name
 
     async def _get_or_create_pm_channel(  # noqa: PLR0912
         self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
@@ -2788,7 +2835,7 @@ class SummonSession:
 
         # Look up the target session
         target = await rt.registry.get_session(target_session_id)
-        if target is None:
+        if target is None or target.get("authenticated_user_id") != self._authenticated_user_id:
             try:
                 await rt.client.post(
                     f":warning: Session `{target_session_id}` not found.",

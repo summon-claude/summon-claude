@@ -98,7 +98,25 @@ class SessionManager:
 
         Returns:
             The short code for the user to authenticate via ``/summon`` in Slack.
+
+        Raises:
+            ValueError: If ``options.channel_id`` targets a channel that already
+                has an active or resuming session.
         """
+        # Guard against duplicate sessions on the same channel (resume via CLI)
+        if options.channel_id:
+            cid = options.channel_id
+            if cid in self._resuming_channels:
+                raise ValueError("Resume already in progress for this channel")
+            active = [
+                s
+                for s in self._sessions.values()
+                if getattr(s, "channel_id", None) == cid
+                or getattr(s, "_channel_id_option", None) == cid
+            ]
+            if active:
+                raise ValueError("Channel already has an active session")
+
         # Cancel grace timer — a new session has arrived
         self._cancel_grace_timer()
 
@@ -351,7 +369,10 @@ class SessionManager:
                     options = SessionOptions(**msg["options"])
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
-                short_code = await self.create_session(options)
+                try:
+                    short_code = await self.create_session(options)
+                except ValueError as e:
+                    return {"type": "error", "message": str(e)}
                 return {"type": "session_created", "short_code": short_code}
 
             case "stop_session":
@@ -484,7 +505,7 @@ class SessionManager:
                     break
 
     # ------------------------------------------------------------------
-    # project up — daemon-side orchestration
+    # session resume — daemon-side orchestration
     # ------------------------------------------------------------------
 
     async def _handle_resume_session(self, msg: dict[str, Any]) -> dict[str, Any]:
@@ -497,33 +518,22 @@ class SessionManager:
         if not old_session_id:
             return {"type": "error", "message": "Missing session_id"}
 
-        async with SessionRegistry() as registry:
-            old_session = await registry.get_session(old_session_id)
-            if not old_session:
-                return {"type": "error", "message": f"Session {old_session_id} not found"}
-            if old_session["status"] not in ("completed", "errored"):
-                return {
-                    "type": "error",
-                    "message": "Session is still active — use session_message instead",
-                }
-            channel_id = old_session.get("slack_channel_id")
-            if not channel_id:
-                return {"type": "error", "message": "Session has no associated channel"}
+        # Look up old session and extract resume parameters
+        resume_params = await self._validate_resume_target(old_session_id)
+        if "error" in resume_params:
+            return {"type": "error", "message": resume_params["error"]}
 
-            channel = await registry.get_channel(channel_id)
-            claude_session_id = (
-                channel["claude_session_id"]
-                if channel and channel.get("claude_session_id")
-                else old_session.get("claude_session_id")
-            )
-            if not claude_session_id:
-                return {"type": "error", "message": "No Claude session ID to resume from"}
+        channel_id: str = resume_params["channel_id"]
+        claude_sid: str = resume_params["claude_session_id"]
 
         # Atomic guard: reject if channel already resuming or has active session
         if channel_id in self._resuming_channels:
             return {"type": "error", "message": "Resume already in progress for this channel"}
         active = [
-            s for s in self._sessions.values() if getattr(s, "channel_id", None) == channel_id
+            s
+            for s in self._sessions.values()
+            if getattr(s, "channel_id", None) == channel_id
+            or getattr(s, "_channel_id_option", None) == channel_id
         ]
         if active:
             return {"type": "error", "message": "Channel already has an active session"}
@@ -531,17 +541,17 @@ class SessionManager:
         self._resuming_channels.add(channel_id)
         try:
             options = SessionOptions(
-                cwd=old_session["cwd"],
-                name=old_session.get("session_name") or "",
-                model=msg.get("model") or old_session.get("model"),
-                effort=old_session.get("effort") or "high",
-                resume=claude_session_id,
+                cwd=resume_params["cwd"],
+                name=resume_params.get("session_name") or "",
+                model=msg.get("model") or resume_params.get("model"),
+                effort=resume_params.get("effort") or "high",
+                resume=claude_sid,
                 channel_id=channel_id,
             )
             session_id = await self.create_resumed_session(
                 options,
-                authenticated_user_id=old_session.get("authenticated_user_id"),
-                parent_session_id=old_session.get("parent_session_id"),
+                authenticated_user_id=resume_params.get("authenticated_user_id"),
+                parent_session_id=resume_params.get("parent_session_id"),
             )
             return {
                 "type": "session_resumed",
@@ -550,6 +560,43 @@ class SessionManager:
             }
         finally:
             self._resuming_channels.discard(channel_id)
+
+    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
+        """Validate and extract resume parameters from an old session.
+
+        Returns a dict with resume params on success, or ``{"error": "..."}``
+        on validation failure.
+        """
+        async with SessionRegistry() as registry:
+            old_session = await registry.get_session(old_session_id)
+            if not old_session:
+                return {"error": f"Session {old_session_id} not found"}
+            if old_session["status"] not in ("completed", "errored"):
+                return {"error": "Session is still active — use session_message instead"}
+            channel_id = old_session.get("slack_channel_id")
+            if not channel_id:
+                return {"error": "Session has no associated channel"}
+
+            channel = await registry.get_channel(channel_id)
+            claude_session_id = (
+                channel["claude_session_id"]
+                if channel and channel.get("claude_session_id")
+                else old_session.get("claude_session_id")
+            )
+            if not claude_session_id:
+                return {"error": "No Claude session ID to resume from"}
+
+            return {
+                "channel_id": channel_id,
+                "claude_session_id": claude_session_id,
+                "cwd": old_session["cwd"],
+                "session_name": old_session.get("session_name"),
+                "model": old_session.get("model"),
+                "effort": old_session.get("effort"),
+                "authenticated_user_id": old_session.get("authenticated_user_id"),
+                "parent_session_id": old_session.get("parent_session_id"),
+            }
+        raise RuntimeError("unreachable")  # pragma: no cover
 
     async def create_resumed_session(
         self,
