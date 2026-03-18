@@ -319,10 +319,11 @@ def build_pm_system_prompt(
     section is appended to the system prompt.  These instructions survive
     compaction (they live in the ``append`` field of the preset).
     """
-    append_text = _PM_SYSTEM_PROMPT_APPEND.format(
-        scan_interval=_format_interval(scan_interval_s),
-        cwd=cwd,
-    )
+    # Use .replace() instead of .format() so cwd values containing
+    # curly braces (e.g. /home/user/{project}) don't raise KeyError.
+    append_text = _PM_SYSTEM_PROMPT_APPEND.replace(
+        "{scan_interval}", _format_interval(scan_interval_s)
+    ).replace("{cwd}", cwd)
     if workflow_instructions:
         append_text += (
             "\n\n## Workflow Instructions\n\n"
@@ -1400,6 +1401,13 @@ class SummonSession:
                 pm_workflow = await rt.registry.get_effective_workflow(self._project_id)
             except Exception as e:
                 logger.warning("Failed to fetch workflow instructions: %s", e)
+                try:
+                    await rt.client.post(
+                        ":warning: Failed to load workflow instructions — "
+                        "operating without workflow constraints."
+                    )
+                except Exception:
+                    logger.debug("Failed to post workflow warning to Slack")
 
         while True:
             if is_pm:

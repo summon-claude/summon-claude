@@ -395,6 +395,16 @@ class TestBuildPmSystemPromptWorkflow:
         assert "10 minutes" in result["append"]
         assert "rule1" in result["append"]
 
+    def test_cwd_with_curly_braces(self):
+        """Ensure cwd containing curly braces doesn't crash .replace()."""
+        result = build_pm_system_prompt(cwd="/home/user/{project}", scan_interval_s=900)
+        assert "/home/user/{project}" in result["append"]
+
+    def test_cwd_with_format_style_placeholder(self):
+        """Ensure cwd like '{0}' or '{name}' is treated as literal text."""
+        result = build_pm_system_prompt(cwd="/data/{name}/src", scan_interval_s=60)
+        assert "/data/{name}/src" in result["append"]
+
 
 # ---------------------------------------------------------------------------
 # PM welcome message
