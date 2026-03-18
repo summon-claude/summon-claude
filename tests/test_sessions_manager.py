@@ -1227,16 +1227,11 @@ class TestProjectUpOrchestration:
         auth_stub = _StubSession()
         needing_pm = [_mock_project()]
 
-        # Patch asyncio.wait_for inside the orchestrator to raise TimeoutError immediately
-        original_wait_for = asyncio.wait_for
-
-        async def fast_timeout(coro, *, timeout=None):
-            # Only intercept the auth wait (Event.wait()), let others through
-            if timeout == 360:
-                raise TimeoutError
-            return await original_wait_for(coro, timeout=timeout)
-
-        with patch("summon_claude.sessions.manager.asyncio.wait_for", side_effect=fast_timeout):
+        # Replace the 360s timeout with 0s so it fires immediately
+        with patch(
+            "summon_claude.sessions.manager.asyncio.timeout",
+            side_effect=lambda _: asyncio.timeout(0),
+        ):
             await asyncio.wait_for(
                 manager._project_up_orchestrator(auth_stub, needing_pm),  # type: ignore[arg-type]
                 timeout=5,
@@ -1256,19 +1251,20 @@ class TestProjectUpOrchestration:
         manager._project_up_in_flight = True
 
         auth_stub = _StubSession()
-        auth_stub.authenticate("U001")
 
         with (
             patch("summon_claude.sessions.manager.SummonSession", return_value=_StubSession()),
             patch("pathlib.Path.is_dir", return_value=True),
         ):
-            await asyncio.wait_for(
+            orch_task = asyncio.create_task(
                 manager._project_up_orchestrator(
                     auth_stub,
                     [_mock_project()],  # type: ignore[arg-type]
-                ),
-                timeout=5,
+                )
             )
+            await asyncio.sleep(0)  # let orchestrator start waiting
+            auth_stub.authenticate("U001")
+            await asyncio.wait_for(orch_task, timeout=5)
 
         assert manager._project_up_in_flight is False
 

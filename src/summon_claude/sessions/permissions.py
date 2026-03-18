@@ -180,7 +180,8 @@ class PermissionHandler:
 
         # Wait for this specific request to be resolved
         try:
-            await asyncio.wait_for(req.result_event.wait(), timeout=_PERMISSION_TIMEOUT_S)
+            async with asyncio.timeout(_PERMISSION_TIMEOUT_S):
+                await req.result_event.wait()
         except TimeoutError:
             logger.warning("Permission request timed out for tool %s", tool_name)
             await self._post_timeout_message()
@@ -208,7 +209,8 @@ class PermissionHandler:
 
         # Wait for user response
         try:
-            await asyncio.wait_for(batch_event.wait(), timeout=_PERMISSION_TIMEOUT_S)
+            async with asyncio.timeout(_PERMISSION_TIMEOUT_S):
+                await batch_event.wait()
         except TimeoutError:
             approved = False
         else:
@@ -385,7 +387,8 @@ class PermissionHandler:
             return PermissionResultDeny(message="Failed to display question")
 
         try:
-            await asyncio.wait_for(event.wait(), timeout=_PERMISSION_TIMEOUT_S)
+            async with asyncio.timeout(_PERMISSION_TIMEOUT_S):
+                await event.wait()
         except TimeoutError:
             logger.warning("AskUserQuestion timed out")
             self._cleanup_ask_user(request_id)

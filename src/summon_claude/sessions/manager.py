@@ -523,10 +523,8 @@ class SessionManager:
     ) -> None:
         """Background task: wait for auth, then create PM sessions directly."""
         try:
-            await asyncio.wait_for(
-                auth_session._authenticated_event.wait(),  # noqa: SLF001
-                timeout=360,
-            )
+            async with asyncio.timeout(360):
+                await auth_session._authenticated_event.wait()  # noqa: SLF001
             user_id = auth_session._authenticated_user_id  # noqa: SLF001
             if user_id is None:
                 raise RuntimeError("Auth session completed without setting user_id")
@@ -592,6 +590,7 @@ class SessionManager:
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""
         if not session.channel_id or not self._web_client:
+            logger.debug("_alert_channel skipped (no channel or web_client)")
             return
         with contextlib.suppress(Exception):
             safe_msg = _SECRET_PATTERN.sub("***", message)

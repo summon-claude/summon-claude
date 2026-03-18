@@ -1302,12 +1302,6 @@ class SummonSession:
             )
             mcp_servers["summon-cli"] = cli_mcp
 
-        pm_user_id: str | None = None
-        if is_pm:
-            if self._authenticated_user_id is None:
-                raise RuntimeError("_run_message_loop reached without authenticated_user_id")
-            pm_user_id = self._authenticated_user_id
-
         setting_sources = ["user"] if is_pm else ["user", "project"]
 
         streamer = ResponseStreamer(
@@ -1535,7 +1529,8 @@ class SummonSession:
         logger.info("PM scan timer started (interval: %ds)", scan_interval)
         while not self._shutdown_event.is_set():
             try:
-                await asyncio.wait_for(self._shutdown_event.wait(), timeout=float(scan_interval))
+                async with asyncio.timeout(scan_interval):
+                    await self._shutdown_event.wait()
                 # Shutdown event fired — exit cleanly
                 return
             except TimeoutError:
@@ -1553,7 +1548,6 @@ class SummonSession:
                     "and update the canvas with current status."
                 ),
                 "user": authenticated_user_id,
-                "ts": None,
                 "_synthetic": True,
             }
             try:
