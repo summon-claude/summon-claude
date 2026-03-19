@@ -1076,7 +1076,8 @@ class SummonSession:
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
 
-        # Register in channels table (INSERT OR IGNORE — safe for resume/reuse)
+        # Register in channels table (UPSERT — safe for resume/reuse)
+        channel_registered = True
         try:
             await registry.register_channel(
                 channel_id=channel_id,
@@ -1085,7 +1086,8 @@ class SummonSession:
                 authenticated_user_id=self._authenticated_user_id,
             )
         except Exception as e:
-            logger.debug("Failed to register channel: %s", e)
+            channel_registered = False
+            logger.warning("Failed to register channel %s: %s", channel_id, e)
 
         # Invite the authenticating user to the private channel
         # Skip invite if user is the bot (bot already created the channel)
@@ -1129,6 +1131,15 @@ class SummonSession:
 
         # --- NOW create the channel-bound SlackClient ---
         client = SlackClient(web_client, channel_id)
+
+        if not channel_registered:
+            try:
+                await client.post(
+                    ":warning: Channel state could not be saved — "
+                    "canvas and session resume may not persist across restarts."
+                )
+            except Exception as e:
+                logger.debug("Failed to post channel registration warning: %s", e)
 
         if self._channel_id_option:
             # Resume banner instead of full header
