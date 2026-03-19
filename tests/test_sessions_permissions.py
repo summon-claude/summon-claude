@@ -10,6 +10,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from helpers import make_mock_slack_client
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.permissions import (
+    _GITHUB_MCP_REQUIRE_APPROVAL,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -541,3 +542,30 @@ class TestGitHubMCPDestructiveToolsRequireApproval:
         result = await handler.handle("mcp__github__close_issue", {}, None)
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_called()
+
+    async def test_update_pull_request_branch_requires_approval(self):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle("mcp__github__update_pull_request_branch", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+
+class TestGitHubMCPDenyListGuard:
+    """Guard test: pin the deny list so new destructive tools aren't silently missed."""
+
+    def test_require_approval_set_pinned(self):
+        assert (
+            frozenset(
+                [
+                    "mcp__github__merge_pull_request",
+                    "mcp__github__delete_branch",
+                    "mcp__github__close_pull_request",
+                    "mcp__github__close_issue",
+                    "mcp__github__update_pull_request_branch",
+                    "mcp__github__push_files",
+                    "mcp__github__create_or_update_file",
+                ]
+            )
+            == _GITHUB_MCP_REQUIRE_APPROVAL
+        )

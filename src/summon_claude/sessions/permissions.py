@@ -67,6 +67,7 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
         "mcp__github__close_issue",
         "mcp__github__update_pull_request_branch",
         "mcp__github__push_files",
+        "mcp__github__create_or_update_file",
     ]
 )
 
