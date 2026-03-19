@@ -1927,3 +1927,77 @@ class TestResumeSessionIPC:
             new=AsyncMock(return_value=None),
         ):
             await manager.resume_from_channel("C_UNKNOWN", "U1", None)  # should not raise
+
+
+class TestResolveChannelResume:
+    """Tests for _resolve_channel_resume validation logic."""
+
+    async def test_unknown_channel_returns_none(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value=None)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._resolve_channel_resume("C_UNK", "U1", None)
+        assert result is None
+
+    async def test_wrong_user_raises(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U_OWNER"})
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="owner"):
+                await manager._resolve_channel_resume("C1", "U_INTRUDER", None)
+
+    async def test_no_previous_session_raises(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U1"})
+            mock_reg.get_latest_session_for_channel = AsyncMock(return_value=None)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="No previous session"):
+                await manager._resolve_channel_resume("C1", "U1", None)
+
+    async def test_target_not_in_channel_raises(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U1"})
+            mock_reg.get_session = AsyncMock(
+                return_value={"slack_channel_id": "C_OTHER", "status": "completed"}
+            )
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="not found"):
+                await manager._resolve_channel_resume("C1", "U1", "sess-wrong")
+
+    async def test_active_session_raises(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U1"})
+            mock_reg.get_latest_session_for_channel = AsyncMock(
+                return_value={"session_id": "s1", "status": "active"}
+            )
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="still active"):
+                await manager._resolve_channel_resume("C1", "U1", None)
+
+    async def test_happy_path_returns_session_id(self):
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U1"})
+            mock_reg.get_latest_session_for_channel = AsyncMock(
+                return_value={"session_id": "sess-done", "status": "completed"}
+            )
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._resolve_channel_resume("C1", "U1", None)
+        assert result == "sess-done"

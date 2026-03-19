@@ -1335,6 +1335,12 @@ class SummonSession:
                 await registry.update_channel_claude_session(
                     new_id, old_channel["claude_session_id"]
                 )
+            if old_channel.get("canvas_id"):
+                await registry.update_channel_canvas(
+                    new_id,
+                    old_channel["canvas_id"],
+                    old_channel.get("canvas_markdown") or "",
+                )
 
         logger.info(
             "Created replacement channel %s -> %s for archived %s", old_name, new_id, channel_id
