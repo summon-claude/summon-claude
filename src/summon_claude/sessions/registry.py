@@ -701,16 +701,26 @@ class SessionRegistry:
         cwd: str,
         authenticated_user_id: str | None = None,
     ) -> None:
-        """Register a new channel in the channels table."""
+        """Register or update a channel in the channels table.
+
+        Uses ``INSERT ... ON CONFLICT DO UPDATE`` so that
+        ``authenticated_user_id`` and ``cwd`` stay current across resumes.
+        """
         db = self._check_connected()
         now = _now()
         async with self._lock:
             await db.execute(
                 """
-                INSERT OR IGNORE INTO channels
+                INSERT INTO channels
                     (channel_id, channel_name, cwd, authenticated_user_id,
                      created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    authenticated_user_id = COALESCE(
+                        excluded.authenticated_user_id, authenticated_user_id
+                    ),
+                    cwd = excluded.cwd,
+                    updated_at = excluded.updated_at
                 """,
                 (channel_id, channel_name, cwd, authenticated_user_id, now, now),
             )

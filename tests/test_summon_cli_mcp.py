@@ -643,6 +643,19 @@ class TestSessionMessage:
         assert call_kwargs["channel"] == "C200"
         assert "hello child" in call_kwargs["text"]
 
+    async def test_slack_post_sanitizes_mentions(self, msg_tools):
+        tools, _mock_send, mock_web = msg_tools
+        text = "Alert <!channel> and <!here> and <!everyone> and <@U123ABC> and <!subteam^S456>"
+        await tools["session_message"].handler({"session_id": "child-2222", "text": text})
+        posted = mock_web.chat_postMessage.call_args[1]["text"]
+        assert "<!channel>" not in posted
+        assert "<!here>" not in posted
+        assert "<!everyone>" not in posted
+        assert "<@U123ABC>" not in posted
+        assert "<!subteam^S456>" not in posted
+        assert "channel" in posted
+        assert "user:U123ABC" in posted
+
     async def test_slack_post_failure_non_fatal(self, msg_tools):
         tools, mock_send, mock_web = msg_tools
         mock_web.chat_postMessage.side_effect = Exception("Slack down")

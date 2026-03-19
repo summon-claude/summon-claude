@@ -1815,7 +1815,7 @@ class TestResumeSessionIPC:
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             result = await manager._validate_resume_target("active-sess")
         assert "error" in result
-        assert "still active" in result["error"]
+        assert "active" in result["error"]
 
     async def test_concurrent_resume_rejected(self):
         """Two resume requests for the same channel — second is rejected."""
@@ -1863,3 +1863,24 @@ class TestResumeSessionIPC:
 
         with pytest.raises(ValueError, match="already has an active session"):
             await manager.create_session(make_options(channel_id="C_PENDING"))
+
+    async def test_validate_resume_target_suspended_gives_clear_error(self):
+        """Suspended sessions should get a specific error, not 'still active'."""
+        manager, _, _ = _make_manager()
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_session = AsyncMock(
+                return_value={"status": "suspended", "slack_channel_id": "C1"}
+            )
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await manager._validate_resume_target("suspended-sess")
+        assert "error" in result
+        assert "suspended" in result["error"]
+        assert "project up" in result["error"]
+
+    async def test_create_resumed_session_rejects_none_auth(self):
+        """create_resumed_session raises ValueError when authenticated_user_id is None."""
+        manager, _, _ = _make_manager()
+        with pytest.raises(ValueError, match="authenticated_user_id"):
+            await manager.create_resumed_session(make_options(), authenticated_user_id=None)

@@ -1097,12 +1097,29 @@ class TestChannelsMethods:
         latest = await registry.get_latest_session_for_channel("C_ACT")
         assert latest is None
 
-    async def test_register_channel_ignore_duplicate(self, registry):
+    async def test_register_channel_upsert_updates_cwd(self, registry):
         await registry.register_channel("C_DUP", "dup-chan", "/tmp")
-        # Second insert should be ignored (INSERT OR IGNORE)
-        await registry.register_channel("C_DUP", "dup-chan-2", "/other")
+        await registry.register_channel("C_DUP", "dup-chan-2", "/new-cwd")
         channel = await registry.get_channel("C_DUP")
-        assert channel["channel_name"] == "dup-chan"  # original kept
+        assert channel["channel_name"] == "dup-chan"  # name preserved (not in ON CONFLICT SET)
+        assert channel["cwd"] == "/new-cwd"  # cwd updated
+
+    async def test_register_channel_upsert_updates_auth_user(self, registry):
+        """Upsert should update authenticated_user_id when non-None."""
+        await registry.register_channel("C_AUTH", "auth-chan", "/tmp", None)
+        channel = await registry.get_channel("C_AUTH")
+        assert channel["authenticated_user_id"] is None
+        # Re-register with actual user — should update
+        await registry.register_channel("C_AUTH", "auth-chan", "/tmp", "U_REAL")
+        channel = await registry.get_channel("C_AUTH")
+        assert channel["authenticated_user_id"] == "U_REAL"
+
+    async def test_register_channel_upsert_preserves_auth_on_none(self, registry):
+        """Upsert with None should NOT overwrite existing authenticated_user_id."""
+        await registry.register_channel("C_KEEP", "keep-chan", "/tmp", "U_OWNER")
+        await registry.register_channel("C_KEEP", "keep-chan", "/tmp", None)
+        channel = await registry.get_channel("C_KEEP")
+        assert channel["authenticated_user_id"] == "U_OWNER"  # preserved via COALESCE
 
     async def test_effort_in_updatable_fields(self):
         assert "effort" in SessionRegistry._UPDATABLE_FIELDS

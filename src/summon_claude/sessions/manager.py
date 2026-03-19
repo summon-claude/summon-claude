@@ -442,7 +442,10 @@ class SessionManager:
                 }
 
             case "resume_session":
-                return await self._handle_resume_session(msg)
+                try:
+                    return await self._handle_resume_session(msg)
+                except ValueError as e:
+                    return {"type": "error", "message": str(e)}
 
             case "project_up":
                 return await self._handle_project_up(msg)
@@ -571,8 +574,11 @@ class SessionManager:
             old_session = await registry.get_session(old_session_id)
             if not old_session:
                 return {"error": f"Session {old_session_id} not found"}
-            if old_session["status"] not in ("completed", "errored"):
-                return {"error": "Session is still active — use session_message instead"}
+            status = old_session["status"]
+            if status == "suspended":
+                return {"error": "Session is suspended — use project up to restart it"}
+            if status not in ("completed", "errored"):
+                return {"error": f"Session is {status} — use session_message instead"}
             channel_id = old_session.get("slack_channel_id")
             if not channel_id:
                 return {"error": "Session has no associated channel"}
@@ -608,7 +614,14 @@ class SessionManager:
 
         Similar to ``create_session_with_spawn_token`` but uses the old
         session's auth identity directly.
+
+        Raises:
+            ValueError: If ``authenticated_user_id`` is None (session would
+                hang in auth wait).
         """
+        if not authenticated_user_id:
+            raise ValueError("Cannot resume session without authenticated_user_id")
+
         self._cancel_grace_timer()
         session_id = str(uuid.uuid4())
 
@@ -622,8 +635,7 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             parent_session_id=parent_session_id,
         )
-        if authenticated_user_id:
-            session.authenticate(authenticated_user_id)
+        session.authenticate(authenticated_user_id)
 
         self._sessions[session_id] = session
         task = asyncio.create_task(
