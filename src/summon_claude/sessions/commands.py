@@ -100,7 +100,8 @@ async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult: 
             action = "skill"
         else:
             action = "passthrough"
-        usage = f"`!{canonical} {defn.argument_hint}`" if defn.argument_hint else f"`!{canonical}`"
+        safe_hint = defn.argument_hint.replace("`", "'")
+        usage = f"`!{canonical} {safe_hint}`" if safe_hint.strip() else f"`!{canonical}`"
         lines = [f"*{usage}* — {defn.description}", f"_Type: {action}_"]
         if defn.aliases:
             lines.append(f"_Aliases: {', '.join(f'`!{a}`' for a in defn.aliases)}_")
