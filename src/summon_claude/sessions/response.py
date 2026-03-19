@@ -695,8 +695,11 @@ class ResponseStreamer:
         basename = PurePosixPath(filepath).name
         n_chars = len(content)
 
-        # Skip re-rendering same path in same turn
-        if filepath in rendered_paths:
+        # Claim slot immediately (before any await) to prevent duplicate renders
+        already_rendered = filepath in rendered_paths
+        rendered_paths.add(filepath)
+
+        if already_rendered:
             blocks = [
                 {
                     "type": "context",
@@ -713,8 +716,6 @@ class ResponseStreamer:
             except Exception:
                 logger.warning("Failed to post .md update notice for %s", basename)
             return
-
-        rendered_paths.add(filepath)
 
         # Post context header
         header_blocks = [

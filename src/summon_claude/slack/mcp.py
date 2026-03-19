@@ -34,7 +34,8 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 _MAX_TEXT_CHARS = 3000  # Slack section block limit
 _MARKDOWN_BLOCK_LIMIT = 12000  # Slack type: markdown block cumulative limit
 
-# Common language aliases → Slack snippet_type values
+# Language aliases → Slack snippet_type values (identity mappings omitted;
+# the fallback `get(lang, lang)` already passes them through)
 _LANG_TO_SNIPPET_TYPE: dict[str, str] = {
     "bash": "shell",
     "sh": "shell",
@@ -51,9 +52,6 @@ _LANG_TO_SNIPPET_TYPE: dict[str, str] = {
     "md": "markdown",
     "rs": "rust",
     "kt": "kotlin",
-    "swift": "swift",
-    "go": "go",
-    "java": "java",
 }
 
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")

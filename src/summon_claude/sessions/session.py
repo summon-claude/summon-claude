@@ -149,6 +149,7 @@ _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
+_MAX_DIFF_UPLOAD_CHARS = 5_000_000  # 5 MB cap for diff uploads (Slack API limit is 10 MB)
 _CLEANUP_TIMEOUT_S = 10.0
 _CONTEXT_AGENT_THRESHOLD = 70.0  # Inject context note into agent messages
 _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
@@ -2095,9 +2096,13 @@ class SummonSession:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
                 diff_output = stdout.decode(errors="replace")
-                # Cap at 500KB
-                if len(diff_output) > 500_000:
-                    diff_output = diff_output[:500_000] + "\n... (truncated)"
+                if len(diff_output) > _MAX_DIFF_UPLOAD_CHARS:
+                    diff_output = diff_output[:_MAX_DIFF_UPLOAD_CHARS] + "\n... (truncated)"
+                    await rt.client.post(
+                        f":warning: Diff for `{user_path}` truncated at "
+                        f"{_MAX_DIFF_UPLOAD_CHARS // 1_000_000} MB.",
+                        thread_ts=thread_ts,
+                    )
                 await rt.client.upload(
                     diff_output,
                     f"{basename}.diff",
@@ -2430,7 +2435,7 @@ class SummonSession:
             if self._changed_files:
                 await self._post_change_summary(rt)
             else:
-                await rt.client.post("_No files changed in this session yet._")
+                await rt.client.post("_No files changed in this session yet._", thread_ts=thread_ts)
             return
 
         # Handle !diff <file> — show git diff for a specific file
