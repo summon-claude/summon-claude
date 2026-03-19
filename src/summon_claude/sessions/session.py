@@ -2098,11 +2098,14 @@ class SummonSession:
                 diff_output = stdout.decode(errors="replace")
                 if len(diff_output) > _MAX_DIFF_UPLOAD_CHARS:
                     diff_output = diff_output[:_MAX_DIFF_UPLOAD_CHARS] + "\n... (truncated)"
-                    await rt.client.post(
-                        f":warning: Diff for `{user_path}` truncated at "
-                        f"{_MAX_DIFF_UPLOAD_CHARS // 1_000_000} MB.",
-                        thread_ts=thread_ts,
-                    )
+                    try:
+                        await rt.client.post(
+                            f":warning: Diff for `{user_path}` truncated at "
+                            f"{_MAX_DIFF_UPLOAD_CHARS:,} chars.",
+                            thread_ts=thread_ts,
+                        )
+                    except Exception:
+                        logger.debug("Failed to post truncation warning for %s", user_path)
                 await rt.client.upload(
                     diff_output,
                     f"{basename}.diff",
@@ -2122,7 +2125,7 @@ class SummonSession:
                 thread_ts=thread_ts,
             )
 
-    async def _post_change_summary(self, rt: _SessionRuntime) -> None:
+    async def _post_change_summary(self, rt: _SessionRuntime, thread_ts: str | None = None) -> None:
         """Post a summary of all changed files to the channel."""
         if not self._changed_files:
             return
@@ -2154,12 +2157,12 @@ class SummonSession:
         body = "\n".join(detail_lines)
 
         try:
-            ref = await rt.client.post(f"{header}\n{body}")
+            ref = await rt.client.post(f"{header}\n{body}", thread_ts=thread_ts)
         except Exception as e:
             logger.warning("Failed to post change summary: %s", e)
             return
 
-        # Git diff --stat as a threaded upload
+        # Git diff --stat as a threaded reply to the summary
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -2433,7 +2436,7 @@ class SummonSession:
         # Handle !changes — show all changed files
         if result.metadata.get("show_changes"):
             if self._changed_files:
-                await self._post_change_summary(rt)
+                await self._post_change_summary(rt, thread_ts=thread_ts)
             else:
                 await rt.client.post("_No files changed in this session yet._", thread_ts=thread_ts)
             return
