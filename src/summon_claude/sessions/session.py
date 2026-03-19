@@ -288,7 +288,10 @@ _PM_SYSTEM_PROMPT_APPEND = (
 )
 
 
-def _format_pm_topic(child_count: int) -> str:
+_PM_WELCOME_PREFIX = "*Project Manager Status*"
+
+
+def format_pm_topic(child_count: int) -> str:
     """Build the deterministic PM channel topic string."""
     sessions_word = "session" if child_count == 1 else "sessions"
     status = "working" if child_count > 0 else "idle"
@@ -1058,7 +1061,7 @@ class SummonSession:
         self._last_topic_model = self._model
         self._last_topic_branch = git_branch
         if self._pm_profile:
-            topic = _format_pm_topic(0)
+            topic = format_pm_topic(0)
         else:
             topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
         try:
@@ -1267,17 +1270,14 @@ class SummonSession:
         prevent accumulation of stale status messages.
         """
         welcome_text = (
-            "*Project Manager Status*\n"
-            "---\n"
-            "No active sessions.\n\n"
-            "_Send a message to start working._"
+            f"{_PM_WELCOME_PREFIX}\n---\nNo active sessions.\n\n_Send a message to start working._"
         )
         # Remove stale pins from previous PM sessions (non-fatal)
         try:
             pins_resp = await web_client.pins_list(channel=client.channel_id)
             for item in pins_resp.get("items") or []:
                 msg = item.get("message", {})
-                if msg.get("text", "").startswith("*Project Manager Status*"):
+                if msg.get("text", "").startswith(_PM_WELCOME_PREFIX):
                     try:
                         await web_client.pins_remove(
                             channel=client.channel_id,

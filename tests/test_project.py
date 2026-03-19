@@ -355,21 +355,25 @@ class TestBuildPmSystemPrompt:
 
 
 class TestBuildPmSystemPromptWorkflow:
-    def test_no_workflow_by_default(self):
-        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "Workflow Instructions" not in result["append"]
-
-    def test_empty_workflow_excluded(self):
-        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, workflow_instructions="")
-        assert "Workflow Instructions" not in result["append"]
-
-    def test_workflow_instructions_appended(self):
-        instructions = "Always use TDD. Run tests before committing."
-        result = build_pm_system_prompt(
-            cwd="/tmp", scan_interval_s=900, workflow_instructions=instructions
-        )
-        assert "## Workflow Instructions" in result["append"]
-        assert instructions in result["append"]
+    @pytest.mark.parametrize(
+        "workflow,should_appear",
+        [
+            (None, False),
+            ("", False),
+            ("Always use TDD.", True),
+        ],
+        ids=["omitted", "empty-string", "non-empty"],
+    )
+    def test_workflow_presence(self, workflow, should_appear):
+        kwargs: dict = {"cwd": "/tmp", "scan_interval_s": 900}
+        if workflow is not None:
+            kwargs["workflow_instructions"] = workflow
+        result = build_pm_system_prompt(**kwargs)
+        if should_appear:
+            assert "## Workflow Instructions" in result["append"]
+            assert workflow in result["append"]
+        else:
+            assert "Workflow Instructions" not in result["append"]
 
     def test_workflow_instructions_include_compliance_notice(self):
         result = build_pm_system_prompt(
@@ -397,15 +401,15 @@ class TestBuildPmSystemPromptWorkflow:
         assert "10 minutes" in result["append"]
         assert "rule1" in result["append"]
 
-    def test_cwd_with_curly_braces(self):
-        """Ensure cwd containing curly braces doesn't crash .replace()."""
-        result = build_pm_system_prompt(cwd="/home/user/{project}", scan_interval_s=900)
-        assert "/home/user/{project}" in result["append"]
-
-    def test_cwd_with_format_style_placeholder(self):
-        """Ensure cwd like '{0}' or '{name}' is treated as literal text."""
-        result = build_pm_system_prompt(cwd="/data/{name}/src", scan_interval_s=60)
-        assert "/data/{name}/src" in result["append"]
+    @pytest.mark.parametrize(
+        "cwd",
+        ["/home/user/{project}", "/data/{name}/src"],
+        ids=["curly-braces", "format-placeholder"],
+    )
+    def test_cwd_with_special_characters(self, cwd):
+        """Ensure cwd containing curly braces is treated as literal text."""
+        result = build_pm_system_prompt(cwd=cwd, scan_interval_s=900)
+        assert cwd in result["append"]
 
 
 # ---------------------------------------------------------------------------
@@ -560,58 +564,39 @@ class TestPostPmWelcome:
 
 
 class TestFormatPmTopic:
-    def test_zero_sessions(self):
-        from summon_claude.sessions.session import _format_pm_topic
+    @pytest.mark.parametrize(
+        "count,expected",
+        [
+            (0, "Project Manager | 0 active sessions | idle"),
+            (1, "Project Manager | 1 active session | working"),
+            (3, "Project Manager | 3 active sessions | working"),
+        ],
+    )
+    def test_format(self, count, expected):
+        from summon_claude.sessions.session import format_pm_topic
 
-        assert _format_pm_topic(0) == "Project Manager | 0 active sessions | idle"
-
-    def test_one_session(self):
-        from summon_claude.sessions.session import _format_pm_topic
-
-        assert _format_pm_topic(1) == "Project Manager | 1 active session | working"
-
-    def test_multiple_sessions(self):
-        from summon_claude.sessions.session import _format_pm_topic
-
-        assert _format_pm_topic(3) == "Project Manager | 3 active sessions | working"
+        assert format_pm_topic(count) == expected
 
 
 class TestPmTopicGuard:
-    def test_pm_session_has_pm_profile_flag(self):
+    @pytest.mark.parametrize(
+        "opts_kwargs,attr,expected",
+        [
+            ({"pm_profile": True}, "_pm_profile", True),
+            ({}, "_pm_profile", False),
+            ({"project_id": "proj-123"}, "project_id", "proj-123"),
+            ({}, "project_id", None),
+        ],
+        ids=["pm-flag-set", "pm-flag-default", "project-id-set", "project-id-default"],
+    )
+    def test_session_option_exposure(self, opts_kwargs, attr, expected):
         from summon_claude.config import SummonConfig
         from summon_claude.sessions.session import SessionOptions, SummonSession
 
         config = MagicMock(spec=SummonConfig)
-        options = SessionOptions(cwd="/tmp", name="pm-test", pm_profile=True)
-        session = SummonSession(config=config, options=options, session_id="pm-topic-guard")
-        assert session._pm_profile is True
-
-    def test_non_pm_session_has_no_pm_profile(self):
-        from summon_claude.config import SummonConfig
-        from summon_claude.sessions.session import SessionOptions, SummonSession
-
-        config = MagicMock(spec=SummonConfig)
-        options = SessionOptions(cwd="/tmp", name="regular")
-        session = SummonSession(config=config, options=options, session_id="non-pm-guard")
-        assert session._pm_profile is False
-
-    def test_project_id_property_exposed(self):
-        from summon_claude.config import SummonConfig
-        from summon_claude.sessions.session import SessionOptions, SummonSession
-
-        config = MagicMock(spec=SummonConfig)
-        options = SessionOptions(cwd="/tmp", name="proj-test", project_id="proj-123")
-        session = SummonSession(config=config, options=options, session_id="prop-test")
-        assert session.project_id == "proj-123"
-
-    def test_project_id_none_by_default(self):
-        from summon_claude.config import SummonConfig
-        from summon_claude.sessions.session import SessionOptions, SummonSession
-
-        config = MagicMock(spec=SummonConfig)
-        options = SessionOptions(cwd="/tmp", name="no-proj")
-        session = SummonSession(config=config, options=options, session_id="prop-none")
-        assert session.project_id is None
+        options = SessionOptions(cwd="/tmp", name="guard-test", **opts_kwargs)
+        session = SummonSession(config=config, options=options, session_id="guard-test")
+        assert getattr(session, attr) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +618,7 @@ class TestUpdatePmTopic:
         mgr = object.__new__(SessionManager)
         mgr._sessions = sessions
         mgr._web_client = AsyncMock()
+        mgr._pm_topic_cache = {}
         return mgr
 
     async def test_updates_topic_with_child_count(self):
@@ -695,13 +681,31 @@ class TestUpdatePmTopic:
 
         mgr._web_client.conversations_setTopic.assert_not_called()
 
-    async def test_survives_slack_api_error(self):
+    async def test_skips_redundant_api_call(self):
+        """Repeated calls with same child count should not call Slack API again."""
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        child = self._make_session(project_id="p1")
+        mgr = self._make_manager({"pm": pm, "c1": child})
+
+        await mgr._update_pm_topic("p1")
+        await mgr._update_pm_topic("p1")
+
+        mgr._web_client.conversations_setTopic.assert_called_once()
+
+    async def test_retries_after_slack_api_error(self):
+        """Failed API call should NOT cache, so next call retries."""
         pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
         mgr = self._make_manager({"pm": pm})
         mgr._web_client.conversations_setTopic = AsyncMock(side_effect=Exception("Slack down"))
 
-        # Should not raise
+        # First call fails — should not raise
         await mgr._update_pm_topic("p1")
+        assert "p1" not in mgr._pm_topic_cache
+
+        # Fix the API and retry — should actually call the API
+        mgr._web_client.conversations_setTopic = AsyncMock()
+        await mgr._update_pm_topic("p1")
+        mgr._web_client.conversations_setTopic.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -1221,29 +1225,26 @@ class TestSuspendedStatus:
 
 
 class TestWorkflowInstructionsRegistry:
-    async def test_effective_workflow_returns_project_override(self, registry, tmp_path):
-        project_id = await registry.add_project("wf-proj", str(tmp_path))
-        await registry.set_project_workflow(project_id, "project-specific rules")
+    @pytest.mark.parametrize(
+        "global_wf,project_wf,expected",
+        [
+            (None, "project-specific rules", "project-specific rules"),
+            ("global defaults", None, "global defaults"),
+            ("global defaults", "project override", "project override"),
+            (None, None, ""),
+        ],
+        ids=["project-only", "global-fallback", "project-overrides-global", "neither-set"],
+    )
+    async def test_effective_workflow_resolution(
+        self, registry, tmp_path, global_wf, project_wf, expected
+    ):
+        project_id = await registry.add_project("wf-test", str(tmp_path))
+        if global_wf is not None:
+            await registry.set_workflow_defaults(global_wf)
+        if project_wf is not None:
+            await registry.set_project_workflow(project_id, project_wf)
         result = await registry.get_effective_workflow(project_id)
-        assert result == "project-specific rules"
-
-    async def test_effective_workflow_falls_back_to_global(self, registry, tmp_path):
-        project_id = await registry.add_project("wf-fallback", str(tmp_path))
-        await registry.set_workflow_defaults("global defaults")
-        result = await registry.get_effective_workflow(project_id)
-        assert result == "global defaults"
-
-    async def test_effective_workflow_project_overrides_global(self, registry, tmp_path):
-        project_id = await registry.add_project("wf-override", str(tmp_path))
-        await registry.set_workflow_defaults("global defaults")
-        await registry.set_project_workflow(project_id, "project override")
-        result = await registry.get_effective_workflow(project_id)
-        assert result == "project override"
-
-    async def test_effective_workflow_empty_when_neither_set(self, registry, tmp_path):
-        project_id = await registry.add_project("wf-empty", str(tmp_path))
-        result = await registry.get_effective_workflow(project_id)
-        assert result == ""
+        assert result == expected
 
     async def test_clear_project_workflow_falls_back(self, registry, tmp_path):
         project_id = await registry.add_project("wf-clear", str(tmp_path))

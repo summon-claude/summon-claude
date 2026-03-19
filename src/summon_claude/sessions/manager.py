@@ -42,7 +42,7 @@ from summon_claude.sessions.session import (
     _SECRET_PATTERN,
     SessionOptions,
     SummonSession,
-    _format_pm_topic,
+    format_pm_topic,
 )
 
 if TYPE_CHECKING:
@@ -82,6 +82,7 @@ class SessionManager:
         self._start_time: float = time.monotonic()
         self._project_up_in_flight = False  # guard against concurrent project_up
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
 
     # ------------------------------------------------------------------
     # Public lifecycle API
@@ -693,6 +694,10 @@ class SessionManager:
         task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
         self._tasks[new_session_id] = task
 
+        # Seed the topic cache with the initial value that session.start() will set,
+        # so _update_pm_topic on clean exit doesn't make a redundant API call.
+        self._pm_topic_cache[project["project_id"]] = format_pm_topic(0)
+
         logger.info(
             "SessionManager: started PM session %s for project %s",
             new_session_id,
@@ -718,6 +723,10 @@ class SessionManager:
 
         if session is not None and session.channel_id:
             self._dispatcher.unregister(session.channel_id)
+
+        # Clear PM topic cache when a PM exits so a replacement PM gets a fresh topic
+        if session is not None and session.is_pm and session.project_id:
+            self._pm_topic_cache.pop(session.project_id, None)
 
         # Update PM topic if a non-PM child with a project finished
         if session is not None and not session.is_pm and session.project_id:
@@ -751,14 +760,17 @@ class SessionManager:
         child_count = sum(
             1 for s in self._sessions.values() if s.project_id == project_id and not s.is_pm
         )
-        topic = _format_pm_topic(child_count)
+        topic = format_pm_topic(child_count)
+        if self._pm_topic_cache.get(project_id) == topic:
+            return
         try:
             await self._web_client.conversations_setTopic(
                 channel=pm_session.channel_id,
                 topic=topic,
             )
+            self._pm_topic_cache[project_id] = topic
         except Exception:
-            logger.warning("Failed to update PM topic for project %s", project_id)
+            logger.warning("Failed to update PM topic for project %s", project_id, exc_info=True)
 
     def _on_background_task_done(self, task: asyncio.Task) -> None:  # type: ignore[type-arg]
         """Cleanup callback for background tasks (orchestrators, etc.)."""
