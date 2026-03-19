@@ -1179,6 +1179,22 @@ class TestMCPRegistration:
         result = await self._capture_mcp_servers_with_config()
         assert "github" not in result["mcp_servers"]
 
+    async def test_github_mcp_unreachable_does_not_block_session_init(self):
+        """Session must reach SDK init even when GitHub MCP URL is unreachable.
+
+        MCP connections are lazy — the SDK subprocess connects on first tool
+        use, not at startup. This test verifies the session passes the config
+        through to ClaudeSDKClient without attempting an eager connection.
+        """
+        result = await self._capture_mcp_servers_with_config(
+            github_pat="ghp_unreachable_test",
+        )
+        # The spy captures options at SDK init time — if the session tried to
+        # eagerly connect to the (real, external) MCP URL and failed, we'd
+        # never reach spy_init and _CaptureError would not be raised.
+        assert "github" in result["mcp_servers"]
+        assert "api.githubcopilot.com" in result["mcp_servers"]["github"]["url"]
+
 
 class TestSecretPatternRedaction:
     """redact_secrets must redact all known secret formats in error messages."""
@@ -1202,6 +1218,18 @@ class TestSecretPatternRedaction:
     def test_redacts_anthropic_key(self):
         text = "Error: sk-ant-api03-secretkey invalid"
         assert "sk-ant-api03-secretkey" not in redact_secrets(text)
+
+    def test_redacts_github_oauth_token(self):
+        text = "Error: gho_oauthtoken123 expired"
+        assert "gho_oauthtoken123" not in redact_secrets(text)
+
+    def test_redacts_github_app_installation_token(self):
+        text = "Error: ghs_apptoken456 forbidden"
+        assert "ghs_apptoken456" not in redact_secrets(text)
+
+    def test_redacts_github_app_refresh_token(self):
+        text = "Error: ghr_refreshtoken789 invalid"
+        assert "ghr_refreshtoken789" not in redact_secrets(text)
 
 
 # ------------------------------------------------------------------

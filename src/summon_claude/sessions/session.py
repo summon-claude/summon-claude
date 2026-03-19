@@ -131,8 +131,8 @@ class SessionIdFilter(logging.Filter):
 class RedactingFormatter(logging.Formatter):
     """Formatter that strips secret tokens from the final log output.
 
-    Wraps any ``Formatter`` and applies ``_SECRET_RE`` to the entire
-    formatted string, including exception tracebacks from ``exc_info``.
+    Wraps any ``Formatter`` and applies :func:`redact_secrets` to the
+    entire formatted string, including exception tracebacks from ``exc_info``.
     """
 
     def __init__(self, fmt: logging.Formatter) -> None:
@@ -140,9 +140,7 @@ class RedactingFormatter(logging.Formatter):
         self._inner = fmt
 
     def format(self, record: logging.LogRecord) -> str:
-        from summon_claude.slack.client import _SECRET_RE  # noqa: PLC0415
-
-        return _SECRET_RE.sub("[REDACTED]", self._inner.format(record))
+        return redact_secrets(self._inner.format(record))
 
 
 class _SessionLogFilter(logging.Filter):

@@ -349,6 +349,21 @@ class TestRedactSecrets:
         assert "[REDACTED]" in redact_secrets(text)
         assert "github_pat_11ABCDEF_xyz789" not in redact_secrets(text)
 
+    def test_oauth_token_redacted(self):
+        text = "Error: gho_abc123XYZ token expired"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "gho_abc123XYZ" not in redact_secrets(text)
+
+    def test_app_installation_token_redacted(self):
+        text = "Error: ghs_installtoken456 forbidden"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghs_installtoken456" not in redact_secrets(text)
+
+    def test_app_refresh_token_redacted(self):
+        text = "Error: ghr_refreshtoken789 invalid"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghr_refreshtoken789" not in redact_secrets(text)
+
     def test_no_pat_unchanged(self):
         text = "Normal message without any tokens"
         assert redact_secrets(text) == text

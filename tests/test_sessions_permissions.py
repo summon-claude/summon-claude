@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
 from helpers import make_mock_slack_client
@@ -415,113 +416,63 @@ class TestPermissionSuggestions:
 class TestGitHubMCPReadToolsAutoApproved:
     """GitHub MCP read-only tools should be auto-approved without Slack prompt."""
 
-    async def test_pull_request_read(self):
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "mcp__github__pull_request_read",
+            "mcp__github__get_file_contents",
+            "mcp__github__get_commit",
+            "mcp__github__list_pull_requests",
+            "mcp__github__search_code",
+            "mcp__github__list_issues",
+        ],
+    )
+    async def test_read_tool_auto_approved(self, tool_name):
         handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__pull_request_read", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
-
-    async def test_get_file_contents(self):
-        handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__get_file_contents", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
-
-    async def test_get_commit(self):
-        handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__get_commit", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
-
-    async def test_list_pull_requests(self):
-        handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__list_pull_requests", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
-
-    async def test_search_code(self):
-        handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__search_code", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
-
-    async def test_list_issues(self):
-        handler, provider, _ = make_handler()
-        result = await handler.handle("mcp__github__list_issues", {}, None)
+        result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_not_called()
 
 
-class TestGitHubMCPVisibleCreateToolsRequireApproval:
-    """Visible-to-others create tools should require Slack approval."""
+class TestGitHubMCPToolsRequireApproval:
+    """GitHub MCP tools that are visible-to-others or destructive require HITL approval."""
 
-    async def test_create_pull_request(self):
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            # Visible-to-others
+            "mcp__github__create_pull_request",
+            "mcp__github__create_issue",
+            "mcp__github__add_issue_comment",
+            "mcp__github__pull_request_review_write",
+            # Destructive
+            "mcp__github__merge_pull_request",
+            "mcp__github__create_or_update_file",
+            "mcp__github__push_files",
+            "mcp__github__delete_branch",
+            "mcp__github__close_pull_request",
+            "mcp__github__close_issue",
+            "mcp__github__update_pull_request_branch",
+            # Unknown (fail-closed)
+            "mcp__github__some_future_tool",
+        ],
+    )
+    async def test_requires_slack_approval(self, tool_name):
         handler, provider, _ = make_handler()
         provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__create_pull_request", {}, None)
+        result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_called()
 
-    async def test_create_issue(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__create_issue", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_add_issue_comment(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__add_issue_comment", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-
-class TestGitHubMCPReviewWriteRequiresApproval:
-    async def test_pull_request_review_write(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__pull_request_review_write", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-
-class TestGitHubMCPDestructiveToolsRequireApproval:
-    """Destructive GitHub MCP tools should require HITL approval."""
-
-    async def test_merge_pull_request(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__merge_pull_request", {}, None)
-        # Requires approval (goes through Slack flow) — auto-approved by side effect
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_create_or_update_file(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__create_or_update_file", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_push_files(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__push_files", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_delete_branch(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__delete_branch", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_merge_ignores_sdk_allow_suggestion(self):
-        """Destructive tools must require Slack approval even when SDK suggests allow."""
-        from unittest.mock import MagicMock
-
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "mcp__github__merge_pull_request",
+            "mcp__github__create_pull_request",
+        ],
+    )
+    async def test_ignores_sdk_allow_suggestion(self, tool_name):
+        """Restricted tools must require Slack approval even when SDK suggests allow."""
         handler, provider, _ = make_handler()
         provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
 
@@ -530,59 +481,7 @@ class TestGitHubMCPDestructiveToolsRequireApproval:
         context = MagicMock()
         context.suggestions = [suggestion]
 
-        result = await handler.handle("mcp__github__merge_pull_request", {}, context)
-        assert isinstance(result, PermissionResultAllow)
-        # Must have gone through Slack approval, NOT auto-approved by SDK suggestion
-        provider.post_ephemeral.assert_called()
-
-    async def test_close_pull_request_requires_approval(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__close_pull_request", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_close_issue_requires_approval(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__close_issue", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-    async def test_update_pull_request_branch_requires_approval(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__update_pull_request_branch", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-
-class TestGitHubMCPUnknownToolFallsThrough:
-    """Unknown GitHub MCP tools should fall through to Slack approval (fail-closed)."""
-
-    async def test_unknown_github_tool_requires_approval(self):
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        result = await handler.handle("mcp__github__some_future_tool", {}, None)
-        assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
-
-
-class TestGitHubMCPCreateToolsIgnoreSDKAllow:
-    """Create tools must require Slack approval even when SDK suggests allow."""
-
-    async def test_create_pull_request_ignores_sdk_allow(self):
-        from unittest.mock import MagicMock
-
-        handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-
-        suggestion = MagicMock()
-        suggestion.behavior = "allow"
-        context = MagicMock()
-        context.suggestions = [suggestion]
-
-        result = await handler.handle("mcp__github__create_pull_request", {}, context)
+        result = await handler.handle(tool_name, {}, context)
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_called()
 

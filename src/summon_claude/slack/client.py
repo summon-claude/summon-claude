@@ -41,6 +41,7 @@ def sanitize_for_mrkdwn(text: str, max_len: int = 100) -> str:
 _SECRET_RE = re.compile(
     r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
     r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
+    r"|gho_[A-Za-z0-9_]+|ghs_[A-Za-z0-9_]+|ghr_[A-Za-z0-9_]+"
 )
 
 
