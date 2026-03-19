@@ -1179,21 +1179,43 @@ class TestMCPRegistration:
         result = await self._capture_mcp_servers_with_config()
         assert "github" not in result["mcp_servers"]
 
-    async def test_github_mcp_unreachable_does_not_block_session_init(self):
-        """Session must reach SDK init even when GitHub MCP URL is unreachable.
+    async def test_github_mcp_connection_failure_propagates(self):
+        """SDK startup failure with GitHub MCP configured propagates cleanly.
 
-        MCP connections are lazy — the SDK subprocess connects on first tool
-        use, not at startup. This test verifies the session passes the config
-        through to ClaudeSDKClient without attempting an eager connection.
+        Verifies that if the SDK subprocess fails during startup (e.g.,
+        MCP connection timeout), the exception is not swallowed by
+        _run_session_tasks — it propagates to the caller (start()'s
+        finally block marks the session as errored).
         """
-        result = await self._capture_mcp_servers_with_config(
-            github_pat="ghp_unreachable_test",
+        cfg = make_config(github_pat="ghp_unreachable_test")
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
         )
-        # The spy captures options at SDK init time — if the session tried to
-        # eagerly connect to the (real, external) MCP URL and failed, we'd
-        # never reach spy_init and _CaptureError would not be raised.
-        assert "github" in result["mcp_servers"]
-        assert "api.githubcopilot.com" in result["mcp_servers"]["github"]["url"]
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        # Simulate SDK __aenter__ failing (e.g., MCP connection timeout)
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(
+            side_effect=Exception("Control request timeout: initialize")
+        )
+
+        with (
+            patch(
+                "summon_claude.sessions.session.ClaudeSDKClient",
+                return_value=mock_client,
+            ),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(Exception, match="Control request timeout"),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
 
 
 class TestSecretPatternRedaction:
