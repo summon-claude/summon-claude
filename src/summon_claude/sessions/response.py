@@ -29,7 +29,7 @@ from claude_agent_sdk import (
 )
 
 from summon_claude.sessions.context import ContextUsage
-from summon_claude.sessions.types import FileChange
+from summon_claude.sessions.types import ChangeType, FileChange
 from summon_claude.slack.markdown_split import split_markdown
 from summon_claude.slack.router import ThreadRouter
 
@@ -776,7 +776,7 @@ class ResponseStreamer:
             return
         old_lines = old_content.splitlines() if old_content else []
         new_lines = new_content.splitlines() if new_content else []
-        change_type = "modified" if old_content else "created"
+        change_type: ChangeType = "modified" if old_content else "created"
         if old_content:
             # Count actual changed lines via unified diff
             diff = difflib.unified_diff(old_lines, new_lines)
