@@ -196,6 +196,8 @@ class ResponseStreamer:
         self._turn = _TurnState()
         # Turn number counter
         self._current_turn_number: int = 0
+        # Strong references to fire-and-forget tasks (prevent GC)
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # --- Turn lifecycle ---
 
@@ -512,8 +514,7 @@ class ResponseStreamer:
             old_str = input_data.get("old_string", "")
             new_str = input_data.get("new_string", "")
             thread_ts = self._resolve_upload_thread(parent_id)
-            task = asyncio.create_task(self._upload_diff(old_str, new_str, filename, thread_ts))
-            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+            self._spawn_background(self._upload_diff(old_str, new_str, filename, thread_ts))
             self._schedule_file_change(filename, old_str, new_str)
 
         # Fire-and-forget content upload for Write
@@ -526,15 +527,13 @@ class ResponseStreamer:
                     # Capture turn state at creation time — task may outlive the turn
                     thread_ts = self._resolve_upload_thread(parent_id)
                     rendered = self._turn.md_rendered_paths
-                    task = asyncio.create_task(
+                    self._spawn_background(
                         self._render_md_write(filepath, content, thread_ts, rendered)
                     )
-                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
                 else:
                     basename = PurePosixPath(filepath).name
                     thread_ts = self._resolve_upload_thread(parent_id)
-                    task = asyncio.create_task(self._upload_write(content, basename, thread_ts))
-                    task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+                    self._spawn_background(self._upload_write(content, basename, thread_ts))
             self._schedule_file_change(filepath, "", content)
 
     async def _post_tool_result(self, block: ToolResultBlock, parent_id: str | None = None) -> None:
@@ -590,6 +589,12 @@ class ResponseStreamer:
                 ],
             }
         ]
+
+    def _spawn_background(self, coro: Awaitable[None]) -> None:
+        """Schedule a fire-and-forget task with a strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
 
     def _resolve_upload_thread(self, parent_id: str | None) -> str | None:
         """Resolve thread_ts for file uploads, respecting subagent threads."""
@@ -784,8 +789,7 @@ class ResponseStreamer:
             timestamp=datetime.now(UTC),
             turn_number=self._current_turn_number,
         )
-        task = asyncio.create_task(self._on_file_change(change))
-        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+        self._spawn_background(self._on_file_change(change))
 
 
 def _format_tool_result(block: ToolResultBlock) -> tuple[str, list[dict[str, Any]]]:
