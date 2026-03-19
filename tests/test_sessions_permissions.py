@@ -454,7 +454,7 @@ class TestGitHubMCPToolsRequireApproval:
             "mcp__github__close_issue",
             "mcp__github__update_pull_request_branch",
             # Unknown (fail-closed)
-            "mcp__github__some_future_tool",
+            pytest.param("mcp__github__some_future_tool", id="unknown_tool_falls_through"),
         ],
     )
     async def test_requires_slack_approval(self, tool_name):

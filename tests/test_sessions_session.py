@@ -1245,6 +1245,10 @@ class TestSecretPatternRedaction:
         text = "Error: gho_oauthtoken123 expired"
         assert "gho_oauthtoken123" not in redact_secrets(text)
 
+    def test_redacts_github_user_to_server_token(self):
+        text = "Error: ghu_usertoken456 expired"
+        assert "ghu_usertoken456" not in redact_secrets(text)
+
     def test_redacts_github_app_installation_token(self):
         text = "Error: ghs_apptoken456 forbidden"
         assert "ghs_apptoken456" not in redact_secrets(text)

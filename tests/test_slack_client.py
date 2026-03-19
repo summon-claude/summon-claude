@@ -354,6 +354,11 @@ class TestRedactSecrets:
         assert "[REDACTED]" in redact_secrets(text)
         assert "gho_abc123XYZ" not in redact_secrets(text)
 
+    def test_user_to_server_token_redacted(self):
+        text = "Error: ghu_usertoken456 expired"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghu_usertoken456" not in redact_secrets(text)
+
     def test_app_installation_token_redacted(self):
         text = "Error: ghs_installtoken456 forbidden"
         assert "[REDACTED]" in redact_secrets(text)
