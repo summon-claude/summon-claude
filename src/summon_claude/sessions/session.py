@@ -2162,7 +2162,11 @@ class SummonSession:
             logger.warning("Failed to post change summary: %s", e)
             return
 
-        # Git diff --stat as a threaded reply to the summary
+        # Git diff --stat as a threaded reply to the summary.
+        # When the summary is top-level (thread_ts=None), thread under it via ref.ts.
+        # When the summary is itself a reply, use the parent thread directly —
+        # Slack doesn't support nested threads.
+        stat_thread_ts = ref.ts if thread_ts is None else thread_ts
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -2180,7 +2184,7 @@ class SummonSession:
                     stdout.decode(errors="replace"),
                     "changes.diff",
                     title="git diff --stat",
-                    thread_ts=ref.ts,
+                    thread_ts=stat_thread_ts,
                     snippet_type="diff",
                 )
         except Exception:
