@@ -594,7 +594,15 @@ class ResponseStreamer:
         """Schedule a fire-and-forget task with a strong reference to prevent GC."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._on_background_done)
+
+    def _on_background_done(self, task: asyncio.Task[None]) -> None:
+        """Clean up completed background task and suppress unhandled exception warnings."""
+        self._background_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                logger.debug("Background task failed: %s", exc)
 
     def _resolve_upload_thread(self, parent_id: str | None) -> str | None:
         """Resolve thread_ts for file uploads, respecting subagent threads."""
