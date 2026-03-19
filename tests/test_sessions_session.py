@@ -1789,6 +1789,56 @@ class TestReuseChannel:
         assert cid == "C_FRESH"
         assert cname == "fresh-chan"
 
+    async def test_archived_replacement_copies_canvas_data(self):
+        """When archived channel is replaced, canvas data is copied to new channel."""
+        session = make_session(channel_id="C_ARCH")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(
+            return_value={"channel": {"name": "arch-chan", "is_archived": True}}
+        )
+        web.conversations_unarchive = AsyncMock(side_effect=Exception("cant unarchive"))
+        web.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_REPLACEMENT", "name": "arch-chan"}}
+        )
+        registry = AsyncMock()
+        registry.get_channel = AsyncMock(
+            return_value={
+                "cwd": "/proj",
+                "authenticated_user_id": "U1",
+                "claude_session_id": "claude-old",
+                "canvas_id": "F_CV",
+                "canvas_markdown": "# My Canvas",
+            }
+        )
+        cid, cname = await session._reuse_channel(web, registry, "C_ARCH")
+        assert cid == "C_REPLACEMENT"
+        # Canvas data should be copied to the new channel
+        registry.update_channel_canvas.assert_awaited_once_with(
+            "C_REPLACEMENT", "F_CV", "# My Canvas"
+        )
+        # Claude session ID should also be copied
+        registry.update_channel_claude_session.assert_awaited_once_with(
+            "C_REPLACEMENT", "claude-old"
+        )
+
+    async def test_archived_replacement_skips_canvas_when_absent(self):
+        """When old channel has no canvas, no canvas copy is attempted."""
+        session = make_session(channel_id="C_ARCH")
+        web = AsyncMock()
+        web.conversations_info = AsyncMock(
+            return_value={"channel": {"name": "arch-chan", "is_archived": True}}
+        )
+        web.conversations_unarchive = AsyncMock(side_effect=Exception("cant unarchive"))
+        web.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_NEW2", "name": "arch-chan"}}
+        )
+        registry = AsyncMock()
+        registry.get_channel = AsyncMock(
+            return_value={"cwd": "/proj", "authenticated_user_id": "U1"}
+        )
+        await session._reuse_channel(web, registry, "C_ARCH")
+        registry.update_channel_canvas.assert_not_awaited()
+
     async def test_pending_turns_queue_has_maxsize(self):
         """_pending_turns must have a maxsize for backpressure."""
         session = make_session()
