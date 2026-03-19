@@ -2427,7 +2427,10 @@ class SummonSession:
 
         # Handle !changes — show all changed files
         if result.metadata.get("show_changes"):
-            await self._post_change_summary(rt)
+            if self._changed_files:
+                await self._post_change_summary(rt)
+            else:
+                await rt.client.post("_No files changed in this session yet._")
             return
 
         # Handle !diff <file> — show git diff for a specific file
