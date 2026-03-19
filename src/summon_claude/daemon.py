@@ -375,7 +375,7 @@ def _setup_daemon_logging(log_file: Path) -> logging.handlers.QueueListener:
     Returns the ``QueueListener`` — the caller must call ``.stop()`` on
     shutdown to flush remaining records.
     """
-    from summon_claude.sessions.session import SessionIdFilter  # noqa: PLC0415
+    from summon_claude.sessions.session import RedactingFormatter, SessionIdFilter  # noqa: PLC0415
 
     log_file.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
@@ -384,9 +384,11 @@ def _setup_daemon_logging(log_file: Path) -> logging.handlers.QueueListener:
     # session_id is "[abc] " when inside a session task, "" at daemon level.
     # Example daemon:  "12:00:00 INFO summon_claude.daemon: message text"
     # Example session: "12:00:00 INFO summon_claude.session: [abc123] message text"
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(session_id)s%(message)s",
-        datefmt="%H:%M:%S",
+    fmt = RedactingFormatter(
+        logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(session_id)s%(message)s",
+            datefmt="%H:%M:%S",
+        )
     )
     fh = logging.handlers.RotatingFileHandler(
         log_file,

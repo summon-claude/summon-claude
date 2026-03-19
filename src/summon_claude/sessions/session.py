@@ -74,7 +74,7 @@ from summon_claude.sessions.response import split_text as _split_text
 from summon_claude.sessions.types import FileChange
 from summon_claude.slack.canvas_store import CanvasStore
 from summon_claude.slack.canvas_templates import get_canvas_template
-from summon_claude.slack.client import SlackClient
+from summon_claude.slack.client import SlackClient, redact_secrets
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
@@ -128,6 +128,23 @@ class SessionIdFilter(logging.Filter):
         return True
 
 
+class RedactingFormatter(logging.Formatter):
+    """Formatter that strips secret tokens from the final log output.
+
+    Wraps any ``Formatter`` and applies ``_SECRET_RE`` to the entire
+    formatted string, including exception tracebacks from ``exc_info``.
+    """
+
+    def __init__(self, fmt: logging.Formatter) -> None:
+        # Don't call super().__init__ — we delegate all formatting to _inner
+        self._inner = fmt
+
+    def format(self, record: logging.LogRecord) -> str:
+        from summon_claude.slack.client import _SECRET_RE  # noqa: PLC0415
+
+        return _SECRET_RE.sub("[REDACTED]", self._inner.format(record))
+
+
 class _SessionLogFilter(logging.Filter):
     """Passes only log records emitted within a specific session task.
 
@@ -178,11 +195,6 @@ _THINKING_TRIGGERS = frozenset(
     }
 )
 
-# Patterns that may appear in exception messages and should not be stored in the audit log
-_SECRET_PATTERN = re.compile(
-    r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
-    r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
-)
 
 _BASE_SYSTEM_APPEND = (
     "You are running headlessly via summon-claude, bridged to a private Slack channel. "
@@ -910,7 +922,10 @@ class SummonSession:
                             ended_at=datetime.now(UTC).isoformat(),
                         )
                     except Exception as e:
-                        logger.warning("Failed to update registry on unexpected termination: %s", e)
+                        logger.warning(
+                            "Failed to update registry on unexpected termination: %s",
+                            redact_secrets(str(e)),
+                        )
                     # Notify parent channel of spawn failure (non-fatal)
                     if self._parent_channel_id and self._web_client:
                         try:
@@ -1028,7 +1043,7 @@ class SummonSession:
                     "Invited user %s to channel %s", self._authenticated_user_id, channel_id
                 )
             except Exception as e:
-                logger.warning("Failed to invite user to channel: %s", e)
+                logger.warning("Failed to invite user to channel: %s", redact_secrets(str(e)))
 
         await registry.update_status(
             self._session_id,
@@ -1081,7 +1096,7 @@ class SummonSession:
             canvas_store = await self._init_canvas(client, registry)
             self._canvas_store = canvas_store
         except Exception as e:
-            logger.warning("Canvas initialization failed (non-fatal): %s", e)
+            logger.warning("Canvas initialization failed (non-fatal): %s", redact_secrets(str(e)))
             self._canvas_store = None
 
         # Notify the authenticating user
@@ -1265,7 +1280,7 @@ class SummonSession:
         try:
             await registry.update_project(project_id, pm_channel_id=new_id)
         except Exception as e:
-            logger.warning("PM: failed to persist pm_channel_id: %s", e)
+            logger.warning("PM: failed to persist pm_channel_id: %s", redact_secrets(str(e)))
 
         logger.info("PM: created new channel #%s", cname)
         return new_id, cname
@@ -1527,7 +1542,11 @@ class SummonSession:
                             restart = restart_exc
                         else:
                             for exc in eg.exceptions:
-                                logger.error("Session task failed: %s", exc, exc_info=exc)
+                                logger.error(
+                                    "Session task failed: %s",
+                                    redact_secrets(str(exc)),
+                                    exc_info=exc,
+                                )
                             raise eg.exceptions[0] from eg
                 except _SessionRestartError as e:
                     restart = e
@@ -1541,7 +1560,7 @@ class SummonSession:
                         except TimeoutError:
                             logger.warning("Session summary timed out")
                         except Exception as e:
-                            logger.warning("Session summary failed: %s", e)
+                            logger.warning("Session summary failed: %s", redact_secrets(str(e)))
                     self._claude = None
 
             # After client teardown: restart if compaction requested
@@ -1633,7 +1652,10 @@ class SummonSession:
                     await claude.query(user_message)
                     pre_sent = True
                 except Exception as e:
-                    logger.warning("Pre-send query() failed: %s — consumer will retry", e)
+                    logger.warning(
+                        "Pre-send query() failed: %s — consumer will retry",
+                        redact_secrets(str(e)),
+                    )
 
                 pending = _PendingTurn(
                     message=user_message,
@@ -1798,7 +1820,7 @@ class SummonSession:
                 session_id=self._session_id,
                 details={
                     "error_type": error_type,
-                    "error": _SECRET_PATTERN.sub("[REDACTED]", f"{error_type}: {str(e)[:200]}"),
+                    "error": redact_secrets(f"{error_type}: {str(e)[:200]}"),
                 },
             )
             try:
@@ -1806,7 +1828,7 @@ class SummonSession:
                     ":warning: An error occurred while processing your request.",
                 )
             except Exception as e2:
-                logger.warning("Failed to post error notification: %s", e2)
+                logger.warning("Failed to post error notification: %s", redact_secrets(str(e2)))
         finally:
             # Safety net: clean up gear if turn ended without proper emoji transition
             if pending.message_ts and not emoji_finalized:
@@ -1942,7 +1964,7 @@ class SummonSession:
                 await rt.registry.heartbeat(self._session_id)
                 self._last_heartbeat_time = asyncio.get_running_loop().time()
             except Exception as e:
-                logger.warning("Heartbeat failed: %s", e)
+                logger.warning("Heartbeat failed: %s", redact_secrets(str(e)))
 
     async def _post_session_summary(self, router: ThreadRouter, claude: ClaudeSDKClient) -> None:
         """Generate and post a session summary via Claude."""
@@ -1967,7 +1989,7 @@ class SummonSession:
                     f":memo: **Session Summary**\n{summary}",
                 )
         except Exception as e:
-            logger.warning("Failed to generate session summary: %s", e)
+            logger.warning("Failed to generate session summary: %s", redact_secrets(str(e)))
 
     async def _shutdown(self, rt: _SessionRuntime) -> None:
         """Gracefully shut down the session."""
@@ -2012,7 +2034,7 @@ class SummonSession:
                 timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
-            logger.warning("Failed to update registry on shutdown: %s", e)
+            logger.warning("Failed to update registry on shutdown: %s", redact_secrets(str(e)))
         # Socket Mode is now managed by BoltRouter — no per-session cleanup needed
 
     async def _post_disconnect_message(self, rt: _SessionRuntime) -> None:
@@ -2036,7 +2058,7 @@ class SummonSession:
                 timeout=_CLEANUP_TIMEOUT_S,
             )
         except Exception as e:
-            logger.warning("Failed to post disconnect message: %s", e)
+            logger.warning("Failed to post disconnect message: %s", redact_secrets(str(e)))
 
     async def _on_file_change(self, change: FileChange) -> None:
         """Callback from ResponseStreamer when a file is changed."""
@@ -2219,7 +2241,7 @@ class SummonSession:
         try:
             await rt.client.post("Conversation cleared.", blocks=blocks)
         except Exception as e:
-            logger.warning("Failed to post clear delineation: %s", e)
+            logger.warning("Failed to post clear delineation: %s", redact_secrets(str(e)))
 
     async def _execute_compact(  # noqa: PLR0912
         self,
@@ -2288,7 +2310,7 @@ class SummonSession:
         except _SessionRestartError:
             raise  # Propagate to trigger client restart
         except Exception as e:
-            logger.warning("Compact failed: %s", e)
+            logger.warning("Compact failed: %s", redact_secrets(str(e)))
             err_str = str(e).lower()
             is_overflow = any(
                 kw in err_str for kw in ("context", "token", "limit", "length", "overflow")
@@ -2330,7 +2352,7 @@ class SummonSession:
                     thread_ts=thread_ts,
                 )
         except Exception as e:
-            logger.warning("set_effort(%s) failed: %s", level, e)
+            logger.warning("set_effort(%s) failed: %s", level, redact_secrets(str(e)))
             try:
                 await rt.client.post(
                     f":warning: Failed to set effort: {e}",
@@ -2369,7 +2391,7 @@ class SummonSession:
                     thread_ts=thread_ts,
                 )
             except Exception as e2:
-                logger.warning("Failed to post command error: %s", e2)
+                logger.warning("Failed to post command error: %s", redact_secrets(str(e2)))
             return
 
         # Handle shutdown signal from !end/!quit/!exit/!logout
@@ -2378,7 +2400,7 @@ class SummonSession:
                 try:
                     await rt.client.post(result.text, thread_ts=thread_ts)
                 except Exception as e:
-                    logger.warning("Failed to post shutdown message: %s", e)
+                    logger.warning("Failed to post shutdown message: %s", redact_secrets(str(e)))
             self._shutdown_event.set()
             try:
                 self._raw_event_queue.put_nowait(None)
@@ -2392,7 +2414,7 @@ class SummonSession:
                 try:
                     await rt.client.post(result.text, thread_ts=thread_ts)
                 except Exception as e:
-                    logger.warning("Failed to post stop message: %s", e)
+                    logger.warning("Failed to post stop message: %s", redact_secrets(str(e)))
             self._abort_current_turn()
             return
 
@@ -2404,7 +2426,7 @@ class SummonSession:
                     await self._claude.set_model(new_model)
                     self._model = new_model
                 except Exception as e:
-                    logger.warning("set_model(%s) failed: %s", new_model, e)
+                    logger.warning("set_model(%s) failed: %s", new_model, redact_secrets(str(e)))
                     result = CommandResult(
                         text=f":warning: Failed to switch model: {e}",
                     )
@@ -2433,7 +2455,7 @@ class SummonSession:
                     await claude.query(compact_prompt)
                     pre_sent = True
                 except Exception as e:
-                    logger.warning("Pre-send compact prompt failed: %s", e)
+                    logger.warning("Pre-send compact prompt failed: %s", redact_secrets(str(e)))
             await self._pending_turns.put(
                 _PendingTurn(
                     message=instructions,
@@ -2474,7 +2496,7 @@ class SummonSession:
                     thread_ts=thread_ts,
                 )
             except Exception as e:
-                logger.warning("Failed to post passthrough ack: %s", e)
+                logger.warning("Failed to post passthrough ack: %s", redact_secrets(str(e)))
             # Pre-send: call query() and enqueue as _PendingTurn
             pre_sent = False
             if claude:
@@ -2482,7 +2504,10 @@ class SummonSession:
                     await claude.query(slash_message)
                     pre_sent = True
                 except Exception as e:
-                    logger.warning("Pre-send query() for passthrough failed: %s", e)
+                    logger.warning(
+                        "Pre-send query() for passthrough failed: %s",
+                        redact_secrets(str(e)),
+                    )
             await self._pending_turns.put(_PendingTurn(message=slash_message, pre_sent=pre_sent))
             return
 
@@ -2493,7 +2518,7 @@ class SummonSession:
                 try:
                     await rt.client.post(chunk, thread_ts=thread_ts)
                 except Exception as e:
-                    logger.warning("Failed to post command response: %s", e)
+                    logger.warning("Failed to post command response: %s", redact_secrets(str(e)))
                     break
 
     async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:  # noqa: PLR0912, PLR0915
@@ -2525,7 +2550,7 @@ class SummonSession:
                     logger.debug("Failed to post spawn depth message: %s", e2)
                 return
         except Exception as e:
-            logger.error("Failed to verify spawn depth: %s", e)
+            logger.error("Failed to verify spawn depth: %s", redact_secrets(str(e)))
 
         # Enforce active-child cap before spawning (PM sessions share the
         # higher limit with the MCP session_spawn tool)
@@ -2544,7 +2569,7 @@ class SummonSession:
                     logger.debug("Failed to post spawn limit message: %s", e2)
                 return
         except Exception as e:
-            logger.error("Failed to verify spawn child limit: %s", e)
+            logger.error("Failed to verify spawn child limit: %s", redact_secrets(str(e)))
             try:
                 await rt.client.post(
                     ":warning: Could not verify session limit. Try again.",
@@ -2632,9 +2657,11 @@ class SummonSession:
             fh = logging.FileHandler(log_file)
             fh.setLevel(logging.DEBUG)
             fh.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s %(levelname)s %(name)s: %(message)s",
-                    datefmt="%H:%M:%S",
+                RedactingFormatter(
+                    logging.Formatter(
+                        "%(asctime)s %(levelname)s %(name)s: %(message)s",
+                        datefmt="%H:%M:%S",
+                    )
                 )
             )
 
@@ -2819,7 +2846,9 @@ class SummonSession:
                             await self._claude.set_model(new_model)
                             self._model = new_model
                         except Exception as e:
-                            logger.warning("set_model(%s) failed: %s", new_model, e)
+                            logger.warning(
+                                "set_model(%s) failed: %s", new_model, redact_secrets(str(e))
+                            )
                     new_effort = result.metadata.get("set_effort")
                     if new_effort:
                         await self._execute_effort(rt, new_effort, thread_ts)
@@ -2839,7 +2868,9 @@ class SummonSession:
                     elif result.text:
                         annotations.insert(0, f"`!{match.raw_name}` — {result.text}")
                 except Exception as e:
-                    logger.warning("Mid-message command error !%s: %s", match.raw_name, e)
+                    logger.warning(
+                        "Mid-message command error !%s: %s", match.raw_name, redact_secrets(str(e))
+                    )
                     annotations.insert(0, f"`!{match.raw_name}` — error")
 
                 # Remove the command + args from the text
@@ -2864,7 +2895,7 @@ class SummonSession:
             try:
                 await rt.client.post("\n".join(annotations), thread_ts=thread_ts)
             except Exception as e:
-                logger.warning("Failed to post command annotations: %s", e)
+                logger.warning("Failed to post command annotations: %s", redact_secrets(str(e)))
 
         # Clean up modified text and forward to Claude
         modified_text = " ".join(modified_text.split())

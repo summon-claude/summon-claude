@@ -10,6 +10,8 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from helpers import make_mock_slack_client
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.permissions import (
+    _GITHUB_MCP_AUTO_APPROVE,
+    _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
     _GITHUB_MCP_REQUIRE_APPROVAL,
     PendingRequest,
     PermissionHandler,
@@ -450,34 +452,38 @@ class TestGitHubMCPReadToolsAutoApproved:
         provider.post_ephemeral.assert_not_called()
 
 
-class TestGitHubMCPCreateToolsAutoApproved:
-    """Non-destructive create tools should be auto-approved."""
+class TestGitHubMCPVisibleCreateToolsRequireApproval:
+    """Visible-to-others create tools should require Slack approval."""
 
     async def test_create_pull_request(self):
         handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
         result = await handler.handle("mcp__github__create_pull_request", {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_ephemeral.assert_called()
 
     async def test_create_issue(self):
         handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
         result = await handler.handle("mcp__github__create_issue", {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_ephemeral.assert_called()
 
     async def test_add_issue_comment(self):
         handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
         result = await handler.handle("mcp__github__add_issue_comment", {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_ephemeral.assert_called()
 
 
-class TestGitHubMCPReviewWriteAutoApproved:
+class TestGitHubMCPReviewWriteRequiresApproval:
     async def test_pull_request_review_write(self):
         handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
         result = await handler.handle("mcp__github__pull_request_review_write", {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_ephemeral.assert_called()
 
 
 class TestGitHubMCPDestructiveToolsRequireApproval:
@@ -551,8 +557,38 @@ class TestGitHubMCPDestructiveToolsRequireApproval:
         provider.post_ephemeral.assert_called()
 
 
-class TestGitHubMCPDenyListGuard:
-    """Guard test: pin the deny list so new destructive tools aren't silently missed."""
+class TestGitHubMCPUnknownToolFallsThrough:
+    """Unknown GitHub MCP tools should fall through to Slack approval (fail-closed)."""
+
+    async def test_unknown_github_tool_requires_approval(self):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle("mcp__github__some_future_tool", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+
+class TestGitHubMCPCreateToolsIgnoreSDKAllow:
+    """Create tools must require Slack approval even when SDK suggests allow."""
+
+    async def test_create_pull_request_ignores_sdk_allow(self):
+        from unittest.mock import MagicMock
+
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+
+        suggestion = MagicMock()
+        suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+
+        result = await handler.handle("mcp__github__create_pull_request", {}, context)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+
+class TestGitHubMCPGuardTests:
+    """Guard tests: pin permission sets so changes aren't silently missed."""
 
     def test_require_approval_set_pinned(self):
         assert (
@@ -565,7 +601,29 @@ class TestGitHubMCPDenyListGuard:
                     "mcp__github__update_pull_request_branch",
                     "mcp__github__push_files",
                     "mcp__github__create_or_update_file",
+                    "mcp__github__pull_request_review_write",
+                    "mcp__github__create_pull_request",
+                    "mcp__github__create_issue",
+                    "mcp__github__add_issue_comment",
                 ]
             )
             == _GITHUB_MCP_REQUIRE_APPROVAL
         )
+
+    def test_auto_approve_set_pinned(self):
+        assert (
+            frozenset(
+                [
+                    "mcp__github__pull_request_read",
+                    "mcp__github__get_file_contents",
+                ]
+            )
+            == _GITHUB_MCP_AUTO_APPROVE
+        )
+
+    def test_require_approval_not_matched_by_auto_approve_prefixes(self):
+        """No require-approval tool should match an auto-approve prefix."""
+        for tool in _GITHUB_MCP_REQUIRE_APPROVAL:
+            assert not tool.startswith(_GITHUB_MCP_AUTO_APPROVE_PREFIXES), (
+                f"{tool} matches an auto-approve prefix"
+            )

@@ -37,15 +37,11 @@ _AUTO_APPROVE_TOOLS = frozenset(
     ]
 )
 
-# GitHub MCP tools that are always auto-approved (read-only or non-destructive creates)
+# GitHub MCP tools that are always auto-approved (read-only operations)
 _GITHUB_MCP_AUTO_APPROVE = frozenset(
     [
         "mcp__github__pull_request_read",
         "mcp__github__get_file_contents",
-        "mcp__github__create_pull_request",
-        "mcp__github__create_issue",
-        "mcp__github__add_issue_comment",
-        "mcp__github__pull_request_review_write",
     ]
 )
 
@@ -58,9 +54,10 @@ _GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
 
 # GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
 # even if SDK suggestions say "allow". Defense-in-depth against broad
-# allowedTools patterns in settings.json bypassing HITL for destructive ops.
+# allowedTools patterns in settings.json bypassing HITL.
 _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     [
+        # Destructive operations
         "mcp__github__merge_pull_request",
         "mcp__github__delete_branch",
         "mcp__github__close_pull_request",
@@ -68,6 +65,11 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
         "mcp__github__update_pull_request_branch",
         "mcp__github__push_files",
         "mcp__github__create_or_update_file",
+        # Visible-to-others actions (notify reviewers, trigger CI, auto-merge, etc.)
+        "mcp__github__pull_request_review_write",
+        "mcp__github__create_pull_request",
+        "mcp__github__create_issue",
+        "mcp__github__add_issue_comment",
     ]
 )
 
@@ -178,18 +180,18 @@ class PermissionHandler:
             logger.debug("Auto-approving tool: %s", tool_name)
             return PermissionResultAllow()
 
-        # 2b. GitHub MCP auto-approve: exact names and prefix matches
+        # 2b. Restricted GitHub MCP tools always require Slack approval —
+        # checked before auto-approve so deny-list takes precedence over prefixes
+        if tool_name in _GITHUB_MCP_REQUIRE_APPROVAL:
+            logger.info("Restricted GitHub MCP tool requires approval: %s", tool_name)
+            return await self._request_approval(tool_name, input_data, context)
+
+        # 2c. GitHub MCP auto-approve: exact names and prefix matches
         if tool_name in _GITHUB_MCP_AUTO_APPROVE or tool_name.startswith(
             _GITHUB_MCP_AUTO_APPROVE_PREFIXES
         ):
             logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
             return PermissionResultAllow()
-
-        # 2c. Destructive GitHub MCP tools always require Slack approval —
-        # skip SDK allow suggestions to prevent broad allowedTools bypass
-        if tool_name in _GITHUB_MCP_REQUIRE_APPROVAL:
-            logger.info("Destructive GitHub MCP tool requires approval: %s", tool_name)
-            return await self._request_approval(tool_name, input_data, context)
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist
         if context is not None:
