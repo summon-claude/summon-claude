@@ -1434,9 +1434,18 @@ class TestHandleSpawn:
             child_opts = mock_create.call_args[0][0]
             assert child_opts.project_id == "proj-42"
 
+    async def test_spawn_blocked_missing_ipc_spawn(self):
+        """_handle_spawn posts error when _ipc_spawn callback is not registered."""
+        session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+        await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
+        rt.client.post.assert_awaited_once()
+        assert "callback missing" in rt.client.post.call_args[0][0]
+
     async def test_spawn_blocked_at_child_limit(self):
         """_handle_spawn posts limit message when active children >= limit."""
-        session = make_session()
+        session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
 
@@ -1483,7 +1492,7 @@ class TestHandleSpawn:
 
     async def test_spawn_pm_session_blocked_at_pm_limit(self):
         """PM sessions should be blocked when active children >= PM limit."""
-        session = make_session(pm_profile=True)
+        session = make_session(pm_profile=True, ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
 
@@ -1507,7 +1516,7 @@ class TestHandleSpawn:
 
     async def test_spawn_blocked_at_depth_limit(self):
         """_handle_spawn posts depth message when depth >= MAX_SPAWN_DEPTH."""
-        session = make_session()
+        session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
 
@@ -1548,7 +1557,7 @@ class TestHandleSpawn:
 
     async def test_spawn_list_children_failure_blocks_spawn(self):
         """If list_children raises, spawn should be blocked (fail-closed)."""
-        session = make_session()
+        session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
 

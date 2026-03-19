@@ -2731,6 +2731,17 @@ class SummonSession:
                 logger.debug("Failed to post spawn rejection: %s", e)
             return
 
+        if not self._ipc_spawn:
+            logger.error("Cannot spawn: no IPC spawn callback registered")
+            try:
+                await rt.client.post(
+                    ":warning: Spawn not available — internal callback missing.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post ipc_spawn missing: %s", e)
+            return
+
         # Enforce spawn depth limit to prevent recursive chains
         try:
             depth = await rt.registry.compute_spawn_depth(self._session_id)
@@ -2799,9 +2810,6 @@ class SummonSession:
         child_options = SessionOptions(
             cwd=self._cwd, name=child_name, project_id=self._project_id
         )
-        if not self._ipc_spawn:
-            logger.error("Cannot spawn: no IPC spawn callback registered")
-            return
         try:
             child_session_id = await self._ipc_spawn(child_options, spawn_auth.token)
         except Exception as e:
