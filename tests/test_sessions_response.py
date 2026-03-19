@@ -743,8 +743,16 @@ class TestUploadDiff:
         await streamer._handle_assistant_message(msg)
         await asyncio.sleep(0.05)
 
-        # Should have attempted markdown block and fallen back to plain text
-        assert call_count >= 3  # header + markdown attempt + plain text fallback
+        # Should have attempted markdown block and fallen back to plain text.
+        # Calls: header (no md blocks, succeeds) + md block (fails) + plain text fallback
+        assert call_count >= 3
+        # Verify at least one call had no markdown blocks (the fallback)
+        plain_calls = [
+            c
+            for c in client.post.call_args_list
+            if not any(b.get("type") == "markdown" for b in c.kwargs.get("blocks", []))
+        ]
+        assert len(plain_calls) >= 2  # header + plain text fallback
 
 
 class TestSplitTextAdditional:

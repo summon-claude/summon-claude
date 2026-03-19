@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import dataclasses
 import logging
 import logging.handlers
 import os
@@ -2027,7 +2028,7 @@ class SummonSession:
     async def _on_file_change(self, change: FileChange) -> None:
         """Callback from ResponseStreamer when a file is changed."""
         if change.path in self._changed_files:
-            change.change_type = "modified"
+            change = dataclasses.replace(change, change_type="modified")
         self._changed_files[change.path] = change
         # Canvas update for Changed Files section (Task 7)
         if self._canvas_store is not None:
@@ -2055,15 +2056,15 @@ class SummonSession:
         """Handle !diff <file> — show git diff for a specific file."""
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
         try:
-            resolved = os.path.realpath(f"{self._cwd}/{user_path}")  # noqa: ASYNC240
+            resolved = os.path.realpath(Path(self._cwd) / user_path)  # noqa: ASYNC240
             if not resolved.startswith(cwd + os.sep) and resolved != cwd:
                 await rt.client.post(
-                    ":warning: Path must be within the session directory.",
+                    f":warning: `{user_path}` is outside the session directory.",
                     thread_ts=thread_ts,
                 )
                 return
         except Exception:
-            await rt.client.post(":warning: Invalid path.", thread_ts=thread_ts)
+            await rt.client.post(f":warning: Invalid path: `{user_path}`.", thread_ts=thread_ts)
             return
 
         # Show tracked info if available
@@ -2127,24 +2128,24 @@ class SummonSession:
             f"\U0001f4cb *Session Changes* \u2014 "
             f"{n} file{'s' if n != 1 else ''} \u00b7 +{total_add}/-{total_del} lines"
         )
+
+        # Build file detail lines for a single message
+        detail_lines = []
+        for path, change in self._changed_files.items():
+            short = path.rsplit("/", 1)[-1] if "/" in path else path
+            detail_lines.append(
+                f"\u2022 `{short}` \u2014 {change.change_type} "
+                f"(+{change.additions}/-{change.deletions})"
+            )
+        body = "\n".join(detail_lines)
+
         try:
-            ref = await rt.client.post(header)
+            ref = await rt.client.post(f"{header}\n{body}")
         except Exception as e:
-            logger.warning("Failed to post change summary header: %s", e)
+            logger.warning("Failed to post change summary: %s", e)
             return
 
-        # Threaded per-file details
-        for path, change in self._changed_files.items():
-            detail = (
-                f"`{path}` \u2014 {change.change_type} (+{change.additions}/-{change.deletions})"
-            )
-            try:
-                await rt.client.post(detail, thread_ts=ref.ts)
-                await asyncio.sleep(1.2)  # Tier 3 rate limit
-            except Exception as e:
-                logger.warning("Failed to post change detail: %s", e)
-
-        # Git diff --stat upload
+        # Git diff --stat as a threaded upload
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -2158,7 +2159,6 @@ class SummonSession:
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
-                await asyncio.sleep(3.0)  # Tier 2 rate limit for file uploads
                 await rt.client.upload(
                     stdout.decode(errors="replace"),
                     "changes.diff",

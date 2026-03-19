@@ -43,11 +43,17 @@ _LANG_TO_SNIPPET_TYPE: dict[str, str] = {
     "c#": "csharp",
     "js": "javascript",
     "ts": "typescript",
+    "jsx": "javascript",
+    "tsx": "typescript",
     "py": "python",
     "rb": "ruby",
     "yml": "yaml",
     "md": "markdown",
     "rs": "rust",
+    "kt": "kotlin",
+    "swift": "swift",
+    "go": "go",
+    "java": "java",
 }
 
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")
@@ -246,7 +252,16 @@ def create_summon_mcp_tools(  # noqa: PLR0915
             "snippet_type: optional syntax highlighting type (e.g. 'diff', 'python', 'json'). "
             "Enables Slack's native syntax highlighting for the uploaded file."
         ),
-        {"content": str, "filename": str, "title": str, "snippet_type": str},
+        {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string"},
+                "filename": {"type": "string"},
+                "title": {"type": "string"},
+                "snippet_type": {"type": "string"},
+            },
+            "required": ["content", "filename", "title"],
+        },
     )
     async def upload_file(args: dict) -> dict:
         try:

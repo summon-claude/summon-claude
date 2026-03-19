@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.types import FileChange
+from summon_claude.slack.markdown_split import split_markdown
 from summon_claude.slack.router import ThreadRouter
 
 logger = logging.getLogger(__name__)
@@ -513,7 +514,7 @@ class ResponseStreamer:
             thread_ts = self._resolve_upload_thread(parent_id)
             task = asyncio.create_task(self._upload_diff(old_str, new_str, filename, thread_ts))
             task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-            await self._fire_file_change(filename, old_str, new_str)
+            self._schedule_file_change(filename, old_str, new_str)
 
         # Fire-and-forget content upload for Write
         elif tool_name == "Write":
@@ -534,7 +535,7 @@ class ResponseStreamer:
                     thread_ts = self._resolve_upload_thread(parent_id)
                     task = asyncio.create_task(self._upload_write(content, basename, thread_ts))
                     task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
-            await self._fire_file_change(filepath, "", content)
+            self._schedule_file_change(filepath, "", content)
 
     async def _post_tool_result(self, block: ToolResultBlock, parent_id: str | None = None) -> None:
         """Post a brief tool result summary to the appropriate thread."""
@@ -677,8 +678,6 @@ class ResponseStreamer:
             thread_ts: Captured at task creation time to avoid race with turn reset.
             rendered_paths: Reference to the originating turn's md_rendered_paths set.
         """
-        from summon_claude.slack.markdown_split import split_markdown  # noqa: PLC0415
-
         client = self._router.client
         basename = PurePosixPath(filepath).name
         n_chars = len(content)
@@ -752,13 +751,13 @@ class ResponseStreamer:
         except Exception:
             logger.warning("Write content upload failed for %s", basename)
 
-    async def _fire_file_change(
+    def _schedule_file_change(
         self,
         filepath: str,
         old_content: str,
         new_content: str,
     ) -> None:
-        """Notify the on_file_change callback with change details."""
+        """Schedule on_file_change callback as a fire-and-forget task."""
         if not self._on_file_change or not filepath:
             return
         old_lines = old_content.splitlines() if old_content else []
@@ -785,10 +784,8 @@ class ResponseStreamer:
             timestamp=datetime.now(UTC),
             turn_number=self._current_turn_number,
         )
-        try:
-            await self._on_file_change(change)
-        except Exception:
-            logger.warning("on_file_change callback failed for %s", filepath)
+        task = asyncio.create_task(self._on_file_change(change))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
 
 def _format_tool_result(block: ToolResultBlock) -> tuple[str, list[dict[str, Any]]]:
