@@ -100,7 +100,8 @@ async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult: 
             action = "skill"
         else:
             action = "passthrough"
-        lines = [f"*`!{canonical}`* — {defn.description}", f"_Type: {action}_"]
+        usage = f"`!{canonical} {defn.argument_hint}`" if defn.argument_hint else f"`!{canonical}`"
+        lines = [f"*{usage}* — {defn.description}", f"_Type: {action}_"]
         if defn.aliases:
             lines.append(f"_Aliases: {', '.join(f'`!{a}`' for a in defn.aliases)}_")
         # Show short aliases from _ALIAS_LOOKUP (e.g. plugin skills)
