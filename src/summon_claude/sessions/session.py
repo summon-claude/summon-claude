@@ -2129,14 +2129,23 @@ class SummonSession:
             f"{n} file{'s' if n != 1 else ''} \u00b7 +{total_add}/-{total_del} lines"
         )
 
-        # Build file detail lines for a single message
+        # Build file detail lines — cap at 3000 chars for readability
         detail_lines = []
+        remaining = 3000 - len(header) - 1  # -1 for the joining newline
+        truncated = 0
         for path, change in self._changed_files.items():
             short = path.rsplit("/", 1)[-1] if "/" in path else path
-            detail_lines.append(
+            line = (
                 f"\u2022 `{short}` \u2014 {change.change_type} "
                 f"(+{change.additions}/-{change.deletions})"
             )
+            if remaining - len(line) - 1 < 0:
+                truncated = n - len(detail_lines)
+                break
+            detail_lines.append(line)
+            remaining -= len(line) + 1
+        if truncated:
+            detail_lines.append(f"_\u2026and {truncated} more file{'s' if truncated != 1 else ''}_")
         body = "\n".join(detail_lines)
 
         try:
