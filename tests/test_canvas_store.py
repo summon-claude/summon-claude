@@ -23,11 +23,12 @@ def _make_mock_client() -> SlackClient:
 
 @pytest.fixture
 async def canvas_registry(tmp_path: Path) -> SessionRegistry:
-    """Registry with a pre-registered session for canvas tests."""
+    """Registry with a pre-registered session and channel for canvas tests."""
     reg = SessionRegistry(db_path=tmp_path / "canvas_test.db")
     async with reg:
         await reg.register("sess-cv", 111, "/tmp")
         await reg.update_status("sess-cv", "active", slack_channel_id="C_TEST")
+        await reg.register_channel("C_TEST", "test-channel", "/tmp")
         yield reg
 
 
@@ -39,6 +40,7 @@ class TestCanvasStoreReadWrite:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Initial",
         )
         assert store.read() == "# Initial"
@@ -50,23 +52,25 @@ class TestCanvasStoreReadWrite:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="",
         )
         await store.write("# Updated\nNew content")
         assert store.read() == "# Updated\nNew content"
 
-    async def test_write_persists_to_registry(self, canvas_registry):
+    async def test_write_persists_to_channels_table(self, canvas_registry):
         client = _make_mock_client()
         store = CanvasStore(
             session_id="sess-cv",
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         await store.write("# Persisted")
-        canvas_id, md = await canvas_registry.get_canvas("sess-cv")
-        assert canvas_id == "F_1"
-        assert md == "# Persisted"
+        channel = await canvas_registry.get_channel("C_TEST")
+        assert channel["canvas_id"] == "F_1"
+        assert channel["canvas_markdown"] == "# Persisted"
 
     async def test_canvas_id_property(self, canvas_registry):
         client = _make_mock_client()
@@ -75,6 +79,7 @@ class TestCanvasStoreReadWrite:
             canvas_id="F_ABC",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         assert store.canvas_id == "F_ABC"
 
@@ -88,6 +93,7 @@ class TestCanvasStoreUpdateSection:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown=md,
         )
         await store.update_section("Status", "New status line")
@@ -105,6 +111,7 @@ class TestCanvasStoreUpdateSection:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown=md,
         )
         await store.update_section("## Status", "New")
@@ -120,6 +127,7 @@ class TestCanvasStoreUpdateSection:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         with pytest.raises(ValueError, match="non-whitespace text"):
             await store.update_section("", "content")
@@ -131,6 +139,7 @@ class TestCanvasStoreUpdateSection:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         with pytest.raises(ValueError, match="non-whitespace text"):
             await store.update_section("###", "content")
@@ -143,6 +152,7 @@ class TestCanvasStoreUpdateSection:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown=md,
         )
         await store.update_section("Nonexistent", "New stuff")
@@ -241,11 +251,12 @@ class TestReplaceSectionHelper:
 class TestCanvasStoreRestore:
     async def test_restore_returns_store_when_canvas_exists(self, canvas_registry):
         client = _make_mock_client()
-        await canvas_registry.update_canvas("sess-cv", "F_RESTORE", "# Restored")
+        await canvas_registry.update_channel_canvas("C_TEST", "F_RESTORE", "# Restored")
         store = await CanvasStore.restore(
             session_id="sess-cv",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         assert store is not None
         assert store.canvas_id == "F_RESTORE"
@@ -257,6 +268,7 @@ class TestCanvasStoreRestore:
             session_id="sess-cv",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         assert store is None
 
@@ -269,6 +281,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Test",
         )
         store.start_sync()
@@ -284,6 +297,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Test",
         )
         store.start_sync()
@@ -299,6 +313,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         # Should not raise
         await store.stop_sync()
@@ -314,6 +329,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Test",
         )
         await store.write("# Dirty")
@@ -330,6 +346,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         await store.write("# Dirty")
         assert store._dirty is True
@@ -346,6 +363,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         for _i in range(4):
             store._dirty = True
@@ -361,6 +379,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
         )
         # Accumulate failures
         for _ in range(3):
@@ -382,6 +401,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Initial",
         )
         store.start_sync()
@@ -402,6 +422,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown=md,
         )
         # Run two updates concurrently
@@ -429,6 +450,7 @@ class TestCanvasStoreSyncLifecycle:
             canvas_id="F_1",
             client=client,
             registry=canvas_registry,
+            channel_id="C_TEST",
             markdown="# Test",
         )
         store.start_sync()
@@ -450,8 +472,8 @@ class TestCanvasStoreChannelSync:
             canvas_id="F_CH",
             client=client,
             registry=canvas_registry,
-            markdown="# Initial",
             channel_id="C_CANVAS",
+            markdown="# Initial",
         )
         await store.write("# Updated via channel")
         channel = await canvas_registry.get_channel("C_CANVAS")
@@ -459,32 +481,14 @@ class TestCanvasStoreChannelSync:
         assert channel["canvas_id"] == "F_CH"
         assert channel["canvas_markdown"] == "# Updated via channel"
 
-    async def test_persist_without_channel_id_skips_channel_table(self, canvas_registry):
-        """When no channel_id, only sessions table is updated."""
-        client = _make_mock_client()
-        store = CanvasStore(
-            session_id="sess-cv",
-            canvas_id="F_NO_CH",
-            client=client,
-            registry=canvas_registry,
-            markdown="# Initial",
-        )
-        await store.write("# No channel sync")
-        # Sessions table should have the canvas
-        cid, md = await canvas_registry.get_canvas("sess-cv")
-        assert cid == "F_NO_CH"
-        assert md == "# No channel sync"
-
 
 class TestCanvasStoreRestoreWithChannel:
     """Tests for CanvasStore.restore() with channel_id parameter."""
 
-    async def test_restore_prefers_channel_canvas(self, canvas_registry):
-        """When channel has canvas data, restore() uses it over session data."""
+    async def test_restore_uses_channel_canvas(self, canvas_registry):
+        """When channel has canvas data, restore() uses it."""
         await canvas_registry.register_channel("C_RCH", "restore-chan", "/tmp")
         await canvas_registry.update_channel_canvas("C_RCH", "F_CHAN", "# Channel canvas")
-        # Put different data in sessions table (sess-cv is pre-registered)
-        await canvas_registry.update_canvas("sess-cv", "F_SESS", "# Session canvas")
         client = _make_mock_client()
         store = await CanvasStore.restore(
             session_id="sess-cv",
@@ -497,28 +501,12 @@ class TestCanvasStoreRestoreWithChannel:
         assert store._markdown == "# Channel canvas"
         assert store._channel_id == "C_RCH"
 
-    async def test_restore_falls_back_to_session_table(self, canvas_registry):
-        """When channel has no canvas, restore() falls back to session data."""
-        await canvas_registry.register_channel("C_NOCANVAS", "no-canvas-chan", "/tmp")
-        # Canvas only in sessions table (sess-cv is pre-registered)
-        await canvas_registry.update_canvas("sess-cv", "F_SESS2", "# Session fallback")
-        client = _make_mock_client()
-        store = await CanvasStore.restore(
-            session_id="sess-cv",
-            client=client,
-            registry=canvas_registry,
-            channel_id="C_NOCANVAS",
-        )
-        assert store is not None
-        assert store._canvas_id == "F_SESS2"
-        assert store._markdown == "# Session fallback"
-
-    async def test_restore_returns_none_when_no_canvas_anywhere(self, canvas_registry):
-        """When neither channel nor session has canvas, returns None."""
+    async def test_restore_returns_none_when_channel_has_no_canvas(self, canvas_registry):
+        """When channel has no canvas data, returns None."""
         await canvas_registry.register_channel("C_EMPTY", "empty-chan", "/tmp")
         client = _make_mock_client()
         store = await CanvasStore.restore(
-            session_id="sess-no-canvas",
+            session_id="sess-cv",
             client=client,
             registry=canvas_registry,
             channel_id="C_EMPTY",

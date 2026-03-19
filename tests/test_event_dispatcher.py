@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from summon_claude.event_dispatcher import EventDispatcher, SessionHandle
 
@@ -308,7 +308,6 @@ class TestUnroutedMessageFallback:
         """!summon resume in an unrouted channel triggers _handle_resume_request."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
-        # Patch _handle_resume_request to verify it's called
         dispatcher._handle_resume_request = AsyncMock()  # type: ignore[method-assign]
         event = {"channel": "C_DEAD", "text": "!summon resume", "user": "U001"}
         await dispatcher._handle_unrouted_message(event)
@@ -322,36 +321,38 @@ class TestUnroutedMessageFallback:
         await dispatcher._handle_unrouted_message(event)
         dispatcher._handle_resume_request.assert_awaited_once_with("C_DEAD", "U001", "sess-abc")
 
-    async def test_resume_request_rejects_wrong_user(self):
-        """_handle_resume_request rejects users who don't own the channel."""
+    async def test_resume_does_not_match_partial_word(self):
+        """!summon resumed should not trigger resume handler."""
+        dispatcher = EventDispatcher()
+        dispatcher._handle_resume_request = AsyncMock()  # type: ignore[method-assign]
+        event = {"channel": "C_DEAD", "text": "!summon resumed", "user": "U001"}
+        await dispatcher._handle_unrouted_message(event)
+        dispatcher._handle_resume_request.assert_not_awaited()
+
+    async def test_resume_delegates_to_handler(self):
+        """_handle_resume_request delegates to the resume handler."""
+        mock_handler = AsyncMock()
+        dispatcher = EventDispatcher()
+        dispatcher.set_resume_handler(mock_handler)
+        await dispatcher._handle_resume_request("C_CHAN", "U001", "sess-abc")
+        mock_handler.assert_awaited_once_with("C_CHAN", "U001", "sess-abc")
+
+    async def test_resume_handler_error_posts_to_channel(self):
+        """_handle_resume_request posts handler ValueError to channel."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
-        with patch("summon_claude.event_dispatcher.SessionRegistry") as mock_reg_cls:
-            mock_reg = AsyncMock()
-            mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U_OWNER"})
-            mock_reg.get_latest_session_for_channel = AsyncMock(
-                return_value={
-                    "session_id": "old-sess",
-                    "status": "completed",
-                }
-            )
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            await dispatcher._handle_resume_request("C_CHAN", "U_INTRUDER", None)
-        # Should post an error about ownership
+        mock_handler = AsyncMock(side_effect=ValueError("Only the owner can resume."))
+        dispatcher.set_resume_handler(mock_handler)
+        await dispatcher._handle_resume_request("C_CHAN", "U_INTRUDER", None)
+        # Should post via SlackClient (which calls chat_postMessage)
         mock_web.chat_postMessage.assert_awaited_once()
         assert "owner" in mock_web.chat_postMessage.call_args.kwargs.get("text", "").lower()
 
-    async def test_resume_request_unknown_channel_is_noop(self):
-        """_handle_resume_request silently returns for non-summon channels."""
+    async def test_resume_no_handler_is_silent(self):
+        """_handle_resume_request without a handler logs and returns silently."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
-        with patch("summon_claude.event_dispatcher.SessionRegistry") as mock_reg_cls:
-            mock_reg = AsyncMock()
-            mock_reg.get_channel = AsyncMock(return_value=None)
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            await dispatcher._handle_resume_request("C_UNKNOWN", "U001", None)
+        await dispatcher._handle_resume_request("C_CHAN", "U001", None)
         mock_web.chat_postMessage.assert_not_awaited()
 
     async def test_unrouted_message_dispatched_for_unregistered_channel(self):

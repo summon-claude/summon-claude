@@ -259,8 +259,6 @@ class SessionRegistry:
             "error_message",
             "model",
             "effort",
-            "canvas_id",
-            "canvas_markdown",
             "project_id",
         }
     )
@@ -653,38 +651,14 @@ class SessionRegistry:
 
     # --- Canvas methods ---
 
-    async def update_canvas(self, session_id: str, canvas_id: str, canvas_markdown: str) -> None:
-        """Update the canvas ID and markdown for a session."""
-        db = self._check_connected()
-        async with self._lock:
-            await db.execute(
-                "UPDATE sessions SET canvas_id = ?, canvas_markdown = ?, last_activity_at = ?"
-                " WHERE session_id = ?",
-                (canvas_id, canvas_markdown, _now(), session_id),
-            )
-            await db.commit()
-
-    async def get_canvas(self, session_id: str) -> tuple[str | None, str | None]:
-        """Return (canvas_id, canvas_markdown) for a session."""
-        db = self._check_connected()
-        async with db.execute(
-            "SELECT canvas_id, canvas_markdown FROM sessions WHERE session_id = ?",
-            (session_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return row[0], row[1]
-            return None, None
-
     async def get_canvas_by_channel(
         self, channel_id: str
     ) -> tuple[str | None, str | None, str | None]:
-        """Return (canvas_id, canvas_markdown, authenticated_user_id) for a channel."""
+        """Return (canvas_id, canvas_markdown, authenticated_user_id) from channels table."""
         db = self._check_connected()
         async with db.execute(
-            "SELECT canvas_id, canvas_markdown, authenticated_user_id FROM sessions"
-            " WHERE slack_channel_id = ? AND canvas_id IS NOT NULL"
-            " ORDER BY started_at DESC LIMIT 1",
+            "SELECT canvas_id, canvas_markdown, authenticated_user_id FROM channels"
+            " WHERE channel_id = ?",
             (channel_id,),
         ) as cursor:
             row = await cursor.fetchone()
@@ -716,6 +690,7 @@ class SessionRegistry:
                      created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(channel_id) DO UPDATE SET
+                    channel_name = excluded.channel_name,
                     authenticated_user_id = COALESCE(
                         excluded.authenticated_user_id, authenticated_user_id
                     ),

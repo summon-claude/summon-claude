@@ -296,11 +296,61 @@ class SessionManager:
     # /summon auth bridging
     # ------------------------------------------------------------------
 
-    async def resume_session(self, session_id: str) -> None:
-        """Resume a stopped session (callback for EventDispatcher)."""
-        result = await self._ipc_resume(session_id)
+    async def resume_from_channel(
+        self, channel_id: str, user_id: str, target_session_id: str | None
+    ) -> None:
+        """Resume a stopped session from a Slack channel command.
+
+        Called by EventDispatcher for ``!summon resume`` in unrouted channels.
+        Validates channel ownership and session state before resuming.
+
+        Raises:
+            ValueError: With a user-facing message on validation failure.
+        """
+        resolved_session_id = await self._resolve_channel_resume(
+            channel_id, user_id, target_session_id
+        )
+        if not resolved_session_id:
+            return  # Not a summon-managed channel — silent
+
+        # Delegate to existing resume orchestration (opens its own registry)
+        result = await self._handle_resume_session(
+            {"type": "resume_session", "session_id": resolved_session_id}
+        )
         if result.get("type") == "error":
             raise ValueError(result["message"])
+
+    async def _resolve_channel_resume(
+        self, channel_id: str, user_id: str, target_session_id: str | None
+    ) -> str | None:
+        """Validate ownership and resolve the session to resume.
+
+        Returns the session ID on success, ``None`` for non-summon channels.
+
+        Raises:
+            ValueError: On ownership or state validation failure.
+        """
+        async with SessionRegistry() as registry:
+            channel = await registry.get_channel(channel_id)
+            if not channel:
+                return None
+
+            if channel.get("authenticated_user_id") != user_id:
+                raise ValueError(":x: Only the original session owner can resume.")
+
+            if target_session_id:
+                session = await registry.get_session(target_session_id)
+                if not session or session.get("slack_channel_id") != channel_id:
+                    raise ValueError("Session not found in this channel.")
+            else:
+                session = await registry.get_latest_session_for_channel(channel_id)
+                if not session:
+                    raise ValueError("No previous session found in this channel.")
+
+            if session["status"] not in ("completed", "errored"):
+                raise ValueError("Session is still active. Use the existing session.")
+
+            return session["session_id"]
 
     async def _ipc_resume(self, session_id: str) -> dict[str, Any]:
         """Resume a stopped session and return the IPC result dict.
@@ -549,9 +599,10 @@ class SessionManager:
             return {"type": "error", "message": "Missing session_id"}
 
         # Look up old session and extract resume parameters
-        resume_params = await self._validate_resume_target(old_session_id)
-        if "error" in resume_params:
-            return {"type": "error", "message": resume_params["error"]}
+        try:
+            resume_params = await self._validate_resume_target(old_session_id)
+        except ValueError as e:
+            return {"type": "error", "message": str(e)}
 
         channel_id: str = resume_params["channel_id"]
         claude_sid: str = resume_params["claude_session_id"]
@@ -582,24 +633,26 @@ class SessionManager:
         finally:
             self._resuming_channels.discard(channel_id)
 
-    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:  # pyright: ignore[reportReturnType]
+    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
         """Validate and extract resume parameters from an old session.
 
-        Returns a dict with resume params on success, or ``{"error": "..."}``
-        on validation failure.
+        Returns a dict with resume params on success.
+
+        Raises:
+            ValueError: On validation failure (session not found, wrong status, etc.).
         """
         async with SessionRegistry() as registry:
             old_session = await registry.get_session(old_session_id)
             if not old_session:
-                return {"error": f"Session {old_session_id} not found"}
+                raise ValueError(f"Session {old_session_id} not found")
             status = old_session["status"]
             if status == "suspended":
-                return {"error": "Session is suspended — use project up to restart it"}
+                raise ValueError("Session is suspended — use project up to restart it")
             if status not in ("completed", "errored"):
-                return {"error": f"Session is {status} — use session_message instead"}
+                raise ValueError(f"Session is {status} — use session_message instead")
             channel_id = old_session.get("slack_channel_id")
             if not channel_id:
-                return {"error": "Session has no associated channel"}
+                raise ValueError("Session has no associated channel")
 
             channel = await registry.get_channel(channel_id)
             claude_session_id = (
@@ -608,7 +661,7 @@ class SessionManager:
                 else old_session.get("claude_session_id")
             )
             if not claude_session_id:
-                return {"error": "No Claude session ID to resume from"}
+                raise ValueError("No Claude session ID to resume from")
 
             return {
                 "channel_id": channel_id,
@@ -620,6 +673,7 @@ class SessionManager:
                 "authenticated_user_id": old_session.get("authenticated_user_id"),
                 "parent_session_id": old_session.get("parent_session_id"),
             }
+        raise AssertionError("unreachable")  # pragma: no cover
 
     async def create_resumed_session(
         self,

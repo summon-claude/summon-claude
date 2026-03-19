@@ -1801,9 +1801,8 @@ class TestResumeSessionIPC:
             mock_reg.get_session = AsyncMock(return_value=None)
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await manager._validate_resume_target("nonexistent")
-        assert "error" in result
-        assert "not found" in result["error"]
+            with pytest.raises(ValueError, match="not found"):
+                await manager._validate_resume_target("nonexistent")
 
     async def test_validate_resume_target_still_active(self):
         manager, _, _ = _make_manager()
@@ -1814,9 +1813,8 @@ class TestResumeSessionIPC:
             )
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await manager._validate_resume_target("active-sess")
-        assert "error" in result
-        assert "active" in result["error"]
+            with pytest.raises(ValueError, match="active"):
+                await manager._validate_resume_target("active-sess")
 
     async def test_concurrent_resume_rejected(self):
         """Two resume requests for the same channel — second is rejected."""
@@ -1875,10 +1873,8 @@ class TestResumeSessionIPC:
             )
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await manager._validate_resume_target("suspended-sess")
-        assert "error" in result
-        assert "suspended" in result["error"]
-        assert "project up" in result["error"]
+            with pytest.raises(ValueError, match=r"suspended.*project up"):
+                await manager._validate_resume_target("suspended-sess")
 
     async def test_create_resumed_session_rejects_none_auth(self):
         """create_resumed_session raises ValueError when authenticated_user_id is None."""
@@ -1886,27 +1882,48 @@ class TestResumeSessionIPC:
         with pytest.raises(ValueError, match="authenticated_user_id"):
             await manager.create_resumed_session(make_options(), authenticated_user_id=None)
 
-    async def test_resume_session_callback_raises_on_error(self):
-        """resume_session() callback raises ValueError when _handle_resume_session returns error."""
+    async def test_resume_from_channel_raises_on_error(self):
+        """resume_from_channel raises ValueError on validation failure."""
         manager, _, _ = _make_manager()
         with (
             patch.object(
                 manager,
-                "_handle_resume_session",
-                new=AsyncMock(return_value={"type": "error", "message": "not found"}),
+                "_resolve_channel_resume",
+                new=AsyncMock(side_effect=ValueError("owner mismatch")),
             ),
-            pytest.raises(ValueError, match="not found"),
+            pytest.raises(ValueError, match="owner mismatch"),
         ):
-            await manager.resume_session("nonexistent")
+            await manager.resume_from_channel("C1", "U_WRONG", None)
 
-    async def test_resume_session_callback_succeeds(self):
-        """resume_session() callback does not raise on success."""
+    async def test_resume_from_channel_succeeds(self):
+        """resume_from_channel delegates to _handle_resume_session on success."""
+        manager, _, _ = _make_manager()
+        with (
+            patch.object(
+                manager,
+                "_resolve_channel_resume",
+                new=AsyncMock(return_value="old-sess"),
+            ),
+            patch.object(
+                manager,
+                "_handle_resume_session",
+                new=AsyncMock(
+                    return_value={
+                        "type": "session_resumed",
+                        "session_id": "new",
+                        "channel_id": "C1",
+                    }
+                ),
+            ),
+        ):
+            await manager.resume_from_channel("C1", "U_OWNER", None)  # should not raise
+
+    async def test_resume_from_channel_silent_for_unknown_channel(self):
+        """resume_from_channel returns silently for non-summon channels."""
         manager, _, _ = _make_manager()
         with patch.object(
             manager,
-            "_handle_resume_session",
-            new=AsyncMock(
-                return_value={"type": "session_resumed", "session_id": "new", "channel_id": "C1"}
-            ),
+            "_resolve_channel_resume",
+            new=AsyncMock(return_value=None),
         ):
-            await manager.resume_session("old-sess")  # should not raise
+            await manager.resume_from_channel("C_UNKNOWN", "U1", None)  # should not raise

@@ -1307,11 +1307,11 @@ class SummonSession:
             logger.warning("Cannot unarchive %s: %s — creating replacement", channel_id, e)
 
         # Fallback: create new channel with same name (Slack allows for archived channels)
-        old_name: str = info["channel"]["name"]  # type: ignore[index]
+        old_name = info["channel"]["name"]  # type: ignore[index]
         try:
             resp = await web_client.conversations_create(name=old_name, is_private=True)
-            new_id: str = resp["channel"]["id"]  # type: ignore[index]
-            new_name: str = resp["channel"]["name"]  # type: ignore[index]
+            new_id = resp["channel"]["id"]  # type: ignore[index]
+            new_name = resp["channel"]["name"]  # type: ignore[index]
         except Exception:
             try:
                 new_name_try = f"{old_name[:70]}-resumed"
@@ -1499,7 +1499,7 @@ class SummonSession:
             logger.debug("PM: failed to post welcome message: %s", e)
 
     async def _init_canvas(
-        self, client: SlackClient, registry: SessionRegistry, channel_id: str | None = None
+        self, client: SlackClient, registry: SessionRegistry, channel_id: str
     ) -> CanvasStore | None:
         """Create a channel canvas and start background sync.
 
@@ -1514,8 +1514,8 @@ class SummonSession:
             logger.warning("Could not create canvas for session %s", self._session_id)
             return None
 
-        # Persist immediately to SQLite
-        await registry.update_canvas(self._session_id, canvas_id, markdown)
+        # Persist immediately to channels table
+        await registry.update_channel_canvas(channel_id, canvas_id, markdown)
 
         store = CanvasStore(
             session_id=self._session_id,
@@ -2826,6 +2826,17 @@ class SummonSession:
         thread_ts: str | None,
     ) -> None:
         """Handle !summon resume from within an active session."""
+        if not self._ipc_resume:
+            logger.error("Cannot resume: no IPC resume callback registered")
+            try:
+                await rt.client.post(
+                    ":warning: Resume not available — internal callback missing.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post ipc_resume missing: %s", e)
+            return
+
         if user_id != self._authenticated_user_id:
             try:
                 await rt.client.post(
@@ -2882,9 +2893,6 @@ class SummonSession:
                 logger.debug("Failed to post resume conflict: %s", e)
             return
 
-        if not self._ipc_resume:
-            logger.error("Cannot resume: no IPC resume callback registered")
-            return
         try:
             result = await self._ipc_resume(target_session_id)
             new_sid = result.get("session_id", "?")

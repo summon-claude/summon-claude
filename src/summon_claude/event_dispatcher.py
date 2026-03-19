@@ -19,10 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.slack.client import SlackClient
 
 # Callback type for session resume (injected by daemon to break circular import).
-ResumeHandler = Callable[[str], Awaitable[None]]
+# Arguments: (channel_id, user_id, target_session_id)
+ResumeHandler = Callable[[str, str, str | None], Awaitable[None]]
 
 if TYPE_CHECKING:
     from summon_claude.sessions.permissions import PermissionHandler
@@ -167,67 +168,39 @@ class EventDispatcher:
         channel_id = event.get("channel", "")
         user_id = event.get("user", "")
 
-        match = re.match(r"^!summon\s+resume(?:\s+(\S+))?", text, re.IGNORECASE)
+        match = re.match(r"^!summon\s+resume(?:\s+(\S+))?\s*$", text, re.IGNORECASE)
         if not match:
             return
 
         target_session_id = match.group(1)
         await self._handle_resume_request(channel_id, user_id, target_session_id)
 
-    async def _handle_resume_request(  # noqa: PLR0911
+    async def _handle_resume_request(
         self, channel_id: str, user_id: str, target_session_id: str | None
     ) -> None:
-        """Process a !summon resume request from an unrouted channel."""
-        resume_session_id: str | None = None
-        async with SessionRegistry() as registry:
-            channel = await registry.get_channel(channel_id)
-            if not channel:
-                return  # Not a summon-managed channel
+        """Process a !summon resume request from an unrouted channel.
 
-            if target_session_id:
-                session = await registry.get_session(target_session_id)
-                if not session or session.get("slack_channel_id") != channel_id:
-                    await self._post_error(channel_id, "Session not found in this channel.")
-                    return
-            else:
-                session = await registry.get_latest_session_for_channel(channel_id)
-                if not session:
-                    await self._post_error(channel_id, "No previous session found in this channel.")
-                    return
-
-            if session["status"] not in ("completed", "errored"):
-                await self._post_error(
-                    channel_id, "Session is still active. Use the existing session."
-                )
-                return
-
-            # Auth check: user must match channel owner
-            if channel.get("authenticated_user_id") != user_id:
-                await self._post_error(
-                    channel_id, ":x: Only the original session owner can resume."
-                )
-                return
-
-            resume_session_id = session["session_id"]
-
-        # Resume handler runs outside the registry context to release the DB connection
-        if resume_session_id is None:
-            return
+        Delegates all validation and DB access to the resume handler
+        (``SessionManager.resume_from_channel``).
+        """
         if not self._resume_handler:
             logger.warning("Cannot resume: no resume handler registered")
             return
         try:
-            await self._resume_handler(resume_session_id)
+            await self._resume_handler(channel_id, user_id, target_session_id)
+        except ValueError as e:
+            await self._post_error(channel_id, str(e))
         except Exception as e:
             await self._post_error(channel_id, f":x: Failed to resume: {e}")
 
     async def _post_error(self, channel_id: str, text: str) -> None:
-        """Best-effort error message to a channel."""
+        """Best-effort error message to a channel via SlackClient (redacted)."""
         if not self._web_client:
             logger.warning("Cannot post error to %s: no web_client", channel_id)
             return
         try:
-            await self._web_client.chat_postMessage(channel=channel_id, text=text)
+            client = SlackClient(self._web_client, channel_id)
+            await client.post(text)
         except Exception as e:
             logger.warning("Failed to post error to %s: %s", channel_id, e)
 

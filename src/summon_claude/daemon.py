@@ -223,7 +223,7 @@ async def daemon_main(config: SummonConfig) -> None:
         dispatcher=dispatcher,
     )
     dispatcher.set_command_handler(session_manager.handle_summon_command)
-    dispatcher.set_resume_handler(session_manager.resume_session)
+    dispatcher.set_resume_handler(session_manager.resume_from_channel)
 
     # Start Unix socket control server
     control_server = await asyncio.start_unix_server(

@@ -1639,8 +1639,16 @@ class TestHandleResumeFromActive:
             permission_handler=AsyncMock(),
         )
 
-    async def test_rejects_wrong_user(self):
+    async def test_rejects_missing_ipc_resume(self):
         session = make_session()
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt()
+        await session._handle_resume_from_active(rt, "U_OWNER", "some-id", None)
+        rt.client.post.assert_awaited_once()
+        assert "callback missing" in rt.client.post.call_args[0][0]
+
+    async def test_rejects_wrong_user(self):
+        session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
         await session._handle_resume_from_active(rt, "U_INTRUDER", "some-id", None)
@@ -1648,7 +1656,7 @@ class TestHandleResumeFromActive:
         assert "Only the session owner" in rt.client.post.call_args[0][0]
 
     async def test_no_target_shows_usage(self):
-        session = make_session()
+        session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
         await session._handle_resume_from_active(rt, "U_OWNER", None, None)
@@ -1656,7 +1664,7 @@ class TestHandleResumeFromActive:
         assert "Specify a session ID" in rt.client.post.call_args[0][0]
 
     async def test_rejects_target_owned_by_different_user(self):
-        session = make_session()
+        session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt()
         rt.registry.get_session = AsyncMock(
@@ -1671,7 +1679,7 @@ class TestHandleResumeFromActive:
         assert "not found" in rt.client.post.call_args[0][0]
 
     async def test_blocks_resume_into_own_channel(self):
-        session = make_session()
+        session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
         rt = self._make_rt("C_SELF")
         rt.registry.get_session = AsyncMock(

@@ -105,7 +105,8 @@ class TestCanvasRead:
 
     async def test_cross_channel_read(self, canvas_tools, populated_registry):
         """Reading another channel uses registry.get_canvas_by_channel."""
-        await populated_registry.update_canvas("child-2222", "canvas-x", "# Cross Canvas")
+        await populated_registry.register_channel("C200", "child-chan", "/tmp", "U_OWNER")
+        await populated_registry.update_channel_canvas("C200", "canvas-x", "# Cross Canvas")
         result = await canvas_tools["summon_canvas_read"].handler({"channel": "C200"})
         assert not result.get("is_error")
         assert "Cross Canvas" in result["content"][0]["text"]
@@ -125,7 +126,8 @@ class TestCanvasRead:
         await populated_registry.update_status(
             "other-cc", "active", slack_channel_id="C_OTHER", authenticated_user_id="U_OTHER"
         )
-        await populated_registry.update_canvas("other-cc", "F_OTHER", "# Secret")
+        await populated_registry.register_channel("C_OTHER", "other-chan", "/tmp", "U_OTHER")
+        await populated_registry.update_channel_canvas("C_OTHER", "F_OTHER", "# Secret")
         result = await canvas_tools["summon_canvas_read"].handler({"channel": "C_OTHER"})
         assert result["is_error"] is True
         assert "No canvas found" in result["content"][0]["text"]

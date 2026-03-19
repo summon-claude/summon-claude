@@ -505,7 +505,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "session_id: the target session's ID. "
             "text: the message text to send."
         ),
-        {"session_id": str, "text": str},
+        {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "text": {"type": "string"},
+            },
+            "required": ["session_id", "text"],
+        },
     )
     async def session_message(args: dict) -> dict:  # noqa: PLR0911
         target_id = args.get("session_id", "")
