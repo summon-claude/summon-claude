@@ -559,6 +559,23 @@ class TestPostPmWelcome:
 # ---------------------------------------------------------------------------
 
 
+class TestFormatPmTopic:
+    def test_zero_sessions(self):
+        from summon_claude.sessions.session import _format_pm_topic
+
+        assert _format_pm_topic(0) == "Project Manager | 0 active sessions | idle"
+
+    def test_one_session(self):
+        from summon_claude.sessions.session import _format_pm_topic
+
+        assert _format_pm_topic(1) == "Project Manager | 1 active session | working"
+
+    def test_multiple_sessions(self):
+        from summon_claude.sessions.session import _format_pm_topic
+
+        assert _format_pm_topic(3) == "Project Manager | 3 active sessions | working"
+
+
 class TestPmTopicGuard:
     def test_pm_session_has_pm_profile_flag(self):
         from summon_claude.config import SummonConfig
@@ -577,6 +594,114 @@ class TestPmTopicGuard:
         options = SessionOptions(cwd="/tmp", name="regular")
         session = SummonSession(config=config, options=options, session_id="non-pm-guard")
         assert session._pm_profile is False
+
+    def test_project_id_property_exposed(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="proj-test", project_id="proj-123")
+        session = SummonSession(config=config, options=options, session_id="prop-test")
+        assert session.project_id == "proj-123"
+
+    def test_project_id_none_by_default(self):
+        from summon_claude.config import SummonConfig
+        from summon_claude.sessions.session import SessionOptions, SummonSession
+
+        config = MagicMock(spec=SummonConfig)
+        options = SessionOptions(cwd="/tmp", name="no-proj")
+        session = SummonSession(config=config, options=options, session_id="prop-none")
+        assert session.project_id is None
+
+
+# ---------------------------------------------------------------------------
+# PM topic: deterministic updates from SessionManager
+# ---------------------------------------------------------------------------
+
+
+class TestUpdatePmTopic:
+    def _make_session(self, *, is_pm=False, project_id=None, channel_id=None):
+        s = MagicMock()
+        s.is_pm = is_pm
+        s.project_id = project_id
+        s.channel_id = channel_id
+        return s
+
+    def _make_manager(self, sessions: dict):
+        from summon_claude.sessions.manager import SessionManager
+
+        mgr = object.__new__(SessionManager)
+        mgr._sessions = sessions
+        mgr._web_client = AsyncMock()
+        return mgr
+
+    async def test_updates_topic_with_child_count(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        child1 = self._make_session(project_id="p1")
+        child2 = self._make_session(project_id="p1")
+        mgr = self._make_manager({"pm": pm, "c1": child1, "c2": child2})
+
+        await mgr._update_pm_topic("p1")
+
+        mgr._web_client.conversations_setTopic.assert_called_once_with(
+            channel="C_PM",
+            topic="Project Manager | 2 active sessions | working",
+        )
+
+    async def test_idle_when_no_children(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        mgr = self._make_manager({"pm": pm})
+
+        await mgr._update_pm_topic("p1")
+
+        mgr._web_client.conversations_setTopic.assert_called_once_with(
+            channel="C_PM",
+            topic="Project Manager | 0 active sessions | idle",
+        )
+
+    async def test_singular_session_word(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        child = self._make_session(project_id="p1")
+        mgr = self._make_manager({"pm": pm, "c1": child})
+
+        await mgr._update_pm_topic("p1")
+
+        topic = mgr._web_client.conversations_setTopic.call_args.kwargs["topic"]
+        assert "1 active session |" in topic
+
+    async def test_ignores_other_project_children(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        child_p2 = self._make_session(project_id="p2")
+        mgr = self._make_manager({"pm": pm, "c1": child_p2})
+
+        await mgr._update_pm_topic("p1")
+
+        topic = mgr._web_client.conversations_setTopic.call_args.kwargs["topic"]
+        assert "0 active sessions | idle" in topic
+
+    async def test_noop_when_no_pm_for_project(self):
+        child = self._make_session(project_id="p1")
+        mgr = self._make_manager({"c1": child})
+
+        await mgr._update_pm_topic("p1")
+
+        mgr._web_client.conversations_setTopic.assert_not_called()
+
+    async def test_noop_when_pm_has_no_channel(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id=None)
+        mgr = self._make_manager({"pm": pm})
+
+        await mgr._update_pm_topic("p1")
+
+        mgr._web_client.conversations_setTopic.assert_not_called()
+
+    async def test_survives_slack_api_error(self):
+        pm = self._make_session(is_pm=True, project_id="p1", channel_id="C_PM")
+        mgr = self._make_manager({"pm": pm})
+        mgr._web_client.conversations_setTopic = AsyncMock(side_effect=Exception("Slack down"))
+
+        # Should not raise
+        await mgr._update_pm_topic("p1")
 
 
 # ---------------------------------------------------------------------------

@@ -58,6 +58,7 @@ class _StubSession:
         self._run_count = 0
         self.channel_id: str | None = None
         self.is_pm: bool = False
+        self.project_id: str | None = None
         self._shutdown_requested = False
         self._authenticated_user_id: str | None = None
         self._authenticated_event = asyncio.Event()
@@ -341,6 +342,26 @@ class TestSupervisedSession:
 
         with pytest.raises(asyncio.CancelledError):
             await manager._supervised_session(stub, "s1")  # type: ignore[arg-type]
+
+    async def test_pm_clean_exit_updates_topic(self):
+        """PM session clean exit triggers _update_pm_topic."""
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.conversations_setTopic = AsyncMock()
+
+        stub = _StubSession()
+        stub.is_pm = True
+        stub.project_id = "p1"
+        stub.channel_id = "C_PM"
+
+        # Add the PM to _sessions so _update_pm_topic can find it
+        manager._sessions["pm-id"] = stub  # type: ignore[assignment]
+
+        await manager._supervised_session(stub, "pm-id")  # type: ignore[arg-type]
+
+        mock_provider.conversations_setTopic.assert_awaited_once_with(
+            channel="C_PM",
+            topic="Project Manager | 0 active sessions | idle",
+        )
 
     async def test_recoverable_posts_error_on_final_failure(self):
         """After exhausting retries, best-effort error message posted to channel."""

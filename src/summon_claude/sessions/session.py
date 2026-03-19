@@ -288,6 +288,13 @@ _PM_SYSTEM_PROMPT_APPEND = (
 )
 
 
+def _format_pm_topic(child_count: int) -> str:
+    """Build the deterministic PM channel topic string."""
+    sessions_word = "session" if child_count == 1 else "sessions"
+    status = "working" if child_count > 0 else "idle"
+    return f"Project Manager | {child_count} active {sessions_word} | {status}"
+
+
 def _format_interval(seconds: int) -> str:
     """Format a duration in seconds as a human-readable string.
 
@@ -766,6 +773,11 @@ class SummonSession:
         return self._pm_profile
 
     @property
+    def project_id(self) -> str | None:
+        """Project ID this session belongs to, if any."""
+        return self._project_id
+
+    @property
     def name(self) -> str:
         """Session name (from SessionOptions)."""
         return self._name
@@ -1046,7 +1058,7 @@ class SummonSession:
         self._last_topic_model = self._model
         self._last_topic_branch = git_branch
         if self._pm_profile:
-            topic = "Project Manager | 0 active sessions | idle"
+            topic = _format_pm_topic(0)
         else:
             topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
         try:
@@ -2359,7 +2371,7 @@ class SummonSession:
             return
 
         child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
-        child_options = SessionOptions(cwd=self._cwd, name=child_name)
+        child_options = SessionOptions(cwd=self._cwd, name=child_name, project_id=self._project_id)
         try:
             child_session_id = await daemon_client.create_session_with_spawn_token(
                 child_options, spawn_auth.token
