@@ -72,7 +72,11 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "'all' for all sessions including completed/errored, "
             "'mine' for sessions spawned by the calling session."
         ),
-        {"filter": str},
+        {
+            "type": "object",
+            "properties": {"filter": {"type": "string"}},
+            "required": [],
+        },
     )
     async def session_list(args: dict) -> dict:
         filter_type = args.get("filter", "active")
@@ -162,7 +166,15 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "cwd: working directory (optional, defaults to calling session's cwd). "
             "model: model override (optional)."
         ),
-        {"name": str, "cwd": str, "model": str},
+        {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "cwd": {"type": "string"},
+                "model": {"type": "string"},
+            },
+            "required": ["name"],
+        },
     )
     async def session_start(args: dict) -> dict:  # noqa: PLR0911
         name = args.get("name", "")
@@ -420,7 +432,15 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "summary: brief status summary (required, max 500 chars). "
             "details: optional structured details (markdown, max 2000 chars)."
         ),
-        {"status": str, "summary": str, "details": str},
+        {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string"},
+                "summary": {"type": "string"},
+                "details": {"type": "string"},
+            },
+            "required": ["status", "summary"],
+        },
     )
     async def session_log_status(args: dict) -> dict:
         valid_statuses = {"active", "idle", "blocked", "error"}
@@ -608,7 +628,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "session_id: the stopped session's ID. "
             "model: optional model override."
         ),
-        {"session_id": str, "model": str},
+        {
+            "type": "object",
+            "properties": {
+                "session_id": {"type": "string"},
+                "model": {"type": "string"},
+            },
+            "required": ["session_id"],
+        },
     )
     async def session_resume(args: dict) -> dict:  # noqa: PLR0911
         target_id = args.get("session_id", "")

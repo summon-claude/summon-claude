@@ -57,6 +57,7 @@ class _StubSession:
         self._runs = runs
         self._run_count = 0
         self.channel_id: str | None = None
+        self.target_channel_id: str | None = None
         self.is_pm: bool = False
         self.project_id: str | None = None
         self._shutdown_requested = False
@@ -1854,11 +1855,11 @@ class TestResumeSessionIPC:
         with pytest.raises(ValueError, match="already has an active session"):
             await manager.create_session(make_options(channel_id="C_OCCUPIED"))
 
-    async def test_channel_guard_catches_channel_id_option(self):
-        """create_session detects sessions with _channel_id_option but no channel_id yet."""
+    async def test_channel_guard_catches_target_channel_id(self):
+        """create_session detects sessions with target_channel_id but no channel_id yet."""
         manager, _, _ = _make_manager()
         stub = _StubSession()
-        stub._channel_id_option = "C_PENDING"  # type: ignore[attr-defined]
+        stub.target_channel_id = "C_PENDING"
         manager._sessions["pending"] = stub  # type: ignore[assignment]
 
         with pytest.raises(ValueError, match="already has an active session"):
@@ -1884,3 +1885,28 @@ class TestResumeSessionIPC:
         manager, _, _ = _make_manager()
         with pytest.raises(ValueError, match="authenticated_user_id"):
             await manager.create_resumed_session(make_options(), authenticated_user_id=None)
+
+    async def test_resume_session_callback_raises_on_error(self):
+        """resume_session() callback raises ValueError when _handle_resume_session returns error."""
+        manager, _, _ = _make_manager()
+        with (
+            patch.object(
+                manager,
+                "_handle_resume_session",
+                new=AsyncMock(return_value={"type": "error", "message": "not found"}),
+            ),
+            pytest.raises(ValueError, match="not found"),
+        ):
+            await manager.resume_session("nonexistent")
+
+    async def test_resume_session_callback_succeeds(self):
+        """resume_session() callback does not raise on success."""
+        manager, _, _ = _make_manager()
+        with patch.object(
+            manager,
+            "_handle_resume_session",
+            new=AsyncMock(
+                return_value={"type": "session_resumed", "session_id": "new", "channel_id": "C1"}
+            ),
+        ):
+            await manager.resume_session("old-sess")  # should not raise

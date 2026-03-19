@@ -19,6 +19,11 @@ from typing import TYPE_CHECKING, Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.sessions.registry import SessionRegistry
+
+# Callback type for session resume (injected by daemon to break circular import).
+ResumeHandler = Callable[[str], Awaitable[None]]
+
 if TYPE_CHECKING:
     from summon_claude.sessions.permissions import PermissionHandler
 
@@ -68,6 +73,7 @@ class EventDispatcher:
     def __init__(self, web_client: AsyncWebClient | None = None) -> None:
         self._sessions: dict[str, SessionHandle] = {}  # channel_id → handle
         self._command_handler: CommandHandler | None = None
+        self._resume_handler: ResumeHandler | None = None
         self._web_client = web_client
 
     # ------------------------------------------------------------------
@@ -108,6 +114,10 @@ class EventDispatcher:
     def set_command_handler(self, handler: CommandHandler) -> None:
         """Register a callback for ``/summon`` slash commands."""
         self._command_handler = handler
+
+    def set_resume_handler(self, handler: ResumeHandler) -> None:
+        """Register a callback for ``!summon resume`` in unrouted channels."""
+        self._resume_handler = handler
 
     async def dispatch_command(
         self, user_id: str, code: str, respond: Callable[..., Awaitable[None]]
@@ -164,13 +174,11 @@ class EventDispatcher:
         target_session_id = match.group(1)
         await self._handle_resume_request(channel_id, user_id, target_session_id)
 
-    async def _handle_resume_request(
+    async def _handle_resume_request(  # noqa: PLR0911
         self, channel_id: str, user_id: str, target_session_id: str | None
     ) -> None:
         """Process a !summon resume request from an unrouted channel."""
-        from summon_claude.cli import daemon_client  # noqa: PLC0415
-        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
-
+        resume_session_id: str | None = None
         async with SessionRegistry() as registry:
             channel = await registry.get_channel(channel_id)
             if not channel:
@@ -200,9 +208,16 @@ class EventDispatcher:
                 )
                 return
 
-        # session is guaranteed bound here — all unbound paths return above
+            resume_session_id = session["session_id"]
+
+        # Resume handler runs outside the registry context to release the DB connection
+        if resume_session_id is None:
+            return
+        if not self._resume_handler:
+            logger.warning("Cannot resume: no resume handler registered")
+            return
         try:
-            await daemon_client.resume_session(session["session_id"])  # type: ignore[possibly-undefined]
+            await self._resume_handler(resume_session_id)
         except Exception as e:
             await self._post_error(channel_id, f":x: Failed to resume: {e}")
 

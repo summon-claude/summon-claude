@@ -326,7 +326,7 @@ class TestUnroutedMessageFallback:
         """_handle_resume_request rejects users who don't own the channel."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
-        with patch("summon_claude.sessions.registry.SessionRegistry") as mock_reg_cls:
+        with patch("summon_claude.event_dispatcher.SessionRegistry") as mock_reg_cls:
             mock_reg = AsyncMock()
             mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U_OWNER"})
             mock_reg.get_latest_session_for_channel = AsyncMock(
@@ -346,7 +346,7 @@ class TestUnroutedMessageFallback:
         """_handle_resume_request silently returns for non-summon channels."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
-        with patch("summon_claude.sessions.registry.SessionRegistry") as mock_reg_cls:
+        with patch("summon_claude.event_dispatcher.SessionRegistry") as mock_reg_cls:
             mock_reg = AsyncMock()
             mock_reg.get_channel = AsyncMock(return_value=None)
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)

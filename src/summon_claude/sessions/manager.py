@@ -82,6 +82,23 @@ class SessionManager:
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
 
     # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _channel_has_active_session(self, channel_id: str) -> bool:
+        """Return True if any live session is bound to *channel_id*."""
+        return any(
+            channel_id in (s.channel_id, s.target_channel_id) for s in self._sessions.values()
+        )
+
+    def _check_channel_available(self, channel_id: str) -> None:
+        """Raise ``ValueError`` if *channel_id* is resuming or has an active session."""
+        if channel_id in self._resuming_channels:
+            raise ValueError("Resume already in progress for this channel")
+        if self._channel_has_active_session(channel_id):
+            raise ValueError("Channel already has an active session")
+
+    # ------------------------------------------------------------------
     # Public lifecycle API
     # ------------------------------------------------------------------
 
@@ -105,17 +122,7 @@ class SessionManager:
         """
         # Guard against duplicate sessions on the same channel (resume via CLI)
         if options.channel_id:
-            cid = options.channel_id
-            if cid in self._resuming_channels:
-                raise ValueError("Resume already in progress for this channel")
-            active = [
-                s
-                for s in self._sessions.values()
-                if getattr(s, "channel_id", None) == cid
-                or getattr(s, "_channel_id_option", None) == cid
-            ]
-            if active:
-                raise ValueError("Channel already has an active session")
+            self._check_channel_available(options.channel_id)
 
         # Cancel grace timer — a new session has arrived
         self._cancel_grace_timer()
@@ -131,6 +138,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         self._sessions[session_id] = session
 
@@ -213,6 +222,8 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             parent_session_id=spawn_auth.parent_session_id,
             parent_channel_id=spawn_auth.parent_channel_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         session.authenticate(spawn_auth.target_user_id)
 
@@ -284,6 +295,21 @@ class SessionManager:
     # ------------------------------------------------------------------
     # /summon auth bridging
     # ------------------------------------------------------------------
+
+    async def resume_session(self, session_id: str) -> None:
+        """Resume a stopped session (callback for EventDispatcher)."""
+        result = await self._ipc_resume(session_id)
+        if result.get("type") == "error":
+            raise ValueError(result["message"])
+
+    async def _ipc_resume(self, session_id: str) -> dict[str, Any]:
+        """Resume a stopped session and return the IPC result dict.
+
+        Used as callback for ``SummonSession._handle_resume_from_active``.
+        """
+        return await self._handle_resume_session(
+            {"type": "resume_session", "session_id": session_id}
+        )
 
     async def handle_summon_command(
         self,
@@ -444,7 +470,8 @@ class SessionManager:
             case "resume_session":
                 try:
                     return await self._handle_resume_session(msg)
-                except ValueError as e:
+                except Exception as e:
+                    logger.exception("resume_session failed")
                     return {"type": "error", "message": str(e)}
 
             case "project_up":
@@ -530,16 +557,7 @@ class SessionManager:
         claude_sid: str = resume_params["claude_session_id"]
 
         # Atomic guard: reject if channel already resuming or has active session
-        if channel_id in self._resuming_channels:
-            return {"type": "error", "message": "Resume already in progress for this channel"}
-        active = [
-            s
-            for s in self._sessions.values()
-            if getattr(s, "channel_id", None) == channel_id
-            or getattr(s, "_channel_id_option", None) == channel_id
-        ]
-        if active:
-            return {"type": "error", "message": "Channel already has an active session"}
+        self._check_channel_available(channel_id)
 
         self._resuming_channels.add(channel_id)
         try:
@@ -564,7 +582,7 @@ class SessionManager:
         finally:
             self._resuming_channels.discard(channel_id)
 
-    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
+    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:  # pyright: ignore[reportReturnType]
         """Validate and extract resume parameters from an old session.
 
         Returns a dict with resume params on success, or ``{"error": "..."}``
@@ -602,7 +620,6 @@ class SessionManager:
                 "authenticated_user_id": old_session.get("authenticated_user_id"),
                 "parent_session_id": old_session.get("parent_session_id"),
             }
-        raise RuntimeError("unreachable")  # pragma: no cover
 
     async def create_resumed_session(
         self,
@@ -634,6 +651,8 @@ class SessionManager:
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
             parent_session_id=parent_session_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         session.authenticate(authenticated_user_id)
 
@@ -694,6 +713,8 @@ class SessionManager:
                 web_client=self._web_client,
                 dispatcher=self._dispatcher,
                 bot_user_id=self._bot_user_id,
+                ipc_spawn=self.create_session_with_spawn_token,
+                ipc_resume=self._ipc_resume,
             )
             self._sessions[session_id] = session
             task = asyncio.create_task(
@@ -825,6 +846,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         new_session.authenticate(user_id)
 
@@ -870,6 +893,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         new_session.authenticate(user_id)
 

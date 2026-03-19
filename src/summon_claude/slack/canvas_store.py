@@ -116,9 +116,26 @@ class CanvasStore:
     ) -> CanvasStore | None:
         """Restore a CanvasStore from SQLite for session resume.
 
-        Returns ``None`` if no canvas data is stored for this session.
+        When *channel_id* is provided, the channels table is checked first
+        (it holds the latest canvas state across session resumes).  Falls
+        back to the sessions table if no channel-level canvas exists.
+
+        Returns ``None`` if no canvas data is found in either table.
         """
-        canvas_id, canvas_markdown = await registry.get_canvas(session_id)
+        canvas_id: str | None = None
+        canvas_markdown: str | None = None
+
+        # Prefer channel-level canvas (survives across session resumes)
+        if channel_id:
+            channel = await registry.get_channel(channel_id)
+            if channel and channel.get("canvas_id"):
+                canvas_id = channel["canvas_id"]
+                canvas_markdown = channel.get("canvas_markdown")
+
+        # Fall back to session-level canvas
+        if not canvas_id:
+            canvas_id, canvas_markdown = await registry.get_canvas(session_id)
+
         if not canvas_id:
             return None
         return cls(

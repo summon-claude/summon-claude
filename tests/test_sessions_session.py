@@ -1337,7 +1337,8 @@ class TestHandleSpawn:
         rt = self._make_rt()
 
         # Patch at the source module since _handle_spawn uses lazy import
-        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+        gen_path = "summon_claude.sessions.session.generate_spawn_token"
+        with patch(gen_path, new=AsyncMock()) as mock_gen:
             await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
 
         mock_gen.assert_not_called()
@@ -1368,7 +1369,8 @@ class TestHandleSpawn:
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-spawn", 1234, "/tmp")
 
-            session = make_session(session_id="sess-spawn", cwd="/tmp")
+            mock_spawn = AsyncMock(return_value="child-sess-id")
+            session = make_session(session_id="sess-spawn", cwd="/tmp", ipc_spawn=mock_spawn)
             session._authenticated_user_id = "U_OWNER"
             session._channel_id = "C_SELF"
 
@@ -1378,16 +1380,10 @@ class TestHandleSpawn:
                 permission_handler=AsyncMock(),
             )
 
-            with (
-                patch(
-                    "summon_claude.sessions.auth.generate_spawn_token",
-                    new=AsyncMock(
-                        return_value=AsyncMock(token="tok123", parent_session_id="sess-spawn")
-                    ),
-                ),
-                patch(
-                    "summon_claude.cli.daemon_client.create_session_with_spawn_token",
-                    new=AsyncMock(return_value="child-sess-id"),
+            with patch(
+                "summon_claude.sessions.session.generate_spawn_token",
+                new=AsyncMock(
+                    return_value=AsyncMock(token="tok123", parent_session_id="sess-spawn")
                 ),
             ):
                 await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
@@ -1458,7 +1454,12 @@ class TestHandleSpawn:
 
     async def test_spawn_pm_session_uses_higher_limit(self):
         """PM sessions should use the higher spawn limit (MAX_SPAWN_CHILDREN_PM)."""
-        session = make_session(pm_profile=True, session_id="pm-sess", cwd="/tmp")
+        session = make_session(
+            pm_profile=True,
+            session_id="pm-sess",
+            cwd="/tmp",
+            ipc_spawn=AsyncMock(return_value="child-sess-pm"),
+        )
         session._authenticated_user_id = "U_OWNER"
         session._channel_id = "C_PM"
 
@@ -1469,15 +1470,9 @@ class TestHandleSpawn:
             return_value=[{"session_id": f"child-{i}", "status": "active"} for i in range(10)]
         )
 
-        with (
-            patch(
-                "summon_claude.sessions.auth.generate_spawn_token",
-                new=AsyncMock(return_value=AsyncMock(token="tok456", parent_session_id="pm-sess")),
-            ),
-            patch(
-                "summon_claude.cli.daemon_client.create_session_with_spawn_token",
-                new=AsyncMock(return_value="child-sess-pm"),
-            ),
+        with patch(
+            "summon_claude.sessions.session.generate_spawn_token",
+            new=AsyncMock(return_value=AsyncMock(token="tok456", parent_session_id="pm-sess")),
         ):
             await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
 
@@ -1518,7 +1513,8 @@ class TestHandleSpawn:
 
         rt.registry.compute_spawn_depth = AsyncMock(return_value=2)
 
-        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+        gen_path = "summon_claude.sessions.session.generate_spawn_token"
+        with patch(gen_path, new=AsyncMock()) as mock_gen:
             await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
 
         mock_gen.assert_not_called()
@@ -1528,7 +1524,11 @@ class TestHandleSpawn:
 
     async def test_spawn_allowed_below_depth_limit(self):
         """_handle_spawn proceeds when depth < MAX_SPAWN_DEPTH."""
-        session = make_session(session_id="parent-ok", cwd="/tmp")
+        session = make_session(
+            session_id="parent-ok",
+            cwd="/tmp",
+            ipc_spawn=AsyncMock(return_value="child-ok"),
+        )
         session._authenticated_user_id = "U_OWNER"
         session._channel_id = "C_TEST"
         rt = self._make_rt()
@@ -1536,15 +1536,9 @@ class TestHandleSpawn:
         rt.registry.compute_spawn_depth = AsyncMock(return_value=1)
         rt.registry.list_children = AsyncMock(return_value=[])
 
-        with (
-            patch(
-                "summon_claude.sessions.auth.generate_spawn_token",
-                new=AsyncMock(return_value=AsyncMock(token="tok", parent_session_id="parent-ok")),
-            ),
-            patch(
-                "summon_claude.cli.daemon_client.create_session_with_spawn_token",
-                new=AsyncMock(return_value="child-ok"),
-            ),
+        with patch(
+            "summon_claude.sessions.session.generate_spawn_token",
+            new=AsyncMock(return_value=AsyncMock(token="tok", parent_session_id="parent-ok")),
         ):
             await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
 
@@ -1560,7 +1554,8 @@ class TestHandleSpawn:
 
         rt.registry.list_children = AsyncMock(side_effect=RuntimeError("DB locked"))
 
-        with patch("summon_claude.sessions.auth.generate_spawn_token", new=AsyncMock()) as mock_gen:
+        gen_path = "summon_claude.sessions.session.generate_spawn_token"
+        with patch(gen_path, new=AsyncMock()) as mock_gen:
             await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
 
         # Should NOT have attempted to generate a token
@@ -1689,6 +1684,23 @@ class TestHandleResumeFromActive:
         await session._handle_resume_from_active(rt, "U_OWNER", "old-id", None)
         rt.client.post.assert_awaited_once()
         assert "End this session first" in rt.client.post.call_args[0][0]
+
+    async def test_happy_path_calls_ipc_resume(self):
+        mock_resume = AsyncMock(return_value={"session_id": "new-id", "channel_id": "C_OTHER"})
+        session = make_session(ipc_resume=mock_resume)
+        session._authenticated_user_id = "U_OWNER"
+        rt = self._make_rt("C_SELF")
+        rt.registry.get_session = AsyncMock(
+            return_value={
+                "status": "completed",
+                "slack_channel_id": "C_OTHER",
+                "authenticated_user_id": "U_OWNER",
+            }
+        )
+        await session._handle_resume_from_active(rt, "U_OWNER", "target-id", None)
+        mock_resume.assert_awaited_once_with("target-id")
+        rt.client.post.assert_awaited_once()
+        assert "resumed" in rt.client.post.call_args[0][0].lower()
 
 
 # ------------------------------------------------------------------

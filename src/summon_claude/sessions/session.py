@@ -15,10 +15,11 @@ import os
 import queue
 import re
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -43,7 +44,7 @@ from summon_claude.config import (
     get_data_dir,
     google_mcp_env,
 )
-from summon_claude.sessions.auth import SessionAuth
+from summon_claude.sessions.auth import SessionAuth, generate_spawn_token
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
@@ -720,6 +721,8 @@ class SummonSession:
         bot_user_id: str | None = None,
         parent_session_id: str | None = None,
         parent_channel_id: str | None = None,
+        ipc_spawn: Callable[[SessionOptions, str], Awaitable[str]] | None = None,
+        ipc_resume: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self._config = config
         self._pm_profile = options.pm_profile
@@ -743,6 +746,9 @@ class SummonSession:
         self._dispatcher = dispatcher
         # Pre-cached bot user ID from BoltRouter.start() — avoids a per-session auth_test() call
         self._bot_user_id = bot_user_id
+        # Daemon IPC callbacks (injected to avoid circular imports with cli.daemon_client)
+        self._ipc_spawn = ipc_spawn
+        self._ipc_resume = ipc_resume
 
         # Raw event queue: Slack events from EventDispatcher -> preprocessor
         # maxsize=100 provides backpressure — EventDispatcher drops events when full
@@ -791,6 +797,11 @@ class SummonSession:
     def channel_id(self) -> str | None:
         """Slack channel ID for this session, set after channel creation."""
         return self._channel_id
+
+    @property
+    def target_channel_id(self) -> str | None:
+        """Channel ID this session will bind to (from options), before creation."""
+        return self._channel_id_option
 
     @property
     def is_pm(self) -> bool:
@@ -1149,21 +1160,16 @@ class SummonSession:
 
         # --- Canvas initialization (non-fatal) ---
         if self._channel_id_option:
-            # Resume: load canvas from channels table
+            # Resume: restore canvas from channels table (falls back to sessions)
             try:
-                channel_row = await registry.get_channel(channel_id)
-                if channel_row and channel_row.get("canvas_id"):
-                    self._canvas_store = CanvasStore(
-                        session_id=self._session_id,
-                        canvas_id=channel_row["canvas_id"],
-                        client=client,
-                        registry=registry,
-                        markdown=channel_row.get("canvas_markdown") or "",
-                        channel_id=channel_id,
-                    )
+                self._canvas_store = await CanvasStore.restore(
+                    session_id=self._session_id,
+                    client=client,
+                    registry=registry,
+                    channel_id=channel_id,
+                )
+                if self._canvas_store is not None:
                     self._canvas_store.start_sync()
-                else:
-                    self._canvas_store = None
             except Exception as e:
                 logger.warning(
                     "Canvas resume failed (non-fatal): %s", redact_secrets(str(e))
@@ -2707,7 +2713,7 @@ class SummonSession:
                     logger.warning("Failed to post command response: %s", redact_secrets(str(e)))
                     break
 
-    async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:  # noqa: PLR0912, PLR0915
+    async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Handle !summon start: verify caller, generate spawn token, create child session."""
         if user_id != self._authenticated_user_id:
             try:
@@ -2718,9 +2724,6 @@ class SummonSession:
             except Exception as e:
                 logger.debug("Failed to post spawn rejection: %s", e)
             return
-
-        from summon_claude.cli import daemon_client  # noqa: PLC0415
-        from summon_claude.sessions.auth import generate_spawn_token  # noqa: PLC0415
 
         # Enforce spawn depth limit to prevent recursive chains
         try:
@@ -2787,11 +2790,14 @@ class SummonSession:
             return
 
         child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
-        child_options = SessionOptions(cwd=self._cwd, name=child_name, project_id=self._project_id)
+        child_options = SessionOptions(
+            cwd=self._cwd, name=child_name, project_id=self._project_id
+        )
+        if not self._ipc_spawn:
+            logger.error("Cannot spawn: no IPC spawn callback registered")
+            return
         try:
-            child_session_id = await daemon_client.create_session_with_spawn_token(
-                child_options, spawn_auth.token
-            )
+            child_session_id = await self._ipc_spawn(child_options, spawn_auth.token)
         except Exception as e:
             logger.exception("Failed to create spawn session: %s", e)
             try:
@@ -2812,7 +2818,7 @@ class SummonSession:
         except Exception as e:
             logger.debug("Failed to post spawn success message: %s", e)
 
-    async def _handle_resume_from_active(
+    async def _handle_resume_from_active(  # noqa: PLR0912
         self,
         rt: _SessionRuntime,
         user_id: str,
@@ -2876,10 +2882,11 @@ class SummonSession:
                 logger.debug("Failed to post resume conflict: %s", e)
             return
 
-        from summon_claude.cli import daemon_client  # noqa: PLC0415
-
+        if not self._ipc_resume:
+            logger.error("Cannot resume: no IPC resume callback registered")
+            return
         try:
-            result = await daemon_client.resume_session(target_session_id)
+            result = await self._ipc_resume(target_session_id)
             new_sid = result.get("session_id", "?")
             target_cid = result.get("channel_id", target_channel)
             await rt.client.post(

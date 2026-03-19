@@ -474,3 +474,53 @@ class TestCanvasStoreChannelSync:
         cid, md = await canvas_registry.get_canvas("sess-cv")
         assert cid == "F_NO_CH"
         assert md == "# No channel sync"
+
+
+class TestCanvasStoreRestoreWithChannel:
+    """Tests for CanvasStore.restore() with channel_id parameter."""
+
+    async def test_restore_prefers_channel_canvas(self, canvas_registry):
+        """When channel has canvas data, restore() uses it over session data."""
+        await canvas_registry.register_channel("C_RCH", "restore-chan", "/tmp")
+        await canvas_registry.update_channel_canvas("C_RCH", "F_CHAN", "# Channel canvas")
+        # Put different data in sessions table (sess-cv is pre-registered)
+        await canvas_registry.update_canvas("sess-cv", "F_SESS", "# Session canvas")
+        client = _make_mock_client()
+        store = await CanvasStore.restore(
+            session_id="sess-cv",
+            client=client,
+            registry=canvas_registry,
+            channel_id="C_RCH",
+        )
+        assert store is not None
+        assert store._canvas_id == "F_CHAN"
+        assert store._markdown == "# Channel canvas"
+        assert store._channel_id == "C_RCH"
+
+    async def test_restore_falls_back_to_session_table(self, canvas_registry):
+        """When channel has no canvas, restore() falls back to session data."""
+        await canvas_registry.register_channel("C_NOCANVAS", "no-canvas-chan", "/tmp")
+        # Canvas only in sessions table (sess-cv is pre-registered)
+        await canvas_registry.update_canvas("sess-cv", "F_SESS2", "# Session fallback")
+        client = _make_mock_client()
+        store = await CanvasStore.restore(
+            session_id="sess-cv",
+            client=client,
+            registry=canvas_registry,
+            channel_id="C_NOCANVAS",
+        )
+        assert store is not None
+        assert store._canvas_id == "F_SESS2"
+        assert store._markdown == "# Session fallback"
+
+    async def test_restore_returns_none_when_no_canvas_anywhere(self, canvas_registry):
+        """When neither channel nor session has canvas, returns None."""
+        await canvas_registry.register_channel("C_EMPTY", "empty-chan", "/tmp")
+        client = _make_mock_client()
+        store = await CanvasStore.restore(
+            session_id="sess-no-canvas",
+            client=client,
+            registry=canvas_registry,
+            channel_id="C_EMPTY",
+        )
+        assert store is None
