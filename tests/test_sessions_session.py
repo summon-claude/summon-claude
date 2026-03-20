@@ -1218,6 +1218,50 @@ class TestMCPRegistration:
             await session._run_session_tasks(rt, AsyncMock())
 
 
+class TestThinkingConfig:
+    """Verify that enable_thinking produces the correct ThinkingConfig on ClaudeAgentOptions."""
+
+    async def _capture_thinking(self, enable_thinking: bool) -> dict:
+        """Run _run_session_tasks just far enough to capture options.thinking."""
+        cfg = make_config(enable_thinking=enable_thinking)
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
+        )
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        rt = make_rt(AsyncMock())
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["thinking"] = options.thinking
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured
+
+    async def test_thinking_enabled_produces_adaptive(self):
+        result = await self._capture_thinking(enable_thinking=True)
+        assert result["thinking"] == {"type": "adaptive"}
+
+    async def test_thinking_disabled_produces_disabled(self):
+        result = await self._capture_thinking(enable_thinking=False)
+        assert result["thinking"] == {"type": "disabled"}
+
+
 class TestSecretPatternRedaction:
     """redact_secrets must redact all known secret formats in error messages."""
 
