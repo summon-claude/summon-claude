@@ -113,7 +113,7 @@ async def _migrate_8_to_9(db: aiosqlite.Connection) -> None:
 
 
 async def _migrate_9_to_10(db: aiosqlite.Connection) -> None:
-    """Create channels table, add effort column, migrate existing data."""
+    """Create channels table, add effort column, migrate canvas data, drop redundant columns."""
     # Add effort column to sessions table
     with contextlib.suppress(sqlite3.OperationalError):
         await db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
@@ -155,6 +155,12 @@ async def _migrate_9_to_10(db: aiosqlite.Connection) -> None:
           )
         """
     )
+
+    # Drop canvas columns from sessions — now channel-only.
+    # Data was just copied above; no code writes these on sessions anymore.
+    for col in ("canvas_id", "canvas_markdown"):
+        with contextlib.suppress(sqlite3.OperationalError):
+            await db.execute(f"ALTER TABLE sessions DROP COLUMN {col}")
 
 
 # Mapping from version N to the coroutine that migrates N → N+1.
