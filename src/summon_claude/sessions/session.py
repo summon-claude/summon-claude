@@ -1182,9 +1182,7 @@ class SummonSession:
                 if self._canvas_store is not None:
                     self._canvas_store.start_sync()
             except Exception as e:
-                logger.warning(
-                    "Canvas resume failed (non-fatal): %s", redact_secrets(str(e))
-                )
+                logger.warning("Canvas resume failed (non-fatal): %s", redact_secrets(str(e)))
                 self._canvas_store = None
         else:
             try:
