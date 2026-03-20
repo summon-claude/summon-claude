@@ -2824,9 +2824,7 @@ class SummonSession:
             return
 
         child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
-        child_options = SessionOptions(
-            cwd=self._cwd, name=child_name, project_id=self._project_id
-        )
+        child_options = SessionOptions(cwd=self._cwd, name=child_name, project_id=self._project_id)
         try:
             child_session_id = await self._ipc_spawn(child_options, spawn_auth.token)
         except Exception as e:

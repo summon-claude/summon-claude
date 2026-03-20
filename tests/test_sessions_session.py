@@ -1399,12 +1399,14 @@ class TestHandleSpawn:
         async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
             await registry.register("sess-proj", 1234, "/tmp")
 
+            mock_ipc_spawn = AsyncMock(return_value="child-sess-id")
             opts = SessionOptions(cwd="/tmp", name="test-pm", project_id="proj-42")
             session = SummonSession(
                 config=make_config(),
                 options=opts,
                 auth=make_auth(session_id="sess-proj"),
                 session_id="sess-proj",
+                ipc_spawn=mock_ipc_spawn,
             )
             session._authenticated_user_id = "U_OWNER"
             session._channel_id = "C_SELF"
@@ -1415,23 +1417,16 @@ class TestHandleSpawn:
                 permission_handler=AsyncMock(),
             )
 
-            mock_create = AsyncMock(return_value="child-sess-id")
-            with (
-                patch(
-                    "summon_claude.sessions.auth.generate_spawn_token",
-                    new=AsyncMock(
-                        return_value=AsyncMock(token="tok123", parent_session_id="sess-proj")
-                    ),
-                ),
-                patch(
-                    "summon_claude.cli.daemon_client.create_session_with_spawn_token",
-                    new=mock_create,
+            with patch(
+                "summon_claude.sessions.auth.generate_spawn_token",
+                new=AsyncMock(
+                    return_value=AsyncMock(token="tok123", parent_session_id="sess-proj")
                 ),
             ):
                 await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
 
             # Verify project_id was propagated to child options
-            child_opts = mock_create.call_args[0][0]
+            child_opts = mock_ipc_spawn.call_args[0][0]
             assert child_opts.project_id == "proj-42"
 
     async def test_spawn_blocked_missing_ipc_spawn(self):
