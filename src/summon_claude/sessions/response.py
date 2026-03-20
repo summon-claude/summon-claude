@@ -514,8 +514,12 @@ class ResponseStreamer:
             filename = input_data.get("path", input_data.get("file_path", "file"))
             old_str = input_data.get("old_string", "")
             new_str = input_data.get("new_string", "")
-            thread_ts = self._resolve_upload_thread(parent_id)
-            self._spawn_background(self._upload_diff(old_str, new_str, filename, thread_ts))
+            try:
+                thread_ts = self._resolve_upload_thread(parent_id)
+            except RuntimeError:
+                logger.debug("No active thread for diff upload of %s, skipping", filename)
+            else:
+                self._spawn_background(self._upload_diff(old_str, new_str, filename, thread_ts))
             self._schedule_file_change(filename, old_str, new_str)
 
         # Fire-and-forget content upload for Write
@@ -523,18 +527,19 @@ class ResponseStreamer:
             filepath = input_data.get("file_path", input_data.get("path", ""))
             content = input_data.get("content", "")
             if filepath and content:
-                if filepath.endswith(".md"):
-                    # Render .md files with type: markdown blocks
-                    # Capture turn state at creation time — task may outlive the turn
+                try:
                     thread_ts = self._resolve_upload_thread(parent_id)
-                    rendered = self._turn.md_rendered_paths
-                    self._spawn_background(
-                        self._render_md_write(filepath, content, thread_ts, rendered)
-                    )
+                except RuntimeError:
+                    logger.debug("No active thread for write upload of %s, skipping", filepath)
                 else:
-                    basename = PurePosixPath(filepath).name
-                    thread_ts = self._resolve_upload_thread(parent_id)
-                    self._spawn_background(self._upload_write(content, basename, thread_ts))
+                    if filepath.endswith(".md"):
+                        rendered = self._turn.md_rendered_paths
+                        self._spawn_background(
+                            self._render_md_write(filepath, content, thread_ts, rendered)
+                        )
+                    else:
+                        basename = PurePosixPath(filepath).name
+                        self._spawn_background(self._upload_write(content, basename, thread_ts))
             self._schedule_file_change(filepath, "", content)
 
     async def _post_tool_result(self, block: ToolResultBlock, parent_id: str | None = None) -> None:

@@ -610,6 +610,29 @@ class TestResponseStreamerUserPing:
 # ---------------------------------------------------------------------------
 
 
+class TestResolveUploadThread:
+    def test_returns_active_thread(self):
+        streamer, router, _client = make_streamer()
+        router.active_thread_ts = "active_ts"
+        assert streamer._resolve_upload_thread(None) == "active_ts"
+
+    def test_returns_subagent_thread_when_registered(self):
+        streamer, router, _client = make_streamer()
+        router.active_thread_ts = "active_ts"
+        router.subagent_threads["task_abc"] = "subagent_ts"
+        assert streamer._resolve_upload_thread("task_abc") == "subagent_ts"
+
+    def test_falls_back_to_active_when_parent_unknown(self):
+        streamer, router, _client = make_streamer()
+        router.active_thread_ts = "fallback_ts"
+        assert streamer._resolve_upload_thread("unknown_parent") == "fallback_ts"
+
+    def test_raises_when_no_active_thread(self):
+        streamer, _router, _client = make_streamer()
+        with pytest.raises(RuntimeError, match="No active thread"):
+            streamer._resolve_upload_thread(None)
+
+
 class TestUploadDiff:
     async def test_no_change_posts_notice(self):
         streamer, router, client = make_streamer()
@@ -629,7 +652,7 @@ class TestUploadDiff:
         assert call_kwargs["thread_ts"] == "thread_1"
         assert "file.py.diff" in client.upload.call_args.args[1]
 
-    async def test_upload_failure_falls_back_to_mrkdwn(self):
+    async def test_upload_failure_falls_back_to_inline(self):
         streamer, router, client = make_streamer()
         client.upload.side_effect = Exception("API error")
         router.active_thread_ts = "thread_1"
