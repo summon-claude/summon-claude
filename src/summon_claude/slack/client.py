@@ -5,7 +5,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +38,26 @@ def sanitize_for_mrkdwn(text: str, max_len: int = 100) -> str:
     return sanitized if max_len >= len(sanitized) else sanitized[:max_len]
 
 
+_SECRET_RE = re.compile(
+    r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
+    r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
+    r"|gho_[A-Za-z0-9_]+|ghu_[A-Za-z0-9_]+|ghs_[A-Za-z0-9_]+|ghr_[A-Za-z0-9_]+"
+)
+
+
+def redact_secrets(text: str) -> str:
+    """Replace secret token patterns with [REDACTED] to prevent leakage."""
+    return _SECRET_RE.sub("[REDACTED]", text)
+
+
+def _redact_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Redact secrets in Block Kit structures by round-tripping through JSON."""
+    raw = json.dumps(blocks)
+    if _SECRET_RE.search(raw):
+        return json.loads(_SECRET_RE.sub("[REDACTED]", raw))
+    return blocks
+
+
 class SlackClient:
     """Channel-bound Slack output client (Layer 1).
 
@@ -56,9 +78,10 @@ class SlackClient:
         blocks: list[dict[str, Any]] | None = None,
     ) -> MessageRef:
         """Post a message to the channel."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {"channel": self.channel_id, "text": text}
         if blocks:
-            kwargs["blocks"] = blocks
+            kwargs["blocks"] = _redact_blocks(blocks)
         if thread_ts:
             kwargs["thread_ts"] = thread_ts
         resp = await self._web.chat_postMessage(**kwargs)
@@ -72,13 +95,14 @@ class SlackClient:
         blocks: list[dict[str, Any]] | None = None,
     ) -> None:
         """Post an ephemeral message visible only to user_id."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "user": user_id,
             "text": text,
         }
         if blocks:
-            kwargs["blocks"] = blocks
+            kwargs["blocks"] = _redact_blocks(blocks)
         try:
             await self._web.chat_postEphemeral(**kwargs)
         except Exception as e:
@@ -93,9 +117,10 @@ class SlackClient:
         channel: str | None = None,
     ) -> None:
         """Update an existing message."""
+        text = redact_secrets(text)
         kwargs: dict[str, Any] = {"channel": channel or self.channel_id, "ts": ts, "text": text}
         if blocks:
-            kwargs["blocks"] = blocks
+            kwargs["blocks"] = _redact_blocks(blocks)
         await self._web.chat_update(**kwargs)
 
     async def react(self, ts: str, emoji: str) -> None:
@@ -145,6 +170,7 @@ class SlackClient:
         snippet_type: str | None = None,
     ) -> None:
         """Upload a file to the channel."""
+        content = redact_secrets(content)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "content": content,
@@ -159,6 +185,7 @@ class SlackClient:
 
     async def set_topic(self, topic: str) -> None:
         """Set the channel topic."""
+        topic = redact_secrets(topic)
         await self._web.conversations_setTopic(channel=self.channel_id, topic=topic)
 
     async def fetch_history(
@@ -251,6 +278,7 @@ class SlackClient:
 
         Returns the canvas file ID, or ``None`` if all attempts fail.
         """
+        markdown = redact_secrets(markdown)
         try:
             resp = await self._web.api_call(
                 "canvases.create",
@@ -280,6 +308,7 @@ class SlackClient:
         Replaces all content with a single ``replace`` operation.
         Returns ``True`` on success, ``False`` on failure (never raises).
         """
+        markdown = redact_secrets(markdown)
         try:
             await self._web.api_call(
                 "canvases.edit",

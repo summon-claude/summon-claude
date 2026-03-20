@@ -38,12 +38,8 @@ from summon_claude.sessions.auth import (
     verify_spawn_token,
 )
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.sessions.session import (
-    _SECRET_PATTERN,
-    SessionOptions,
-    SummonSession,
-    format_pm_topic,
-)
+from summon_claude.sessions.session import SessionOptions, SummonSession, format_pm_topic
+from summon_claude.slack.client import redact_secrets
 
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
@@ -436,7 +432,7 @@ class SessionManager:
                         attempt + 1,
                         self.MAX_SESSION_RESTARTS,
                         backoff,
-                        e,
+                        redact_secrets(str(e)),
                     )
                     # Best-effort: alert channel about retry
                     await self._alert_channel(
@@ -450,7 +446,7 @@ class SessionManager:
                     logger.error(
                         "Session %s failed permanently: %s",
                         session_id,
-                        _SECRET_PATTERN.sub("***", str(e)),
+                        redact_secrets(str(e)),
                     )
                     recovery_hint = "\nRun `summon project up` to restart." if session.is_pm else ""
                     await self._alert_channel(
@@ -565,7 +561,9 @@ class SessionManager:
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
-            logger.error("project_up orchestrator failed: %s", e, exc_info=True)
+            logger.error(
+                "project_up orchestrator failed: %s", redact_secrets(str(e)), exc_info=True
+            )
         finally:
             self._project_up_in_flight = False
 
@@ -710,7 +708,7 @@ class SessionManager:
             logger.debug("_alert_channel skipped (no channel or web_client)")
             return
         with contextlib.suppress(Exception):
-            safe_msg = _SECRET_PATTERN.sub("***", message)
+            safe_msg = redact_secrets(message)
             await self._web_client.chat_postMessage(
                 channel=session.channel_id,
                 text=safe_msg,
@@ -742,7 +740,9 @@ class SessionManager:
         if not task.cancelled():
             exc = task.exception()
             if exc is not None:
-                logger.error("Session %s task raised: %s", session_id, exc, exc_info=exc)
+                logger.error(
+                    "Session %s task raised: %s", session_id, redact_secrets(str(exc)), exc_info=exc
+                )
 
         # Start grace timer when no sessions remain
         if not self._sessions:
@@ -778,7 +778,9 @@ class SessionManager:
         if not task.cancelled():
             exc = task.exception()
             if exc is not None:
-                logger.error("Background task %s failed: %s", task.get_name(), exc)
+                logger.error(
+                    "Background task %s failed: %s", task.get_name(), redact_secrets(str(exc))
+                )
 
     def _start_grace_timer(self) -> None:
         """Schedule daemon auto-stop after ``_GRACE_SECONDS`` with no sessions."""

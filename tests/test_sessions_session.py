@@ -31,7 +31,7 @@ from summon_claude.sessions.session import (
     _SessionRestartError,
     _SessionRuntime,
 )
-from summon_claude.slack.client import MessageRef, SlackClient
+from summon_claude.slack.client import MessageRef, SlackClient, redact_secrets
 
 
 def make_config(**overrides) -> SummonConfig:
@@ -1135,6 +1135,171 @@ class TestMCPRegistration:
     def test_session_options_pm_profile_true(self):
         opts = SessionOptions(cwd="/tmp", name="test", pm_profile=True)
         assert opts.pm_profile is True
+
+    async def _capture_mcp_servers_with_config(self, **config_overrides) -> dict:
+        """Like _capture_mcp_servers but with custom config overrides."""
+        cfg = make_config(**config_overrides)
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
+        )
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["mcp_servers"] = options.mcp_servers
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured
+
+    async def test_github_mcp_wired_when_configured(self):
+        result = await self._capture_mcp_servers_with_config(github_pat="ghp_test123")
+        assert "github" in result["mcp_servers"]
+        assert result["mcp_servers"]["github"]["type"] == "http"
+
+    async def test_github_mcp_not_wired_when_not_configured(self):
+        result = await self._capture_mcp_servers_with_config()
+        assert "github" not in result["mcp_servers"]
+
+    async def test_github_mcp_connection_failure_propagates(self):
+        """SDK startup failure with GitHub MCP configured propagates cleanly.
+
+        Verifies that if the SDK subprocess fails during startup (e.g.,
+        MCP connection timeout), the exception is not swallowed by
+        _run_session_tasks — it propagates to the caller (start()'s
+        finally block marks the session as errored).
+        """
+        cfg = make_config(github_pat="ghp_unreachable_test")
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
+        )
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        # Simulate SDK __aenter__ failing (e.g., MCP connection timeout)
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(
+            side_effect=Exception("Control request timeout: initialize")
+        )
+
+        with (
+            patch(
+                "summon_claude.sessions.session.ClaudeSDKClient",
+                return_value=mock_client,
+            ),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(Exception, match="Control request timeout"),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+
+class TestThinkingConfig:
+    """Verify that enable_thinking produces the correct ThinkingConfig on ClaudeAgentOptions."""
+
+    async def _capture_thinking(self, enable_thinking: bool) -> dict:
+        """Run _run_session_tasks just far enough to capture options.thinking."""
+        cfg = make_config(enable_thinking=enable_thinking)
+        session = SummonSession(
+            config=cfg,
+            options=make_options(),
+            auth=make_auth(),
+            session_id="test-session",
+        )
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        rt = make_rt(AsyncMock())
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["thinking"] = options.thinking
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured
+
+    async def test_thinking_enabled_produces_adaptive(self):
+        result = await self._capture_thinking(enable_thinking=True)
+        assert result["thinking"] == {"type": "adaptive"}
+
+    async def test_thinking_disabled_produces_disabled(self):
+        result = await self._capture_thinking(enable_thinking=False)
+        assert result["thinking"] == {"type": "disabled"}
+
+
+class TestSecretPatternRedaction:
+    """redact_secrets must redact all known secret formats in error messages."""
+
+    def test_redacts_github_classic_pat(self):
+        text = "ConnectionError: auth failed for ghp_abc123XYZ token"
+        assert "ghp_abc123XYZ" not in redact_secrets(text)
+
+    def test_redacts_github_fine_grained_pat(self):
+        text = "Error: github_pat_11ABCDEF_xyz789 rejected"
+        assert "github_pat_11ABCDEF_xyz789" not in redact_secrets(text)
+
+    def test_redacts_slack_bot_token(self):
+        text = "Error: xoxb-123-456-abc invalid"
+        assert "xoxb-123-456-abc" not in redact_secrets(text)
+
+    def test_redacts_slack_app_token(self):
+        text = "Error: xapp-1-A1234-567890 invalid"
+        assert "xapp-1-A1234-567890" not in redact_secrets(text)
+
+    def test_redacts_anthropic_key(self):
+        text = "Error: sk-ant-api03-secretkey invalid"
+        assert "sk-ant-api03-secretkey" not in redact_secrets(text)
+
+    def test_redacts_github_oauth_token(self):
+        text = "Error: gho_oauthtoken123 expired"
+        assert "gho_oauthtoken123" not in redact_secrets(text)
+
+    def test_redacts_github_user_to_server_token(self):
+        text = "Error: ghu_usertoken456 expired"
+        assert "ghu_usertoken456" not in redact_secrets(text)
+
+    def test_redacts_github_app_installation_token(self):
+        text = "Error: ghs_apptoken456 forbidden"
+        assert "ghs_apptoken456" not in redact_secrets(text)
+
+    def test_redacts_github_app_refresh_token(self):
+        text = "Error: ghr_refreshtoken789 invalid"
+        assert "ghr_refreshtoken789" not in redact_secrets(text)
 
 
 # ------------------------------------------------------------------

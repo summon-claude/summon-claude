@@ -20,6 +20,9 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ResultMessage,
     TextBlock,
+    ThinkingBlock,
+    ThinkingConfigAdaptive,
+    ThinkingConfigDisabled,
 )
 
 from summon_claude.sessions.commands import COMMAND_ACTIONS
@@ -208,6 +211,66 @@ async def test_passthrough_command_populates_result():
     assert result_msg.is_error is False, (
         "Expected /cost to complete without error, got is_error=True"
     )
+
+
+# ------------------------------------------------------------------
+# ThinkingConfig integration tests
+# ------------------------------------------------------------------
+
+
+class TestThinkingConfigIntegration:
+    """Verify ThinkingConfig type discriminator is accepted by the SDK."""
+
+    async def test_adaptive_thinking_produces_thinking_blocks(self):
+        """ThinkingConfigAdaptive(type='adaptive') should produce ThinkingBlocks."""
+        with tempfile.TemporaryDirectory() as cwd:
+            options = ClaudeAgentOptions(
+                cwd=cwd,
+                max_turns=1,
+                thinking=ThinkingConfigAdaptive(type="adaptive"),
+                **_COMMON_OPTS,
+            )
+            async with ClaudeSDKClient(options) as client:
+                await client.query(
+                    "Think step by step about what 17 * 23 equals. Show your reasoning."
+                )
+                messages = []
+                async for msg in client.receive_response():
+                    messages.append(msg)
+
+        assistant_msgs = [m for m in messages if isinstance(m, AssistantMessage)]
+        assert any(isinstance(m, ResultMessage) for m in messages), "Expected ResultMessage"
+        thinking_blocks = [
+            b for m in assistant_msgs for b in m.content if isinstance(b, ThinkingBlock)
+        ]
+        assert len(thinking_blocks) > 0, (
+            "Expected at least one ThinkingBlock with adaptive thinking enabled, "
+            f"got content types: {[type(b).__name__ for m in assistant_msgs for b in m.content]}"
+        )
+
+    async def test_disabled_thinking_produces_no_thinking_blocks(self):
+        """ThinkingConfigDisabled(type='disabled') should produce no ThinkingBlocks."""
+        with tempfile.TemporaryDirectory() as cwd:
+            options = ClaudeAgentOptions(
+                cwd=cwd,
+                max_turns=1,
+                thinking=ThinkingConfigDisabled(type="disabled"),
+                **_COMMON_OPTS,
+            )
+            async with ClaudeSDKClient(options) as client:
+                await client.query("What is 2 + 2?")
+                messages = []
+                async for msg in client.receive_response():
+                    messages.append(msg)
+
+        assistant_msgs = [m for m in messages if isinstance(m, AssistantMessage)]
+        assert any(isinstance(m, ResultMessage) for m in messages), "Expected ResultMessage"
+        thinking_blocks = [
+            b for m in assistant_msgs for b in m.content if isinstance(b, ThinkingBlock)
+        ]
+        assert len(thinking_blocks) == 0, (
+            f"Expected no ThinkingBlocks with thinking disabled, got {len(thinking_blocks)}"
+        )
 
 
 # ------------------------------------------------------------------

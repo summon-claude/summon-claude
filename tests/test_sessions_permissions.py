@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
 from helpers import make_mock_slack_client
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.permissions import (
+    _GITHUB_MCP_AUTO_APPROVE,
+    _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
+    _GITHUB_MCP_REQUIRE_APPROVAL,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -407,3 +411,118 @@ class TestPermissionSuggestions:
 
         assert isinstance(result, PermissionResultAllow)
         provider.post_ephemeral.assert_not_called()
+
+
+class TestGitHubMCPReadToolsAutoApproved:
+    """GitHub MCP read-only tools should be auto-approved without Slack prompt."""
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "mcp__github__pull_request_read",
+            "mcp__github__get_file_contents",
+            "mcp__github__get_commit",
+            "mcp__github__list_pull_requests",
+            "mcp__github__search_code",
+            "mcp__github__list_issues",
+        ],
+    )
+    async def test_read_tool_auto_approved(self, tool_name):
+        handler, provider, _ = make_handler()
+        result = await handler.handle(tool_name, {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_not_called()
+
+
+class TestGitHubMCPToolsRequireApproval:
+    """GitHub MCP tools that are visible-to-others or destructive require HITL approval."""
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            # Visible-to-others
+            "mcp__github__create_pull_request",
+            "mcp__github__create_issue",
+            "mcp__github__add_issue_comment",
+            "mcp__github__pull_request_review_write",
+            # Destructive
+            "mcp__github__merge_pull_request",
+            "mcp__github__create_or_update_file",
+            "mcp__github__push_files",
+            "mcp__github__delete_branch",
+            "mcp__github__close_pull_request",
+            "mcp__github__close_issue",
+            "mcp__github__update_pull_request_branch",
+            # Unknown (fail-closed)
+            pytest.param("mcp__github__some_future_tool", id="unknown_tool_falls_through"),
+        ],
+    )
+    async def test_requires_slack_approval(self, tool_name):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle(tool_name, {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+    @pytest.mark.parametrize(
+        "tool_name",
+        [
+            "mcp__github__merge_pull_request",
+            "mcp__github__create_pull_request",
+        ],
+    )
+    async def test_ignores_sdk_allow_suggestion(self, tool_name):
+        """Restricted tools must require Slack approval even when SDK suggests allow."""
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+
+        suggestion = MagicMock()
+        suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+
+        result = await handler.handle(tool_name, {}, context)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called()
+
+
+class TestGitHubMCPGuardTests:
+    """Guard tests: pin permission sets so changes aren't silently missed."""
+
+    def test_require_approval_set_pinned(self):
+        assert (
+            frozenset(
+                [
+                    "mcp__github__merge_pull_request",
+                    "mcp__github__delete_branch",
+                    "mcp__github__close_pull_request",
+                    "mcp__github__close_issue",
+                    "mcp__github__update_pull_request_branch",
+                    "mcp__github__push_files",
+                    "mcp__github__create_or_update_file",
+                    "mcp__github__pull_request_review_write",
+                    "mcp__github__create_pull_request",
+                    "mcp__github__create_issue",
+                    "mcp__github__add_issue_comment",
+                ]
+            )
+            == _GITHUB_MCP_REQUIRE_APPROVAL
+        )
+
+    def test_auto_approve_set_pinned(self):
+        assert (
+            frozenset(
+                [
+                    "mcp__github__pull_request_read",
+                    "mcp__github__get_file_contents",
+                ]
+            )
+            == _GITHUB_MCP_AUTO_APPROVE
+        )
+
+    def test_require_approval_not_matched_by_auto_approve_prefixes(self):
+        """No require-approval tool should match an auto-approve prefix."""
+        for tool in _GITHUB_MCP_REQUIRE_APPROVAL:
+            assert not tool.startswith(_GITHUB_MCP_AUTO_APPROVE_PREFIXES), (
+                f"{tool} matches an auto-approve prefix"
+            )

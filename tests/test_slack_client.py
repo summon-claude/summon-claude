@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from summon_claude.slack.client import (
     MessageRef,
     SlackClient,
+    redact_secrets,
     sanitize_for_mrkdwn,
 )
 
@@ -334,3 +336,102 @@ class TestSlackClient:
         web.files_list = AsyncMock(side_effect=Exception("api error"))
         result = await client.get_canvas_id()
         assert result is None
+
+
+class TestRedactSecrets:
+    def test_classic_pat_redacted(self):
+        text = "Error: auth failed with ghp_abc123XYZ token"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghp_abc123XYZ" not in redact_secrets(text)
+
+    def test_fine_grained_pat_redacted(self):
+        text = "Token github_pat_11ABCDEF_xyz789 is invalid"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "github_pat_11ABCDEF_xyz789" not in redact_secrets(text)
+
+    def test_oauth_token_redacted(self):
+        text = "Error: gho_abc123XYZ token expired"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "gho_abc123XYZ" not in redact_secrets(text)
+
+    def test_user_to_server_token_redacted(self):
+        text = "Error: ghu_usertoken456 expired"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghu_usertoken456" not in redact_secrets(text)
+
+    def test_app_installation_token_redacted(self):
+        text = "Error: ghs_installtoken456 forbidden"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghs_installtoken456" not in redact_secrets(text)
+
+    def test_app_refresh_token_redacted(self):
+        text = "Error: ghr_refreshtoken789 invalid"
+        assert "[REDACTED]" in redact_secrets(text)
+        assert "ghr_refreshtoken789" not in redact_secrets(text)
+
+    def test_no_pat_unchanged(self):
+        text = "Normal message without any tokens"
+        assert redact_secrets(text) == text
+
+    def test_multiple_pats_redacted(self):
+        text = "Found ghp_first and github_pat_second tokens"
+        result = redact_secrets(text)
+        assert "ghp_first" not in result
+        assert "github_pat_second" not in result
+        assert result.count("[REDACTED]") == 2
+
+    async def test_post_redacts_pat(self):
+        web = MagicMock()
+        web.chat_postMessage = AsyncMock(return_value={"channel": "C123", "ts": "1.0"})
+        client = SlackClient(web, "C123")
+        await client.post("Error with ghp_secret123 token")
+        call_kwargs = web.chat_postMessage.call_args.kwargs
+        assert "ghp_secret123" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]
+
+    async def test_post_ephemeral_redacts_pat(self):
+        web = MagicMock()
+        web.chat_postEphemeral = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.post_ephemeral("U_USER", "Token: ghp_ephemeral_secret")
+        call_kwargs = web.chat_postEphemeral.call_args.kwargs
+        assert "ghp_ephemeral_secret" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]
+
+    async def test_update_redacts_pat(self):
+        web = MagicMock()
+        web.chat_update = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.update("1.0", "Token: github_pat_leaked123")
+        call_kwargs = web.chat_update.call_args.kwargs
+        assert "github_pat_leaked123" not in call_kwargs["text"]
+        assert "[REDACTED]" in call_kwargs["text"]
+
+    async def test_post_redacts_blocks(self):
+        web = MagicMock()
+        web.chat_postMessage = AsyncMock(return_value={"channel": "C123", "ts": "1.0"})
+        client = SlackClient(web, "C123")
+        blocks = [
+            {"type": "section", "text": {"type": "mrkdwn", "text": "Token: ghp_blocktoken123"}}
+        ]
+        await client.post("fallback", blocks=blocks)
+        sent_blocks = web.chat_postMessage.call_args.kwargs["blocks"]
+        assert "ghp_blocktoken123" not in json.dumps(sent_blocks)
+        assert "[REDACTED]" in json.dumps(sent_blocks)
+
+    async def test_upload_redacts_content(self):
+        web = MagicMock()
+        web.files_upload_v2 = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.upload("config: ghp_uploadtoken456", "config.txt")
+        call_kwargs = web.files_upload_v2.call_args.kwargs
+        assert "ghp_uploadtoken456" not in call_kwargs["content"]
+        assert "[REDACTED]" in call_kwargs["content"]
+
+    async def test_set_topic_redacts(self):
+        web = MagicMock()
+        web.conversations_setTopic = AsyncMock(return_value={})
+        client = SlackClient(web, "C123")
+        await client.set_topic("Topic with ghp_topictoken789")
+        call_kwargs = web.conversations_setTopic.call_args.kwargs
+        assert "ghp_topictoken789" not in call_kwargs["topic"]

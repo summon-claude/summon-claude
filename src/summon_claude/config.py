@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -277,10 +277,10 @@ class SummonConfig(BaseSettings):
         extra="ignore",
     )
 
-    # Slack credentials
-    slack_bot_token: str
-    slack_app_token: str  # Socket Mode app-level token (xapp-)
-    slack_signing_secret: str
+    # Slack credentials — repr=False to prevent leakage in logs/tracebacks
+    slack_bot_token: str = Field(repr=False)
+    slack_app_token: str = Field(repr=False)  # Socket Mode app-level token (xapp-)
+    slack_signing_secret: str = Field(repr=False)
 
     # Claude model
     default_model: str | None = None
@@ -300,6 +300,12 @@ class SummonConfig(BaseSettings):
     # Thinking display
     enable_thinking: bool = True  # Pass ThinkingConfigAdaptive to SDK
     show_thinking: bool = False  # Route ThinkingBlock content to Slack turn thread
+
+    # ------------------------------------------------------------------
+    # GitHub integration
+    # ------------------------------------------------------------------
+
+    github_pat: str | None = Field(default=None, repr=False)  # GitHub PAT for remote MCP
 
     # ------------------------------------------------------------------
     # Scribe agent settings
@@ -395,6 +401,26 @@ class SummonConfig(BaseSettings):
         if v and not v.startswith("xapp-"):
             raise ValueError("SUMMON_SLACK_APP_TOKEN must start with 'xapp-'")
         return v
+
+    @field_validator("github_pat")
+    @classmethod
+    def _check_github_pat(cls, v: str | None) -> str | None:
+        if v and not v.startswith(("ghp_", "github_pat_")):
+            msg = "github_pat must start with 'ghp_' (classic) or 'github_pat_' (fine-grained)"
+            raise ValueError(msg)
+        return v
+
+    def github_mcp_config(self) -> dict | None:
+        """Return GitHub remote MCP server config, or None if not configured."""
+        if not self.github_pat:
+            return None
+        return {
+            "type": "http",
+            "url": "https://api.githubcopilot.com/mcp/",
+            "headers": {
+                "Authorization": f"Bearer {self.github_pat}",
+            },
+        }
 
     @classmethod
     def from_file(cls, config_path: str | None = None) -> SummonConfig:
