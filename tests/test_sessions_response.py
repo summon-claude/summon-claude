@@ -638,10 +638,12 @@ class TestUploadDiff:
         streamer, router, client = make_streamer()
         router.active_thread_ts = "thread_1"
         await streamer._upload_diff("same", "same", "file.py", "thread_1")
-        # Should post a "No changes" message via router
+        # Should post a "No changes" message via router with mrkdwn conversion
         assert client.post.call_count >= 1
         text = client.post.call_args.args[0]
-        assert "No changes" in text
+        # Source is markdown *italic* — router converts to mrkdwn _italic_
+        assert "_No changes" in text
+        assert "file.py" in text
 
     async def test_change_uploads_diff_file(self):
         streamer, router, client = make_streamer()
@@ -743,9 +745,13 @@ class TestUploadDiff:
         await streamer._handle_assistant_message(msg2)
         await asyncio.sleep(0.05)
 
-        # Should show "Updated" not full re-render
+        # Should show "Updated" header, not full re-render.
+        # Header goes through post_to_thread: **Updated:** → *Updated:* (mrkdwn bold)
         all_texts = [c.args[0] for c in client.post.call_args_list if c.args]
-        assert any("Updated" in t for t in all_texts)
+        assert any("*Updated:*" in t for t in all_texts)
+        # Must NOT re-render the markdown content
+        all_blocks = [b for c in client.post.call_args_list for b in (c.kwargs.get("blocks") or [])]
+        assert not any(b.get("type") == "markdown" for b in all_blocks)
 
     async def test_write_md_fallback_to_plain_text(self):
         """When type: markdown blocks fail, should fall back to plain text."""
@@ -786,7 +792,9 @@ class TestUploadDiff:
         assert len(plain_calls) >= 2  # header + mrkdwn fallback
         # The fallback text should be mrkdwn-converted (# Hello → *Hello*)
         fallback_texts = [c.args[0] for c in plain_calls if c.args]
-        assert any("Hello" in t for t in fallback_texts)
+        # Must contain the converted heading (*Hello*), NOT the raw markdown (# Hello)
+        assert any("*Hello*" in t for t in fallback_texts)
+        assert not any("# Hello" in t for t in fallback_texts)
 
 
 class TestSplitTextAdditional:
