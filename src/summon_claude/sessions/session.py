@@ -1769,16 +1769,23 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post workflow warning to Slack")
 
-        _lost_cron_jobs: list[tuple[str, str, bool]] = []  # (cron_expr, prompt, recurring)
-        _cron_recovery = ""
-
         while True:
-            # Snapshot agent cron jobs before clearing (for recovery prompt after compaction)
+            # Snapshot agent cron jobs before clearing, compute recovery prompt
             _lost_cron_jobs = [
                 (j.cron_expr, j.prompt, j.recurring)
                 for j in scheduler.list_jobs()
                 if not j.internal
             ]
+            _cron_recovery = ""
+            if _lost_cron_jobs:
+                cron_lines = "\n".join(
+                    f"  - CronCreate(cron={expr!r}, prompt={prompt[:100]!r}, recurring={rec})"
+                    for expr, prompt, rec in _lost_cron_jobs
+                )
+                _cron_recovery = (
+                    "\n\nScheduled jobs were lost during context compaction. "
+                    "Re-create them with CronCreate:\n" + cron_lines
+                )
             # Cancel any orphaned scheduler tasks from prior iteration and re-register
             scheduler.cancel_all()
             if is_pm:
@@ -1807,10 +1814,13 @@ class SummonSession:
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery
             else:
+                effective_append = system_prompt_append
+                if _cron_recovery:
+                    effective_append = system_prompt_append + _cron_recovery
                 system_prompt = {
                     "type": "preset",
                     "preset": "claude_code",
-                    "append": system_prompt_append,
+                    "append": effective_append,
                 }
             options = ClaudeAgentOptions(
                 cwd=self._cwd,
@@ -1903,18 +1913,8 @@ class SummonSession:
                     system_prompt_append = base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
-                # Build cron recovery snippet (used by both PM and non-PM paths)
-                _cron_recovery = ""
-                if _lost_cron_jobs:
-                    cron_lines = "\n".join(
-                        f"  - CronCreate(cron={expr!r}, prompt={prompt[:100]!r}, recurring={rec})"
-                        for expr, prompt, rec in _lost_cron_jobs
-                    )
-                    _cron_recovery = (
-                        "\n\nScheduled jobs were lost during context compaction. "
-                        "Re-create them with CronCreate:\n" + cron_lines
-                    )
-                    system_prompt_append += _cron_recovery
+                # Cron recovery is computed at the TOP of the next iteration
+                # from the fresh snapshot (not here where _lost_cron_jobs is stale)
                 restart_count += 1
                 if restart_count > _MAX_SESSION_RESTARTS:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
