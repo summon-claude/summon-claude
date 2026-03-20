@@ -2683,9 +2683,7 @@ class SummonSession:
             if self._changed_files:
                 await self._post_change_summary(rt, thread_ts=thread_ts)
             else:
-                await rt.client.post(
-                    "_No files changed in this session yet._", thread_ts=thread_ts
-                )
+                await rt.client.post("_No files changed in this session yet._", thread_ts=thread_ts)
             return
 
         # Handle !diff <file> — show git diff for a specific file
