@@ -82,6 +82,11 @@ class SessionScheduler:
                 prompt = prompt[: self._MAX_PROMPT_LENGTH]
                 logger.warning("Cron job prompt truncated to %d chars", self._MAX_PROMPT_LENGTH)
 
+            # Strip system-reserved prefixes to prevent spoofing
+            for prefix in ("[SYSTEM:", "[CRON:"):
+                if prompt.lstrip().startswith(prefix):
+                    prompt = prompt.lstrip().removeprefix(prefix).lstrip("] ")
+
         job = ScheduledJob(
             id=secrets.token_hex(4),
             cron_expr=cron_expr,
