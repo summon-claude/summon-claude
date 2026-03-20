@@ -710,16 +710,15 @@ class ResponseStreamer:
         # Split and post markdown blocks
         chunks = split_markdown(content, limit=12000)
         for chunk in chunks:
-            md_blocks = [{"type": "markdown", "text": chunk}]
             try:
-                await self._router.post_to_thread(chunk, blocks=md_blocks, thread_ts=thread_ts)
+                await self._router.post_markdown_to_thread(chunk, thread_ts=thread_ts)
             except Exception:
-                # Fallback: post as plain text if markdown blocks fail
-                logger.warning("Markdown block failed for %s, using plain text", basename)
+                # Fallback: post as mrkdwn-converted text if markdown blocks fail
+                logger.warning("Markdown block failed for %s, using mrkdwn fallback", basename)
                 try:
                     await self._router.post_to_thread(chunk, thread_ts=thread_ts)
                 except Exception:
-                    logger.warning("Plain text fallback also failed for %s", basename)
+                    logger.warning("mrkdwn fallback also failed for %s", basename)
 
     async def _upload_write(
         self,

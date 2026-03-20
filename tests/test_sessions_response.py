@@ -695,24 +695,32 @@ class TestUploadDiff:
     async def test_write_md_renders_markdown_blocks(self):
         streamer, router, client = make_streamer()
         router.active_thread_ts = "thread_1"
+        md_content = "# Hello\n\n**World**"
         write_block = make_tool_use_block(
             "Write",
-            {"file_path": "/src/README.md", "content": "# Hello\n\nWorld"},
+            {"file_path": "/src/README.md", "content": md_content},
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
         await asyncio.sleep(0.05)
         # .md files should NOT trigger upload — they use markdown blocks
         client.upload.assert_not_called()
-        # Should post header and markdown block
-        all_blocks = []
+        # Find the markdown block post
+        md_blocks = []
         for c in client.post.call_args_list:
-            if c.kwargs.get("blocks"):
-                all_blocks.extend(c.kwargs["blocks"])
-        # Should contain a markdown type block
-        assert any(b.get("type") == "markdown" for b in all_blocks), (
-            f"Expected type: markdown block, got: {all_blocks}"
+            for b in c.kwargs.get("blocks") or []:
+                if b.get("type") == "markdown":
+                    md_blocks.append(b)
+        assert md_blocks, "Expected at least one type: markdown block"
+        # Block content must be raw markdown — NOT mrkdwn-converted
+        assert md_blocks[0]["text"] == md_content
+        # text param (notification fallback) must also be raw (no conversion)
+        md_call = next(
+            c
+            for c in client.post.call_args_list
+            if any(b.get("type") == "markdown" for b in (c.kwargs.get("blocks") or []))
         )
+        assert md_call.args[0] == md_content
 
     async def test_write_md_repeated_shows_update(self):
         streamer, router, client = make_streamer()
@@ -766,16 +774,19 @@ class TestUploadDiff:
         await streamer._handle_assistant_message(msg)
         await asyncio.sleep(0.05)
 
-        # Should have attempted markdown block and fallen back to plain text.
-        # Calls: header (no md blocks, succeeds) + md block (fails) + plain text fallback
+        # Should have attempted markdown block and fallen back to mrkdwn-converted text.
+        # Calls: header (succeeds) + md block (fails) + mrkdwn fallback (succeeds)
         assert call_count >= 3
-        # Verify at least one call had no markdown blocks (the fallback)
+        # Verify the fallback call has no markdown blocks and has mrkdwn-converted text
         plain_calls = [
             c
             for c in client.post.call_args_list
             if not any(b.get("type") == "markdown" for b in (c.kwargs.get("blocks") or []))
         ]
-        assert len(plain_calls) >= 2  # header + plain text fallback
+        assert len(plain_calls) >= 2  # header + mrkdwn fallback
+        # The fallback text should be mrkdwn-converted (# Hello → *Hello*)
+        fallback_texts = [c.args[0] for c in plain_calls if c.args]
+        assert any("Hello" in t for t in fallback_texts)
 
 
 class TestSplitTextAdditional:

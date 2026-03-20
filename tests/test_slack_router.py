@@ -196,6 +196,21 @@ class TestThreadRouterConversion:
         assert call_kwargs["text"] == "*bold*"
         assert call_kwargs["thread_ts"] == "explicit_ts"
 
+    async def test_post_markdown_to_thread_no_conversion(self):
+        """Markdown blocks must post raw content — no mrkdwn conversion."""
+        client, web = make_mock_client()
+        router = ThreadRouter(client)
+        await router.post_markdown_to_thread("# Heading\n\n**bold**", thread_ts="t1")
+        call_kwargs = web.chat_postMessage.call_args.kwargs
+        # text fallback is raw markdown, NOT converted
+        assert call_kwargs["text"] == "# Heading\n\n**bold**"
+        assert call_kwargs["thread_ts"] == "t1"
+        # Block contains raw markdown
+        blocks = call_kwargs["blocks"]
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "markdown"
+        assert blocks[0]["text"] == "# Heading\n\n**bold**"
+
     async def test_post_to_active_thread_converts_markdown(self):
         client, web = make_mock_client()
         router = ThreadRouter(client)

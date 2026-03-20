@@ -101,6 +101,20 @@ class ThreadRouter:
         """Update an existing message with mrkdwn conversion."""
         await self.client.update(ts, markdown_to_mrkdwn(text), blocks=blocks)
 
+    async def post_markdown_to_thread(
+        self,
+        markdown: str,
+        *,
+        thread_ts: str,
+    ) -> MessageRef:
+        """Post a type:markdown block with raw content (no mrkdwn conversion).
+
+        The ``text`` fallback is the raw markdown — readable in notifications
+        even without rendering.
+        """
+        blocks = [{"type": "markdown", "text": markdown}]
+        return await self._post_raw(markdown, blocks=blocks, thread_ts=thread_ts)
+
     # --- File uploads (no text conversion — file content is not markdown) ---
 
     async def upload(
