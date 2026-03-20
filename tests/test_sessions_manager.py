@@ -1958,6 +1958,7 @@ class TestResolveChannelResume:
             mock_reg = AsyncMock()
             mock_reg.get_channel = AsyncMock(return_value={"authenticated_user_id": "U1"})
             mock_reg.get_latest_session_for_channel = AsyncMock(return_value=None)
+            mock_reg.get_active_session_for_channel = AsyncMock(return_value=None)
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with pytest.raises(ValueError, match="No previous session"):

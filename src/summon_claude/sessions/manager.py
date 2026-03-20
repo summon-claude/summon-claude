@@ -345,6 +345,11 @@ class SessionManager:
             else:
                 session = await registry.get_latest_session_for_channel(channel_id)
                 if not session:
+                    # Check if there's an active session — provide a better
+                    # error message than "no previous session found"
+                    active = await registry.get_active_session_for_channel(channel_id)
+                    if active:
+                        raise ValueError("Session is still active. Use the existing session.")
                     raise ValueError("No previous session found in this channel.")
 
             if session["status"] not in ("completed", "errored"):

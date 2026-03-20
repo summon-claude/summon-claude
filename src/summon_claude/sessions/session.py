@@ -1381,11 +1381,17 @@ class SummonSession:
 
         channel_name: str = info["channel"]["name"]  # type: ignore[index]
 
-        # Rejoin — bot may have been removed since last session
+        # Best-effort rejoin — works for public channels where bot was removed.
+        # Private channels always raise method_not_supported_for_channel_type
+        # (bot is already a member since it created the channel).
         try:
             await web_client.conversations_join(channel=channel_id)
         except Exception as e:
-            logger.debug("conversations_join for %s: %s (may already be a member)", channel_id, e)
+            logger.debug(
+                "conversations_join for %s: %s (expected for private channels)",
+                channel_id,
+                e,
+            )
 
         logger.info("Resuming in existing channel #%s (%s)", channel_name, channel_id)
         return channel_id, channel_name

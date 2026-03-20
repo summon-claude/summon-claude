@@ -754,6 +754,18 @@ class SessionRegistry:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    async def get_active_session_for_channel(self, channel_id: str) -> dict | None:
+        """Return an active/pending_auth session for a channel, if any."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM sessions"
+            " WHERE slack_channel_id = ? AND status IN ('active', 'pending_auth')"
+            " LIMIT 1",
+            (channel_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
     # --- Pending auth token methods ---
 
     async def store_pending_token(
