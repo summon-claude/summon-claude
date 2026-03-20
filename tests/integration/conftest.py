@@ -12,14 +12,31 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import secrets
 import time
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.slack.client import SlackClient
 from summon_claude.slack.router import ThreadRouter
+
+
+async def slack_retry[T](fn: Callable[..., Awaitable[T]], *args: object, **kwargs: object) -> T:
+    """Retry a Slack API call on rate-limit (429) errors, up to 5 times with backoff."""
+    for attempt in range(5):
+        try:
+            return await fn(*args, **kwargs)
+        except Exception as e:
+            if "ratelimited" in str(e) and attempt < 4:
+                await asyncio.sleep(5 * (attempt + 1))
+                continue
+            raise
+    raise RuntimeError("unreachable")  # pragma: no cover
+
 
 # Load .env file so credentials are available for local runs
 _env_file = Path(__file__).resolve().parents[2] / ".env"
@@ -93,8 +110,8 @@ class SlackTestHarness:
         return self._non_bot_user_id
 
     async def create_test_channel(self, prefix: str = "test") -> str:
-        """Create a test channel with timestamp suffix. Returns channel_id."""
-        name = f"{prefix}-integ-{int(time.time())}"[:80]
+        """Create a test channel with timestamp + random suffix. Returns channel_id."""
+        name = f"{prefix}-integ-{int(time.time())}-{secrets.token_hex(3)}"[:80]
         resp = await self.client.conversations_create(name=name, is_private=True)
         channel = resp.get("channel") or {}
         channel_id = channel["id"]
@@ -154,6 +171,27 @@ def slack_client(slack_harness, test_channel):
 async def thread_router(slack_client):
     """ThreadRouter backed by real SlackClient and test channel."""
     return ThreadRouter(slack_client)
+
+
+@pytest.fixture
+async def fresh_channel(slack_harness):
+    """Create a fresh isolated channel for tests that modify channel state.
+
+    Unlike test_channel, this is NOT shared — each test gets its own channel.
+    The channel is archived in teardown.
+    """
+    channel_id = await slack_harness.create_test_channel(prefix="lifecycle")
+    yield channel_id
+    with contextlib.suppress(Exception):
+        await slack_harness.client.conversations_archive(channel=channel_id)
+
+
+@pytest.fixture
+async def registry(tmp_path):
+    """SessionRegistry backed by a temp SQLite DB."""
+    db_path = tmp_path / "test.db"
+    async with SessionRegistry(db_path=db_path) as reg:
+        yield reg
 
 
 def pytest_sessionfinish(session, exitstatus):

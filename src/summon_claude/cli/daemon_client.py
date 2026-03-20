@@ -103,6 +103,43 @@ async def project_up(cwd: str) -> dict[str, Any]:
     return await _request({"type": "project_up", "cwd": cwd})
 
 
+async def send_message_to_session(
+    session_id: str,
+    text: str,
+    sender_info: str | None = None,
+) -> dict[str, Any]:
+    """Send a message to a running session via daemon IPC.
+
+    Returns the daemon response dict with ``type``, ``session_id``, and
+    ``channel_id`` on success.
+    """
+    return await _request(
+        {
+            "type": "send_message",
+            "session_id": session_id,
+            "text": text,
+            "sender_info": sender_info,
+        }
+    )
+
+
+async def resume_session(
+    session_id: str,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Resume a stopped session via daemon IPC.
+
+    Returns the daemon response dict with new ``session_id`` and ``channel_id``.
+    """
+    return await _request(
+        {
+            "type": "resume_session",
+            "session_id": session_id,
+            "model": model,
+        }
+    )
+
+
 async def stop_session(session_id: str) -> bool:
     """Send a ``stop_session`` request to the daemon.
 

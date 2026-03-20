@@ -258,8 +258,7 @@ class SessionRegistry:
             "ended_at",
             "error_message",
             "model",
-            "canvas_id",
-            "canvas_markdown",
+            "effort",
             "project_id",
         }
     )
@@ -652,44 +651,120 @@ class SessionRegistry:
 
     # --- Canvas methods ---
 
-    async def update_canvas(self, session_id: str, canvas_id: str, canvas_markdown: str) -> None:
-        """Update the canvas ID and markdown for a session."""
-        db = self._check_connected()
-        async with self._lock:
-            await db.execute(
-                "UPDATE sessions SET canvas_id = ?, canvas_markdown = ?, last_activity_at = ?"
-                " WHERE session_id = ?",
-                (canvas_id, canvas_markdown, _now(), session_id),
-            )
-            await db.commit()
-
-    async def get_canvas(self, session_id: str) -> tuple[str | None, str | None]:
-        """Return (canvas_id, canvas_markdown) for a session."""
-        db = self._check_connected()
-        async with db.execute(
-            "SELECT canvas_id, canvas_markdown FROM sessions WHERE session_id = ?",
-            (session_id,),
-        ) as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return row[0], row[1]
-            return None, None
-
     async def get_canvas_by_channel(
         self, channel_id: str
     ) -> tuple[str | None, str | None, str | None]:
-        """Return (canvas_id, canvas_markdown, authenticated_user_id) for a channel."""
+        """Return (canvas_id, canvas_markdown, authenticated_user_id) from channels table."""
         db = self._check_connected()
         async with db.execute(
-            "SELECT canvas_id, canvas_markdown, authenticated_user_id FROM sessions"
-            " WHERE slack_channel_id = ? AND canvas_id IS NOT NULL"
-            " ORDER BY started_at DESC LIMIT 1",
+            "SELECT canvas_id, canvas_markdown, authenticated_user_id FROM channels"
+            " WHERE channel_id = ?",
             (channel_id,),
         ) as cursor:
             row = await cursor.fetchone()
             if row:
                 return row[0], row[1], row[2]
             return None, None, None
+
+    # --- Channels table methods ---
+
+    async def register_channel(
+        self,
+        channel_id: str,
+        channel_name: str,
+        cwd: str,
+        authenticated_user_id: str | None = None,
+    ) -> None:
+        """Register or update a channel in the channels table.
+
+        Uses ``INSERT ... ON CONFLICT DO UPDATE`` so that
+        ``authenticated_user_id`` and ``cwd`` stay current across resumes.
+        """
+        db = self._check_connected()
+        now = _now()
+        async with self._lock:
+            await db.execute(
+                """
+                INSERT INTO channels
+                    (channel_id, channel_name, cwd, authenticated_user_id,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(channel_id) DO UPDATE SET
+                    channel_name = excluded.channel_name,
+                    authenticated_user_id = COALESCE(
+                        excluded.authenticated_user_id, authenticated_user_id
+                    ),
+                    cwd = excluded.cwd,
+                    updated_at = excluded.updated_at
+                """,
+                (channel_id, channel_name, cwd, authenticated_user_id, now, now),
+            )
+            await db.commit()
+
+    async def update_channel_claude_session(self, channel_id: str, claude_session_id: str) -> None:
+        """Update the latest Claude session ID for a channel."""
+        db = self._check_connected()
+        async with self._lock:
+            await db.execute(
+                "UPDATE channels SET claude_session_id = ?, updated_at = ? WHERE channel_id = ?",
+                (claude_session_id, _now(), channel_id),
+            )
+            await db.commit()
+
+    async def update_channel_canvas(
+        self, channel_id: str, canvas_id: str, canvas_markdown: str
+    ) -> None:
+        """Update canvas data on the channels table."""
+        db = self._check_connected()
+        async with self._lock:
+            await db.execute(
+                "UPDATE channels SET canvas_id = ?, canvas_markdown = ?, updated_at = ?"
+                " WHERE channel_id = ?",
+                (canvas_id, canvas_markdown, _now(), channel_id),
+            )
+            await db.commit()
+
+    async def get_channel(self, channel_id: str) -> dict | None:
+        """Fetch a channel row by ID."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM channels WHERE channel_id = ?", (channel_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_channel_by_name(self, channel_name: str) -> dict | None:
+        """Look up a channel by name."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM channels WHERE channel_name = ? LIMIT 1", (channel_name,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_latest_session_for_channel(self, channel_id: str) -> dict | None:
+        """Return the most recent completed/errored session for a channel."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM sessions"
+            " WHERE slack_channel_id = ? AND status IN ('completed', 'errored')"
+            " ORDER BY ended_at DESC LIMIT 1",
+            (channel_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+    async def get_active_session_for_channel(self, channel_id: str) -> dict | None:
+        """Return an active/pending_auth session for a channel, if any."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT * FROM sessions"
+            " WHERE slack_channel_id = ? AND status IN ('active', 'pending_auth')"
+            " LIMIT 1",
+            (channel_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     # --- Pending auth token methods ---
 

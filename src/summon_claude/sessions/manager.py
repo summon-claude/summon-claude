@@ -77,8 +77,26 @@ class SessionManager:
         self._shutdown_event = asyncio.Event()
         self._start_time: float = time.monotonic()
         self._project_up_in_flight = False  # guard against concurrent project_up
+        self._resuming_channels: set[str] = set()  # guard against concurrent resume
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _channel_has_active_session(self, channel_id: str) -> bool:
+        """Return True if any live session is bound to *channel_id*."""
+        return any(
+            channel_id in (s.channel_id, s.target_channel_id) for s in self._sessions.values()
+        )
+
+    def _check_channel_available(self, channel_id: str) -> None:
+        """Raise ``ValueError`` if *channel_id* is resuming or has an active session."""
+        if channel_id in self._resuming_channels:
+            raise ValueError("Resume already in progress for this channel")
+        if self._channel_has_active_session(channel_id):
+            raise ValueError("Channel already has an active session")
 
     # ------------------------------------------------------------------
     # Public lifecycle API
@@ -97,7 +115,15 @@ class SessionManager:
 
         Returns:
             The short code for the user to authenticate via ``/summon`` in Slack.
+
+        Raises:
+            ValueError: If ``options.channel_id`` targets a channel that already
+                has an active or resuming session.
         """
+        # Guard against duplicate sessions on the same channel (resume via CLI)
+        if options.channel_id:
+            self._check_channel_available(options.channel_id)
+
         # Cancel grace timer — a new session has arrived
         self._cancel_grace_timer()
 
@@ -112,6 +138,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         self._sessions[session_id] = session
 
@@ -194,6 +222,8 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             parent_session_id=spawn_auth.parent_session_id,
             parent_channel_id=spawn_auth.parent_channel_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         session.authenticate(spawn_auth.target_user_id)
 
@@ -265,6 +295,76 @@ class SessionManager:
     # ------------------------------------------------------------------
     # /summon auth bridging
     # ------------------------------------------------------------------
+
+    async def resume_from_channel(
+        self, channel_id: str, user_id: str, target_session_id: str | None
+    ) -> None:
+        """Resume a stopped session from a Slack channel command.
+
+        Called by EventDispatcher for ``!summon resume`` in unrouted channels.
+        Validates channel ownership and session state before resuming.
+
+        Raises:
+            ValueError: With a user-facing message on validation failure.
+        """
+        resolved_session_id = await self._resolve_channel_resume(
+            channel_id, user_id, target_session_id
+        )
+        if not resolved_session_id:
+            return  # Not a summon-managed channel — silent
+
+        # Delegate to existing resume orchestration (opens its own registry)
+        result = await self._handle_resume_session(
+            {"type": "resume_session", "session_id": resolved_session_id}
+        )
+        if result.get("type") == "error":
+            raise ValueError(result["message"])
+
+    async def _resolve_channel_resume(
+        self, channel_id: str, user_id: str, target_session_id: str | None
+    ) -> str | None:
+        """Validate ownership and resolve the session to resume.
+
+        Returns the session ID on success, ``None`` for non-summon channels.
+
+        Raises:
+            ValueError: On ownership or state validation failure.
+        """
+        async with SessionRegistry() as registry:
+            channel = await registry.get_channel(channel_id)
+            if not channel:
+                return None
+
+            if channel.get("authenticated_user_id") != user_id:
+                raise ValueError(":x: Only the original session owner can resume.")
+
+            if target_session_id:
+                session = await registry.get_session(target_session_id)
+                if not session or session.get("slack_channel_id") != channel_id:
+                    raise ValueError("Session not found in this channel.")
+            else:
+                session = await registry.get_latest_session_for_channel(channel_id)
+                if not session:
+                    # Check if there's an active session — provide a better
+                    # error message than "no previous session found"
+                    active = await registry.get_active_session_for_channel(channel_id)
+                    if active:
+                        raise ValueError("Session is still active. Use the existing session.")
+                    raise ValueError("No previous session found in this channel.")
+
+            if session["status"] not in ("completed", "errored"):
+                raise ValueError("Session is still active. Use the existing session.")
+
+            return session["session_id"]
+
+    async def _ipc_resume(self, session_id: str) -> dict[str, Any]:
+        """Resume a stopped session and return the IPC result dict.
+
+        Used as callback for ``SummonSession._handle_resume_from_active``.
+        """
+        return await self._handle_resume_session(
+            {"type": "resume_session", "session_id": session_id}
+        )
 
     async def handle_summon_command(
         self,
@@ -342,7 +442,7 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
 
-    async def _dispatch_control(self, msg: dict) -> dict:  # type: ignore[type-arg]
+    async def _dispatch_control(self, msg: dict) -> dict:  # type: ignore[type-arg]  # noqa: PLR0912
         """Route a control message to the appropriate handler and return a response."""
         match msg.get("type"):
             case "create_session":
@@ -350,7 +450,10 @@ class SessionManager:
                     options = SessionOptions(**msg["options"])
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
-                short_code = await self.create_session(options)
+                try:
+                    short_code = await self.create_session(options)
+                except ValueError as e:
+                    return {"type": "error", "message": str(e)}
                 return {"type": "session_created", "short_code": short_code}
 
             case "stop_session":
@@ -394,6 +497,37 @@ class SessionManager:
                 except ValueError as e:
                     return {"type": "error", "message": str(e)}
                 return {"type": "session_created_spawned", "session_id": session_id}
+
+            case "send_message":
+                session_id = msg.get("session_id")
+                text = msg.get("text")
+                sender_info = msg.get("sender_info")
+                if not session_id or not text:
+                    return {"type": "error", "message": "Missing session_id or text"}
+                session = self._sessions.get(session_id)
+                if session is None:
+                    return {
+                        "type": "error",
+                        "message": f"Session {session_id} not found or not active",
+                    }
+                ok = await session.inject_message(text, sender_info=sender_info)
+                if not ok:
+                    return {
+                        "type": "error",
+                        "message": "Queue full or session shutting down",
+                    }
+                return {
+                    "type": "message_sent",
+                    "session_id": session_id,
+                    "channel_id": session.channel_id,
+                }
+
+            case "resume_session":
+                try:
+                    return await self._handle_resume_session(msg)
+                except Exception as e:
+                    logger.exception("resume_session failed")
+                    return {"type": "error", "message": str(e)}
 
             case "project_up":
                 return await self._handle_project_up(msg)
@@ -456,6 +590,142 @@ class SessionManager:
                     break
 
     # ------------------------------------------------------------------
+    # session resume — daemon-side orchestration
+    # ------------------------------------------------------------------
+
+    async def _handle_resume_session(self, msg: dict[str, Any]) -> dict[str, Any]:
+        """IPC handler for ``resume_session``.
+
+        Looks up the old session, validates state, and creates a new session
+        connected to the same channel with Claude SDK transcript continuity.
+        """
+        old_session_id = msg.get("session_id")
+        if not old_session_id:
+            return {"type": "error", "message": "Missing session_id"}
+
+        # Look up old session and extract resume parameters
+        try:
+            resume_params = await self._validate_resume_target(old_session_id)
+        except ValueError as e:
+            return {"type": "error", "message": str(e)}
+
+        channel_id: str = resume_params["channel_id"]
+        claude_sid: str = resume_params["claude_session_id"]
+
+        # Atomic guard: reject if channel already resuming or has active session
+        self._check_channel_available(channel_id)
+
+        self._resuming_channels.add(channel_id)
+        try:
+            options = SessionOptions(
+                cwd=resume_params["cwd"],
+                name=resume_params.get("session_name") or "",
+                model=msg.get("model") or resume_params.get("model"),
+                effort=resume_params.get("effort") or "high",
+                resume=claude_sid,
+                channel_id=channel_id,
+            )
+            session_id = await self.create_resumed_session(
+                options,
+                authenticated_user_id=resume_params.get("authenticated_user_id"),
+                parent_session_id=resume_params.get("parent_session_id"),
+            )
+            return {
+                "type": "session_resumed",
+                "session_id": session_id,
+                "channel_id": channel_id,
+            }
+        finally:
+            self._resuming_channels.discard(channel_id)
+
+    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
+        """Validate and extract resume parameters from an old session.
+
+        Returns a dict with resume params on success.
+
+        Raises:
+            ValueError: On validation failure (session not found, wrong status, etc.).
+        """
+        async with SessionRegistry() as registry:
+            old_session = await registry.get_session(old_session_id)
+            if not old_session:
+                raise ValueError(f"Session {old_session_id} not found")
+            status = old_session["status"]
+            if status == "suspended":
+                raise ValueError("Session is suspended — use project up to restart it")
+            if status not in ("completed", "errored"):
+                raise ValueError(f"Session is {status} — use session_message instead")
+            channel_id = old_session.get("slack_channel_id")
+            if not channel_id:
+                raise ValueError("Session has no associated channel")
+
+            channel = await registry.get_channel(channel_id)
+            claude_session_id = (
+                channel["claude_session_id"]
+                if channel and channel.get("claude_session_id")
+                else old_session.get("claude_session_id")
+            )
+            if not claude_session_id:
+                raise ValueError("No Claude session ID to resume from")
+
+            return {
+                "channel_id": channel_id,
+                "claude_session_id": claude_session_id,
+                "cwd": old_session["cwd"],
+                "session_name": old_session.get("session_name"),
+                "model": old_session.get("model"),
+                "effort": old_session.get("effort"),
+                "authenticated_user_id": old_session.get("authenticated_user_id"),
+                "parent_session_id": old_session.get("parent_session_id"),
+            }
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def create_resumed_session(
+        self,
+        options: SessionOptions,
+        authenticated_user_id: str | None = None,
+        parent_session_id: str | None = None,
+    ) -> str:
+        """Create a pre-authenticated session for resume (no spawn token needed).
+
+        Similar to ``create_session_with_spawn_token`` but uses the old
+        session's auth identity directly.
+
+        Raises:
+            ValueError: If ``authenticated_user_id`` is None (session would
+                hang in auth wait).
+        """
+        if not authenticated_user_id:
+            raise ValueError("Cannot resume session without authenticated_user_id")
+
+        self._cancel_grace_timer()
+        session_id = str(uuid.uuid4())
+
+        session = SummonSession(
+            config=self._config,
+            options=options,
+            auth=None,
+            session_id=session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            parent_session_id=parent_session_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
+        )
+        session.authenticate(authenticated_user_id)
+
+        self._sessions[session_id] = session
+        task = asyncio.create_task(
+            self._supervised_session(session, session_id),
+            name=f"session-resume-{session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=session_id))
+        self._tasks[session_id] = task
+        logger.info("SessionManager: created resumed session %s", session_id)
+        return session_id
+
+    # ------------------------------------------------------------------
     # project up — daemon-side orchestration
     # ------------------------------------------------------------------
 
@@ -502,6 +772,8 @@ class SessionManager:
                 web_client=self._web_client,
                 dispatcher=self._dispatcher,
                 bot_user_id=self._bot_user_id,
+                ipc_spawn=self.create_session_with_spawn_token,
+                ipc_resume=self._ipc_resume,
             )
             self._sessions[session_id] = session
             task = asyncio.create_task(
@@ -633,6 +905,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         new_session.authenticate(user_id)
 
@@ -678,6 +952,8 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
         )
         new_session.authenticate(user_id)
 

@@ -15,10 +15,11 @@ import os
 import queue
 import re
 import secrets
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -43,7 +44,7 @@ from summon_claude.config import (
     get_data_dir,
     google_mcp_env,
 )
-from summon_claude.sessions.auth import SessionAuth
+from summon_claude.sessions.auth import SessionAuth, generate_spawn_token
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
@@ -171,6 +172,7 @@ _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
 _CONTEXT_URGENT_THRESHOLD = 90.0  # Urgent warning in Slack
 _CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
 _MAX_SESSION_RESTARTS = 3  # Circuit breaker for compaction restart loop
+_MAX_PENDING_TURNS = 100  # Backpressure for inject_message
 _MAX_CHANNEL_NAME_LEN = 80
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
@@ -643,6 +645,7 @@ class SessionOptions:
     model: str | None = None
     effort: str = "high"
     resume: str | None = None
+    channel_id: str | None = None
     pm_profile: bool = False
     auth_only: bool = False
     project_id: str | None = None
@@ -718,6 +721,8 @@ class SummonSession:
         bot_user_id: str | None = None,
         parent_session_id: str | None = None,
         parent_channel_id: str | None = None,
+        ipc_spawn: Callable[[SessionOptions, str], Awaitable[str]] | None = None,
+        ipc_resume: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
     ) -> None:
         self._config = config
         self._pm_profile = options.pm_profile
@@ -730,6 +735,7 @@ class SummonSession:
         self._model = options.model
         self._effort = options.effort
         self._resume = options.resume
+        self._channel_id_option = options.channel_id
 
         self._auth: SessionAuth | None = auth
         self._claude: ClaudeSDKClient | None = None
@@ -740,13 +746,18 @@ class SummonSession:
         self._dispatcher = dispatcher
         # Pre-cached bot user ID from BoltRouter.start() — avoids a per-session auth_test() call
         self._bot_user_id = bot_user_id
+        # Daemon IPC callbacks (injected to avoid circular imports with cli.daemon_client)
+        self._ipc_spawn = ipc_spawn
+        self._ipc_resume = ipc_resume
 
         # Raw event queue: Slack events from EventDispatcher -> preprocessor
         # maxsize=100 provides backpressure — EventDispatcher drops events when full
         self._raw_event_queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=100)
 
         # Pending turns: preprocessed messages ready for response consumer
-        self._pending_turns: asyncio.Queue[_PendingTurn | None] = asyncio.Queue()
+        self._pending_turns: asyncio.Queue[_PendingTurn | None] = asyncio.Queue(
+            maxsize=_MAX_PENDING_TURNS
+        )
 
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
@@ -788,6 +799,11 @@ class SummonSession:
         return self._channel_id
 
     @property
+    def target_channel_id(self) -> str | None:
+        """Channel ID this session will bind to (from options), before creation."""
+        return self._channel_id_option
+
+    @property
     def is_pm(self) -> bool:
         """Whether this session is a PM agent session."""
         return self._pm_profile
@@ -824,6 +840,34 @@ class SummonSession:
         self._authenticated_event.set()
         self._auth = None  # clear token from memory after successful auth
         logger.info("Session %s: authenticated by user %s", self._session_id, user_id)
+
+    async def inject_message(self, text: str, sender_info: str | None = None) -> bool:
+        """Inject an external message into this session's processing queue.
+
+        The message is processed as a regular user turn. This bypasses Slack
+        event dispatch — the message goes directly into the internal queue.
+
+        Args:
+            text: Message text to inject.
+            sender_info: Human-readable source (e.g., "myapp-pm (#C12345)").
+
+        Returns:
+            True if enqueued successfully, False if session is shutting down
+            or queue is full.
+        """
+        if self._shutdown_event.is_set():
+            logger.debug("inject_message rejected: session %s is shutting down", self._session_id)
+            return False
+        pending = _PendingTurn(message=text, pre_sent=False)
+        try:
+            self._pending_turns.put_nowait(pending)
+        except asyncio.QueueFull:
+            logger.warning("inject_message rejected: queue full for session %s", self._session_id)
+            return False
+        logger.info(
+            "Injected external message from %s into session %s", sender_info, self._session_id
+        )
+        return True
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -1018,7 +1062,11 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
-        if self._pm_profile and self._project_id:
+        if self._channel_id_option:
+            channel_id, channel_name = await self._reuse_channel(
+                web_client, registry, self._channel_id_option
+            )
+        elif self._pm_profile and self._project_id:
             channel_id, channel_name = await self._get_or_create_pm_channel(
                 web_client, registry, self._project_id
             )
@@ -1027,6 +1075,19 @@ class SummonSession:
 
         # Record channel_id for SessionManager status queries
         self._channel_id = channel_id
+
+        # Register in channels table (UPSERT — safe for resume/reuse)
+        channel_registered = True
+        try:
+            await registry.register_channel(
+                channel_id=channel_id,
+                channel_name=channel_name,
+                cwd=self._cwd,
+                authenticated_user_id=self._authenticated_user_id,
+            )
+        except Exception as e:
+            channel_registered = False
+            logger.warning("Failed to register channel %s: %s", channel_id, e)
 
         # Invite the authenticating user to the private channel
         # Skip invite if user is the bot (bot already created the channel)
@@ -1071,7 +1132,26 @@ class SummonSession:
         # --- NOW create the channel-bound SlackClient ---
         client = SlackClient(web_client, channel_id)
 
-        await _post_session_header(client, self._cwd, self._model, self._session_id)
+        if not channel_registered:
+            try:
+                await client.post(
+                    ":warning: Channel state could not be saved — "
+                    "canvas and session resume may not persist across restarts."
+                )
+            except Exception as e:
+                logger.debug("Failed to post channel registration warning: %s", e)
+
+        if self._channel_id_option:
+            # Resume banner instead of full header
+            try:
+                await client.post(
+                    ":arrows_counterclockwise: Session resumed"
+                    " \u2014 continuing previous conversation."
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume banner: %s", e)
+        else:
+            await _post_session_header(client, self._cwd, self._model, self._session_id)
 
         # PM-specific: welcome message, pinned status, and PM topic
         if self._pm_profile:
@@ -1090,12 +1170,30 @@ class SummonSession:
             logger.debug("Failed to set initial topic: %s", e)
 
         # --- Canvas initialization (non-fatal) ---
-        try:
-            canvas_store = await self._init_canvas(client, registry)
-            self._canvas_store = canvas_store
-        except Exception as e:
-            logger.warning("Canvas initialization failed (non-fatal): %s", redact_secrets(str(e)))
-            self._canvas_store = None
+        if self._channel_id_option:
+            # Resume: restore canvas from channels table (falls back to sessions)
+            try:
+                self._canvas_store = await CanvasStore.restore(
+                    session_id=self._session_id,
+                    client=client,
+                    registry=registry,
+                    channel_id=channel_id,
+                )
+                if self._canvas_store is not None:
+                    self._canvas_store.start_sync()
+            except Exception as e:
+                logger.warning("Canvas resume failed (non-fatal): %s", redact_secrets(str(e)))
+                self._canvas_store = None
+        else:
+            try:
+                canvas_store = await self._init_canvas(client, registry, channel_id)
+                self._canvas_store = canvas_store
+            except Exception as e:
+                logger.warning(
+                    "Canvas initialization failed (non-fatal): %s",
+                    redact_secrets(str(e)),
+                )
+                self._canvas_store = None
 
         # Notify the authenticating user
         if self._authenticated_user_id:
@@ -1195,6 +1293,106 @@ class SummonSession:
         raise RuntimeError(
             f"Could not create channel after {self._CHANNEL_CREATE_RETRIES} attempts"
         ) from last_err
+
+    async def _handle_archived_channel(
+        self,
+        web_client: AsyncWebClient,
+        registry: SessionRegistry,
+        channel_id: str,
+        info: dict,
+    ) -> tuple[str, str]:
+        """Handle an archived channel during resume.
+
+        Tries to unarchive first, falls back to creating a replacement channel.
+        Returns ``(channel_id, channel_name)``.
+        """
+        # Try to unarchive
+        try:
+            await web_client.conversations_unarchive(channel=channel_id)
+            channel_name = info["channel"]["name"]
+            logger.info("Unarchived channel %s for resume", channel_id)
+            return channel_id, channel_name
+        except Exception as e:
+            logger.warning("Cannot unarchive %s: %s — creating replacement", channel_id, e)
+
+        # Fallback: create new channel with same name (Slack allows for archived channels)
+        old_name = info["channel"]["name"]  # type: ignore[index]
+        try:
+            resp = await web_client.conversations_create(name=old_name, is_private=True)
+            new_id = resp["channel"]["id"]  # type: ignore[index]
+            new_name = resp["channel"]["name"]  # type: ignore[index]
+        except Exception:
+            try:
+                new_name_try = f"{old_name[:70]}-resumed"
+                resp = await web_client.conversations_create(name=new_name_try, is_private=True)
+                new_id = resp["channel"]["id"]  # type: ignore[index]
+                new_name = resp["channel"]["name"]  # type: ignore[index]
+            except Exception:
+                logger.warning("All archived channel recovery failed — creating fresh channel")
+                return await self._create_channel(web_client)
+
+        # Update channels table with new channel_id
+        old_channel = await registry.get_channel(channel_id)
+        if old_channel:
+            await registry.register_channel(
+                channel_id=new_id,
+                channel_name=new_name,
+                cwd=old_channel.get("cwd", self._cwd),
+                authenticated_user_id=old_channel.get("authenticated_user_id"),
+            )
+            if old_channel.get("claude_session_id"):
+                await registry.update_channel_claude_session(
+                    new_id, old_channel["claude_session_id"]
+                )
+            if old_channel.get("canvas_id"):
+                await registry.update_channel_canvas(
+                    new_id,
+                    old_channel["canvas_id"],
+                    old_channel.get("canvas_markdown") or "",
+                )
+
+        logger.info(
+            "Created replacement channel %s -> %s for archived %s", old_name, new_id, channel_id
+        )
+        return new_id, new_name
+
+    async def _reuse_channel(
+        self,
+        web_client: AsyncWebClient,
+        registry: SessionRegistry,
+        channel_id: str,
+    ) -> tuple[str, str]:
+        """Reuse an existing channel for a resumed session.
+
+        Joins the channel and returns ``(channel_id, channel_name)``.
+        Handles archived channels via unarchive or replacement.
+        Falls back to creating a new channel on unexpected errors.
+        """
+        try:
+            info = await web_client.conversations_info(channel=channel_id)
+        except Exception as e:
+            logger.warning("Cannot look up channel %s: %s — creating new channel", channel_id, e)
+            return await self._create_channel(web_client)
+
+        if info["channel"].get("is_archived"):  # type: ignore[index]
+            return await self._handle_archived_channel(web_client, registry, channel_id, info)
+
+        channel_name: str = info["channel"]["name"]  # type: ignore[index]
+
+        # Best-effort rejoin — works for public channels where bot was removed.
+        # Private channels always raise method_not_supported_for_channel_type
+        # (bot is already a member since it created the channel).
+        try:
+            await web_client.conversations_join(channel=channel_id)
+        except Exception as e:
+            logger.debug(
+                "conversations_join for %s: %s (expected for private channels)",
+                channel_id,
+                e,
+            )
+
+        logger.info("Resuming in existing channel #%s (%s)", channel_name, channel_id)
+        return channel_id, channel_name
 
     async def _get_or_create_pm_channel(  # noqa: PLR0912
         self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
@@ -1322,7 +1520,7 @@ class SummonSession:
             logger.debug("PM: failed to post welcome message: %s", e)
 
     async def _init_canvas(
-        self, client: SlackClient, registry: SessionRegistry
+        self, client: SlackClient, registry: SessionRegistry, channel_id: str
     ) -> CanvasStore | None:
         """Create a channel canvas and start background sync.
 
@@ -1337,8 +1535,8 @@ class SummonSession:
             logger.warning("Could not create canvas for session %s", self._session_id)
             return None
 
-        # Persist immediately to SQLite
-        await registry.update_canvas(self._session_id, canvas_id, markdown)
+        # Persist immediately to channels table
+        await registry.update_channel_canvas(channel_id, canvas_id, markdown)
 
         store = CanvasStore(
             session_id=self._session_id,
@@ -1346,6 +1544,7 @@ class SummonSession:
             client=client,
             registry=registry,
             markdown=markdown,
+            channel_id=channel_id,
         )
         store.start_sync()
         logger.info("Canvas initialized: %s for session %s", canvas_id, self._session_id)
@@ -1422,6 +1621,8 @@ class SummonSession:
                 authenticated_user_id=self._authenticated_user_id,
                 channel_id=rt.client.channel_id,
                 cwd=self._cwd,
+                session_name=self._name,
+                web_client=self._web_client,
             )
             mcp_servers["summon-cli"] = cli_mcp
 
@@ -1571,7 +1772,7 @@ class SummonSession:
                 if restart_count > _MAX_SESSION_RESTARTS:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
                     break
-                self._pending_turns = asyncio.Queue()
+                self._pending_turns = asyncio.Queue(maxsize=_MAX_PENDING_TURNS)
                 self._context_warned_threshold = 0.0
                 self._last_context = None
                 self._claude_session_id = None
@@ -1851,6 +2052,12 @@ class SummonSession:
             await rt.registry.update_status(
                 self._session_id, "active", claude_session_id=claude_sid
             )
+            # Also update channels table to track latest Claude session
+            if self._channel_id:
+                try:
+                    await rt.registry.update_channel_claude_session(self._channel_id, claude_sid)
+                except Exception as e:
+                    logger.debug("Failed to update channel claude_session_id: %s", e)
             logger.info("Captured Claude session ID: %s", claude_sid[:16])
             try:
                 await rt.client.post(
@@ -2483,6 +2690,12 @@ class SummonSession:
             await self._handle_diff_file(rt, diff_path, thread_ts)
             return
 
+        # Handle !summon resume — resume a child session from within active session
+        if result.metadata.get("resume"):
+            target = result.metadata.get("resume_target")
+            await self._handle_resume_from_active(rt, user_id, target, thread_ts)
+            return
+
         # Pass-through: translate !cmd args -> /cmd args and enqueue
         if not result.suppress_queue:
             slash_message = f"/{name}" + (" " + " ".join(args) if args else "")
@@ -2519,7 +2732,7 @@ class SummonSession:
                     logger.warning("Failed to post command response: %s", redact_secrets(str(e)))
                     break
 
-    async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:  # noqa: PLR0912, PLR0915
+    async def _handle_spawn(self, rt: _SessionRuntime, user_id: str, thread_ts: str | None) -> None:  # noqa: PLR0911, PLR0912, PLR0915
         """Handle !summon start: verify caller, generate spawn token, create child session."""
         if user_id != self._authenticated_user_id:
             try:
@@ -2531,8 +2744,16 @@ class SummonSession:
                 logger.debug("Failed to post spawn rejection: %s", e)
             return
 
-        from summon_claude.cli import daemon_client  # noqa: PLC0415
-        from summon_claude.sessions.auth import generate_spawn_token  # noqa: PLC0415
+        if not self._ipc_spawn:
+            logger.error("Cannot spawn: no IPC spawn callback registered")
+            try:
+                await rt.client.post(
+                    ":warning: Spawn not available — internal callback missing.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post ipc_spawn missing: %s", e)
+            return
 
         # Enforce spawn depth limit to prevent recursive chains
         try:
@@ -2601,9 +2822,7 @@ class SummonSession:
         child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
         child_options = SessionOptions(cwd=self._cwd, name=child_name, project_id=self._project_id)
         try:
-            child_session_id = await daemon_client.create_session_with_spawn_token(
-                child_options, spawn_auth.token
-            )
+            child_session_id = await self._ipc_spawn(child_options, spawn_auth.token)
         except Exception as e:
             logger.exception("Failed to create spawn session: %s", e)
             try:
@@ -2623,6 +2842,99 @@ class SummonSession:
             )
         except Exception as e:
             logger.debug("Failed to post spawn success message: %s", e)
+
+    async def _handle_resume_from_active(  # noqa: PLR0912
+        self,
+        rt: _SessionRuntime,
+        user_id: str,
+        target_session_id: str | None,
+        thread_ts: str | None,
+    ) -> None:
+        """Handle !summon resume from within an active session."""
+        if not self._ipc_resume:
+            logger.error("Cannot resume: no IPC resume callback registered")
+            try:
+                await rt.client.post(
+                    ":warning: Resume not available — internal callback missing.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post ipc_resume missing: %s", e)
+            return
+
+        if user_id != self._authenticated_user_id:
+            try:
+                await rt.client.post(
+                    ":no_entry: Only the session owner can resume sessions.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume rejection: %s", e)
+            return
+
+        if not target_session_id:
+            try:
+                await rt.client.post(
+                    ":warning: Specify a session ID to resume. "
+                    "This channel already has an active session.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume usage: %s", e)
+            return
+
+        # Look up the target session
+        target = await rt.registry.get_session(target_session_id)
+        if target is None or target.get("authenticated_user_id") != self._authenticated_user_id:
+            try:
+                await rt.client.post(
+                    f":warning: Session `{target_session_id}` not found.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post session not found: %s", e)
+            return
+
+        if target.get("status") not in ("completed", "errored"):
+            try:
+                await rt.client.post(
+                    f":warning: Session is {target.get('status')} "
+                    "\u2014 can only resume stopped sessions.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post status message: %s", e)
+            return
+
+        target_channel = target.get("slack_channel_id")
+        if target_channel == rt.client.channel_id:
+            try:
+                await rt.client.post(
+                    ":warning: Cannot resume into a channel with an active session. "
+                    "End this session first, then use `!summon resume`.",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e:
+                logger.debug("Failed to post resume conflict: %s", e)
+            return
+
+        try:
+            result = await self._ipc_resume(target_session_id)
+            new_sid = result.get("session_id", "?")
+            target_cid = result.get("channel_id", target_channel)
+            await rt.client.post(
+                f":arrows_counterclockwise: Session resumed (new: `{new_sid[:8]}...`). "
+                f"Channel: <#{target_cid}>",
+                thread_ts=thread_ts,
+            )
+        except Exception as e:
+            try:
+                await rt.client.post(
+                    f":x: Failed to resume: {e}",
+                    thread_ts=thread_ts,
+                )
+            except Exception as e2:
+                logger.debug("Failed to post resume error: %s", e2)
 
     def _abort_current_turn(self) -> None:
         """Signal the current Claude turn to abort."""
@@ -2855,6 +3167,7 @@ class SummonSession:
                     standalone_only = (
                         result.metadata.get("compact")
                         or result.metadata.get("spawn")
+                        or result.metadata.get("resume")
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
                     )

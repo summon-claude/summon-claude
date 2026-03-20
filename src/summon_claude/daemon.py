@@ -207,6 +207,8 @@ async def daemon_main(config: SummonConfig) -> None:
     bolt_router = BoltRouter(config, dispatcher)
 
     await bolt_router.start()
+    # Inject web_client now that BoltRouter has started
+    dispatcher._web_client = bolt_router.web_client  # noqa: SLF001
     logger.info("BoltRouter started")
 
     # Mark any sessions left active from a previous daemon as errored
@@ -221,6 +223,7 @@ async def daemon_main(config: SummonConfig) -> None:
         dispatcher=dispatcher,
     )
     dispatcher.set_command_handler(session_manager.handle_summon_command)
+    dispatcher.set_resume_handler(session_manager.resume_from_channel)
 
     # Start Unix socket control server
     control_server = await asyncio.start_unix_server(

@@ -29,7 +29,7 @@ class CanvasStore:
     rapid updates.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         session_id: str,
@@ -37,12 +37,14 @@ class CanvasStore:
         client: SlackClient,
         registry: SessionRegistry,
         markdown: str = "",
+        channel_id: str,
     ) -> None:
         self._session_id = session_id
         self._canvas_id = canvas_id
         self._client = client
         self._registry = registry
         self._markdown = markdown
+        self._channel_id = channel_id
         self._dirty = False
         self._consecutive_failures = 0
         self._write_lock = asyncio.Lock()
@@ -110,26 +112,30 @@ class CanvasStore:
         session_id: str,
         client: SlackClient,
         registry: SessionRegistry,
+        channel_id: str,
     ) -> CanvasStore | None:
-        """Restore a CanvasStore from SQLite for session resume.
+        """Restore a CanvasStore from the channels table for session resume.
 
-        Returns ``None`` if no canvas data is stored for this session.
+        Returns ``None`` if no canvas data is found for the channel.
         """
-        canvas_id, canvas_markdown = await registry.get_canvas(session_id)
-        if not canvas_id:
+        channel = await registry.get_channel(channel_id)
+        if not channel or not channel.get("canvas_id"):
             return None
         return cls(
             session_id=session_id,
-            canvas_id=canvas_id,
+            canvas_id=channel["canvas_id"],
             client=client,
             registry=registry,
-            markdown=canvas_markdown or "",
+            markdown=channel.get("canvas_markdown") or "",
+            channel_id=channel_id,
         )
 
     async def _persist(self) -> None:
-        """Write current markdown to SQLite."""
+        """Write current markdown to channels table."""
         try:
-            await self._registry.update_canvas(self._session_id, self._canvas_id, self._markdown)
+            await self._registry.update_channel_canvas(
+                self._channel_id, self._canvas_id, self._markdown
+            )
         except Exception as e:
             logger.warning("Failed to persist canvas to SQLite: %s", e)
 

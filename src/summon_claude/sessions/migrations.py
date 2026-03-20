@@ -16,7 +16,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 
 # ---------------------------------------------------------------------------
@@ -112,6 +112,57 @@ async def _migrate_8_to_9(db: aiosqlite.Connection) -> None:
     )
 
 
+async def _migrate_9_to_10(db: aiosqlite.Connection) -> None:
+    """Create channels table, add effort column, migrate canvas data, drop redundant columns."""
+    # Add effort column to sessions table
+    with contextlib.suppress(sqlite3.OperationalError):
+        await db.execute("ALTER TABLE sessions ADD COLUMN effort TEXT")
+
+    # Create channels table
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS channels (
+            channel_id TEXT PRIMARY KEY,
+            channel_name TEXT NOT NULL,
+            claude_session_id TEXT,
+            canvas_id TEXT,
+            canvas_markdown TEXT,
+            cwd TEXT NOT NULL,
+            authenticated_user_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_channels_name ON channels(channel_name)")
+
+    # Migrate existing data from sessions to channels (latest session per channel)
+    await db.execute(
+        """
+        INSERT OR IGNORE INTO channels
+            (channel_id, channel_name, claude_session_id, canvas_id,
+             canvas_markdown, cwd, authenticated_user_id, created_at, updated_at)
+        SELECT s.slack_channel_id, s.slack_channel_name, s.claude_session_id,
+               s.canvas_id, s.canvas_markdown, s.cwd, s.authenticated_user_id,
+               s.started_at, s.started_at
+        FROM sessions s
+        WHERE s.slack_channel_id IS NOT NULL
+          AND s.slack_channel_name IS NOT NULL
+          AND s.rowid = (
+            SELECT s2.rowid FROM sessions s2
+            WHERE s2.slack_channel_id = s.slack_channel_id
+            ORDER BY s2.started_at DESC LIMIT 1
+          )
+        """
+    )
+
+    # Drop canvas columns from sessions — now channel-only.
+    # Data was just copied above; no code writes these on sessions anymore.
+    for col in ("canvas_id", "canvas_markdown"):
+        with contextlib.suppress(sqlite3.OperationalError):
+            await db.execute(f"ALTER TABLE sessions DROP COLUMN {col}")
+
+
 # Mapping from version N to the coroutine that migrates N → N+1.
 # Migration 0→1 is a no-op: the baseline DDL in _connect() produces schema v1.
 _MIGRATIONS: dict[int, Any] = {
@@ -124,6 +175,7 @@ _MIGRATIONS: dict[int, Any] = {
     6: _migrate_6_to_7,
     7: _migrate_7_to_8,
     8: _migrate_8_to_9,
+    9: _migrate_9_to_10,
 }
 
 

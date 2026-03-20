@@ -572,6 +572,236 @@ class TestListChildren:
         assert children == []
 
 
+class TestSessionMessage:
+    """Tests for the session_message MCP tool."""
+
+    @pytest.fixture
+    def msg_tools(self, populated_registry: SessionRegistry) -> dict:
+        mock_send = AsyncMock(
+            return_value={"type": "message_sent", "session_id": "child-2222", "channel_id": "C200"}
+        )
+        mock_web = AsyncMock()
+        return (
+            {
+                t.name: t
+                for t in create_summon_cli_mcp_tools(
+                    registry=populated_registry,
+                    session_id="parent-1111",
+                    authenticated_user_id="U_OWNER",
+                    channel_id="C100",
+                    cwd="/home/user/proj",
+                    session_name="parent-session",
+                    _ipc_send_message=mock_send,
+                    _web_client=mock_web,
+                )
+            },
+            mock_send,
+            mock_web,
+        )
+
+    async def test_sends_to_child(self, msg_tools):
+        tools, mock_send, _mock_web = msg_tools
+        result = await tools["session_message"].handler(
+            {"session_id": "child-2222", "text": "hello child"}
+        )
+        assert not result.get("is_error")
+        assert "Message sent" in result["content"][0]["text"]
+        mock_send.assert_awaited_once()
+
+    async def test_rejects_non_child(self, msg_tools):
+        tools, mock_send, _ = msg_tools
+        result = await tools["session_message"].handler(
+            {"session_id": "done-4444", "text": "hello"}
+        )
+        assert result.get("is_error")
+        assert "can only message sessions you spawned" in result["content"][0]["text"]
+        mock_send.assert_not_awaited()
+
+    async def test_rejects_self(self, msg_tools):
+        tools, mock_send, _ = msg_tools
+        result = await tools["session_message"].handler(
+            {"session_id": "parent-1111", "text": "hello me"}
+        )
+        assert result.get("is_error")
+        assert "cannot send a message to your own session" in result["content"][0]["text"]
+
+    async def test_rejects_inactive_target(self, populated_registry, msg_tools):
+        # Make child inactive
+        await populated_registry.update_status("child-2222", "completed")
+        tools, mock_send, _ = msg_tools
+        result = await tools["session_message"].handler(
+            {"session_id": "child-2222", "text": "hello"}
+        )
+        assert result.get("is_error")
+        assert "Can only message active sessions" in result["content"][0]["text"]
+
+    async def test_posts_to_slack_channel(self, msg_tools):
+        tools, _mock_send, mock_web = msg_tools
+        await tools["session_message"].handler({"session_id": "child-2222", "text": "hello child"})
+        mock_web.chat_postMessage.assert_awaited_once()
+        call_kwargs = mock_web.chat_postMessage.call_args[1]
+        assert call_kwargs["channel"] == "C200"
+        assert "hello child" in call_kwargs["text"]
+
+    async def test_slack_post_sanitizes_mentions(self, msg_tools):
+        tools, _mock_send, mock_web = msg_tools
+        text = "Alert <!channel> and <!here> and <!everyone> and <@U123ABC> and <!subteam^S456>"
+        await tools["session_message"].handler({"session_id": "child-2222", "text": text})
+        posted = mock_web.chat_postMessage.call_args[1]["text"]
+        assert "<!channel>" not in posted
+        assert "<!here>" not in posted
+        assert "<!everyone>" not in posted
+        assert "<@U123ABC>" not in posted
+        assert "<!subteam^S456>" not in posted
+        assert "channel" in posted
+        assert "user:U123ABC" in posted
+
+    async def test_slack_post_failure_non_fatal(self, msg_tools):
+        tools, mock_send, mock_web = msg_tools
+        mock_web.chat_postMessage.side_effect = Exception("Slack down")
+        result = await tools["session_message"].handler(
+            {"session_id": "child-2222", "text": "hello child"}
+        )
+        # Should still succeed (message was injected)
+        assert not result.get("is_error")
+        assert "Message sent" in result["content"][0]["text"]
+
+    async def test_text_truncated(self, msg_tools):
+        tools, mock_send, _ = msg_tools
+        long_text = "x" * 20_000
+        await tools["session_message"].handler({"session_id": "child-2222", "text": long_text})
+        call_kwargs = mock_send.call_args[1]
+        assert len(call_kwargs["text"]) == 10_000
+
+    async def test_missing_session_id(self, msg_tools):
+        tools, _, _ = msg_tools
+        result = await tools["session_message"].handler({"text": "hello"})
+        assert result.get("is_error")
+
+    async def test_missing_text(self, msg_tools):
+        tools, _, _ = msg_tools
+        result = await tools["session_message"].handler({"session_id": "child-2222"})
+        assert result.get("is_error")
+
+
+class TestSessionResume:
+    """Tests for the session_resume MCP tool."""
+
+    @pytest.fixture
+    async def resume_registry(self, registry: SessionRegistry) -> SessionRegistry:
+        """Registry with parent + completed child for resume testing."""
+        await registry.register(
+            session_id="pm-1111",
+            pid=os.getpid(),
+            cwd="/home/user/proj",
+            name="pm-session",
+            authenticated_user_id="U_OWNER",
+        )
+        await registry.update_status(
+            "pm-1111",
+            "active",
+            slack_channel_id="C100",
+            authenticated_user_id="U_OWNER",
+        )
+
+        await registry.register(
+            session_id="child-done",
+            pid=os.getpid(),
+            cwd="/home/user/proj",
+            name="child-done",
+            parent_session_id="pm-1111",
+            authenticated_user_id="U_OWNER",
+        )
+        await registry.update_status(
+            "child-done",
+            "completed",
+            slack_channel_id="C200",
+            slack_channel_name="summon-child",
+            authenticated_user_id="U_OWNER",
+            claude_session_id="claude-xyz",
+            ended_at="2026-03-18T00:00:00+00:00",
+        )
+        return registry
+
+    async def test_resumes_child(self, resume_registry):
+        mock_resume = AsyncMock(
+            return_value={"type": "session_resumed", "session_id": "new-id", "channel_id": "C200"}
+        )
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=resume_registry,
+                session_id="pm-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                _ipc_resume_session=mock_resume,
+            )
+        }
+        result = await tools["session_resume"].handler({"session_id": "child-done"})
+        assert not result.get("is_error")
+        assert "resumed" in result["content"][0]["text"]
+        mock_resume.assert_awaited_once()
+
+    async def test_rejects_active_session(self, resume_registry):
+        mock_resume = AsyncMock()
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=resume_registry,
+                session_id="pm-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                _ipc_resume_session=mock_resume,
+            )
+        }
+        result = await tools["session_resume"].handler({"session_id": "pm-1111"})
+        assert result.get("is_error")
+        mock_resume.assert_not_awaited()
+
+    async def test_rejects_non_child(self, resume_registry):
+        # Register a non-child completed session
+        await resume_registry.register(
+            session_id="other-done",
+            pid=os.getpid(),
+            cwd="/tmp",
+            name="other",
+            authenticated_user_id="U_OWNER",
+        )
+        await resume_registry.update_status("other-done", "completed")
+
+        mock_resume = AsyncMock()
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=resume_registry,
+                session_id="pm-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                _ipc_resume_session=mock_resume,
+            )
+        }
+        result = await tools["session_resume"].handler({"session_id": "other-done"})
+        assert result.get("is_error")
+        assert "can only resume sessions you spawned" in result["content"][0]["text"]
+
+    async def test_missing_session_id(self, resume_registry):
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=resume_registry,
+                session_id="pm-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+            )
+        }
+        result = await tools["session_resume"].handler({})
+        assert result.get("is_error")
+
+
 class TestMCPServerCreation:
     def test_returns_valid_config(self, populated_registry):
         config = create_summon_cli_mcp_server(populated_registry, "sid", "uid", "cid", "/tmp")
@@ -580,4 +810,4 @@ class TestMCPServerCreation:
 
     def test_tool_count(self, populated_registry):
         tools = create_summon_cli_mcp_tools(populated_registry, "sid", "uid", "cid", "/tmp")
-        assert len(tools) == 5
+        assert len(tools) == 7
