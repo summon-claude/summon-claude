@@ -765,7 +765,7 @@ class TestUploadDiff:
         async def selective_fail(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            blocks = kwargs.get("blocks", [])
+            blocks = kwargs.get("blocks") or []
             if any(b.get("type") == "markdown" for b in blocks):
                 raise Exception("markdown blocks not supported")
             return await original_post(*args, **kwargs)
