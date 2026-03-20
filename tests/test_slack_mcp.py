@@ -217,7 +217,7 @@ class TestPostSnippet:
             {"channel": "C123", "ts": "1.0"},
         ]
         result = await tools["slack_post_snippet"].handler(
-            {"code": "x", "language": "py", "title": "T"}
+            {"code": "x", "language": "python", "title": "T"}
         )
         # Fallback should succeed
         assert "Code snippet posted" in result["content"][0]["text"]

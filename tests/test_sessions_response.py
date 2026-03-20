@@ -656,10 +656,12 @@ class TestUploadDiff:
         streamer, router, client = make_streamer()
         client.upload.side_effect = Exception("API error")
         router.active_thread_ts = "thread_1"
-        # Should not raise — falls back to mrkdwn
+        # Should not raise — falls back to inline posting via router
         await streamer._upload_diff("old\n", "new\n", "file.py", "thread_1")
-        # Fallback posts mrkdwn blocks
         assert client.post.call_count >= 1
+        # Router converts markdown **Edit:** to mrkdwn *Edit:*
+        text = client.post.call_args.args[0]
+        assert "*Edit:*" in text
 
     async def test_edit_tool_triggers_diff_upload(self):
         streamer, router, client = make_streamer()

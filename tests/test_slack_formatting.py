@@ -102,3 +102,8 @@ class TestSnippetTypeForExtension:
 
     def test_case_insensitive(self) -> None:
         assert snippet_type_for_extension("PY") == "python"
+
+    @pytest.mark.parametrize("ext", ["lock", "dockerfile", "xyz", "bak"])
+    def test_unknown_extensions_pass_through(self, ext: str) -> None:
+        """Unknown extensions pass through as-is; Slack ignores unrecognized types."""
+        assert snippet_type_for_extension(ext) == ext
