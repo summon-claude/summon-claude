@@ -611,14 +611,14 @@ class TestResponseStreamerUserPing:
 
 
 class TestUploadDiff:
-    async def test_no_change_posts_context_block(self):
+    async def test_no_change_posts_notice(self):
         streamer, router, client = make_streamer()
         router.active_thread_ts = "thread_1"
         await streamer._upload_diff("same", "same", "file.py", "thread_1")
-        # Should post a "No changes" context block
+        # Should post a "No changes" message via router
         assert client.post.call_count >= 1
-        blocks = client.post.call_args.kwargs.get("blocks", [])
-        assert any("No changes" in str(b) for b in blocks)
+        text = client.post.call_args.args[0]
+        assert "No changes" in text
 
     async def test_change_uploads_diff_file(self):
         streamer, router, client = make_streamer()
@@ -665,6 +665,7 @@ class TestUploadDiff:
         await asyncio.sleep(0.05)
         client.upload.assert_called_once()
         assert "output.py" in client.upload.call_args.args[1]
+        assert client.upload.call_args.kwargs["snippet_type"] == "python"
 
     async def test_write_md_renders_markdown_blocks(self):
         streamer, router, client = make_streamer()
@@ -710,11 +711,8 @@ class TestUploadDiff:
         await asyncio.sleep(0.05)
 
         # Should show "Updated" not full re-render
-        all_blocks = []
-        for c in client.post.call_args_list:
-            if c.kwargs.get("blocks"):
-                all_blocks.extend(c.kwargs["blocks"])
-        assert any("Updated" in str(b) for b in all_blocks)
+        all_texts = [c.args[0] for c in client.post.call_args_list if c.args]
+        assert any("Updated" in t for t in all_texts)
 
     async def test_write_md_fallback_to_plain_text(self):
         """When type: markdown blocks fail, should fall back to plain text."""
@@ -750,7 +748,7 @@ class TestUploadDiff:
         plain_calls = [
             c
             for c in client.post.call_args_list
-            if not any(b.get("type") == "markdown" for b in c.kwargs.get("blocks", []))
+            if not any(b.get("type") == "markdown" for b in (c.kwargs.get("blocks") or []))
         ]
         assert len(plain_calls) >= 2  # header + plain text fallback
 

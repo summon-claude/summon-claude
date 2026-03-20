@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.types import ChangeType, FileChange
+from summon_claude.slack.formatting import snippet_type_for_extension
 from summon_claude.slack.markdown_split import split_markdown
 from summon_claude.slack.router import ThreadRouter
 
@@ -604,18 +605,23 @@ class ResponseStreamer:
             if exc is not None:
                 logger.debug("Background task failed: %s", exc)
 
-    def _resolve_upload_thread(self, parent_id: str | None) -> str | None:
+    def _resolve_upload_thread(self, parent_id: str | None) -> str:
         """Resolve thread_ts for file uploads, respecting subagent threads."""
         if parent_id:
-            return self._router.subagent_threads.get(parent_id)
-        return self._router.active_thread_ts
+            ts = self._router.subagent_threads.get(parent_id)
+            if ts:
+                return ts
+        ts = self._router.active_thread_ts
+        if not ts:
+            raise RuntimeError("No active thread for upload")
+        return ts
 
     async def _upload_diff(
         self,
         old_string: str,
         new_string: str,
         filename: str,
-        thread_ts: str | None,
+        thread_ts: str,
     ) -> None:
         """Upload a unified diff as a snippet_type=diff file (fire-and-forget)."""
         diff_lines: list[str] = []
@@ -629,26 +635,14 @@ class ResponseStreamer:
                 )
             )
             if not diff_lines:
-                # Empty diff — post a brief note instead
-                blocks = [
-                    {
-                        "type": "context",
-                        "elements": [
-                            {
-                                "type": "mrkdwn",
-                                "text": f"_No changes in `{filename}`_",
-                            }
-                        ],
-                    }
-                ]
-                await self._router.client.post(
-                    f"No changes in {filename}", blocks=blocks, thread_ts=thread_ts
+                await self._router.post_to_thread(
+                    f"*No changes in `{filename}`*", thread_ts=thread_ts
                 )
                 return
 
             diff_text = "".join(diff_lines)
             basename = PurePosixPath(filename).name
-            await self._router.client.upload(
+            await self._router.upload(
                 diff_text,
                 f"{basename}.diff",
                 title=f"Edit: {basename}",
@@ -656,33 +650,24 @@ class ResponseStreamer:
                 snippet_type="diff",
             )
         except Exception:
-            # Fallback: post mrkdwn diff inline
-            logger.warning("Diff upload failed for %s, using mrkdwn fallback", filename)
+            # Fallback: post diff inline
+            logger.warning("Diff upload failed for %s, using inline fallback", filename)
             if not diff_lines:
                 return
             try:
                 diff_text = "".join(diff_lines)
-                header = f"*Edit:* `{filename}`\n"
-                combined = f"{header}```{diff_text}```"
+                combined = f"**Edit:** `{filename}`\n```\n{diff_text}\n```"
                 chunks = split_text(combined, _MAX_MESSAGE_CHARS)
                 for chunk in chunks:
-                    blocks = [
-                        {
-                            "type": "section",
-                            "text": {"type": "mrkdwn", "text": chunk},
-                        }
-                    ]
-                    await self._router.client.post(
-                        f"Edit: {filename}", blocks=blocks, thread_ts=thread_ts
-                    )
+                    await self._router.post_to_thread(chunk, thread_ts=thread_ts)
             except Exception:
-                logger.warning("Diff mrkdwn fallback also failed for %s", filename)
+                logger.warning("Diff inline fallback also failed for %s", filename)
 
     async def _render_md_write(
         self,
         filepath: str,
         content: str,
-        thread_ts: str | None,
+        thread_ts: str,
         rendered_paths: set[str],
     ) -> None:
         """Render a Write-created .md file with type: markdown blocks.
@@ -691,7 +676,6 @@ class ResponseStreamer:
             thread_ts: Captured at task creation time to avoid race with turn reset.
             rendered_paths: Reference to the originating turn's md_rendered_paths set.
         """
-        client = self._router.client
         basename = PurePosixPath(filepath).name
         n_chars = len(content)
 
@@ -700,37 +684,21 @@ class ResponseStreamer:
         rendered_paths.add(filepath)
 
         if already_rendered:
-            blocks = [
-                {
-                    "type": "context",
-                    "elements": [
-                        {
-                            "type": "mrkdwn",
-                            "text": (f":page_facing_up: *Updated:* `{basename}` ({n_chars} chars)"),
-                        }
-                    ],
-                }
-            ]
             try:
-                await client.post(f"Updated: {basename}", blocks=blocks, thread_ts=thread_ts)
+                await self._router.post_to_thread(
+                    f":page_facing_up: **Updated:** `{basename}` ({n_chars} chars)",
+                    thread_ts=thread_ts,
+                )
             except Exception:
                 logger.warning("Failed to post .md update notice for %s", basename)
             return
 
         # Post context header
-        header_blocks = [
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": (f":page_facing_up: *Created:* `{basename}` ({n_chars} chars)"),
-                    }
-                ],
-            }
-        ]
         try:
-            await client.post(f"Created: {basename}", blocks=header_blocks, thread_ts=thread_ts)
+            await self._router.post_to_thread(
+                f":page_facing_up: **Created:** `{basename}` ({n_chars} chars)",
+                thread_ts=thread_ts,
+            )
         except Exception:
             logger.warning("Failed to post .md header for %s", basename)
 
@@ -739,12 +707,12 @@ class ResponseStreamer:
         for chunk in chunks:
             md_blocks = [{"type": "markdown", "text": chunk}]
             try:
-                await client.post(chunk, blocks=md_blocks, thread_ts=thread_ts)
+                await self._router.post_to_thread(chunk, blocks=md_blocks, thread_ts=thread_ts)
             except Exception:
                 # Fallback: post as plain text if markdown blocks fail
                 logger.warning("Markdown block failed for %s, using plain text", basename)
                 try:
-                    await client.post(chunk, thread_ts=thread_ts)
+                    await self._router.post_to_thread(chunk, thread_ts=thread_ts)
                 except Exception:
                     logger.warning("Plain text fallback also failed for %s", basename)
 
@@ -752,15 +720,17 @@ class ResponseStreamer:
         self,
         content: str,
         basename: str,
-        thread_ts: str | None,
+        thread_ts: str,
     ) -> None:
         """Upload written file content (fire-and-forget)."""
         try:
-            await self._router.client.upload(
+            ext = PurePosixPath(basename).suffix.lstrip(".")
+            await self._router.upload(
                 content,
                 basename,
                 title=f"Written: {basename}",
                 thread_ts=thread_ts,
+                snippet_type=snippet_type_for_extension(ext),
             )
         except Exception:
             logger.warning("Write content upload failed for %s", basename)

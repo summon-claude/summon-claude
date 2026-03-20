@@ -202,10 +202,10 @@ class TestPostSnippet:
         call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
         assert call_kwargs["snippet_type"] == "python"
 
-    async def test_lang_alias_resolved_for_upload(self, tools, mock_client):
+    async def test_lang_passed_through_for_upload(self, tools, mock_client):
         large_code = "echo hi\n" * 3000
         await tools["slack_post_snippet"].handler(
-            {"code": large_code, "language": "bash", "title": "Script"}
+            {"code": large_code, "language": "shell", "title": "Script"}
         )
         call_kwargs = mock_client._web.files_upload_v2.call_args.kwargs
         assert call_kwargs["snippet_type"] == "shell"

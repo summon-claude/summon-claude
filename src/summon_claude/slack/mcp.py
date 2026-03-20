@@ -34,26 +34,6 @@ _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 _MAX_TEXT_CHARS = 3000  # Slack section block limit
 _MARKDOWN_BLOCK_LIMIT = 12000  # Slack type: markdown block cumulative limit
 
-# Language aliases → Slack snippet_type values (identity mappings omitted;
-# the fallback `get(lang, lang)` already passes them through)
-_LANG_TO_SNIPPET_TYPE: dict[str, str] = {
-    "bash": "shell",
-    "sh": "shell",
-    "zsh": "shell",
-    "c++": "cpp",
-    "c#": "csharp",
-    "js": "javascript",
-    "ts": "typescript",
-    "jsx": "javascript",
-    "tsx": "typescript",
-    "py": "python",
-    "rb": "ruby",
-    "yml": "yaml",
-    "md": "markdown",
-    "rs": "rust",
-    "kt": "kotlin",
-}
-
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")
 _EMOJI_RE = re.compile(r"^[A-Za-z0-9_+]+$")
 
@@ -390,7 +370,10 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         (
             "Post a formatted code snippet with syntax highlighting to the channel. "
             "code: source code content. "
-            "language: syntax highlighting language (e.g. 'python', 'bash', 'json'). "
+            "language: Slack snippet type for syntax highlighting. Use exact values: "
+            "python, javascript, typescript, shell, go, rust, ruby, java, kotlin, "
+            "swift, c, cpp, csharp, html, css, json, yaml, toml, xml, sql, diff, "
+            "markdown, text. "
             "title: display title for the snippet."
         ),
         {"code": str, "language": str, "title": str},
@@ -413,7 +396,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
 
         # Content > 12K → file upload fallback
         if len(formatted) > _MARKDOWN_BLOCK_LIMIT:
-            snippet_type = _LANG_TO_SNIPPET_TYPE.get(lang.lower(), lang.lower()) or None
+            snippet_type = lang.lower() or None
             try:
                 await client.upload(
                     code,
