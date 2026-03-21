@@ -69,7 +69,16 @@ def make_auth(**overrides) -> SessionAuth:
 
 
 def make_session(session_id: str = "test-session", **overrides) -> SummonSession:
-    opt_fields = ("cwd", "name", "model", "effort", "resume", "channel_id", "pm_profile")
+    opt_fields = (
+        "cwd",
+        "name",
+        "model",
+        "effort",
+        "resume",
+        "channel_id",
+        "pm_profile",
+        "system_prompt_append",
+    )
     opts_kw = {k: overrides.pop(k) for k in list(overrides) if k in opt_fields}
     auth_fields = ("short_code", "expires_at")
     auth_kw = {k: overrides.pop(k) for k in list(overrides) if k in auth_fields}
@@ -164,6 +173,22 @@ class TestSessionOptions:
     def test_effort_stored_on_session(self):
         session = make_session(effort="low")
         assert session._effort == "low"
+
+    def test_system_prompt_append_default_none(self):
+        opts = make_options()
+        assert opts.system_prompt_append is None
+
+    def test_system_prompt_append_stored(self):
+        opts = make_options(system_prompt_append="custom instructions")
+        assert opts.system_prompt_append == "custom instructions"
+
+    def test_system_prompt_append_on_session(self):
+        session = make_session(system_prompt_append="review PR #1")
+        assert session._system_prompt_append == "review PR #1"
+
+    def test_system_prompt_append_none_on_session(self):
+        session = make_session()
+        assert session._system_prompt_append is None
 
 
 class TestSummonSessionConstructorGuards:
@@ -1271,6 +1296,62 @@ class TestMCPRegistration:
             pytest.raises(Exception, match="Control request timeout"),
         ):
             await session._run_session_tasks(rt, AsyncMock())
+
+    async def _capture_system_prompt(
+        self, *, pm_profile: bool = False, system_prompt_append: str | None = None
+    ) -> dict:
+        """Run _run_session_tasks far enough to capture ClaudeAgentOptions.system_prompt."""
+        session = make_session(pm_profile=pm_profile, system_prompt_append=system_prompt_append)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured: dict = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["system_prompt"] = options.system_prompt
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch(
+                "summon_claude.sessions.session.discover_installed_plugins",
+                return_value=[],
+            ),
+            patch(
+                "summon_claude.sessions.session.discover_plugin_skills",
+                return_value=[],
+            ),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured
+
+    async def test_system_prompt_append_in_pm_prompt(self):
+        """system_prompt_append appears in PM session's system prompt."""
+        result = await self._capture_system_prompt(
+            pm_profile=True, system_prompt_append="Review PR #42 carefully"
+        )
+        assert "Review PR #42 carefully" in result["system_prompt"]["append"]
+
+    async def test_system_prompt_append_in_regular_prompt(self):
+        """system_prompt_append appears in regular session's system prompt."""
+        result = await self._capture_system_prompt(
+            pm_profile=False, system_prompt_append="Custom instructions"
+        )
+        assert "Custom instructions" in result["system_prompt"]["append"]
+
+    async def test_system_prompt_append_none_no_effect(self):
+        """system_prompt_append=None does not alter the system prompt."""
+        with_none = await self._capture_system_prompt(pm_profile=False, system_prompt_append=None)
+        without = await self._capture_system_prompt(pm_profile=False)
+        assert with_none["system_prompt"]["append"] == without["system_prompt"]["append"]
 
 
 class TestThinkingConfig:
