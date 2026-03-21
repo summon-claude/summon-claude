@@ -1096,7 +1096,7 @@ class SessionRegistry:
         """Remove global default workflow instructions.
 
         Uses UPDATE (not DELETE) to preserve other columns on the row
-        (e.g. hooks column added by migration 9→10).
+        (e.g. hooks column added by migration 11→12).
         """
         db = self._check_connected()
         async with self._lock:

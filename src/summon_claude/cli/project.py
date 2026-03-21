@@ -139,6 +139,7 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     """
     if not is_daemon_running():
         click.echo("Daemon is not running. No PM sessions to stop.")
+        await _run_project_hooks("project_down")
         return []
 
     stopped: list[str] = []

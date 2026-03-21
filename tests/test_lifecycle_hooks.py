@@ -713,3 +713,46 @@ class TestRunProjectHooksProjectIdsFilter:
 
         assert sentinel_a.exists(), "proj-a hook should have run"
         assert sentinel_b.exists(), "proj-b hook should have run"
+
+
+# ---------------------------------------------------------------------------
+# Regression: clear_workflow_defaults preserves hooks (#5)
+# ---------------------------------------------------------------------------
+
+
+class TestClearWorkflowDefaultsPreservesHooks:
+    async def test_clear_workflow_defaults_preserves_hooks(self, registry):
+        """Clearing workflow instructions must not destroy lifecycle hooks."""
+        await registry.set_lifecycle_hooks({"worktree_create": ["hook-cmd"]})
+        await registry.set_workflow_defaults("some instructions")
+        await registry.clear_workflow_defaults()
+        assert await registry.get_workflow_defaults() == ""
+        assert await registry.get_lifecycle_hooks("worktree_create") == ["hook-cmd"]
+
+
+# ---------------------------------------------------------------------------
+# Coverage: set_lifecycle_hooks KeyError for unknown project (#7)
+# ---------------------------------------------------------------------------
+
+
+class TestSetLifecycleHooksKeyError:
+    async def test_set_raises_key_error_for_unknown_project(self, registry):
+        """set_lifecycle_hooks raises KeyError when project_id does not exist."""
+        with pytest.raises(KeyError, match="nonexistent-id"):
+            await registry.set_lifecycle_hooks(
+                {"worktree_create": ["cmd"]}, project_id="nonexistent-id"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Coverage: run_lifecycle_hooks ValueError for invalid hook_type (#8)
+# ---------------------------------------------------------------------------
+
+
+class TestRunLifecycleHooksInvalidHookType:
+    async def test_raises_value_error_for_invalid_hook_type(self, tmp_path):
+        """run_lifecycle_hooks raises ValueError for unknown hook types."""
+        from summon_claude.sessions.hooks import run_lifecycle_hooks
+
+        with pytest.raises(ValueError, match="invalid_type"):
+            await run_lifecycle_hooks("invalid_type", tmp_path, ["cmd"])

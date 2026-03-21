@@ -37,11 +37,14 @@ if command -v sqlite3 >/dev/null 2>&1; then
 fi
 BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null)
 if [ "$BRANCH" = "main" ]; then
+    BEFORE=$(git rev-parse HEAD 2>/dev/null)
     GIT_SSH='ssh -o ConnectTimeout=10 -o BatchMode=yes'
     GIT_SSH_COMMAND="$GIT_SSH" git fetch upstream main --no-tags 2>/dev/null \
         || GIT_SSH_COMMAND="$GIT_SSH" git fetch origin main --no-tags 2>/dev/null
     git merge --ff-only upstream/main 2>/dev/null \
         || git merge --ff-only origin/main 2>/dev/null || true
+    AFTER=$(git rev-parse HEAD 2>/dev/null)
+    [ "$BEFORE" != "$AFTER" ] && echo "summon pre-worktree: ff-merged main $BEFORE → $AFTER" >&2
 fi
 exit 0
 """
@@ -243,8 +246,12 @@ async def async_show_hooks(ctx: click.Context, project_id: str | None = None) ->
     """Print configured lifecycle hooks for a project or globally."""
     raw_hooks: dict[str, list[str]] = {}
     label = "global defaults"
+    is_fallback = False
     async with SessionRegistry() as registry:
         if project_id is not None:
+            # Check whether project has its own hooks or is falling back to global.
+            raw_json = await registry.get_raw_hooks_json(project_id=project_id)
+            is_fallback = raw_json is None
             raw_hooks = {
                 ht: await registry.get_lifecycle_hooks(ht, project_id=project_id)
                 for ht in sorted(VALID_HOOK_TYPES)
@@ -259,7 +266,10 @@ async def async_show_hooks(ctx: click.Context, project_id: str | None = None) ->
         echo(f"No lifecycle hooks configured ({label}).", ctx)
         return
 
-    echo(f"Lifecycle hooks ({label}):", ctx)
+    if is_fallback:
+        echo(f"Lifecycle hooks ({label} — showing global defaults, no project override):", ctx)
+    else:
+        echo(f"Lifecycle hooks ({label}):", ctx)
     for hook_type, cmds in raw_hooks.items():
         if cmds:
             echo(f"  {hook_type}:", ctx)
