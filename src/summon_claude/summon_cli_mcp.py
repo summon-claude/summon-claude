@@ -180,7 +180,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "a pre-authenticated session via daemon IPC. "
             "name: session name (required, lowercase alphanumeric + hyphens, max 20 chars). "
             "cwd: working directory (optional, defaults to calling session's cwd). "
-            "model: model override (optional)."
+            "model: model override (optional). "
+            "system_prompt: additional system prompt text appended to session (optional)."
         ),
         {
             "type": "object",
@@ -188,6 +189,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 "name": {"type": "string"},
                 "cwd": {"type": "string"},
                 "model": {"type": "string"},
+                "system_prompt": {"type": "string"},
             },
             "required": ["name"],
         },
@@ -337,6 +339,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 name=name,
                 model=model,
                 project_id=parent_project_id,
+                system_prompt_append=args.get("system_prompt"),
             )
 
             new_session_id = await ipc_create(options, spawn_auth.token)

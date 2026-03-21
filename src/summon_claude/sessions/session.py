@@ -688,6 +688,7 @@ class SessionOptions:
     auth_only: bool = False
     project_id: str | None = None
     scan_interval_s: int = 900
+    system_prompt_append: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -814,6 +815,7 @@ class SummonSession:
         self._auth_only = options.auth_only
         self._project_id = options.project_id
         self._scan_interval_s = max(30, options.scan_interval_s)
+        self._system_prompt_append = options.system_prompt_append
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -1819,10 +1821,14 @@ class SummonSession:
                 # PM prompt is built separately — inject cron recovery if present
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery
+                if self._system_prompt_append:
+                    system_prompt["append"] += "\n\n" + self._system_prompt_append
             else:
                 effective_append = system_prompt_append
                 if _cron_recovery:
                     effective_append = system_prompt_append + _cron_recovery
+                if self._system_prompt_append:
+                    effective_append += "\n\n" + self._system_prompt_append
                 system_prompt = {
                     "type": "preset",
                     "preset": "claude_code",
