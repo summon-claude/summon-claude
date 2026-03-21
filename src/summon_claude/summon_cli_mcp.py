@@ -1013,7 +1013,15 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         task_list,
     ]
     if is_pm:
-        tools.extend([session_start, session_stop, session_log_status, session_message, session_resume])
+        tools.extend(
+            [
+                session_start,
+                session_stop,
+                session_log_status,
+                session_message,
+                session_resume,
+            ]
+        )
     return tools
 
 

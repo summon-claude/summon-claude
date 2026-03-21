@@ -8,7 +8,7 @@ from pathlib import Path
 import aiosqlite
 import pytest
 
-from summon_claude.sessions.migrations import _migrate_9_to_10, run_migrations
+from summon_claude.sessions.migrations import _migrate_10_to_11, run_migrations
 from summon_claude.sessions.registry import SessionRegistry
 
 # ---------------------------------------------------------------------------
@@ -85,12 +85,12 @@ class TestMigration:
                 "total_turns INTEGER DEFAULT 0, "
                 "error_message TEXT)"
             )
-            await db.execute("INSERT INTO schema_version (id, version) VALUES (1, 9)")
+            await db.execute("INSERT INTO schema_version (id, version) VALUES (1, 10)")
             await db.commit()
 
             # Run the migration directly
             await db.execute("BEGIN IMMEDIATE")
-            await _migrate_9_to_10(db)
+            await _migrate_10_to_11(db)
             await db.execute("COMMIT")
 
             # Verify table exists

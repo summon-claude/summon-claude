@@ -623,6 +623,8 @@ class TestSessionMessage:
                     channel_id="C100",
                     cwd="/home/user/proj",
                     session_name="parent-session",
+                    scheduler=make_scheduler(),
+                    is_pm=True,
                     _ipc_send_message=mock_send,
                     _web_client=mock_web,
                 )
@@ -767,6 +769,8 @@ class TestSessionResume:
                 authenticated_user_id="U_OWNER",
                 channel_id="C100",
                 cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
                 _ipc_resume_session=mock_resume,
             )
         }
@@ -785,6 +789,8 @@ class TestSessionResume:
                 authenticated_user_id="U_OWNER",
                 channel_id="C100",
                 cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
                 _ipc_resume_session=mock_resume,
             )
         }
@@ -812,6 +818,8 @@ class TestSessionResume:
                 authenticated_user_id="U_OWNER",
                 channel_id="C100",
                 cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
                 _ipc_resume_session=mock_resume,
             )
         }
@@ -828,6 +836,8 @@ class TestSessionResume:
                 authenticated_user_id="U_OWNER",
                 channel_id="C100",
                 cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
             )
         }
         result = await tools["session_resume"].handler({})
