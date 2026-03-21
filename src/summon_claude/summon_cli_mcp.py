@@ -189,7 +189,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 "name": {"type": "string"},
                 "cwd": {"type": "string"},
                 "model": {"type": "string"},
-                "system_prompt": {"type": "string"},
+                "system_prompt": {"type": "string", "maxLength": 10000},
             },
             "required": ["name"],
         },

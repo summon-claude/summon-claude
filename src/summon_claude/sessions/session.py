@@ -343,6 +343,8 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "retry. If it fails again, report the error to the user."
     "\n\n"
     "## PR Review\n\n"
+    "Skip this section entirely if GitHub MCP tools are not available "
+    "(no `github_pat` configured).\n\n"
     "After each periodic scan, check for completed sub-sessions that may have "
     "produced pull requests:\n\n"
     '1. Use `session_list` to find sessions with status "completed" since your '
@@ -372,7 +374,7 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "   c. Spawn a reviewer session:\n"
     "      - Use `session_start` with:\n"
     "        - `cwd`: the completed session's CWD (branch is already checked out)\n"
-    '        - `name`: "{channel_prefix}-review-pr{number}"\n'
+    '        - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
     '        - `model`: "opus"\n'
     "        - `system_prompt`: the review instructions below\n"
     "      - Review instructions to pass via system_prompt:\n"
@@ -410,12 +412,11 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "5. Spawn a reviewer session:\n"
     "   - Use `session_start` with:\n"
     '     - `cwd`: "{project_directory}/.worktrees/review-pr{number}"\n'
-    '     - `name`: "{channel_prefix}-review-pr{number}"\n'
+    '     - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
     '     - `model`: "opus"\n'
     "     - `system_prompt`: the same review instructions as the automatic flow\n"
     '6. Note in your canvas: "PR #{number} — manual review spawned"\n'
-    '7. Inform the user: "Spawned a reviewer for PR #{number} in '
-    '#{channel_prefix}-review-pr{number}"\n'
+    '7. Inform the user: "Spawned a reviewer for PR #{number}"\n'
     "\n\n"
     "## Worktree Cleanup\n\n"
     "During periodic scans, check for worktrees that are no longer needed:\n\n"
