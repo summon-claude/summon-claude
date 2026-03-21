@@ -1328,6 +1328,24 @@ class SessionRegistry:
                 )
                 await db.commit()
 
+    async def get_raw_hooks_json(self, project_id: str | None = None) -> str | None:
+        """Return the raw hooks JSON string for a project or global.
+
+        Does NOT expand ``$INCLUDE_GLOBAL`` or apply fallback semantics.
+        Returns None if no hooks are configured at the requested level.
+        """
+        db = self._check_connected()
+        if project_id is not None:
+            async with db.execute(
+                "SELECT hooks FROM projects WHERE project_id = ?", (project_id,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+        else:
+            async with db.execute("SELECT hooks FROM workflow_defaults WHERE id = 1") as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+
     async def clear_lifecycle_hooks(self, project_id: str | None = None) -> None:
         """Set the hooks column to NULL, removing any configured hooks.
 

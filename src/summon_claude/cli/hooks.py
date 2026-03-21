@@ -70,6 +70,8 @@ SUMMON_BIN='@@SUMMON_PATH@@'
 # settings.json helpers
 # ---------------------------------------------------------------------------
 
+# Evaluated at import time — CLAUDE_CONFIG_DIR must be set before process starts.
+# Tests patch the derived constants (_SETTINGS_PATH, etc.) directly.
 _CLAUDE_DIR = get_claude_config_dir()
 _SETTINGS_PATH = _CLAUDE_DIR / "settings.json"
 _HOOKS_DIR = _CLAUDE_DIR / "hooks"
@@ -148,6 +150,12 @@ def install_hooks() -> None:
     if summon_bin is None:
         raise click.ClickException(
             "Cannot find 'summon' on PATH. Install summon first, then re-run."
+        )
+
+    # Single quotes in the path would break the bash template assignment.
+    if "'" in summon_bin:
+        raise click.ClickException(
+            f"Summon binary path contains a single quote, which is unsupported: {summon_bin}"
         )
 
     # Note if sqlite3 CLI is absent — hooks still work but skip the
@@ -275,7 +283,7 @@ _EDITOR_HEADER = """\
 // $PROJECT_ROOT is set to the project directory.
 // Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks:
 //   "worktree_create": ["$INCLUDE_GLOBAL", "make setup"]
-// Delete this comment block before saving. Lines starting with // are stripped.
+// Lines starting with // are auto-stripped before parsing.
 """
 
 
@@ -286,16 +294,19 @@ async def async_set_hooks(hooks_json: str | None = None, *, project_id: str | No
     If None, open $EDITOR with the current hooks (or a template) for editing.
     """
     if hooks_json is None:
-        # Fetch current hooks to pre-populate editor.
+        # Fetch RAW hooks (unexpanded) to pre-populate editor.
+        # Using get_raw_hooks_json avoids expanding $INCLUDE_GLOBAL tokens,
+        # which would silently destroy them on save.
         current = _HOOKS_TEMPLATE
         async with SessionRegistry() as registry:
-            existing: dict[str, list[str]] = {}
-            for ht in sorted(VALID_HOOK_TYPES):
-                cmds = await registry.get_lifecycle_hooks(ht, project_id=project_id)
-                if cmds:
-                    existing[ht] = cmds
-            if existing:
-                current = json.dumps(existing, indent=2) + "\n"
+            raw = await registry.get_raw_hooks_json(project_id=project_id)
+            if raw:
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        current = json.dumps(parsed, indent=2) + "\n"
+                except (json.JSONDecodeError, TypeError):
+                    pass  # fall back to template
 
         edited = click.edit(_EDITOR_HEADER + current, extension=".json")
         if edited is None:
