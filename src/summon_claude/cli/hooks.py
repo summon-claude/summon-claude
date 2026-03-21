@@ -11,6 +11,7 @@ from typing import Any
 import click
 
 from summon_claude.cli.formatting import echo
+from summon_claude.config import get_claude_config_dir
 from summon_claude.sessions.hooks import VALID_HOOK_TYPES, run_post_worktree_hooks
 from summon_claude.sessions.registry import SessionRegistry
 
@@ -64,8 +65,9 @@ SUMMON_BIN='@@SUMMON_PATH@@'
 # settings.json helpers
 # ---------------------------------------------------------------------------
 
-_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
-_HOOKS_DIR = Path.home() / ".claude" / "hooks"
+_CLAUDE_DIR = get_claude_config_dir()
+_SETTINGS_PATH = _CLAUDE_DIR / "settings.json"
+_HOOKS_DIR = _CLAUDE_DIR / "hooks"
 _PRE_SCRIPT = _HOOKS_DIR / "summon-pre-worktree.sh"
 _POST_SCRIPT = _HOOKS_DIR / "summon-post-worktree.sh"
 
