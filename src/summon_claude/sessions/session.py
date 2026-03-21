@@ -396,6 +396,26 @@ _PM_SYSTEM_PROMPT_APPEND = (
     '   d. Note in your canvas: "PR #{number} — review spawned"\n'
     "5. When a reviewer session completes, read its channel for the summary. "
     'Update your canvas: "PR #{number} — reviewed"\n'
+    "\n\n"
+    "## On-Demand PR Review\n\n"
+    'When a user asks you to review a specific PR (e.g., "review PR #42" or '
+    '"review https://github.com/owner/repo/pull/42"):\n\n'
+    "1. Extract the PR number and repo from the request.\n"
+    "2. Use GitHub MCP `pull_request_read` to get the PR details (head branch "
+    "name, base branch, status).\n"
+    "3. If the PR is draft or closed, inform the user and do not spawn a review.\n"
+    "4. Create a git worktree for the PR branch:\n"
+    "   - Run: `git worktree add .worktrees/review-pr{number} {head_branch}`\n"
+    "   - If the worktree already exists, skip creation.\n"
+    "5. Spawn a reviewer session:\n"
+    "   - Use `session_start` with:\n"
+    '     - `cwd`: "{project_directory}/.worktrees/review-pr{number}"\n'
+    '     - `name`: "{channel_prefix}-review-pr{number}"\n'
+    '     - `model`: "opus"\n'
+    "     - `system_prompt`: the same review instructions as the automatic flow\n"
+    '6. Note in your canvas: "PR #{number} — manual review spawned"\n'
+    '7. Inform the user: "Spawned a reviewer for PR #{number} in '
+    '#{channel_prefix}-review-pr{number}"\n'
 )
 
 
