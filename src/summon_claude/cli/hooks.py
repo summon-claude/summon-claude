@@ -277,7 +277,7 @@ async def async_show_hooks(ctx: click.Context, project_id: str | None = None) ->
 
 _HOOKS_TEMPLATE = """\
 {
-  "worktree_create": ["ln -sfn $PROJECT_ROOT/hack hack"],
+  "worktree_create": ["ln -sfn \"$PROJECT_ROOT/hack\" hack"],
   "project_up": [],
   "project_down": []
 }

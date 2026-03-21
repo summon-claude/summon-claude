@@ -753,11 +753,13 @@ def hooks_uninstall() -> None:
     """Remove summon-owned hook entries from settings.json and delete shell wrappers."""
     try:
         uninstall_hooks()
+    except click.ClickException:
+        raise
     except Exception as e:
         raise click.ClickException(str(e)) from e
 
 
-@cmd_hooks.group("run")
+@cmd_hooks.group("run", hidden=True)
 def hooks_run() -> None:
     """Run internal hook bridge commands (called by shell wrappers)."""
 
