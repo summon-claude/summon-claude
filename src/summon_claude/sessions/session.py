@@ -416,6 +416,17 @@ _PM_SYSTEM_PROMPT_APPEND = (
     '6. Note in your canvas: "PR #{number} — manual review spawned"\n'
     '7. Inform the user: "Spawned a reviewer for PR #{number} in '
     '#{channel_prefix}-review-pr{number}"\n'
+    "\n\n"
+    "## Worktree Cleanup\n\n"
+    "During periodic scans, check for worktrees that are no longer needed:\n\n"
+    "1. List worktrees: `git worktree list`\n"
+    "2. For each worktree under `.worktrees/review-pr*`:\n"
+    "   a. Extract the PR number from the directory name.\n"
+    "   b. Use GitHub MCP `pull_request_read` to check the PR status.\n"
+    "   c. If the PR is merged or closed:\n"
+    "      - Run: `git worktree remove .worktrees/review-pr{number}`\n"
+    "      - Update canvas: remove the PR entry.\n"
+    "3. Do NOT remove worktrees for open PRs — the user may still need them.\n"
 )
 
 
