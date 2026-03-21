@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import click
 import pytest
 
 from summon_claude.sessions.registry import SessionRegistry
@@ -798,8 +799,8 @@ class TestStopProjectManagersDaemonDown:
         assert sentinel_a.exists(), "proj-a hook should have run"
         assert not sentinel_b.exists(), "proj-b hook should NOT have run"
 
-    async def test_nonexistent_name_runs_no_hooks(self, tmp_path):
-        """project down --name nonexistent with no daemon runs no hooks."""
+    async def test_nonexistent_name_raises_error(self, tmp_path):
+        """project down --name nonexistent with no daemon raises ClickException."""
         from summon_claude.cli.project import stop_project_managers
 
         dir_a = tmp_path / "proj-a"
@@ -814,8 +815,8 @@ class TestStopProjectManagersDaemonDown:
         with (
             patch("summon_claude.cli.project.is_daemon_running", return_value=False),
             patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
+            pytest.raises(click.ClickException, match="nonexistent"),
         ):
-            result = await stop_project_managers(name="nonexistent")
+            await stop_project_managers(name="nonexistent")
 
-        assert result == []
         assert not sentinel.exists(), "no hooks should run for nonexistent project"

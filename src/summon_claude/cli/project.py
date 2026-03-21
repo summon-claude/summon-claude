@@ -145,6 +145,8 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             async with SessionRegistry() as registry:
                 all_projects = await registry.list_projects()
                 matched_ids = [p["project_id"] for p in all_projects if p["name"] == name]
+            if not matched_ids:
+                raise click.ClickException(f"No project named {name!r}.")
             await _run_project_hooks("project_down", project_ids=matched_ids)
         else:
             await _run_project_hooks("project_down")
