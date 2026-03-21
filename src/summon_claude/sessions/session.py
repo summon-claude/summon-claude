@@ -1693,7 +1693,7 @@ class SummonSession:
             async def _sched_sync() -> None:
                 await _sync_scheduler_to_canvas(scheduler, cs)
 
-            scheduler._on_change = _sched_sync  # noqa: SLF001
+            scheduler.on_change = _sched_sync
 
             async def _task_sync() -> None:
                 await _sync_tasks_to_canvas(rt.registry, self._session_id, cs, task_heading)
@@ -1712,7 +1712,7 @@ class SummonSession:
                 cwd=self._cwd,
                 session_name=self._name,
                 web_client=self._web_client,
-                is_pm=bool(is_pm),
+                is_pm=is_pm,
                 scheduler=scheduler,
                 project_id=self._project_id,
                 on_task_change=_on_task_change,

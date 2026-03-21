@@ -2034,7 +2034,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "claude-agent-sdk", specifier = "==0.1.44" },
     { name = "click", specifier = "==8.3.1" },
-    { name = "cronsim", specifier = ">=2.7" },
+    { name = "cronsim", specifier = "==2.7" },
     { name = "markdown-to-mrkdwn", specifier = "==0.3.1" },
     { name = "packaging", specifier = "==26.0" },
     { name = "pick", specifier = "==2.6.0" },

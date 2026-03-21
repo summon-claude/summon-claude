@@ -137,6 +137,18 @@ class TestSanitizeForTable:
         assert len(result) == 53  # 50 + "..."
         assert result.endswith("...")
 
+    def test_truncation_with_pipes_no_split(self):
+        # Pipes are escaped AFTER truncation, so escape sequences are never split.
+        # max_len=5 ensures old (escape-then-truncate) code would produce a
+        # dangling backslash, while new (truncate-then-escape) code does not.
+        result = self._sanitize("a|b|" * 50, max_len=5)
+        assert result.endswith("...")
+        # No lone backslash anywhere (every \ must be followed by |)
+        import re as _re
+
+        assert not _re.search(r"\\(?!\|)", result), f"Dangling backslash in: {result!r}"
+        assert "\\|" in result  # pipes are properly escaped
+
 
 class TestSessionOptions:
     """Tests for SessionOptions dataclass."""

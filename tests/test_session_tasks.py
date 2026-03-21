@@ -50,6 +50,16 @@ class TestGuardSets:
     def test_valid_task_priorities_pinned(self):
         assert frozenset({"high", "medium", "low"}) == SessionRegistry._VALID_TASK_PRIORITIES
 
+    def test_updatable_task_fields_pinned(self):
+        expected = frozenset({"status", "content", "priority"})
+        assert expected == SessionRegistry._UPDATABLE_TASK_FIELDS
+
+    async def test_updatable_task_fields_match_schema(self, registry: SessionRegistry):
+        db = registry._check_connected()
+        async with db.execute("PRAGMA table_info(session_tasks)") as cursor:
+            columns = {row[1] for row in await cursor.fetchall()}
+        assert columns >= SessionRegistry._UPDATABLE_TASK_FIELDS
+
 
 # ---------------------------------------------------------------------------
 # Migration test
@@ -151,6 +161,39 @@ class TestCreateTask:
 
         tasks = await registry.list_tasks("sess-trunc")
         assert len(tasks[0]["content"]) == 2000
+
+    async def test_max_active_cap_atomic(self, registry: SessionRegistry):
+        await _register_session(registry, "sess-cap")
+        for i in range(3):
+            result = await registry.create_task(
+                "sess-cap", make_task_id(), f"task-{i}", max_active=3
+            )
+            assert result is True
+        # 4th should be rejected
+        result = await registry.create_task("sess-cap", make_task_id(), "over-cap", max_active=3)
+        assert result is False
+        assert len(await registry.list_tasks("sess-cap")) == 3
+
+    async def test_max_active_excludes_completed(self, registry: SessionRegistry):
+        await _register_session(registry, "sess-cap2")
+        tid = make_task_id()
+        await registry.create_task("sess-cap2", tid, "will-complete", max_active=1)
+        # Cap reached
+        result = await registry.create_task("sess-cap2", make_task_id(), "blocked", max_active=1)
+        assert result is False
+        # Complete the first task
+        await registry.update_task("sess-cap2", tid, status="completed")
+        # Now should succeed
+        assert await registry.create_task("sess-cap2", make_task_id(), "ok", max_active=1) is True
+
+    async def test_max_active_counts_in_progress(self, registry: SessionRegistry):
+        await _register_session(registry, "sess-cap-ip")
+        tid = make_task_id()
+        await registry.create_task("sess-cap-ip", tid, "first", max_active=1)
+        await registry.update_task("sess-cap-ip", tid, status="in_progress")
+        # in_progress should still hold the slot
+        result = await registry.create_task("sess-cap-ip", make_task_id(), "second", max_active=1)
+        assert result is False
 
 
 # ---------------------------------------------------------------------------

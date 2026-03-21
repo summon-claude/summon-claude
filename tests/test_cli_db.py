@@ -255,6 +255,42 @@ class TestDbPurge:
         assert "Spawn tokens: 1" in result.output
 
 
+class TestDbPurgeTasks:
+    def test_db_purge_deletes_tasks_with_sessions(self, tmp_path):
+        """'db purge' should delete session_tasks rows for purged sessions."""
+        runner = CliRunner()
+        db_path = tmp_path / "registry.db"
+        old_ts = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+
+        async def _seed():
+            async with SessionRegistry(db_path=db_path) as reg:
+                await reg.register("old-with-tasks", 111, "/tmp")
+                await reg.update_status("old-with-tasks", "completed")
+                await reg.create_task("old-with-tasks", "task-1", "Old task 1")
+                await reg.create_task("old-with-tasks", "task-2", "Old task 2")
+                await reg.db.execute(
+                    "UPDATE sessions SET started_at = ? WHERE session_id = ?",
+                    (old_ts, "old-with-tasks"),
+                )
+                await reg.db.commit()
+
+        asyncio.run(_seed())
+
+        with patch(
+            "summon_claude.sessions.registry.default_db_path",
+            return_value=db_path,
+        ):
+            result = runner.invoke(cli, ["db", "purge", "--older-than", "1", "--yes"])
+        assert result.exit_code == 0
+
+        async def _verify():
+            async with SessionRegistry(db_path=db_path) as reg:
+                return await reg.list_tasks("old-with-tasks")
+
+        tasks = asyncio.run(_verify())
+        assert tasks == []
+
+
 class TestConfigCheckDbValidation:
     """Tests for schema version and integrity checks in 'config check'."""
 

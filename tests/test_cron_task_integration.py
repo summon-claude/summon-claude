@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 
 from conftest import make_scheduler
 
 from summon_claude.sessions.scheduler import SessionScheduler
+from summon_claude.sessions.session import _sync_scheduler_to_canvas, _sync_tasks_to_canvas
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
 
 # ---------------------------------------------------------------------------
@@ -90,6 +92,34 @@ class TestSchedulerSessionLifecycle:
 
         scheduler.cancel_all()
 
+    async def test_hourly_scan_cron_expression(self):
+        """Scan intervals ≥ 60 minutes produce hourly cron expressions."""
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        ev = asyncio.Event()
+        scheduler = SessionScheduler(q, ev)
+
+        # Simulate what session.py does for scan_interval_s=7200 (2 hours)
+        interval_min = max(1, 7200 // 60)  # 120 minutes
+        if interval_min <= 59:
+            scan_cron = f"*/{interval_min} * * * *"
+        else:
+            scan_cron = f"0 */{max(1, interval_min // 60)} * * *"
+
+        assert scan_cron == "0 */2 * * *"
+
+        await scheduler.create(
+            cron_expr=scan_cron,
+            prompt="[SCAN TRIGGER] scan",
+            internal=True,
+            max_lifetime_s=0,
+        )
+
+        jobs = scheduler.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].cron_expr == "0 */2 * * *"
+
+        scheduler.cancel_all()
+
     async def test_shutdown_cancels_all_jobs(self):
         """cancel_all stops all asyncio tasks."""
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -119,7 +149,7 @@ class TestSchedulerSessionLifecycle:
 
 class TestCanvasSyncIntegration:
     async def test_cron_create_triggers_canvas_sync(self):
-        """Scheduler _on_change fires when a job is created."""
+        """Scheduler on_change fires when a job is created."""
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         ev = asyncio.Event()
         scheduler = SessionScheduler(q, ev)
@@ -129,7 +159,7 @@ class TestCanvasSyncIntegration:
         async def mock_sync():
             sync_calls.append("synced")
 
-        scheduler._on_change = mock_sync
+        scheduler.on_change = mock_sync
 
         await scheduler.create("*/5 * * * *", "test")
         assert len(sync_calls) == 1
@@ -158,13 +188,90 @@ class TestCanvasSyncIntegration:
         assert len(sync_calls) == 1
 
     async def test_no_canvas_no_crash(self):
-        """Scheduler with no _on_change callback doesn't error."""
+        """Scheduler with no on_change callback doesn't error."""
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
         ev = asyncio.Event()
         scheduler = SessionScheduler(q, ev)
-        # _on_change is None by default
+        # on_change is None by default
         await scheduler.create("*/5 * * * *", "test")  # Should not crash
         await scheduler.delete(scheduler.list_jobs()[0].id)  # Should not crash
+
+
+# ---------------------------------------------------------------------------
+# Canvas sync render tests (direct unit tests for _sync_* functions)
+# ---------------------------------------------------------------------------
+
+
+class TestSyncSchedulerToCanvas:
+    async def test_empty_jobs_renders_placeholder(self):
+        scheduler = SessionScheduler(asyncio.Queue(maxsize=100), asyncio.Event())
+        mock_canvas = AsyncMock()
+        await _sync_scheduler_to_canvas(scheduler, mock_canvas)
+        mock_canvas.update_section.assert_awaited_once_with(
+            "Scheduled Jobs", "_No scheduled jobs._"
+        )
+
+    async def test_jobs_render_table(self):
+        scheduler = SessionScheduler(asyncio.Queue(maxsize=100), asyncio.Event())
+        await scheduler.create("*/5 * * * *", "check things")
+        mock_canvas = AsyncMock()
+        await _sync_scheduler_to_canvas(scheduler, mock_canvas)
+        call_args = mock_canvas.update_section.call_args
+        assert call_args[0][0] == "Scheduled Jobs"
+        markdown = call_args[0][1]
+        assert "| ID |" in markdown
+        assert "Agent" in markdown
+        assert "check things" in markdown
+
+    async def test_internal_job_shows_system_label(self):
+        scheduler = SessionScheduler(asyncio.Queue(maxsize=100), asyncio.Event())
+        await scheduler.create("*/5 * * * *", "scan", internal=True)
+        mock_canvas = AsyncMock()
+        await _sync_scheduler_to_canvas(scheduler, mock_canvas)
+        markdown = mock_canvas.update_section.call_args[0][1]
+        assert "System" in markdown
+        assert "Project scan timer" in markdown
+
+
+class TestSyncTasksToCanvas:
+    async def test_empty_tasks_renders_placeholder(self, registry):
+        await registry.register("canvas-empty", 1234, "/tmp")
+        mock_canvas = AsyncMock()
+        await _sync_tasks_to_canvas(registry, "canvas-empty", mock_canvas, "Tasks")
+        mock_canvas.update_section.assert_awaited_once_with("Tasks", "_No tasks tracked._")
+
+    async def test_pm_heading_renders_work_items_placeholder(self, registry):
+        await registry.register("canvas-pm-empty", 1234, "/tmp")
+        mock_canvas = AsyncMock()
+        await _sync_tasks_to_canvas(registry, "canvas-pm-empty", mock_canvas, "Work Items")
+        mock_canvas.update_section.assert_awaited_once_with(
+            "Work Items", "_No work items tracked._"
+        )
+
+    async def test_completed_tasks_have_strikethrough(self, registry):
+        await registry.register("canvas-done", 1234, "/tmp")
+        await registry.create_task("canvas-done", "t1", "Active task")
+        await registry.create_task("canvas-done", "t2", "Done task")
+        await registry.update_task("canvas-done", "t2", status="completed")
+        mock_canvas = AsyncMock()
+        await _sync_tasks_to_canvas(registry, "canvas-done", mock_canvas, "Tasks")
+        markdown = mock_canvas.update_section.call_args[0][1]
+        assert "Active task" in markdown
+        assert "~~completed~~" in markdown
+        assert "~~Done task~~" in markdown
+
+    async def test_active_tasks_before_completed(self, registry):
+        await registry.register("canvas-order", 1234, "/tmp")
+        await registry.create_task("canvas-order", "t1", "First")
+        await registry.create_task("canvas-order", "t2", "Second")
+        await registry.update_task("canvas-order", "t1", status="completed")
+        mock_canvas = AsyncMock()
+        await _sync_tasks_to_canvas(registry, "canvas-order", mock_canvas, "Tasks")
+        markdown = mock_canvas.update_section.call_args[0][1]
+        # Active (Second) should appear before completed (First)
+        second_pos = markdown.find("Second")
+        first_pos = markdown.find("~~First~~")
+        assert second_pos < first_pos
 
 
 # ---------------------------------------------------------------------------

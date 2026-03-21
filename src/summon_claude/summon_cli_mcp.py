@@ -32,6 +32,7 @@ _MAX_MESSAGE_CHARS = 10_000
 
 _SENSITIVE_FIELDS = frozenset({"pid", "error_message", "authenticated_user_id"})
 _MAX_TASKS_PER_SESSION = 100
+_MAX_CROSS_SESSION_IDS = 20
 
 
 def _sanitize_session(session: dict[str, Any]) -> dict[str, Any]:
@@ -855,23 +856,22 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                     "is_error": True,
                 }
             priority = args.get("priority", "medium")
-            # Enforce per-session cap on non-completed tasks
-            existing = await registry.list_tasks(session_id)
-            active_count = sum(1 for t in existing if t["status"] != "completed")
-            if active_count >= _MAX_TASKS_PER_SESSION:
+            task_id = secrets.token_hex(8)
+            created = await registry.create_task(
+                session_id, task_id, content, priority, max_active=_MAX_TASKS_PER_SESSION
+            )
+            if not created:
                 return {
                     "content": [
                         {
                             "type": "text",
-                            "text": f"Maximum of {_MAX_TASKS_PER_SESSION} tasks "
+                            "text": f"Maximum of {_MAX_TASKS_PER_SESSION} active tasks "
                             "per session reached. Mark completed tasks with "
                             "TaskUpdate before creating new ones.",
                         }
                     ],
                     "is_error": True,
                 }
-            task_id = secrets.token_hex(8)
-            await registry.create_task(session_id, task_id, content, priority)
             if on_task_change:
                 await on_task_change()
             return {"content": [{"type": "text", "text": f"Created task {task_id}."}]}
@@ -903,8 +903,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             kwargs: dict[str, str] = {}
             if args.get("status"):
                 kwargs["status"] = args["status"]
-            if args.get("content"):
-                kwargs["content"] = args["content"]
+            if "content" in args:
+                val = args["content"]
+                if not val or not val.strip():
+                    return {
+                        "content": [{"type": "text", "text": "Task content cannot be empty."}],
+                        "is_error": True,
+                    }
+                kwargs["content"] = val
             if args.get("priority"):
                 kwargs["priority"] = args["priority"]
             # session_id is closure-captured — NOT overridable by agent input
@@ -951,6 +957,16 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                         "is_error": True,
                     }
                 ids = [s.strip() for s in session_ids.split(",") if s.strip()]
+                if len(ids) > _MAX_CROSS_SESSION_IDS:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": f"Too many session IDs (max {_MAX_CROSS_SESSION_IDS}).",
+                            }
+                        ],
+                        "is_error": True,
+                    }
                 result = await registry.get_tasks_for_sessions(
                     ids, authenticated_user_id, project_id
                 )
@@ -968,14 +984,13 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 return {"content": [{"type": "text", "text": "\n".join(lines)}]}
 
             # Own-session query
-            valid_statuses = {"pending", "in_progress", "completed"}
-            if status and status not in valid_statuses:
+            if status and status not in SessionRegistry._VALID_TASK_STATUSES:  # noqa: SLF001
                 return {
                     "content": [
                         {
                             "type": "text",
                             "text": f"Invalid status '{status}'. "
-                            f"Use: {', '.join(sorted(valid_statuses))}.",
+                            f"Use: {', '.join(sorted(SessionRegistry._VALID_TASK_STATUSES))}.",  # noqa: SLF001
                         }
                     ],
                     "is_error": True,

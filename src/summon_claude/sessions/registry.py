@@ -150,6 +150,11 @@ class SessionRegistry:
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.execute("PRAGMA journal_size_limit=67108864")
+        # FK enforcement required for session_tasks ON DELETE CASCADE.
+        # NOTE: PRAGMA foreign_keys cannot be changed inside a transaction
+        # (SQLite silently ignores it).  Future migrations that need to
+        # temporarily violate FK constraints must run BEFORE this pragma
+        # or use a separate connection with FK enforcement disabled.
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute(_CREATE_SESSIONS)
         await self._db.execute(_CREATE_PENDING_AUTH_TOKENS)
@@ -251,6 +256,7 @@ class SessionRegistry:
 
     _VALID_TASK_STATUSES: frozenset[str] = frozenset({"pending", "in_progress", "completed"})
     _VALID_TASK_PRIORITIES: frozenset[str] = frozenset({"high", "medium", "low"})
+    _UPDATABLE_TASK_FIELDS: frozenset[str] = frozenset({"status", "content", "priority"})
     _MAX_TASK_CONTENT_LENGTH: int = 2000
 
     _UPDATABLE_FIELDS: frozenset[str] = frozenset(
@@ -489,9 +495,21 @@ class SessionRegistry:
     # --- Task methods ---
 
     async def create_task(
-        self, session_id: str, task_id: str, content: str, priority: str = "medium"
-    ) -> None:
-        """Create a task for the given session."""
+        self,
+        session_id: str,
+        task_id: str,
+        content: str,
+        priority: str = "medium",
+        *,
+        max_active: int | None = None,
+    ) -> bool:
+        """Create a task for the given session.
+
+        Returns True if the task was inserted.  When *max_active* is None
+        (default), the insert is unconditional.  When set, the cap is
+        enforced atomically via a conditional INSERT — no TOCTOU race
+        between the count check and the insert.
+        """
         if priority not in self._VALID_TASK_PRIORITIES:
             msg = f"Invalid priority {priority!r}, must be one of {self._VALID_TASK_PRIORITIES}"
             raise ValueError(msg)
@@ -499,6 +517,17 @@ class SessionRegistry:
             content = content[: self._MAX_TASK_CONTENT_LENGTH]
         now = datetime.now(UTC).isoformat()
         db = self._check_connected()
+        if max_active is not None:
+            cursor = await db.execute(
+                "INSERT INTO session_tasks "
+                "(id, session_id, content, status, priority, created_at, updated_at) "
+                "SELECT ?, ?, ?, 'pending', ?, ?, ? "
+                "WHERE (SELECT COUNT(*) FROM session_tasks "
+                "WHERE session_id = ? AND status != 'completed') < ?",
+                (task_id, session_id, content, priority, now, now, session_id, max_active),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
         await db.execute(
             "INSERT INTO session_tasks "
             "(id, session_id, content, status, priority, created_at, updated_at) "
@@ -506,6 +535,7 @@ class SessionRegistry:
             (task_id, session_id, content, priority, now, now),
         )
         await db.commit()
+        return True
 
     async def update_task(
         self,

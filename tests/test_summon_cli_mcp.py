@@ -588,6 +588,11 @@ class TestGuardConstants:
 
         assert _MAX_TASKS_PER_SESSION == 100
 
+    def test_max_cross_session_ids_pinned(self):
+        from summon_claude.summon_cli_mcp import _MAX_CROSS_SESSION_IDS
+
+        assert _MAX_CROSS_SESSION_IDS == 20
+
 
 class TestListChildren:
     async def test_returns_children(self, populated_registry):

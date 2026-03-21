@@ -43,7 +43,7 @@ def explain_cron(cron_expr: str) -> tuple[str, str]:
         logger.debug("explain_cron: CronSim failed for %r", cron_expr, exc_info=True)
         return cron_expr, "—"
     try:
-        nxt = next(iter(sim))
+        nxt = next(sim)
         next_fire = nxt.strftime("%H:%M")
     except Exception:
         logger.debug("explain_cron: no future fire for %r", cron_expr, exc_info=True)
@@ -55,10 +55,11 @@ def sanitize_for_table(text: str, max_len: int = 80) -> str:
     """Sanitize text for markdown table cells (escape pipes, strip newlines)."""
     # Strip heading markers before flattening newlines so ^ matches line starts
     text = re.sub(r"^#{1,6}\s", "", text, flags=re.MULTILINE)
-    text = text.replace("|", "\\|").replace("\n", " ").replace("\r", "")
+    text = text.replace("\n", " ").replace("\r", "")
+    # Truncate before escaping so we never split a \| escape sequence
     if len(text) > max_len:
         text = text[:max_len] + "..."
-    return text
+    return text.replace("|", "\\|")
 
 
 class SessionScheduler:
@@ -80,7 +81,7 @@ class SessionScheduler:
         self._event_queue = event_queue
         self._shutdown_event = shutdown_event
         self._jobs: dict[str, ScheduledJob] = {}
-        self._on_change: Callable[[], Coroutine[Any, Any, None]] | None = None
+        self.on_change: Callable[[], Coroutine[Any, Any, None]] | None = None
 
     async def create(
         self,
@@ -115,12 +116,12 @@ class SessionScheduler:
                 prompt = prompt[: self._MAX_PROMPT_LENGTH]
                 logger.warning("Cron job prompt truncated to %d chars", self._MAX_PROMPT_LENGTH)
 
-            # Strip system-reserved prefixes anywhere in prompt to prevent spoofing
-            for prefix in ("[SYSTEM:", "[CRON:"):
-                prompt = prompt.replace(prefix, "")
+            # Strip system-reserved prefixes anywhere in prompt to prevent spoofing.
+            # Regex handles double-bracket bypass (e.g. "[[SYSTEM:" → "[SYSTEM:").
+            prompt = re.sub(r"\[+(?:SYSTEM|CRON):", "", prompt, flags=re.IGNORECASE)
 
         job = ScheduledJob(
-            id=secrets.token_hex(4),
+            id=secrets.token_hex(8),
             cron_expr=cron_expr,
             prompt=prompt,
             recurring=recurring,
@@ -131,8 +132,8 @@ class SessionScheduler:
         job.task = asyncio.create_task(self._run_job(job))
         self._jobs[job.id] = job
 
-        if self._on_change:
-            await self._on_change()
+        if self.on_change:
+            await self.on_change()
 
         return job
 
@@ -149,8 +150,8 @@ class SessionScheduler:
             job.task.cancel()
         self._jobs.pop(job_id, None)
 
-        if self._on_change:
-            await self._on_change()
+        if self.on_change:
+            await self.on_change()
 
         return True
 
@@ -186,7 +187,7 @@ class SessionScheduler:
             )
             raise ValueError(msg)
 
-    async def _run_job(self, job: ScheduledJob) -> None:
+    async def _run_job(self, job: ScheduledJob) -> None:  # noqa: PLR0912
         """Run a scheduled job, firing at each cron match."""
         try:
             while not self._shutdown_event.is_set():
@@ -200,8 +201,8 @@ class SessionScheduler:
                     if elapsed >= job.max_lifetime_s:
                         logger.info("Job %s expired after %ds", job.id, job.max_lifetime_s)
                         self._jobs.pop(job.id, None)
-                        if self._on_change:
-                            await self._on_change()
+                        if self.on_change:
+                            await self.on_change()
                         return
 
                 # Fresh iterator from now to avoid burst-fire after busy periods
@@ -211,6 +212,8 @@ class SessionScheduler:
                 except StopIteration:
                     logger.info("Job %s has no future fire times", job.id)
                     self._jobs.pop(job.id, None)
+                    if self.on_change:
+                        await self.on_change()
                     return
 
                 delay = (next_fire - now).total_seconds()
@@ -244,8 +247,8 @@ class SessionScheduler:
 
                 if not job.recurring:
                     self._jobs.pop(job.id, None)
-                    if self._on_change:
-                        await self._on_change()
+                    if self.on_change:
+                        await self.on_change()
                     return
 
                 # Guard against tight loop if CronSim returns past/current time
