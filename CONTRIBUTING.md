@@ -339,6 +339,7 @@ src/summon_claude/
 │   ├── auth.py            # Session auth tokens and short codes
 │   ├── commands.py        # !-prefixed command dispatch, aliasing, plugin skill registration
 │   ├── context.py         # Context window usage tracking via JSONL transcript parsing
+│   ├── hook_types.py      # Hook constants (VALID_HOOK_TYPES, INCLUDE_GLOBAL_TOKEN)
 │   ├── hooks.py           # Lifecycle hooks runner (worktree_create, project_up, project_down)
 │   ├── manager.py         # Session lifecycle, IPC control plane
 │   ├── migrations.py      # Schema versioning and migration functions (single source of truth)

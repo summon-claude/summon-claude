@@ -94,7 +94,7 @@ class TestWorktreePostHookRunsCreateHooks:
 
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -109,7 +109,7 @@ class TestWorktreePostHookRunsCreateHooks:
 
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -163,7 +163,7 @@ class TestWorktreePostHookFailureNonFatal:
 
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -176,7 +176,7 @@ class TestWorktreePostHookFailureNonFatal:
 
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -432,7 +432,7 @@ class TestShellHookProjectRootWithSpaces:
 
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=spaced_dir)
 

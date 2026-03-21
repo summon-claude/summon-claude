@@ -488,7 +488,7 @@ class TestRunPostWorktreeHooksIntegration:
         mock_reg_cls = _make_hooks_mock_registry(["true"])
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -501,7 +501,7 @@ class TestRunPostWorktreeHooksIntegration:
         mock_reg_cls = _make_hooks_mock_registry(["exit 1"])
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -514,7 +514,7 @@ class TestRunPostWorktreeHooksIntegration:
         mock_reg_cls = _make_hooks_mock_registry([])
         with (
             patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
-            patch("summon_claude.sessions.registry.SessionRegistry", mock_reg_cls),
+            patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
@@ -756,3 +756,66 @@ class TestRunLifecycleHooksInvalidHookType:
 
         with pytest.raises(ValueError, match="invalid_type"):
             await run_lifecycle_hooks("invalid_type", tmp_path, ["cmd"])
+
+
+# ---------------------------------------------------------------------------
+# stop_project_managers: daemon not running + name filter
+# ---------------------------------------------------------------------------
+
+
+class TestStopProjectManagersDaemonDown:
+    async def test_name_filter_applied_when_daemon_not_running(self, tmp_path):
+        """project down --name X with no daemon only runs hooks for project X."""
+        from summon_claude.cli.project import stop_project_managers
+
+        dir_a = tmp_path / "proj-a"
+        dir_b = tmp_path / "proj-b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        sentinel_a = tmp_path / "down_a.txt"
+        sentinel_b = tmp_path / "down_b.txt"
+
+        db_path = tmp_path / "daemon_down.db"
+        async with SessionRegistry(db_path=db_path) as reg:
+            await reg.add_project("proj-a", str(dir_a))
+            await reg.add_project("proj-b", str(dir_b))
+            await reg.set_lifecycle_hooks(
+                {"project_down": [f"touch {sentinel_a}"]},
+                project_id=(await reg.list_projects())[0]["project_id"],
+            )
+            await reg.set_lifecycle_hooks(
+                {"project_down": [f"touch {sentinel_b}"]},
+                project_id=(await reg.list_projects())[1]["project_id"],
+            )
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=False),
+            patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
+        ):
+            result = await stop_project_managers(name="proj-a")
+
+        assert result == []
+        assert sentinel_a.exists(), "proj-a hook should have run"
+        assert not sentinel_b.exists(), "proj-b hook should NOT have run"
+
+    async def test_nonexistent_name_runs_no_hooks(self, tmp_path):
+        """project down --name nonexistent with no daemon runs no hooks."""
+        from summon_claude.cli.project import stop_project_managers
+
+        dir_a = tmp_path / "proj-a"
+        dir_a.mkdir()
+        sentinel = tmp_path / "should_not_run.txt"
+
+        db_path = tmp_path / "no_match.db"
+        async with SessionRegistry(db_path=db_path) as reg:
+            pid = await reg.add_project("proj-a", str(dir_a))
+            await reg.set_lifecycle_hooks({"project_down": [f"touch {sentinel}"]}, project_id=pid)
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=False),
+            patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
+        ):
+            result = await stop_project_managers(name="nonexistent")
+
+        assert result == []
+        assert not sentinel.exists(), "no hooks should run for nonexistent project"

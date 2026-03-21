@@ -13,6 +13,7 @@ import subprocess
 from pathlib import Path
 
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN, VALID_HOOK_TYPES
+from summon_claude.sessions.registry import SessionRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +125,6 @@ def run_post_worktree_hooks(cwd: Path) -> int:
     if project_root is None:
         logger.debug("run_post_worktree_hooks: could not determine project root for %s", cwd)
         return 0
-
-    # Import here to avoid circular imports at module level.
-    from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
 
     async def _run() -> None:
         hooks: list[str] = []
