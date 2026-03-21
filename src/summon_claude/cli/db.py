@@ -71,8 +71,16 @@ async def async_db_purge(older_than: int, ctx: click.Context) -> None:
     spawn_deleted = 0
     async with SessionRegistry() as reg:
         db = reg.db
-        await db.execute("BEGIN")
+        await db.execute("BEGIN IMMEDIATE")
         try:
+            # Explicit task delete before session delete: belt-and-suspenders
+            # with FK CASCADE.  Covers connections without foreign_keys=ON.
+            await db.execute(
+                "DELETE FROM session_tasks WHERE session_id IN "
+                "(SELECT session_id FROM sessions "
+                "WHERE started_at < ? AND status IN ('completed', 'errored'))",
+                (cutoff,),
+            )
             async with db.execute(
                 "DELETE FROM sessions WHERE started_at < ? AND status IN ('completed', 'errored')",
                 (cutoff,),

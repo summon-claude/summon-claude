@@ -110,6 +110,46 @@ def make_rt(
     )
 
 
+class TestSanitizeForTable:
+    """Tests for sanitize_for_table canvas helper."""
+
+    def _sanitize(self, text: str, max_len: int = 80) -> str:
+        from summon_claude.sessions.scheduler import sanitize_for_table
+
+        return sanitize_for_table(text, max_len)
+
+    def test_heading_at_start(self):
+        assert self._sanitize("## Heading") == "Heading"
+
+    def test_heading_on_non_first_line(self):
+        result = self._sanitize("line one\n## Heading two")
+        assert "##" not in result
+        assert "Heading two" in result
+
+    def test_pipe_escaped(self):
+        assert "\\|" in self._sanitize("a|b")
+
+    def test_newlines_flattened(self):
+        assert "\n" not in self._sanitize("a\nb\nc")
+
+    def test_truncation(self):
+        result = self._sanitize("x" * 200, max_len=50)
+        assert len(result) == 53  # 50 + "..."
+        assert result.endswith("...")
+
+    def test_truncation_with_pipes_no_split(self):
+        # Pipes are escaped AFTER truncation, so escape sequences are never split.
+        # max_len=5 ensures old (escape-then-truncate) code would produce a
+        # dangling backslash, while new (truncate-then-escape) code does not.
+        result = self._sanitize("a|b|" * 50, max_len=5)
+        assert result.endswith("...")
+        # No lone backslash anywhere (every \ must be followed by |)
+        import re as _re
+
+        assert not _re.search(r"\\(?!\|)", result), f"Dangling backslash in: {result!r}"
+        assert "\\|" in result  # pipes are properly escaped
+
+
 class TestSessionOptions:
     """Tests for SessionOptions dataclass."""
 
@@ -1119,15 +1159,29 @@ class TestMCPRegistration:
 
         return captured
 
-    async def test_regular_session_has_only_slack_mcp(self):
+    async def test_regular_session_has_slack_and_cli_mcps(self):
         result = await self._capture_mcp_servers(pm_profile=False)
         assert "summon-slack" in result["mcp_servers"]
-        assert "summon-cli" not in result["mcp_servers"]
+        assert "summon-cli" in result["mcp_servers"]
 
     async def test_pm_session_has_both_mcps(self):
         result = await self._capture_mcp_servers(pm_profile=True)
         assert "summon-slack" in result["mcp_servers"]
         assert "summon-cli" in result["mcp_servers"]
+
+    async def test_pm_without_auth_raises(self):
+        """PM session without authenticated_user_id raises RuntimeError."""
+        session = make_session(pm_profile=True)
+        # Do NOT set session._authenticated_user_id — stays None
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        with (
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(RuntimeError, match="authenticated_user_id"),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
 
     def test_session_options_pm_profile_default(self):
         opts = SessionOptions(cwd="/tmp", name="test")
@@ -2183,7 +2237,7 @@ class TestSessionRestartLoop:
             await session._run_session_tasks(rt, router)
 
         assert len(captured_prompts) == 2
-        assert captured_prompts[0] == _BASE_SYSTEM_APPEND
+        assert _BASE_SYSTEM_APPEND in captured_prompts[0]
         assert _COMPACT_SUMMARY_PREFIX in captured_prompts[1]
         assert "Build widget" in captured_prompts[1]
 

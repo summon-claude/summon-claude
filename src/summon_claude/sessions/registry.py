@@ -150,6 +150,12 @@ class SessionRegistry:
         await self._db.execute("PRAGMA busy_timeout=5000")
         await self._db.execute("PRAGMA synchronous=NORMAL")
         await self._db.execute("PRAGMA journal_size_limit=67108864")
+        # FK enforcement required for session_tasks ON DELETE CASCADE.
+        # NOTE: PRAGMA foreign_keys cannot be changed inside a transaction
+        # (SQLite silently ignores it).  Future migrations that need to
+        # temporarily violate FK constraints must run BEFORE this pragma
+        # or use a separate connection with FK enforcement disabled.
+        await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.execute(_CREATE_SESSIONS)
         await self._db.execute(_CREATE_PENDING_AUTH_TOKENS)
         await self._db.execute(_CREATE_AUDIT_LOG)
@@ -247,6 +253,11 @@ class SessionRegistry:
     _VALID_STATUSES: frozenset[str] = frozenset(
         {"pending_auth", "active", "completed", "errored", "suspended"}
     )
+
+    _VALID_TASK_STATUSES: frozenset[str] = frozenset({"pending", "in_progress", "completed"})
+    _VALID_TASK_PRIORITIES: frozenset[str] = frozenset({"high", "medium", "low"})
+    _UPDATABLE_TASK_FIELDS: frozenset[str] = frozenset({"status", "content", "priority"})
+    _MAX_TASK_CONTENT_LENGTH: int = 2000
 
     _UPDATABLE_FIELDS: frozenset[str] = frozenset(
         {
@@ -480,6 +491,157 @@ class SessionRegistry:
         for session in active:
             await self.mark_stale(session["session_id"], reason)
         return active
+
+    # --- Task methods ---
+
+    async def create_task(
+        self,
+        session_id: str,
+        task_id: str,
+        content: str,
+        priority: str = "medium",
+        *,
+        max_active: int | None = None,
+    ) -> bool:
+        """Create a task for the given session.
+
+        Returns True if the task was inserted.  When *max_active* is None
+        (default), the insert is unconditional.  When set, the cap is
+        enforced atomically via a conditional INSERT — no TOCTOU race
+        between the count check and the insert.
+        """
+        if priority not in self._VALID_TASK_PRIORITIES:
+            msg = f"Invalid priority {priority!r}, must be one of {self._VALID_TASK_PRIORITIES}"
+            raise ValueError(msg)
+        if len(content) > self._MAX_TASK_CONTENT_LENGTH:
+            content = content[: self._MAX_TASK_CONTENT_LENGTH]
+        now = datetime.now(UTC).isoformat()
+        db = self._check_connected()
+        if max_active is not None:
+            cursor = await db.execute(
+                "INSERT INTO session_tasks "
+                "(id, session_id, content, status, priority, created_at, updated_at) "
+                "SELECT ?, ?, ?, 'pending', ?, ?, ? "
+                "WHERE (SELECT COUNT(*) FROM session_tasks "
+                "WHERE session_id = ? AND status != 'completed') < ?",
+                (task_id, session_id, content, priority, now, now, session_id, max_active),
+            )
+            await db.commit()
+            return cursor.rowcount > 0
+        await db.execute(
+            "INSERT INTO session_tasks "
+            "(id, session_id, content, status, priority, created_at, updated_at) "
+            "VALUES (?, ?, ?, 'pending', ?, ?, ?)",
+            (task_id, session_id, content, priority, now, now),
+        )
+        await db.commit()
+        return True
+
+    async def update_task(
+        self,
+        session_id: str,
+        task_id: str,
+        *,
+        status: str | None = None,
+        content: str | None = None,
+        priority: str | None = None,
+    ) -> bool:
+        """Update a task. Returns False if not found or wrong session."""
+        updates: list[str] = []
+        params: list[str] = []
+        if status is not None:
+            if status not in self._VALID_TASK_STATUSES:
+                msg = f"Invalid status {status!r}, must be one of {self._VALID_TASK_STATUSES}"
+                raise ValueError(msg)
+            updates.append("status = ?")
+            params.append(status)
+        if content is not None:
+            if len(content) > self._MAX_TASK_CONTENT_LENGTH:
+                content = content[: self._MAX_TASK_CONTENT_LENGTH]
+            updates.append("content = ?")
+            params.append(content)
+        if priority is not None:
+            if priority not in self._VALID_TASK_PRIORITIES:
+                msg = f"Invalid priority {priority!r}, must be one of {self._VALID_TASK_PRIORITIES}"
+                raise ValueError(msg)
+            updates.append("priority = ?")
+            params.append(priority)
+        if not updates:
+            return True  # Nothing to update
+        updates.append("updated_at = ?")
+        params.append(datetime.now(UTC).isoformat())
+        params.extend([task_id, session_id])
+        db = self._check_connected()
+        sql = f"UPDATE session_tasks SET {', '.join(updates)} WHERE id = ? AND session_id = ?"
+        cursor = await db.execute(sql, params)
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def list_tasks(
+        self, session_id: str, *, status: str | None = None
+    ) -> list[dict[str, Any]]:
+        """List tasks for a session, optionally filtered by status."""
+        db = self._check_connected()
+        sql = (
+            "SELECT id, content, status, priority, created_at, updated_at "
+            "FROM session_tasks WHERE session_id = ?"
+        )
+        params: list[str] = [session_id]
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        sql += " ORDER BY created_at"
+        async with db.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "content": r[1],
+                "status": r[2],
+                "priority": r[3],
+                "created_at": r[4],
+                "updated_at": r[5],
+            }
+            for r in rows
+        ]
+
+    async def get_tasks_for_sessions(
+        self,
+        session_ids: list[str],
+        authenticated_user_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Cross-session task query for PM visibility. Scoped by user and optionally project."""
+        if not session_ids:
+            return {}
+        db = self._check_connected()
+        placeholders = ",".join("?" * len(session_ids))
+        sql = (
+            "SELECT t.session_id, t.id, t.content, t.status, "
+            "t.priority, t.created_at, t.updated_at "
+            f"FROM session_tasks t JOIN sessions s ON t.session_id = s.session_id "
+            f"WHERE t.session_id IN ({placeholders}) AND s.authenticated_user_id = ?"
+        )
+        params: list[str] = [*session_ids, authenticated_user_id]
+        if project_id is not None:
+            sql += " AND s.project_id = ?"
+            params.append(project_id)
+        sql += " ORDER BY t.created_at"
+        async with db.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+        result: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            sid = r[0]
+            task = {
+                "id": r[1],
+                "content": r[2],
+                "status": r[3],
+                "priority": r[4],
+                "created_at": r[5],
+                "updated_at": r[6],
+            }
+            result.setdefault(sid, []).append(task)
+        return result
 
     # --- Project methods ---
 
