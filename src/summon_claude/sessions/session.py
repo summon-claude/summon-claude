@@ -507,6 +507,36 @@ def build_pm_system_prompt(
     }
 
 
+def _is_quiet_hours(quiet_hours_str: str) -> bool:
+    """Check if the current local time falls within quiet hours.
+
+    Args:
+        quiet_hours_str: Format ``HH:MM-HH:MM`` (e.g. ``"22:00-07:00"``).
+            Wraps around midnight if start > end.
+
+    Returns:
+        True if current time is within quiet hours.
+    """
+    if not quiet_hours_str or "-" not in quiet_hours_str:
+        return False
+    try:
+        start_str, end_str = quiet_hours_str.split("-", 1)
+        start_h, start_m = int(start_str.split(":")[0]), int(start_str.split(":")[1])
+        end_h, end_m = int(end_str.split(":")[0]), int(end_str.split(":")[1])
+    except (ValueError, IndexError):
+        return False
+
+    now = datetime.now()  # noqa: DTZ005 — quiet hours use system local time
+    current_minutes = now.hour * 60 + now.minute
+    start_minutes = start_h * 60 + start_m
+    end_minutes = end_h * 60 + end_m
+
+    if start_minutes <= end_minutes:
+        return start_minutes <= current_minutes < end_minutes
+    # Wraps around midnight (e.g. 22:00-07:00)
+    return current_minutes >= start_minutes or current_minutes < end_minutes
+
+
 def _build_google_workspace_mcp(services: str) -> dict:
     """Build MCP server config for Google Workspace (workspace-mcp).
 
@@ -597,6 +627,64 @@ _SCRIBE_SYSTEM_PROMPT_APPEND = (
     "- When asked, synthesize the past week's daily summaries into a week-in-review\n"
     "- Highlight patterns: busiest days, most active sources, recurring action items\n"
     "- Include outstanding action items that haven't been resolved\n"
+    "\n"
+    "Alert formatting:\n"
+    "- Level 5 (urgent):\n"
+    "  :rotating_light: **URGENT** | {{source}}: {{summary}}\n"
+    "  > {{detail}}\n"
+    "  @{user_mention}\n"
+    "\n"
+    "- Level 4 (important):\n"
+    "  :warning: **{{source}}**: {{summary}}\n"
+    "  > {{detail}}\n"
+    "\n"
+    "- Level 3 (normal):\n"
+    "  {{source}}: {{summary}}\n"
+    "\n"
+    "- Level 1-2 (low/noise):\n"
+    "  _Low priority ({{count}} items):_ {{one-line summary of all}}\n"
+    "\n"
+    "Example scan output:\n"
+    ":rotating_light: **URGENT** | Gmail: VP requesting architecture review by EOD\n"
+    '> From: jane.smith@company.com | Subject: "Need arch review ASAP"\n'
+    "> Received 3 minutes ago, flagged as urgent\n"
+    "@{user_mention}\n"
+    "\n"
+    ":warning: **Calendar**: Standup in 25 minutes (10:00 AM)\n"
+    "> #team-standup | Required | No agenda posted yet\n"
+    "\n"
+    "Gmail: Weekly newsletter from Platform team\n"
+    "_Low priority (3 items):_ 2 marketing emails, 1 JIRA digest\n"
+    "\n"
+    "Daily summary format:\n"
+    "**Daily Recap — {{date}}**\n"
+    "\n"
+    "**Email:** {{count}} received, {{important_count}} flagged important\n"
+    "- Key: {{1-3 most important emails, one line each}}\n"
+    "\n"
+    "**Calendar:** {{count}} events today\n"
+    "- Notable: {{1-2 notable meetings or changes}}\n"
+    "\n"
+    "**Drive:** {{count}} documents modified/shared\n"
+    "- Key: {{1-2 most relevant docs}}\n"
+    "\n"
+    "**Slack:** {{count}} messages captured, {{dm_count}} DMs, {{mention_count}} mentions\n"
+    "- Highlights: {{1-2 important conversations or decisions}}\n"
+    "\n"
+    "**Notes & Action Items:**\n"
+    "- {{list of notes taken today, action items with status}}\n"
+    "\n"
+    "**Agent Work** (from Global PM):\n"
+    "- {{1-2 line summary of what agents accomplished today}}\n"
+    "\n"
+    "**Alerts:** {{total_flagged}} items flagged as important today\n"
+    "\n"
+    "_Scribe monitored {{total_scans}} scan cycles today._\n"
+    "\n"
+    "Generate the daily summary when:\n"
+    "- Activity has been quiet for 3+ consecutive scans\n"
+    "- User explicitly asks for a summary\n"
+    "- Quiet hours begin (if configured)\n"
     "\n"
     "Importance keywords (always flag as 4+): {importance_keywords}\n"
     "\n"
@@ -2027,6 +2115,10 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post workflow warning to Slack")
 
+        # [SEC-008] Session-unique prefix for scribe scan trigger — prevents
+        # external content from spoofing the scan trigger system messages.
+        _scribe_scan_nonce = secrets.token_hex(8) if is_scribe else ""
+
         while True:
             # Snapshot agent cron jobs before clearing, compute recovery prompt
             _lost_cron_jobs = [
@@ -2062,6 +2154,34 @@ class SummonSession:
                     internal=True,
                     max_lifetime_s=0,
                 )
+            if is_scribe:
+                interval_min = max(1, self._scan_interval_s // 60)
+                if interval_min <= 59:
+                    scan_cron = f"*/{interval_min} * * * *"
+                else:
+                    scan_cron = f"0 */{max(1, interval_min // 60)} * * *"
+                # Build contextual scan trigger with time info and quiet hours
+                now = datetime.now()  # noqa: DTZ005 — local time for user context
+                quiet_note = ""
+                if _is_quiet_hours(self._config.scribe_quiet_hours):
+                    quiet_note = (
+                        "\n[QUIET HOURS] Only report items rated 5 (urgent). "
+                        "Batch everything else for morning."
+                    )
+                scribe_scan_prompt = (
+                    f"[SUMMON-INTERNAL-{_scribe_scan_nonce}] "
+                    f"Periodic scan — {now.strftime('%A')} {now.strftime('%H:%M')}. "
+                    "Query all configured data sources for new items since your last scan. "
+                    "Check calendar for events in the next 60 minutes. "
+                    "Triage all items by importance and post alerts to your channel."
+                    f"{quiet_note}"
+                )
+                await scheduler.create(
+                    cron_expr=scan_cron,
+                    prompt=scribe_scan_prompt,
+                    internal=True,
+                    max_lifetime_s=0,
+                )
             if is_pm:
                 system_prompt = build_pm_system_prompt(
                     cwd=self._cwd,
@@ -2076,6 +2196,23 @@ class SummonSession:
                     compaction_delta = system_prompt_append[len(base_prompt) :]
                     if compaction_delta:
                         system_prompt["append"] += compaction_delta
+                if _cron_recovery:
+                    system_prompt["append"] += _cron_recovery
+                if self._system_prompt_append:
+                    system_prompt["append"] += "\n\n" + self._system_prompt_append
+            elif is_scribe:
+                user_mention = (
+                    f"<@{self._authenticated_user_id}>"
+                    if self._authenticated_user_id
+                    else "the user"
+                )
+                system_prompt = build_scribe_system_prompt(
+                    scan_interval=max(1, self._scan_interval_s // 60),
+                    user_mention=user_mention,
+                    importance_keywords=self._config.scribe_importance_keywords,
+                    google_enabled=bool(self._config.scribe_google_services),
+                    slack_enabled=self._config.scribe_slack_enabled,
+                )
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery
                 if self._system_prompt_append:
@@ -2528,8 +2665,8 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post context warning", exc_info=True)
 
-        # Only update topic if model or branch changed (PM manages its own topic)
-        if not self._pm_profile:
+        # Only update topic if model or branch changed (PM and scribe manage their own topics)
+        if not self._pm_profile and not self._scribe_profile:
             try:
                 current_model = self._last_model_seen or self._model
                 git_branch = await _get_git_branch(self._cwd)

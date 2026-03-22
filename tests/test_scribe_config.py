@@ -349,8 +349,8 @@ class TestScribeSystemPrompt:
             google_enabled=False,
             slack_enabled=True,  # need at least one data source
         )
-        assert "Gmail" not in prompt["append"]
-        assert "Google Calendar" not in prompt["append"]
+        assert "check for new/unread emails using gmail tools" not in prompt["append"]
+        assert "check for upcoming events, changed events" not in prompt["append"]
 
     def test_prompt_includes_google_section_when_enabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
