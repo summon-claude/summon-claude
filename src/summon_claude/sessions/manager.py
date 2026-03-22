@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import importlib.util
 import logging
 import os
 import pathlib
@@ -30,6 +31,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 # recv_msg/send_msg imported lazily in handle_client to avoid circular import
 # (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
+from summon_claude.config import get_data_dir
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -852,6 +854,10 @@ class SessionManager:
                         e,
                     )
 
+            # Start scribe if enabled and not already running
+            self._start_scribe_if_enabled(user_id)
+
+
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
@@ -1033,6 +1039,61 @@ class SessionManager:
             new_session_id,
             project["name"],
         )
+
+    def _start_scribe_if_enabled(self, user_id: str) -> None:
+        """Spawn the global Scribe session if configured and not already running."""
+        if not self._config.scribe_enabled:
+            return
+
+        # Check for already-running scribe
+        for sess in self._sessions.values():
+            if sess.is_scribe:
+                logger.info("SessionManager: scribe already running — skipping")
+                return
+
+        # Pre-flight: validate Google Workspace dependency if enabled
+        if (
+            self._config.scribe_google_services
+            and importlib.util.find_spec("workspace_mcp") is None
+        ):
+            logger.error("Scribe requires Google support: pip install summon-claude[google]")
+            return
+
+        # Resolve CWD
+        scribe_cwd = self._config.scribe_cwd or str(get_data_dir() / "scribe")
+        pathlib.Path(scribe_cwd).mkdir(parents=True, exist_ok=True)
+
+        new_session_id = str(uuid.uuid4())
+        scribe_options = SessionOptions(
+            cwd=scribe_cwd,
+            name="scribe",
+            model=self._config.scribe_model,
+            scribe_profile=True,
+            scan_interval_s=max(60, self._config.scribe_scan_interval_minutes * 60),
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=scribe_options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
+        )
+        new_session.authenticate(user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-scribe-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info("SessionManager: started scribe session %s", new_session_id)
 
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""

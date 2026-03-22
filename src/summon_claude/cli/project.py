@@ -209,6 +209,22 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     target_project_ids = [p["project_id"] for p in projects]
     await _run_project_hooks("project_down", project_ids=target_project_ids)
 
+    # Stop global scribe if running (no project_id, name="scribe")
+    if not name:  # only on "stop all"
+        async with SessionRegistry() as registry:
+            all_active = await registry.list_active()
+            for sess in all_active:
+                sname = sess.get("session_name", "")
+                if sname == "scribe" and sess.get("project_id") is None:
+                    sid = sess["session_id"]
+                    try:
+                        found = await daemon_client.stop_session(sid)
+                        if found:
+                            suspended.append(sid)
+                            click.echo(f"  Stopped scribe ({sid[:8]}...)")
+                    except Exception as e:
+                        click.echo(f"  Failed to stop scribe: {e}", err=True)
+
     return suspended
 
 
