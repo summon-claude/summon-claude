@@ -1174,8 +1174,7 @@ class SummonSession:
                     if self._channel_id and self._web_client:
                         try:
                             tmp_client = SlackClient(self._web_client, self._channel_id)
-                            async with SessionRegistry() as _reg:
-                                await self._rename_channel_disconnected(tmp_client, _reg)
+                            await self._rename_channel_disconnected(tmp_client, registry)
                         except Exception as e:
                             logger.debug("zzz-rename in finally failed: %s", e)
 
