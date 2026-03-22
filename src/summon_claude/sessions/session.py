@@ -1177,7 +1177,7 @@ class SummonSession:
                             async with SessionRegistry() as _reg:
                                 await self._rename_channel_disconnected(tmp_client, _reg)
                         except Exception as e:
-                            logger.debug("zzz- rename in finally failed: %s", e)
+                            logger.debug("zzz-rename in finally failed: %s", e)
 
     async def _wait_for_auth(self) -> AuthResult:
         """Wait until auth is confirmed, timed out, or shutdown is requested.

@@ -620,7 +620,7 @@ class SessionManager:
             return {"type": "error", "message": str(e)}
 
         channel_id: str = resume_params["channel_id"]
-        claude_sid: str = resume_params["claude_session_id"]
+        claude_sid: str | None = resume_params["claude_session_id"]
 
         # Atomic guard: reject if channel already resuming or has active session
         self._check_channel_available(channel_id)
