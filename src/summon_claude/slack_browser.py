@@ -112,7 +112,7 @@ class SlackBrowserMonitor:
         if channel:
             launch_kwargs["channel"] = channel
 
-        self._browser = await browser_launcher.launch(headless=False, **launch_kwargs)
+        self._browser = await browser_launcher.launch(headless=True, **launch_kwargs)
 
         context_kwargs: dict = {}
         if self._state_file.is_file():
