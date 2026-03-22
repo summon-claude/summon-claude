@@ -1883,9 +1883,9 @@ class SummonSession:
             all_messages: list[str] = []
             total_remaining = 0
             for monitor in monitors:
-                messages = await monitor.drain()
-                total_remaining += max(0, len(messages) - max_per_drain)
-                for msg in messages[:max_per_drain]:
+                messages = await monitor.drain(limit=max_per_drain)
+                total_remaining += monitor._queue.qsize()  # noqa: SLF001
+                for msg in messages:
                     text = msg.text[:max_text_len]
                     if len(msg.text) > max_text_len:
                         text += " [truncated]"

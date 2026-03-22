@@ -91,7 +91,7 @@ class SlackBrowserMonitor:
         self._queue: asyncio.Queue[SlackMessage] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._playwright = None  # type: ignore[assignment]
-        self._browser = None  # type: ignore[assignment]
+        self._context = None  # type: ignore[assignment]
         self._page = None  # type: ignore[assignment]
 
     # ------------------------------------------------------------------
@@ -120,13 +120,13 @@ class SlackBrowserMonitor:
         if channel:
             launch_kwargs["channel"] = channel
 
-        context = await browser_launcher.launch_persistent_context(
+        self._context = await browser_launcher.launch_persistent_context(
             user_data_dir=str(self._state_file.parent / f"userdata_{self._workspace_id}"),
             headless=True,
             **launch_kwargs,
         )
 
-        self._page = await context.new_page()
+        self._page = await self._context.new_page()
         self._page.on("websocket", self._on_websocket)
 
         await self._page.goto(self._workspace_url)
@@ -195,10 +195,14 @@ class SlackBrowserMonitor:
                 # Loop was closed between the check and the call
                 pass
 
-    async def drain(self) -> list[SlackMessage]:
-        """Drain all currently queued messages and return them."""
+    async def drain(self, limit: int = 0) -> list[SlackMessage]:
+        """Drain queued messages and return them.
+
+        Args:
+            limit: Maximum number of messages to drain. 0 means drain all.
+        """
         messages: list[SlackMessage] = []
-        while True:
+        while limit == 0 or len(messages) < limit:
             try:
                 messages.append(self._queue.get_nowait())
             except asyncio.QueueEmpty:
@@ -220,9 +224,9 @@ class SlackBrowserMonitor:
 
     async def stop(self) -> None:
         """Save auth state and close the browser."""
-        if self._page is not None:
+        if self._context is not None:
             try:
-                await self._page.context.storage_state(path=str(self._state_file))
+                await self._context.storage_state(path=str(self._state_file))
                 # [SEC-005] Ensure saved state file has restricted permissions
                 self._state_file.chmod(0o600)
                 logger.info(
@@ -236,7 +240,7 @@ class SlackBrowserMonitor:
                 )
 
             with contextlib.suppress(Exception):
-                await self._page.context.close()
+                await self._context.close()
 
         if self._playwright is not None:
             with contextlib.suppress(Exception):
