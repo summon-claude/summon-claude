@@ -2263,21 +2263,22 @@ class SummonSession:
                     scan_cron = f"*/{interval_min} * * * *"
                 else:
                     scan_cron = f"0 */{max(1, interval_min // 60)} * * *"
-                # Build contextual scan trigger with time info and quiet hours
-                now = datetime.now()  # noqa: DTZ005 — local time for user context
-                quiet_note = ""
-                if _is_quiet_hours(self._config.scribe_quiet_hours):
-                    quiet_note = (
-                        "\n[QUIET HOURS] Only report items rated 5 (urgent). "
-                        "Batch everything else for morning."
+                # Scan prompt is static — quiet hours are evaluated by the agent
+                # at fire time based on the system prompt instructions, not baked
+                # into the cron prompt (which is created once at session start).
+                quiet_config = ""
+                if self._config.scribe_quiet_hours:
+                    quiet_config = (
+                        f" Quiet hours: {self._config.scribe_quiet_hours}."
+                        " If current time is within quiet hours, only report level 5."
                     )
                 scribe_scan_prompt = (
                     f"[SUMMON-INTERNAL-{_scribe_scan_nonce}] "
-                    f"Periodic scan — {now.strftime('%A')} {now.strftime('%H:%M')}. "
+                    "Periodic scan. Check current time. "
                     "Query all configured data sources for new items since your last scan. "
                     "Check calendar for events in the next 60 minutes. "
                     "Triage all items by importance and post alerts to your channel."
-                    f"{quiet_note}"
+                    f"{quiet_config}"
                 )
                 await scheduler.create(
                     cron_expr=scan_cron,

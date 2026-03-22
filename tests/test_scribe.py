@@ -309,20 +309,12 @@ class TestScribeImportanceKeywordsInPrompt:
 
 
 class TestScribePromptQuietHoursContext:
-    def test_scribe_scan_uses_is_quiet_hours(self):
-        """_is_quiet_hours is called during scribe scan timer setup."""
+    def test_scribe_scan_includes_quiet_hours_config(self):
+        """Quiet hours config is included in scan prompt for dynamic evaluation."""
         import inspect
 
         from summon_claude.sessions import session as session_mod
 
         source = inspect.getsource(session_mod.SummonSession._run_session_tasks)
-        assert "_is_quiet_hours" in source
-
-    def test_scribe_scan_quiet_note_injected(self):
-        """QUIET HOURS note is injected into scan prompt when in quiet hours."""
-        import inspect
-
-        from summon_claude.sessions import session as session_mod
-
-        source = inspect.getsource(session_mod.SummonSession._run_session_tasks)
-        assert "QUIET HOURS" in source
+        assert "quiet_hours" in source.lower()
+        assert "only report level 5" in source.lower() or "quiet hours" in source.lower()

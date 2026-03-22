@@ -82,6 +82,7 @@ class SlackBrowserMonitor:
         self._queue: asyncio.Queue[SlackMessage] = asyncio.Queue(maxsize=_QUEUE_MAX)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._playwright = None  # type: ignore[assignment]
+        self._browser = None  # type: ignore[assignment]
         self._context = None  # type: ignore[assignment]
         self._page = None  # type: ignore[assignment]
 
@@ -111,12 +112,13 @@ class SlackBrowserMonitor:
         if channel:
             launch_kwargs["channel"] = channel
 
-        self._context = await browser_launcher.launch_persistent_context(
-            user_data_dir=str(self._state_file.parent / f"userdata_{self._workspace_id}"),
-            headless=True,
-            **launch_kwargs,
-        )
+        self._browser = await browser_launcher.launch(headless=False, **launch_kwargs)
 
+        context_kwargs: dict = {}
+        if self._state_file.is_file():
+            context_kwargs["storage_state"] = str(self._state_file)
+
+        self._context = await self._browser.new_context(**context_kwargs)
         self._page = await self._context.new_page()
         self._page.on("websocket", self._on_websocket)
 
@@ -232,6 +234,10 @@ class SlackBrowserMonitor:
 
             with contextlib.suppress(Exception):
                 await self._context.close()
+
+        if self._browser is not None:
+            with contextlib.suppress(Exception):
+                await self._browser.close()
 
         if self._playwright is not None:
             with contextlib.suppress(Exception):
