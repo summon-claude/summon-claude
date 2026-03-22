@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from summon_claude.slack.client import (
+    ZZZ_PREFIX,
     MessageRef,
     SlackClient,
     redact_secrets,
@@ -435,3 +436,61 @@ class TestRedactSecrets:
         await client.set_topic("Topic with ghp_topictoken789")
         call_kwargs = web.conversations_setTopic.call_args.kwargs
         assert "ghp_topictoken789" not in call_kwargs["topic"]
+
+
+# ---------------------------------------------------------------------------
+# zzz- rename: ZZZ_PREFIX constant + SlackClient.rename_channel
+# ---------------------------------------------------------------------------
+
+
+class TestZzzPrefix:
+    def test_zzz_prefix_value(self):
+        """ZZZ_PREFIX module constant must be exactly 'zzz-'."""
+        assert ZZZ_PREFIX == "zzz-"
+
+
+class TestZzzRenameChannel:
+    def _make_client(self, channel_id: str = "C123") -> tuple[SlackClient, MagicMock]:
+        web = MagicMock()
+        web.conversations_rename = AsyncMock(
+            return_value={"channel": {"name": "zzz-chan", "id": channel_id}}
+        )
+        return SlackClient(web, channel_id), web
+
+    async def test_zzz_rename_channel_success_returns_name(self):
+        """rename_channel returns normalized name from Slack on success."""
+        web = MagicMock()
+        web.conversations_rename = AsyncMock(
+            return_value={"channel": {"name": "zzz-myproj", "id": "C123"}}
+        )
+        client = SlackClient(web, "C123")
+        result = await client.rename_channel("zzz-myproj")
+        assert result == "zzz-myproj"
+        web.conversations_rename.assert_awaited_once_with(channel="C123", name="zzz-myproj")
+
+    async def test_zzz_rename_channel_name_taken_returns_none(self):
+        """rename_channel returns None when Slack raises name_taken (logs warning)."""
+        web = MagicMock()
+        web.conversations_rename = AsyncMock(side_effect=Exception("name_taken"))
+        client = SlackClient(web, "C123")
+        result = await client.rename_channel("zzz-taken")
+        assert result is None
+
+    async def test_zzz_rename_channel_generic_error_returns_none(self):
+        """rename_channel returns None on any exception (logs warning, never raises)."""
+        web = MagicMock()
+        web.conversations_rename = AsyncMock(side_effect=RuntimeError("unexpected"))
+        client = SlackClient(web, "C456")
+        result = await client.rename_channel("zzz-whatever")
+        assert result is None
+
+    async def test_zzz_rename_channel_passes_channel_id(self):
+        """rename_channel uses the client's own channel_id, not a parameter."""
+        web = MagicMock()
+        web.conversations_rename = AsyncMock(
+            return_value={"channel": {"name": "zzz-x", "id": "C999"}}
+        )
+        client = SlackClient(web, "C999")
+        await client.rename_channel("zzz-x")
+        call_kwargs = web.conversations_rename.call_args.kwargs
+        assert call_kwargs["channel"] == "C999"

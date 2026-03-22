@@ -76,7 +76,7 @@ from summon_claude.sessions.scheduler import SessionScheduler, explain_cron, san
 from summon_claude.sessions.types import FileChange
 from summon_claude.slack.canvas_store import CanvasStore
 from summon_claude.slack.canvas_templates import get_canvas_template
-from summon_claude.slack.client import SlackClient, redact_secrets
+from summon_claude.slack.client import ZZZ_PREFIX, SlackClient, redact_secrets
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
@@ -1170,6 +1170,15 @@ class SummonSession:
                         except Exception as e:
                             logger.debug("Failed to post parent failure notification: %s", e)
 
+                    # Rename channel with zzz- prefix on unexpected termination
+                    if self._channel_id and self._web_client:
+                        try:
+                            tmp_client = SlackClient(self._web_client, self._channel_id)
+                            async with SessionRegistry() as _reg:
+                                await self._rename_channel_disconnected(tmp_client, _reg)
+                        except Exception as e:
+                            logger.debug("zzz- rename in finally failed: %s", e)
+
     async def _wait_for_auth(self) -> AuthResult:
         """Wait until auth is confirmed, timed out, or shutdown is requested.
 
@@ -1572,23 +1581,29 @@ class SummonSession:
             return await self._create_channel(web_client)
 
         if info["channel"].get("is_archived"):  # type: ignore[index]
-            return await self._handle_archived_channel(web_client, registry, channel_id, info)
-
-        channel_name: str = info["channel"]["name"]  # type: ignore[index]
-
-        # Best-effort rejoin — works for public channels where bot was removed.
-        # Private channels always raise method_not_supported_for_channel_type
-        # (bot is already a member since it created the channel).
-        try:
-            await web_client.conversations_join(channel=channel_id)
-        except Exception as e:
-            logger.debug(
-                "conversations_join for %s: %s (expected for private channels)",
-                channel_id,
-                e,
+            channel_id, channel_name = await self._handle_archived_channel(
+                web_client, registry, channel_id, info
             )
+        else:
+            channel_name = info["channel"]["name"]  # type: ignore[index]
 
-        logger.info("Resuming in existing channel #%s (%s)", channel_name, channel_id)
+            # Best-effort rejoin — works for public channels where bot was removed.
+            # Private channels always raise method_not_supported_for_channel_type
+            # (bot is already a member since it created the channel).
+            try:
+                await web_client.conversations_join(channel=channel_id)
+            except Exception as e:
+                logger.debug(
+                    "conversations_join for %s: %s (expected for private channels)",
+                    channel_id,
+                    e,
+                )
+
+            logger.info("Resuming in existing channel #%s (%s)", channel_name, channel_id)
+
+        channel_name = await self._restore_channel_name(
+            web_client, registry, channel_id, channel_name
+        )
         return channel_id, channel_name
 
     async def _get_or_create_pm_channel(  # noqa: PLR0912
@@ -1616,6 +1631,9 @@ class SummonSession:
                 # Fetch name for the return value
                 resp = await web_client.conversations_info(channel=existing_channel_id)
                 channel_name: str = resp["channel"]["name"]  # type: ignore[index]
+                channel_name = await self._restore_channel_name(
+                    web_client, registry, existing_channel_id, channel_name
+                )
                 logger.info("PM: reusing existing channel #%s", channel_name)
                 return existing_channel_id, channel_name
             except Exception as e:
@@ -2486,6 +2504,12 @@ class SummonSession:
         # Post disconnect message (channel is preserved, not archived)
         await self._post_disconnect_message(rt)
 
+        # Rename channel with zzz- prefix to signal session is inactive
+        try:
+            await self._rename_channel_disconnected(rt.client, rt.registry)
+        except Exception as e:
+            logger.debug("zzz-rename in _shutdown failed: %s", e)
+
         # Update registry — don't overwrite "suspended" (set by project down)
         try:
             current = await rt.registry.get_session(self._session_id)
@@ -2518,7 +2542,7 @@ class SummonSession:
         text = (
             ":wave: *Claude session ended*\n"
             f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
-            "Channel preserved — you can review the conversation history."
+            "Channel renamed with `zzz-` prefix — review the conversation history anytime."
         )
 
         blocks = [
@@ -2535,6 +2559,96 @@ class SummonSession:
             )
         except Exception as e:
             logger.warning("Failed to post disconnect message: %s", redact_secrets(str(e)))
+
+    async def _rename_channel_disconnected(
+        self, client: SlackClient, registry: SessionRegistry
+    ) -> None:
+        """Rename the session channel with a zzz- prefix on disconnect (idempotent).
+
+        Reads the canonical name from the channels table (not Slack API) to avoid
+        renaming an already-prefixed name. Truncates to Slack's 80-char limit.
+        On failure, posts a warning to the channel.
+        """
+        try:
+
+            async def _do_rename() -> None:
+                # Prefer channels table (canonical name), fall back to sessions table
+                channel_name: str | None = None
+                if self._channel_id:
+                    channel = await registry.get_channel(self._channel_id)
+                    if channel:
+                        channel_name = channel.get("channel_name")
+                if not channel_name:
+                    session = await registry.get_session(self._session_id)
+                    if session:
+                        channel_name = session.get("slack_channel_name")
+                if not channel_name:
+                    logger.debug("zzz-rename: no channel name found for %s", self._session_id[:8])
+                    return
+                if channel_name.startswith(ZZZ_PREFIX):
+                    logger.debug("zzz-rename: channel already prefixed (%s)", channel_name)
+                    return
+                max_len = 80
+                new_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                result = await client.rename_channel(new_name)
+                if result is None:
+                    try:
+                        await client.post(
+                            f":warning: Could not rename channel to `{new_name}` — "
+                            "rename it manually to archive."
+                        )
+                    except Exception as exc:
+                        logger.debug("zzz-rename warning post failed: %s", exc)
+
+            await asyncio.wait_for(_do_rename(), timeout=_CLEANUP_TIMEOUT_S)
+        except Exception as e:
+            logger.debug("zzz-rename in _rename_channel_disconnected failed: %s", e)
+
+    async def _restore_channel_name(
+        self,
+        web_client: AsyncWebClient,
+        registry: SessionRegistry,
+        channel_id: str,
+        current_name: str,
+    ) -> str:
+        """Remove zzz- prefix from a channel name on resume (un-zzz).
+
+        Uses raw AsyncWebClient (SlackClient not constructed yet at call time).
+        Looks up the canonical name in the channels table. Falls back to stripping
+        the prefix. Returns the restored name on success, or current_name on failure.
+        """
+        if not current_name.startswith(ZZZ_PREFIX):
+            return current_name
+
+        # Try channels table for canonical (pre-zzz) name
+        restore_name: str | None = None
+        try:
+            channel = await registry.get_channel(channel_id)
+            if channel:
+                canonical = channel.get("channel_name", "")
+                if canonical and not canonical.startswith(ZZZ_PREFIX):
+                    restore_name = canonical
+        except Exception as e:
+            logger.debug("zzz-restore: channels table lookup failed: %s", e)
+
+        if not restore_name:
+            # Fall back to stripping the prefix
+            restore_name = current_name[len(ZZZ_PREFIX) :]
+
+        if not restore_name:
+            logger.debug("zzz-restore: stripped name is empty, leaving channel as %s", current_name)
+            return current_name
+
+        try:
+            resp = await web_client.conversations_rename(channel=channel_id, name=restore_name)
+            restored = resp["channel"]["name"]
+            logger.info("zzz-restore: renamed #%s → #%s", current_name, restored)
+            return restored
+        except Exception as e:
+            logger.warning(
+                "zzz-restore: failed to rename #%s → #%s: %s", current_name, restore_name, e
+            )
+            return current_name
 
     async def _on_file_change(self, change: FileChange) -> None:
         """Callback from ResponseStreamer when a file is changed."""

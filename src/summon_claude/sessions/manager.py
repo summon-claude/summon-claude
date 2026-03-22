@@ -648,10 +648,18 @@ class SessionManager:
         finally:
             self._resuming_channels.discard(channel_id)
 
-    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
+    async def _validate_resume_target(
+        self, old_session_id: str, *, allow_suspended: bool = False
+    ) -> dict[str, Any]:
         """Validate and extract resume parameters from an old session.
 
         Returns a dict with resume params on success.
+
+        Args:
+            old_session_id: The session to resume from.
+            allow_suspended: When True, suspended sessions pass validation
+                (used by project up cascade restart). When False (default),
+                suspended sessions raise ValueError.
 
         Raises:
             ValueError: On validation failure (session not found, wrong status, etc.).
@@ -661,9 +669,9 @@ class SessionManager:
             if not old_session:
                 raise ValueError(f"Session {old_session_id} not found")
             status = old_session["status"]
-            if status == "suspended":
+            if status == "suspended" and not allow_suspended:
                 raise ValueError("Session is suspended — use project up to restart it")
-            if status not in ("completed", "errored"):
+            if status not in ("completed", "errored", "suspended"):
                 raise ValueError(f"Session is {status} — use session_message instead")
             channel_id = old_session.get("slack_channel_id")
             if not channel_id:
@@ -675,8 +683,7 @@ class SessionManager:
                 if channel and channel.get("claude_session_id")
                 else old_session.get("claude_session_id")
             )
-            if not claude_session_id:
-                raise ValueError("No Claude session ID to resume from")
+            # Missing claude_session_id is allowed — caller falls back to channel-reuse-only
 
             return {
                 "channel_id": channel_id,
@@ -819,7 +826,7 @@ class SessionManager:
         auth_session: SummonSession,
         needing_pm: list[dict[str, Any]],
     ) -> None:
-        """Background task: wait for auth, then create PM + restart suspended sessions."""
+        """Background task: wait for auth, then resume suspended sessions + start fresh PMs."""
         try:
             async with asyncio.timeout(360):
                 await auth_session._authenticated_event.wait()  # noqa: SLF001
@@ -827,7 +834,14 @@ class SessionManager:
             if user_id is None:
                 raise RuntimeError("Auth session completed without setting user_id")
 
+            # Resume suspended sessions first (including PMs suspended by project down).
+            # Returns the set of project_ids that got a suspended PM resumed.
+            pm_resumed = await self._restart_suspended_sessions(needing_pm, user_id)
+
+            # Only start fresh PMs for projects that did NOT have a suspended PM to resume.
             for project in needing_pm:
+                if project["project_id"] in pm_resumed:
+                    continue
                 try:
                     self._start_pm_for_project(project, user_id)
                 except Exception as e:
@@ -836,9 +850,6 @@ class SessionManager:
                         project.get("name", "?"),
                         e,
                     )
-
-            # Cascade restart: revive sessions suspended by project down
-            await self._restart_suspended_sessions(needing_pm, user_id)
 
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
@@ -853,41 +864,66 @@ class SessionManager:
         self,
         projects: list[dict[str, Any]],
         user_id: str,
-    ) -> None:
-        """Restart sessions that were suspended by ``project down``."""
+    ) -> set[str]:
+        """Resume sessions suspended by ``project down`` via create_resumed_session.
+
+        Returns a set of project_ids for which a suspended PM was successfully resumed.
+        Child sessions are also resumed (not restarted fresh).
+        """
+        pm_resumed: set[str] = set()
         async with SessionRegistry() as registry:
             for project in projects:
                 project_id = project["project_id"]
                 sessions = await registry.get_project_sessions(project_id)
                 suspended = [s for s in sessions if s.get("status") == "suspended"]
                 for sess in suspended:
+                    sess_id = sess["session_id"]
+                    sess_name = sess.get("session_name", "")
+                    is_pm = "-pm-" in sess_name
                     try:
-                        self._start_child_session(
-                            project=project,
-                            user_id=user_id,
-                            cwd=sess.get("cwd", project["directory"]),
-                            model=sess.get("model"),
+                        resume_params = await self._validate_resume_target(
+                            sess_id, allow_suspended=True
                         )
-                        # Mark old suspended session as completed
-                        await registry.update_status(sess["session_id"], "completed")
+                        claude_sid = resume_params["claude_session_id"]
+                        options = SessionOptions(
+                            cwd=resume_params["cwd"],
+                            name=sess_name or "",
+                            model=resume_params.get("model"),
+                            effort=resume_params.get("effort") or "high",
+                            resume=claude_sid,  # None → channel-reuse-only fallback
+                            channel_id=resume_params["channel_id"],
+                            project_id=project_id,
+                            pm_profile=is_pm,
+                        )
+                        await self.create_resumed_session(
+                            options,
+                            authenticated_user_id=user_id,
+                            parent_session_id=resume_params.get("parent_session_id"),
+                        )
+                        # Mark old suspended record as completed
+                        await registry.update_status(sess_id, "completed")
                         logger.info(
-                            "PM: restarted suspended session %s for project %s",
-                            sess["session_id"][:8],
+                            "PM: resumed suspended %s %s for project %s",
+                            "PM" if is_pm else "session",
+                            sess_id[:8],
                             project["name"],
                         )
+                        if is_pm:
+                            pm_resumed.add(project_id)
                     except Exception as e:
                         logger.error(
-                            "PM: failed to restart suspended session %s: %s",
-                            sess.get("session_id", "?")[:8],
+                            "PM: failed to resume suspended session %s: %s",
+                            sess_id[:8],
                             e,
                         )
                         # Mark as errored to prevent infinite retry on next project up
                         with contextlib.suppress(Exception):
                             await registry.update_status(
-                                sess["session_id"],
+                                sess_id,
                                 "errored",
-                                error_message=f"Restart failed: {e}",
+                                error_message=f"Resume failed: {e}",
                             )
+        return pm_resumed
 
     def _start_child_session(
         self,

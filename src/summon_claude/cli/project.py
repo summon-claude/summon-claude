@@ -8,12 +8,15 @@ import re
 from typing import Any
 
 import click
+from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.cli import daemon_client
+from summon_claude.config import SummonConfig
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.slack.client import ZZZ_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +160,8 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     stopped: list[str] = []
     suspended: list[str] = []
     projects: list[dict[str, Any]] = []
+    # Track child sessions eligible for zzz-rename: (channel_id, channel_name)
+    child_channels_to_rename: list[tuple[str, str]] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
         if not projects:
@@ -180,34 +185,57 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                     found = await daemon_client.stop_session(sid)
                     if not found:
                         continue
+                    # Mark both PM and child sessions as suspended for cascade restart
+                    await registry.update_status(sid, "suspended")
+                    suspended.append(sid)
                     if is_pm:
                         stopped.append(sid)
-                        click.echo(f"  Stopped PM for {pname!r} ({sid[:8]}...)")
+                        click.echo(f"  Suspended PM for {pname!r} ({sid[:8]}...)")
                     else:
-                        # Mark child session as suspended for cascade restart
-                        await registry.update_status(sid, "suspended")
-                        suspended.append(sid)
                         label = sname or sid[:8]
                         click.echo(f"  Suspended {label!r} for {pname!r}")
+                        # Collect child channel info for zzz-rename below
+                        channel_id = session.get("slack_channel_id")
+                        channel_name = session.get("slack_channel_name", "")
+                        if channel_id and channel_name and not channel_name.startswith(ZZZ_PREFIX):
+                            child_channels_to_rename.append((channel_id, channel_name))
                 except Exception as e:
                     click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
-    if not stopped and not suspended:
+    if not suspended:
         click.echo("No active project sessions found.")
     else:
+        n_pm = len(stopped)
+        n_child = len(suspended) - n_pm
         parts: list[str] = []
-        if stopped:
-            parts.append(f"{len(stopped)} PM")
-        if suspended:
-            parts.append(f"{len(suspended)} subsession{'s' if len(suspended) != 1 else ''}")
-        click.echo(f"Stopped {', '.join(parts)}.")
+        if n_pm:
+            parts.append(f"{n_pm} PM{'s' if n_pm != 1 else ''}")
+        if n_child:
+            parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
+        click.echo(f"Suspended {', '.join(parts)}.")
+
+    # Rename child session channels with zzz- prefix (PM channels are renamed daemon-side)
+    if child_channels_to_rename:
+        try:
+            config = SummonConfig.from_file(None)
+            web_client = AsyncWebClient(token=config.slack_bot_token)
+            for channel_id, channel_name in child_channels_to_rename:
+                max_len = 80
+                zzz_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                try:
+                    await web_client.conversations_rename(channel=channel_id, name=zzz_name)
+                    logger.info("zzz-rename: #%s → #%s", channel_name, zzz_name)
+                except Exception as e:
+                    logger.warning("zzz-rename: failed to rename #%s: %s", channel_name, e)
+        except Exception as e:
+            logger.debug("zzz-rename: could not init Slack client: %s", e)
 
     # Run project_down hooks for all projects in the filter (even those with no
     # active sessions — their services/environment still need teardown).
     target_project_ids = [p["project_id"] for p in projects]
     await _run_project_hooks("project_down", project_ids=target_project_ids)
 
-    return stopped + suspended
+    return suspended
 
 
 # ---------------------------------------------------------------------------

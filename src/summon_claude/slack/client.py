@@ -15,6 +15,8 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 logger = logging.getLogger(__name__)
 
+ZZZ_PREFIX = "zzz-"
+
 
 @dataclass(frozen=True, slots=True)
 class MessageRef:
@@ -187,6 +189,18 @@ class SlackClient:
         """Set the channel topic."""
         topic = redact_secrets(topic)
         await self._web.conversations_setTopic(channel=self.channel_id, topic=topic)
+
+    async def rename_channel(self, new_name: str) -> str | None:
+        """Rename the channel (best-effort).
+
+        Returns the normalized name from Slack on success, None on failure (logs warning).
+        """
+        try:
+            resp = await self._web.conversations_rename(channel=self.channel_id, name=new_name)
+            return resp["channel"]["name"]
+        except Exception as e:
+            logger.warning("rename_channel failed for %s → %s: %s", self.channel_id, new_name, e)
+            return None
 
     async def fetch_history(
         self,
