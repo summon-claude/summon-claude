@@ -492,6 +492,9 @@ class SessionManager:
                     spawn_token = msg["spawn_token"]
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid request: {e}"}
+                # Defense-in-depth: re-validate free-text fields at the daemon boundary
+                if options.system_prompt_append and len(options.system_prompt_append) > 10_000:
+                    return {"type": "error", "message": "system_prompt_append exceeds 10000 chars"}
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
                 except ValueError as e:

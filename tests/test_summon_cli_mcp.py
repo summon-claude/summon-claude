@@ -515,6 +515,21 @@ class TestSessionStart:
         assert "system_prompt" in schema["properties"]
         assert "system_prompt" not in schema.get("required", [])
 
+    def test_schema_system_prompt_max_length(self, tools):
+        """Guard test: maxLength matches _MAX_SYSTEM_PROMPT_CHARS constant."""
+        from summon_claude.summon_cli_mcp import _MAX_SYSTEM_PROMPT_CHARS
+
+        schema = tools["session_start"].input_schema
+        assert schema["properties"]["system_prompt"]["maxLength"] == _MAX_SYSTEM_PROMPT_CHARS
+
+    async def test_rejects_oversized_system_prompt(self, tools):
+        """system_prompt exceeding _MAX_SYSTEM_PROMPT_CHARS returns error."""
+        result = await tools["session_start"].handler(
+            {"name": "test-rv", "system_prompt": "x" * 10_001}
+        )
+        assert result["is_error"] is True
+        assert "exceeds" in result["content"][0]["text"]
+
     async def test_passes_system_prompt_to_options(self, populated_registry, tmp_path):
         """system_prompt arg flows through to SessionOptions.system_prompt_append."""
         from summon_claude.sessions.auth import SpawnAuth

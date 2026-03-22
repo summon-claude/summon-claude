@@ -295,8 +295,27 @@ _OVERFLOW_RECOVERY_PROMPT = (
 )
 
 
+_REVIEWER_SYSTEM_PROMPT_TEMPLATE = (
+    "Review PR #{number} on {owner}/{repo}. The branch is checked out "
+    "in this directory.\n\n"
+    "SAFETY RULES (never violate):\n"
+    "- Only push to the PR's head branch. NEVER push to main or master.\n"
+    "- NEVER force-push. Use regular `git push` only.\n"
+    "- Run the project's test suite before every push. Do not push if tests fail.\n"
+    "- Do not modify files outside the scope of this PR's changes unless directly "
+    "related to fixing an issue you found.\n\n"
+    "REVIEW PROCESS:\n"
+    "Thoroughly review all changes — check for bugs, security issues, logic errors, "
+    "and style problems. For each issue you find, fix it directly, commit with a "
+    "descriptive message, and push. Iterate until the PR is clean and tests pass. "
+    "When satisfied:\n"
+    "1. Apply the 'Ready for Review' label using GitHub MCP\n"
+    "2. Post a detailed summary of what you reviewed and fixed in this channel\n\n"
+    "Keep commit messages concise and focused on the change."
+)
+
 _PM_SYSTEM_PROMPT_APPEND = (
-    "You are a Project Manager (PM) agent running headlessly via summon-claude, "
+    "You are a Project Manager (PM) agent running headlessly via summon-claude, "  # noqa: S608
     "bridged to a private Slack channel. There is no terminal, no visible desktop. "
     "The user interacts through Slack messages. Use standard markdown formatting. "
     "Your output is auto-converted for Slack display.\n\n"
@@ -347,8 +366,8 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "(no `github_pat` configured).\n\n"
     "After each periodic scan, check for completed sub-sessions that may have "
     "produced pull requests:\n\n"
-    '1. Use `session_list` to find sessions with status "completed" since your '
-    "last scan.\n"
+    '1. Use `session_list` with `filter="mine"` to get all your child sessions, '
+    "then select those with status `completed` that you have not yet processed.\n"
     "2. For each completed session, read its Slack channel history "
     "(`slack_read_history`) looking for GitHub PR URLs (pattern: "
     "github.com/{owner}/{repo}/pull/{number}).\n"
@@ -376,25 +395,10 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "        - `cwd`: the completed session's CWD (branch is already checked out)\n"
     '        - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
     '        - `model`: "opus"\n'
-    "        - `system_prompt`: the review instructions below\n"
-    "      - Review instructions to pass via system_prompt:\n"
-    '        "Review PR #{number} on {owner}/{repo}. The branch is checked out '
-    "in this directory.\n\n"
-    "SAFETY RULES (never violate):\n"
-    "- Only push to the PR's head branch. NEVER push to main or master.\n"
-    "- NEVER force-push. Use regular `git push` only.\n"
-    "- Run the project's test suite before every push. Do not push if tests fail.\n"
-    "- Do not modify files outside the scope of this PR's changes unless directly "
-    "related to fixing an issue you found.\n\n"
-    "REVIEW PROCESS:\n"
-    "Thoroughly review all changes — check for bugs, security issues, logic errors, "
-    "and style problems. For each issue you find, fix it directly, commit with a "
-    "descriptive message, and push. Iterate until the PR is clean and tests pass. "
-    "When satisfied:\n"
-    "1. Apply the 'Ready for Review' label using GitHub MCP\n"
-    "2. Post a detailed summary of what you reviewed and fixed in this channel\n\n"
-    "Do not mention AI, automation, or automated review in any "
-    'commit messages."\n'
+    "        - `system_prompt`: the review instructions below (between "
+    "BEGIN/END markers), with {number}, {owner}, {repo} filled in\n"
+    "      --- BEGIN REVIEW TEMPLATE ---\n" + _REVIEWER_SYSTEM_PROMPT_TEMPLATE + "\n"
+    "      --- END REVIEW TEMPLATE ---\n"
     '   d. Note in your canvas: "PR #{number} — review spawned"\n'
     "5. When a reviewer session completes, read its channel for the summary. "
     'Update your canvas: "PR #{number} — reviewed"\n'
@@ -407,6 +411,8 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "name, base branch, status).\n"
     "3. If the PR is draft or closed, inform the user and do not spawn a review.\n"
     "4. Create a git worktree for the PR branch:\n"
+    "   - Validate: {number} must be a numeric integer; {head_branch} must match "
+    "[a-zA-Z0-9/_.-]. Reject values with shell metacharacters.\n"
     "   - Run: `git worktree add .worktrees/review-pr{number} {head_branch}`\n"
     "   - If the worktree already exists, skip creation.\n"
     "5. Spawn a reviewer session:\n"

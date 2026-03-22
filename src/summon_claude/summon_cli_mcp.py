@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
 _MAX_MESSAGE_CHARS = 10_000
+_MAX_SYSTEM_PROMPT_CHARS = 10_000
 
 _SENSITIVE_FIELDS = frozenset({"pid", "error_message", "authenticated_user_id"})
 _MAX_TASKS_PER_SESSION = 100
@@ -181,7 +182,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             "name: session name (required, lowercase alphanumeric + hyphens, max 20 chars). "
             "cwd: working directory (optional, defaults to calling session's cwd). "
             "model: model override (optional). "
-            "system_prompt: additional system prompt text appended to session (optional)."
+            "system_prompt: additional system prompt text appended to session, "
+            "max 10000 chars (optional)."
         ),
         {
             "type": "object",
@@ -204,6 +206,21 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                         "text": (
                             "Error: invalid name. Must be lowercase alphanumeric + hyphens, "
                             "1-20 chars, starting with alphanumeric."
+                        ),
+                    }
+                ],
+                "is_error": True,
+            }
+
+        system_prompt_val = args.get("system_prompt")
+        if system_prompt_val and len(system_prompt_val) > _MAX_SYSTEM_PROMPT_CHARS:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Error: system_prompt exceeds {_MAX_SYSTEM_PROMPT_CHARS} chars "
+                            f"({len(system_prompt_val)} provided)."
                         ),
                     }
                 ],
@@ -339,7 +356,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 name=name,
                 model=model,
                 project_id=parent_project_id,
-                system_prompt_append=args.get("system_prompt"),
+                system_prompt_append=system_prompt_val,
             )
 
             new_session_id = await ipc_create(options, spawn_auth.token)

@@ -1354,6 +1354,118 @@ class TestMCPRegistration:
         assert with_none["system_prompt"]["append"] == without["system_prompt"]["append"]
 
 
+class TestSystemPromptAppendRestart:
+    """Verify system_prompt_append survives compaction restarts."""
+
+    async def test_system_prompt_append_survives_restart(self, registry):
+        """system_prompt_append text appears in prompt after compaction restart."""
+        from summon_claude.sessions.session import _SessionRestartError
+
+        captured_prompts = []
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                captured_prompts.append(options.system_prompt["append"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        consumer_call = 0
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(summary="summary text")
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session(system_prompt_append="must-survive-restart")
+        rt = make_rt(registry)
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert len(captured_prompts) == 2
+        assert "must-survive-restart" in captured_prompts[0]
+        assert "must-survive-restart" in captured_prompts[1]
+
+    async def test_system_prompt_append_after_cron_recovery(self, registry):
+        """system_prompt_append appears after cron recovery text, separated by \\n\\n."""
+        from summon_claude.sessions.session import _SessionRestartError
+
+        captured_prompts = []
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                captured_prompts.append(options.system_prompt["append"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        consumer_call = 0
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(summary="summary text")
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session(system_prompt_append="custom-review-instructions")
+        rt = make_rt(registry)
+
+        # Pre-seed scheduler with a cron job that will become "lost" on restart
+        from summon_claude.sessions.scheduler import SessionScheduler
+
+        scheduler = SessionScheduler(session._raw_event_queue, session._shutdown_event)
+        await scheduler.create(cron_expr="*/5 * * * *", prompt="test scan", internal=False)
+        session._scheduler = scheduler
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        # After restart, both cron recovery and custom append should be present
+        restarted_prompt = captured_prompts[1]
+        assert "custom-review-instructions" in restarted_prompt
+        # Custom instructions should come after cron recovery (separated by \n\n)
+        cron_idx = restarted_prompt.find("lost scheduled")
+        custom_idx = restarted_prompt.find("custom-review-instructions")
+        if cron_idx >= 0:
+            assert custom_idx > cron_idx, "system_prompt_append should follow cron recovery"
+
+
 class TestThinkingConfig:
     """Verify that enable_thinking produces the correct ThinkingConfig on ClaudeAgentOptions."""
 
