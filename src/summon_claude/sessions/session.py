@@ -526,6 +526,9 @@ def _is_quiet_hours(quiet_hours_str: str) -> bool:
     except (ValueError, IndexError):
         return False
 
+    if not (0 <= start_h <= 23 and 0 <= start_m <= 59 and 0 <= end_h <= 23 and 0 <= end_m <= 59):
+        return False
+
     now = datetime.now()  # noqa: DTZ005 — quiet hours use system local time
     current_minutes = now.hour * 60 + now.minute
     start_minutes = start_h * 60 + start_m
@@ -589,7 +592,7 @@ _SCRIBE_SYSTEM_PROMPT_APPEND = (
     "   - 2: Low priority (newsletters, automated notifications)\n"
     "   - 1: Noise (marketing, social, spam that passed filters)\n"
     "4. Post results to your channel:\n"
-    "   - Items rated 4-5: Post with :rotating_light: prefix and @{user_mention}\n"
+    "   - Items rated 4-5: Post with :rotating_light: prefix and {user_mention}\n"
     "   - Items rated 3: Post normally (no notification formatting)\n"
     "   - Items rated 1-2: Skip or batch into a single 'low priority' line\n"
     "5. Track what you've already reported (avoid re-alerting on the same item)\n"
@@ -632,7 +635,7 @@ _SCRIBE_SYSTEM_PROMPT_APPEND = (
     "- Level 5 (urgent):\n"
     "  :rotating_light: **URGENT** | {{source}}: {{summary}}\n"
     "  > {{detail}}\n"
-    "  @{user_mention}\n"
+    "  {user_mention}\n"
     "\n"
     "- Level 4 (important):\n"
     "  :warning: **{{source}}**: {{summary}}\n"
@@ -648,7 +651,7 @@ _SCRIBE_SYSTEM_PROMPT_APPEND = (
     ":rotating_light: **URGENT** | Gmail: VP requesting architecture review by EOD\n"
     '> From: jane.smith@company.com | Subject: "Need arch review ASAP"\n'
     "> Received 3 minutes ago, flagged as urgent\n"
-    "@{user_mention}\n"
+    "{user_mention}\n"
     "\n"
     ":warning: **Calendar**: Standup in 25 minutes (10:00 AM)\n"
     "> #team-standup | Required | No agenda posted yet\n"
@@ -709,11 +712,7 @@ def build_scribe_system_prompt(
         google_enabled: Whether Google Workspace MCP is available.
         slack_enabled: Whether external Slack monitoring is enabled.
 
-    Raises:
-        ValueError: If neither Google nor Slack data sources are enabled.
     """
-    if not google_enabled and not slack_enabled:
-        raise ValueError("Scribe requires at least one data source (Google or Slack)")
 
     google_section = (
         "- Gmail: check for new/unread emails using gmail tools\n"
@@ -1838,7 +1837,7 @@ class SummonSession:
         """Start Playwright browser monitors for external Slack workspaces."""
         import json  # noqa: PLC0415
 
-        from summon_claude.slack_browser import SlackBrowserMonitor  # noqa: PLC0415
+        from summon_claude.slack_browser import SlackBrowserMonitor, _slugify  # noqa: PLC0415
 
         config_path = get_data_dir() / "slack_workspace.json"
         if not config_path.is_file():
@@ -1857,7 +1856,7 @@ class SummonSession:
         ]
 
         monitor = SlackBrowserMonitor(
-            workspace_id=workspace.get("url", "unknown"),
+            workspace_id=_slugify(workspace.get("url", "unknown")),
             workspace_url=workspace.get("url", ""),
             state_file=Path(state_file_str),
             monitored_channel_ids=monitored,
@@ -2155,10 +2154,12 @@ class SummonSession:
             mcp_servers["summon-cli"] = cli_mcp
 
         # Wire Google Workspace MCP for scribe sessions if configured.
+        google_mcp_wired = False
         if is_scribe and self._config.scribe_google_services:
             try:
                 google_mcp = _build_google_workspace_mcp(self._config.scribe_google_services)
                 mcp_servers["workspace"] = google_mcp
+                google_mcp_wired = True
             except Exception as e:
                 logger.warning("Scribe: failed to build workspace MCP config: %s", e)
 
@@ -2312,8 +2313,8 @@ class SummonSession:
                     scan_interval=max(1, self._scan_interval_s // 60),
                     user_mention=user_mention,
                     importance_keywords=self._config.scribe_importance_keywords,
-                    google_enabled=bool(self._config.scribe_google_services),
-                    slack_enabled=self._config.scribe_slack_enabled,
+                    google_enabled=google_mcp_wired,
+                    slack_enabled=bool(self._slack_monitors),
                 )
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery

@@ -18,15 +18,6 @@ from summon_claude.config import get_data_dir
 
 logger = logging.getLogger(__name__)
 
-# [SEC-007] Redact secret patterns from any logged WebSocket content.
-# Mirrors _SECRET_RE from slack/client.py — intentionally duplicated here
-# to avoid a cross-module import just for logging safety.
-_SECRET_RE = re.compile(
-    r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
-    r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
-    r"|gho_[A-Za-z0-9_]+|ghu_[A-Za-z0-9_]+|ghs_[A-Za-z0-9_]+|ghr_[A-Za-z0-9_]+"
-)
-
 _QUEUE_MAX = 10_000
 # Maximum wait for login confirmation during interactive auth (seconds)
 _AUTH_TIMEOUT_S = 300

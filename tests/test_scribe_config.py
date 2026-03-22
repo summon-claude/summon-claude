@@ -327,17 +327,18 @@ class TestScribeSystemPrompt:
         )
         assert "Note-taking" in prompt["append"]
 
-    def test_prompt_rejects_no_data_sources(self):
+    def test_prompt_works_with_no_data_sources(self):
+        """Prompt degrades gracefully when no data sources are configured."""
         from summon_claude.sessions.session import build_scribe_system_prompt
 
-        with pytest.raises(ValueError, match="at least one data source"):
-            build_scribe_system_prompt(
-                scan_interval=5,
-                user_mention="<@U12345>",
-                importance_keywords="",
-                google_enabled=False,
-                slack_enabled=False,
-            )
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=False,
+            slack_enabled=False,
+        )
+        assert "append" in prompt
 
     def test_prompt_no_google_section_when_disabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt

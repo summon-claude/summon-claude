@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-import importlib.util
 import logging
 import os
 import pathlib
@@ -1051,13 +1050,15 @@ class SessionManager:
                 logger.info("SessionManager: scribe already running — skipping")
                 return
 
-        # Pre-flight: validate Google Workspace dependency if enabled
-        if (
-            self._config.scribe_google_services
-            and importlib.util.find_spec("workspace_mcp") is None
-        ):
-            logger.error("Scribe requires Google support: pip install summon-claude[google]")
-            return
+        # Pre-flight: validate Google Workspace dependency if enabled.
+        # workspace-mcp uses bare top-level modules (not a 'workspace_mcp' package),
+        # so find_spec('workspace_mcp') always returns None. Use the binary check.
+        if self._config.scribe_google_services:
+            from summon_claude.config import find_workspace_mcp_bin  # noqa: PLC0415
+
+            if not find_workspace_mcp_bin().exists():
+                logger.error("Scribe requires Google support: pip install summon-claude[google]")
+                return
 
         # Resolve CWD
         scribe_cwd = self._config.scribe_cwd or str(get_data_dir() / "scribe")
