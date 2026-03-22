@@ -197,7 +197,7 @@ class SlackClient:
         """
         try:
             resp = await self._web.conversations_rename(channel=self.channel_id, name=new_name)
-            return resp["channel"]["name"]
+            return resp["channel"]["name"]  # type: ignore[index]
         except Exception as e:
             logger.warning("rename_channel failed for %s → %s: %s", self.channel_id, new_name, e)
             return None

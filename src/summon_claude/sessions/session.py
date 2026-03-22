@@ -2641,7 +2641,7 @@ class SummonSession:
 
         try:
             resp = await web_client.conversations_rename(channel=channel_id, name=restore_name)
-            restored = resp["channel"]["name"]
+            restored = resp["channel"]["name"]  # type: ignore[index]
             logger.info("zzz-restore: renamed #%s → #%s", current_name, restored)
             return restored
         except Exception as e:
