@@ -2240,3 +2240,24 @@ class TestRestartSuspendedSessionsResume:
         await asyncio.gather(
             *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
         )
+
+
+class TestValidateResumeTargetEdgeCases:
+    """Edge case tests for _validate_resume_target identified during QG."""
+
+    async def test_zzz_validate_resume_suspended_no_channel(self):
+        """allow_suspended=True still raises if session has no channel_id."""
+        manager, _, _ = _make_manager()
+        suspended_no_channel = {
+            "session_id": "s-no-chan",
+            "status": "suspended",
+            "slack_channel_id": None,
+            "cwd": "/tmp/test",
+        }
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_reg = AsyncMock()
+            mock_reg.get_session = AsyncMock(return_value=suspended_no_channel)
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            with pytest.raises(ValueError, match="no associated channel"):
+                await manager._validate_resume_target("s-no-chan", allow_suspended=True)

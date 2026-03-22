@@ -740,6 +740,11 @@ class SessionManager:
         task.add_done_callback(partial(self._on_task_done, session_id=session_id))
         self._tasks[session_id] = task
         logger.info("SessionManager: created resumed session %s", session_id)
+
+        # Update PM topic if this is a project-affiliated non-PM session
+        if options.project_id and not options.pm_profile:
+            await self._update_pm_topic(options.project_id)
+
         return session_id
 
     # ------------------------------------------------------------------

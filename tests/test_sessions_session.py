@@ -3549,3 +3549,47 @@ class TestZzzShutdownIntegration:
 
             sess = await registry.get_session("sess-shut-err")
             assert sess["status"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# zzz- additional edge case tests (quality gate findings)
+# ---------------------------------------------------------------------------
+
+
+class TestZzzEdgeCases:
+    """Edge case tests identified during quality gate review."""
+
+    def _make_session(
+        self,
+        session_id: str = "sess-edge",
+        channel_id: str = "C_EDGE",
+    ) -> SummonSession:
+        s = make_session(session_id=session_id)
+        s._channel_id = channel_id
+        return s
+
+    async def test_zzz_rename_disconnected_sessions_table_already_prefixed(self):
+        """Skips rename when sessions table fallback returns zzz-prefixed name."""
+        session = self._make_session()
+        reg = AsyncMock()
+        reg.get_channel = AsyncMock(return_value=None)
+        reg.get_session = AsyncMock(return_value={"slack_channel_name": "zzz-already-done"})
+        client = AsyncMock(spec=SlackClient)
+        client.rename_channel = AsyncMock()
+
+        await session._rename_channel_disconnected(client, reg)
+
+        client.rename_channel.assert_not_awaited()
+
+    async def test_zzz_restore_archived_channel_with_zzz_prefix(self):
+        """Archived channel with zzz- prefix is restored after unarchive."""
+        session = self._make_session()
+        web = AsyncMock()
+        web.conversations_rename = AsyncMock(return_value={"channel": {"name": "myproj-abc"}})
+        reg = AsyncMock()
+        reg.get_channel = AsyncMock(return_value={"channel_name": "myproj-abc"})
+
+        result = await session._restore_channel_name(web, reg, "C_EDGE", "zzz-myproj-abc")
+
+        assert result == "myproj-abc"
+        web.conversations_rename.assert_awaited_once()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import pathlib
 import re
@@ -214,19 +215,25 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
         click.echo(f"Suspended {', '.join(parts)}.")
 
-    # Rename child session channels with zzz- prefix (PM channels are renamed daemon-side)
+    # Rename child session channels with zzz- prefix.
+    # PM channels are renamed via their session's own _shutdown() path (daemon-side).
     if child_channels_to_rename:
         try:
             config = SummonConfig.from_file(None)
             web_client = AsyncWebClient(token=config.slack_bot_token)
-            for channel_id, channel_name in child_channels_to_rename:
+
+            async def _rename_one(cid: str, cname: str) -> None:
                 max_len = 80
-                zzz_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                zzz_name = ZZZ_PREFIX + cname[: max_len - len(ZZZ_PREFIX)]
                 try:
-                    await web_client.conversations_rename(channel=channel_id, name=zzz_name)
-                    logger.info("zzz-rename: #%s → #%s", channel_name, zzz_name)
+                    await web_client.conversations_rename(channel=cid, name=zzz_name)
+                    logger.info("zzz-rename: #%s → #%s", cname, zzz_name)
                 except Exception as e:
-                    logger.warning("zzz-rename: failed to rename #%s: %s", channel_name, e)
+                    logger.warning("zzz-rename: failed to rename #%s: %s", cname, e)
+
+            await asyncio.gather(
+                *[_rename_one(cid, cname) for cid, cname in child_channels_to_rename]
+            )
         except Exception as e:
             logger.debug("zzz-rename: could not init Slack client: %s", e)
 

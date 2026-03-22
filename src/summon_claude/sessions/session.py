@@ -2593,10 +2593,7 @@ class SummonSession:
                 result = await client.rename_channel(new_name)
                 if result is None:
                     try:
-                        await client.post(
-                            f":warning: Could not rename channel to `{new_name}` — "
-                            "rename it manually to archive."
-                        )
+                        await client.post(f":warning: Could not rename channel to `{new_name}`.")
                     except Exception as exc:
                         logger.debug("zzz-rename warning post failed: %s", exc)
 
