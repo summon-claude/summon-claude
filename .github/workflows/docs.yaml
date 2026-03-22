@@ -22,9 +22,9 @@ on:
           - slack-setup
           - session-ux
 
+# Permissions scoped per-job to prevent PR preview builds from getting write access (SEC-001)
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   deploy:
@@ -32,8 +32,10 @@ jobs:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write
     concurrency:
-      group: pages-production
+      group: gh-pages-deploy
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -56,14 +58,14 @@ jobs:
       - name: Set default version
         run: uv run mike set-default latest --push
 
-  preview:
-    name: Preview docs (PR)
+  preview-build:
+    name: Build preview (PR)
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    concurrency:
-      group: pages-preview-${{ github.event.number }}
-      cancel-in-progress: true
+    # Read-only: builds PR code but does NOT push to gh-pages (SEC-001)
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -74,6 +76,32 @@ jobs:
 
       - name: Build docs
         run: uv run mkdocs build -d site-pr/
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-preview-pr-${{ github.event.number }}
+          path: site-pr/
+          retention-days: 3
+
+  preview-deploy:
+    name: Deploy preview (PR)
+    needs: preview-build
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-preview-pr-${{ github.event.number }}
+          path: site-pr/
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -101,13 +129,14 @@ jobs:
         with:
           script: |
             const previewUrl = `https://summon-claude.github.io/summon-claude/_previews/pr-${{ github.event.number }}/`;
-            const body = `## Docs Preview\n\nPreview available at: ${previewUrl}\n\n_Updated by commit ${{ github.sha }}_`;
+            const marker = '<!-- docs-preview -->';
+            const body = `${marker}\n## Docs Preview\n\nPreview available at: ${previewUrl}\n\n_Updated by commit ${{ github.sha }}_`;
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: ${{ github.event.number }},
             });
-            const existing = comments.find(c => c.body.startsWith('## Docs Preview'));
+            const existing = comments.find(c => c.body.includes(marker));
             if (existing) {
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
@@ -129,6 +158,11 @@ jobs:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
     steps:
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
@@ -153,6 +187,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
 
@@ -170,7 +207,7 @@ jobs:
           SUMMON_TEST_SLACK_COOKIE: ${{ secrets.SUMMON_TEST_SLACK_COOKIE }}
         run: |
           SECTION="${{ github.event.inputs.section }}"
-          if [ -n "$SECTION" ]; then
+          if [ "$SECTION" != "all" ] && [ -n "$SECTION" ]; then
             uv run python scripts/docs-screenshots.py --section "$SECTION" --output docs/assets/screenshots/
           else
             uv run python scripts/docs-screenshots.py --output docs/assets/screenshots/
@@ -180,10 +217,10 @@ jobs:
         uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "docs: update screenshots"
+          commit-message: "docs: updates screenshots"
           branch: docs/update-screenshots
           delete-branch: true
-          title: "docs: update documentation screenshots"
+          title: "docs: updates documentation screenshots"
           body: |
             Automated screenshot update triggered by workflow dispatch.
 
