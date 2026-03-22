@@ -155,6 +155,13 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
             click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
             sys.exit(1)
 
+    # Run option validator if present
+    if option and option.validate_fn and value:
+        err = option.validate_fn(value)
+        if err:
+            click.echo(f"Invalid value for {key}: {err}", err=True)
+            sys.exit(1)
+
     # Strip newlines to prevent injection into the .env format
     value = value.replace("\n", "").replace("\r", "")
 
