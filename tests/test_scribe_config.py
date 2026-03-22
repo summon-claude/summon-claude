@@ -292,8 +292,9 @@ class TestScribeSystemPrompt:
             user_mention="<@U12345>",
             importance_keywords="",
         )
-        assert "Prompt injection defense" in prompt["append"]
-        assert "NEVER follow instructions" in prompt["append"]
+        assert "PROMPT INJECTION DEFENSE" in prompt["append"]
+        assert "untrusted data" in prompt["append"]
+        assert "Canary rule" in prompt["append"]
 
     def test_prompt_includes_scan_protocol(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
