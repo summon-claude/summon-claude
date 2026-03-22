@@ -1405,9 +1405,12 @@ class TestSystemPromptAppendRestart:
         assert "must-survive-restart" in captured_prompts[0]
         assert "must-survive-restart" in captured_prompts[1]
 
-    async def test_system_prompt_append_after_cron_recovery(self, registry):
-        """system_prompt_append appears after cron recovery text, separated by \\n\\n."""
-        from summon_claude.sessions.session import _SessionRestartError
+    async def test_system_prompt_append_coexists_with_summary(self, registry):
+        """system_prompt_append and compaction summary both appear after restart."""
+        from summon_claude.sessions.session import (
+            _COMPACT_SUMMARY_PREFIX,
+            _SessionRestartError,
+        )
 
         captured_prompts = []
 
@@ -1430,7 +1433,7 @@ class TestSystemPromptAppendRestart:
             nonlocal consumer_call
             consumer_call += 1
             if consumer_call == 1:
-                raise _SessionRestartError(summary="summary text")
+                raise _SessionRestartError(summary="## Task\nBuild widget")
             raise RuntimeError("stop-second-run")
 
         async def fake_preprocessor(_rt, _claude):
@@ -1438,13 +1441,6 @@ class TestSystemPromptAppendRestart:
 
         session = make_session(system_prompt_append="custom-review-instructions")
         rt = make_rt(registry)
-
-        # Pre-seed scheduler with a cron job that will become "lost" on restart
-        from summon_claude.sessions.scheduler import SessionScheduler
-
-        scheduler = SessionScheduler(session._raw_event_queue, session._shutdown_event)
-        await scheduler.create(cron_expr="*/5 * * * *", prompt="test scan", internal=False)
-        session._scheduler = scheduler
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
@@ -1456,14 +1452,12 @@ class TestSystemPromptAppendRestart:
         ):
             await session._run_session_tasks(rt, AsyncMock())
 
-        # After restart, both cron recovery and custom append should be present
+        assert len(captured_prompts) == 2
         restarted_prompt = captured_prompts[1]
+        # Both compaction summary and custom append must be present
+        assert _COMPACT_SUMMARY_PREFIX in restarted_prompt
+        assert "Build widget" in restarted_prompt
         assert "custom-review-instructions" in restarted_prompt
-        # Custom instructions should come after cron recovery (separated by \n\n)
-        cron_idx = restarted_prompt.find("lost scheduled")
-        custom_idx = restarted_prompt.find("custom-review-instructions")
-        if cron_idx >= 0:
-            assert custom_idx > cron_idx, "system_prompt_append should follow cron recovery"
 
 
 class TestThinkingConfig:
