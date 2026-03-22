@@ -155,6 +155,14 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
             click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
             sys.exit(1)
 
+    # Validate choices for choice-type options
+    if option and option.choices and value and value not in option.choices:
+        click.echo(
+            f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(option.choices)}",
+            err=True,
+        )
+        sys.exit(1)
+
     # Run option validator if present
     if option and option.validate_fn and value:
         err = option.validate_fn(value)

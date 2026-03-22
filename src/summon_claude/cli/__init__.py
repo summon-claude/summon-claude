@@ -675,6 +675,20 @@ def cmd_init(ctx: click.Context) -> None:
         if opt.required or value != default_str:
             collected[opt.env_key] = value
 
+    # Validate before writing — construct SummonConfig to catch bad combinations
+    try:
+        SummonConfig(
+            **{
+                opt.field_name: collected[opt.env_key]
+                for opt in CONFIG_OPTIONS
+                if opt.env_key in collected
+            }
+        )
+    except Exception as e:
+        click.echo(f"\nValidation error: {e}", err=True)
+        click.echo("Config file NOT written. Fix the errors and re-run `summon init`.", err=True)
+        raise SystemExit(1) from e
+
     # Write config file
     config_file.parent.mkdir(parents=True, exist_ok=True)
     output_lines = [f"{k}={v}" for k, v in collected.items()]

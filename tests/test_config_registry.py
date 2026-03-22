@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from summon_claude.config import (
@@ -111,15 +113,20 @@ class TestConfigOptionVisibility:
                 f"ConfigOption {opt.env_key!r} should be visible when scribe is enabled"
             )
 
-    def test_scribe_slack_options_need_both_flags(self):
-        """Scribe Slack browser/channels need both scribe and slack enabled."""
+    def test_scribe_slack_options_need_both_flags_and_playwright(self):
+        """Scribe Slack browser/channels need both flags plus playwright installed."""
         cfg_scribe_only = {"SUMMON_SCRIBE_ENABLED": "true"}
         cfg_both = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_SLACK_ENABLED": "true"}
 
         browser_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_slack_browser")
         assert browser_opt.visible is not None
         assert not browser_opt.visible(cfg_scribe_only)
-        assert browser_opt.visible(cfg_both)
+        # With playwright importable, both flags should make it visible
+        with patch("summon_claude.config._is_extra_installed", return_value=True):
+            assert browser_opt.visible(cfg_both)
+        # Without playwright, still hidden even with both flags
+        with patch("summon_claude.config._is_extra_installed", return_value=False):
+            assert not browser_opt.visible(cfg_both)
 
     @pytest.mark.parametrize("bool_value", ["true", "1", "yes", "True", "YES"])
     def test_scribe_enabled_accepts_truthy_values(self, bool_value: str):
@@ -128,6 +135,86 @@ class TestConfigOptionVisibility:
         scan_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_scan_interval_minutes")
         assert scan_opt.visible is not None
         assert scan_opt.visible(cfg)
+
+
+class TestVisibilityGracefulDegradation:
+    """Visibility predicates degrade gracefully when optional extras missing."""
+
+    def test_scribe_google_hidden_without_workspace_mcp(self):
+        """scribe_google_services hidden when workspace_mcp not importable."""
+        cfg = {"SUMMON_SCRIBE_ENABLED": "true"}
+        google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
+        assert google_opt.visible is not None
+        with patch("summon_claude.config.importlib.import_module", side_effect=ImportError):
+            assert not google_opt.visible(cfg)
+
+    def test_scribe_slack_browser_hidden_without_playwright(self):
+        """scribe_slack_browser hidden when playwright not importable."""
+        cfg = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_SLACK_ENABLED": "true"}
+        browser_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_slack_browser")
+        assert browser_opt.visible is not None
+        with patch("summon_claude.config.importlib.import_module", side_effect=ImportError):
+            assert not browser_opt.visible(cfg)
+
+
+class TestConfigShowIntegration:
+    """Integration tests for config show output."""
+
+    def test_config_show_outputs_all_visible_keys(self, tmp_path, capsys):
+        """config show outputs all always-visible CONFIG_OPTIONS keys."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-test\n")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        always_visible = [o for o in CONFIG_OPTIONS if o.visible is None]
+        for opt in always_visible:
+            assert opt.env_key in out, f"{opt.env_key} missing from config show output"
+
+    def test_config_show_hides_scribe_shows_hint(self, tmp_path, capsys):
+        """config show hides scribe sub-options and shows disabled hint."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        assert "Scribe: disabled" not in out or "disabled" in out
+        assert "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES" not in out
+
+    def test_config_show_no_ansi_with_color_false(self, tmp_path, capsys):
+        """config show with color=False produces no ANSI escape codes."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-test\n")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        assert "\x1b[" not in out, "ANSI escape codes found in --no-color output"
+
+    def test_config_show_github_pat_masked(self, tmp_path, capsys):
+        """config show masks github_pat value."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_GITHUB_PAT=ghp_secret123abc\n")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        assert "ghp_secret123abc" not in out
+        assert "configured" in out
 
 
 class TestNoUpdateCheckField:

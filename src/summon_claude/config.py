@@ -503,10 +503,10 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
 
 
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
-    return _scribe_enabled(cfg) and cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", "").lower() in (
-        "true",
-        "1",
-        "yes",
+    return (
+        _scribe_enabled(cfg)
+        and cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", "").lower() in ("true", "1", "yes")
+        and _is_extra_installed("playwright")
     )
 
 
