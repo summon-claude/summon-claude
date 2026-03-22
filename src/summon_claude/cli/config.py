@@ -94,7 +94,7 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
                 source = "not set"
             else:
                 display_value = ""
-                source = "not set"
+                source = "optional"
         elif file_value is not None:
             display_value = file_value
             default_str = str(default) if default is not None else ""
@@ -112,6 +112,8 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
                 source_label = click.style("(set)", fg="green")
             elif source == "not set":
                 source_label = click.style("(not set)", fg="yellow")
+            elif source == "optional":
+                source_label = click.style("(optional)", dim=True)
             else:
                 source_label = click.style("(default)", dim=True)
             val_display = display_value if display_value else click.style("—", dim=True)
@@ -558,5 +560,17 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             all_pass = False
     elif not quiet:
         click.echo("  [INFO] Google Workspace: not configured (optional)")
+
+    # Optional extras availability (informational)
+    if not quiet:
+        from summon_claude.config import _is_extra_installed  # noqa: PLC0415
+
+        extras = {
+            "workspace-mcp (Google)": "workspace_mcp",
+            "playwright (Slack browser)": "playwright",
+        }
+        for label, pkg in extras.items():
+            status = "installed" if _is_extra_installed(pkg) else "not installed"
+            click.echo(f"  [INFO] {label}: {status}")
 
     return all_pass

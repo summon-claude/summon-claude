@@ -19,6 +19,7 @@ class TestConfigOptionRegistryGuard:
     def test_every_config_field_has_option(self):
         """Every SummonConfig field must have a corresponding ConfigOption."""
         option_fields = {opt.field_name for opt in CONFIG_OPTIONS}
+        # model_config is pydantic's SettingsConfigDict (ClassVar), not a user field
         model_fields = {f for f in SummonConfig.model_fields if f != "model_config"}
         missing = model_fields - option_fields
         assert not missing, f"SummonConfig fields without ConfigOption: {missing}"

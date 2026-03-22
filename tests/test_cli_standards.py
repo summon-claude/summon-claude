@@ -230,6 +230,8 @@ class TestConfigCheck:
 
     def test_config_check_all_pass(self, tmp_path):
         """Test config check passes with valid config."""
+        from summon_claude.cli.preflight import CliStatus
+
         runner = CliRunner()
         config_file = tmp_path / "config.env"
         config_file.write_text(
@@ -241,6 +243,10 @@ class TestConfigCheck:
         with (
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch("summon_claude.cli.config.get_data_dir") as mock_data_dir,
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
         ):
             mock_data_dir.return_value = tmp_path
             result = runner.invoke(cli, ["config", "check"])
@@ -274,6 +280,8 @@ class TestConfigCheck:
 
     def test_config_check_quiet_mode(self, tmp_path):
         """Test that quiet mode suppresses PASS messages."""
+        from summon_claude.cli.preflight import CliStatus
+
         runner = CliRunner()
         config_file = tmp_path / "config.env"
         config_file.write_text(
@@ -285,6 +293,10 @@ class TestConfigCheck:
         with (
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch("summon_claude.cli.config.get_data_dir") as mock_data_dir,
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
         ):
             mock_data_dir.return_value = tmp_path
             result = runner.invoke(cli, ["--quiet", "config", "check"])
@@ -305,6 +317,8 @@ class TestConfigCheck:
 
     def test_config_check_db_writable(self, tmp_path):
         """Test that config check verifies DB writability."""
+        from summon_claude.cli.preflight import CliStatus
+
         runner = CliRunner()
         config_file = tmp_path / "config.env"
         config_file.write_text(
@@ -316,6 +330,10 @@ class TestConfigCheck:
         with (
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
         ):
             result = runner.invoke(cli, ["config", "check"])
             # Should pass since tmp_path is writable

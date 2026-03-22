@@ -1,4 +1,4 @@
-"""Claude CLI preflight checks and model discovery."""
+"""Claude CLI preflight checks."""
 
 from __future__ import annotations
 
@@ -8,14 +8,6 @@ import subprocess
 from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
-
-# Known model IDs — update when new models ship.
-# Used as suggestions in `summon init`, not for validation.
-FALLBACK_MODELS: list[str] = [
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-20250514",
-    "claude-haiku-4-5-20251001",
-]
 
 
 class CliStatus(NamedTuple):
@@ -48,14 +40,3 @@ def check_claude_cli() -> CliStatus:
         return CliStatus(found=True, version=version, path=path)
     except (subprocess.TimeoutExpired, OSError):
         return CliStatus(found=True, version=None, path=path)
-
-
-def get_available_models() -> list[str]:
-    """Return known Claude model IDs for use in summon init prompts.
-
-    Returns a static list of model IDs. These are suggestions, not
-    a validation constraint — users can enter any model string.
-
-    Sync-only, suitable for use as ConfigOption.choices_fn.
-    """
-    return list(FALLBACK_MODELS)

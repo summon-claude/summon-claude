@@ -211,8 +211,8 @@ async def _migrate_13_to_14(db: aiosqlite.Connection) -> None:
     """Make projects.workflow_instructions nullable (NULL = use global, '' = explicit clear).
 
     SQLite cannot change column constraints with ALTER TABLE, so we use the
-    copy-drop-rename pattern. The projects table has no inbound FK references
-    so PRAGMA foreign_keys does not need to be toggled.
+    copy-drop-rename pattern. sessions.project_id references projects but has
+    no REFERENCES constraint, so PRAGMA foreign_keys does not fire.
     """
     await db.execute(
         """
