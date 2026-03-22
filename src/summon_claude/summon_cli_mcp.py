@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 _SESSION_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,19}$")
 _MAX_MESSAGE_CHARS = 10_000
-_MAX_SYSTEM_PROMPT_CHARS = 10_000
+MAX_SYSTEM_PROMPT_CHARS = 10_000
 
 _SENSITIVE_FIELDS = frozenset({"pid", "error_message", "authenticated_user_id"})
 _MAX_TASKS_PER_SESSION = 100
@@ -213,13 +213,13 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             }
 
         system_prompt_val = args.get("system_prompt")
-        if system_prompt_val and len(system_prompt_val) > _MAX_SYSTEM_PROMPT_CHARS:
+        if system_prompt_val and len(system_prompt_val) > MAX_SYSTEM_PROMPT_CHARS:
             return {
                 "content": [
                     {
                         "type": "text",
                         "text": (
-                            f"Error: system_prompt exceeds {_MAX_SYSTEM_PROMPT_CHARS} chars "
+                            f"Error: system_prompt exceeds {MAX_SYSTEM_PROMPT_CHARS} chars "
                             f"({len(system_prompt_val)} provided)."
                         ),
                     }

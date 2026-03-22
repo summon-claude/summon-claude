@@ -516,11 +516,11 @@ class TestSessionStart:
         assert "system_prompt" not in schema.get("required", [])
 
     def test_schema_system_prompt_max_length(self, tools):
-        """Guard test: maxLength matches _MAX_SYSTEM_PROMPT_CHARS constant."""
-        from summon_claude.summon_cli_mcp import _MAX_SYSTEM_PROMPT_CHARS
+        """Guard test: maxLength matches MAX_SYSTEM_PROMPT_CHARS constant."""
+        from summon_claude.summon_cli_mcp import MAX_SYSTEM_PROMPT_CHARS
 
         schema = tools["session_start"].input_schema
-        assert schema["properties"]["system_prompt"]["maxLength"] == _MAX_SYSTEM_PROMPT_CHARS
+        assert schema["properties"]["system_prompt"]["maxLength"] == MAX_SYSTEM_PROMPT_CHARS
 
     async def test_rejects_oversized_system_prompt(self, tools):
         """system_prompt exceeding _MAX_SYSTEM_PROMPT_CHARS returns error."""
