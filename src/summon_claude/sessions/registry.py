@@ -1202,14 +1202,13 @@ class SessionRegistry:
         from summon_claude.sessions.hook_types import GLOBAL_WORKFLOW_TOKEN  # noqa: PLC0415
 
         project_wf = await self.get_project_workflow(project_id)
-        global_wf = await self.get_workflow_defaults()
 
         if project_wf is None:
-            # No project override — use global defaults.
-            return global_wf
+            return await self.get_workflow_defaults()
 
         # Project has an explicit value (may be empty string = "no instructions").
         if GLOBAL_WORKFLOW_TOKEN in project_wf:
+            global_wf = await self.get_workflow_defaults()
             return project_wf.replace(GLOBAL_WORKFLOW_TOKEN, global_wf)
 
         return project_wf

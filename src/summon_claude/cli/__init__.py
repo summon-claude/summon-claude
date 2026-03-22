@@ -611,9 +611,12 @@ def cmd_init(ctx: click.Context) -> None:
                 value = raw if raw else current_value
             elif opt.required:
                 value = click.prompt(f"    {opt.label}", hide_input=True)
-                while opt.validate_fn and opt.validate_fn(value):
-                    click.echo(f"    Error: {opt.validate_fn(value)}")
-                    value = click.prompt(f"    {opt.label}", hide_input=True)
+                if opt.validate_fn:
+                    err = opt.validate_fn(value)
+                    while err:
+                        click.echo(f"    Error: {err}")
+                        value = click.prompt(f"    {opt.label}", hide_input=True)
+                        err = opt.validate_fn(value)
             else:
                 # Optional secret — empty input accepted (skip)
                 value = click.prompt(

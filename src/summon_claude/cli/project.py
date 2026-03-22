@@ -287,14 +287,17 @@ async def async_workflow_show(project_name: str | None = None, *, raw: bool = Fa
 async def async_workflow_set(project_name: str | None = None) -> None:
     """Set workflow instructions via $EDITOR."""
     async with SessionRegistry() as registry:
+        pid: str = ""
+        pname: str = ""
         if project_name:
             project = await _resolve_project(registry, project_name)
-            project_id = project["project_id"]
-            current = await registry.get_project_workflow(project_id)
+            pid = project["project_id"]
+            pname = project["name"]
+            current = await registry.get_project_workflow(pid)
             global_wf = await registry.get_workflow_defaults()
 
             lines = [
-                f"# Workflow instructions for project '{project['name']}'",
+                f"# Workflow instructions for project '{pname}'",
                 "# Lines starting with # are stripped on save.",
                 "#",
             ]
@@ -332,14 +335,14 @@ async def async_workflow_set(project_name: str | None = None) -> None:
         content = _strip_comment_lines(edited)
 
         if project_name:
-            await registry.set_project_workflow(project_id, content)
+            await registry.set_project_workflow(pid, content)
             if GLOBAL_WORKFLOW_TOKEN in content:
                 click.echo(
-                    f"Workflow updated for project '{project['name']}'"  # type: ignore[possibly-undefined]
+                    f"Workflow updated for project '{pname}'"
                     f" (includes global defaults via {GLOBAL_WORKFLOW_TOKEN})."
                 )
             else:
-                click.echo(f"Workflow updated for project '{project['name']}'.")  # type: ignore[possibly-undefined]
+                click.echo(f"Workflow updated for project '{pname}'.")
         else:
             await registry.set_workflow_defaults(content)
             click.echo("Global workflow defaults updated.")
