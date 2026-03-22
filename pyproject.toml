@@ -161,6 +161,8 @@ ignore = [
     "RET504",  # unnecessary assignment before return in fixtures
     "F401",    # unused imports sometimes kept for re-export
 ]
+# Scripts: deferred imports for graceful degradation, unused args in stubs
+"scripts/**/*.py" = ["PLC0415", "ARG002", "F401", "T201"]
 "tests/conftest.py" = [
     "S101", "S105", "S106", "S108", "PLR2004", "ARG", "SLF001", "RET504",
 ]
