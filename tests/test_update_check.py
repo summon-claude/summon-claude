@@ -46,7 +46,7 @@ class TestFormatUpdateMessage:
 
         assert "1.0.0 → 2.0.0" in msg
         assert "uv tool upgrade summon-claude" in msg
-        assert "SUMMON_NO_UPDATE_CHECK=1" in msg
+        assert "summon config set SUMMON_NO_UPDATE_CHECK true" in msg
         assert "┌" in msg and "┐" in msg
         assert "└" in msg and "┘" in msg
 
@@ -318,12 +318,10 @@ class TestCheckForUpdate:
 
         assert result == UpdateInfo(current="1.0.0", latest="2.0.0")
 
-    def test_check_for_update_no_update_env_returns_none(self, monkeypatch):
-        """check_for_update returns None when SUMMON_NO_UPDATE_CHECK=1."""
-        monkeypatch.setenv("SUMMON_NO_UPDATE_CHECK", "1")
-
+    def test_check_for_update_no_update_param_returns_none(self):
+        """check_for_update returns None when no_update_check=True."""
         with patch(_URLOPEN) as mock_urlopen:
-            result = check_for_update()
+            result = check_for_update(no_update_check=True)
 
         assert result is None
         mock_urlopen.assert_not_called()

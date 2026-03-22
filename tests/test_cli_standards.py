@@ -216,7 +216,8 @@ class TestConfigFlag:
             result = runner.invoke(cli, ["--config", str(custom_config), "config", "show"])
             assert result.exit_code == 0
             # Secret values should show as 'configured', not the raw token
-            assert "SUMMON_SLACK_BOT_TOKEN=configured" in result.output
+            assert "configured" in result.output
+            assert "SUMMON_SLACK_BOT_TOKEN" in result.output
 
 
 # ---------------------------------------------------------------------------

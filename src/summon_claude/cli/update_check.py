@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.request
 from datetime import UTC, datetime, timedelta
 from importlib.metadata import version
@@ -27,13 +26,13 @@ class UpdateInfo(NamedTuple):
     latest: str
 
 
-def check_for_update() -> UpdateInfo | None:
+def check_for_update(no_update_check: bool = False) -> UpdateInfo | None:
     """Check PyPI for a newer version of summon-claude.
 
     Returns an UpdateInfo if a newer version is available, else None.
     All exceptions are caught and silently ignored (fail-open).
     """
-    if os.environ.get("SUMMON_NO_UPDATE_CHECK") == "1":
+    if no_update_check:
         return None
 
     try:
@@ -104,7 +103,7 @@ def format_update_message(info: UpdateInfo) -> str:
     """Return a styled box announcing the available update."""
     upgrade_line = f"  Update available: {info.current} → {info.latest}"
     install_line = "  Run: uv tool upgrade summon-claude"
-    disable_line = "  Disable: SUMMON_NO_UPDATE_CHECK=1"
+    disable_line = "  Disable: summon config set SUMMON_NO_UPDATE_CHECK true"
 
     width = max(len(upgrade_line), len(install_line), len(disable_line)) + 2
     bar = "─" * width

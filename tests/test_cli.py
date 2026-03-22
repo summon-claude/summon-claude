@@ -875,7 +875,7 @@ class TestUpdateCheckIntegration:
     def test_start_slow_update_check_does_not_block(self):
         """Update check that exceeds the join timeout should not block startup."""
 
-        def slow_check():
+        def slow_check(**kwargs):
             time.sleep(10)
 
         with _start_patches(update_info=None) as stack:

@@ -5,14 +5,17 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
 import re
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -312,6 +315,9 @@ class SummonConfig(BaseSettings):
     # Content display
     max_inline_chars: int = 2500
 
+    # Behavior
+    no_update_check: bool = False
+
     # Thinking display
     enable_thinking: bool = True  # Pass ThinkingConfigAdaptive to SDK
     show_thinking: bool = False  # Route ThinkingBlock content to Slack turn thread
@@ -459,3 +465,277 @@ class SummonConfig(BaseSettings):
 
         if errors:
             raise ValueError("Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors))
+
+
+# ------------------------------------------------------------------
+# ConfigOption registry
+# ------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigOption:
+    """Registry entry mapping a SummonConfig field to display/prompt metadata."""
+
+    field_name: str  # SummonConfig field name
+    env_key: str  # SUMMON_... env var name
+    group: str  # Display group header
+    label: str  # Human-readable label for prompts
+    help_text: str  # One-line description
+    input_type: str  # 'text', 'secret', 'choice', 'flag', 'int'
+    required: bool = False
+    choices: tuple[str, ...] | None = None
+    choices_fn: Callable[[], list[str]] | None = None
+    visible: Callable[[dict[str, str]], bool] | None = None
+    validate_fn: Callable[[str], str | None] | None = None
+
+
+def _is_extra_installed(package: str) -> bool:
+    """Check if an optional dependency is importable."""
+    try:
+        importlib.import_module(package)
+        return True
+    except ImportError:
+        return False
+
+
+def _scribe_enabled(cfg: dict[str, str]) -> bool:
+    return cfg.get("SUMMON_SCRIBE_ENABLED", "").lower() in ("true", "1", "yes")
+
+
+def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
+    return _scribe_enabled(cfg) and cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", "").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
+
+
+def _validate_scribe_scan_interval(v: str) -> str | None:
+    try:
+        return None if int(v) >= 1 else "Must be at least 1"
+    except (ValueError, TypeError):
+        return "Must be an integer"
+
+
+CONFIG_OPTIONS: list[ConfigOption] = [
+    # Slack Credentials
+    ConfigOption(
+        field_name="slack_bot_token",
+        env_key="SUMMON_SLACK_BOT_TOKEN",
+        group="Slack Credentials",
+        label="Bot Token",
+        help_text="Slack bot token (xoxb-...)",
+        input_type="secret",
+        required=True,
+        validate_fn=lambda v: None if v.startswith("xoxb-") else "Must start with xoxb-",
+    ),
+    ConfigOption(
+        field_name="slack_app_token",
+        env_key="SUMMON_SLACK_APP_TOKEN",
+        group="Slack Credentials",
+        label="App Token",
+        help_text="Slack Socket Mode app-level token (xapp-...)",
+        input_type="secret",
+        required=True,
+        validate_fn=lambda v: None if v.startswith("xapp-") else "Must start with xapp-",
+    ),
+    ConfigOption(
+        field_name="slack_signing_secret",
+        env_key="SUMMON_SLACK_SIGNING_SECRET",
+        group="Slack Credentials",
+        label="Signing Secret",
+        help_text="Slack app signing secret for request verification",
+        input_type="secret",
+        required=True,
+    ),
+    # Session Defaults
+    ConfigOption(
+        field_name="default_model",
+        env_key="SUMMON_DEFAULT_MODEL",
+        group="Session Defaults",
+        label="Default Model",
+        help_text="Claude model to use for sessions (e.g. claude-opus-4-6)",
+        input_type="text",
+    ),
+    ConfigOption(
+        field_name="default_effort",
+        env_key="SUMMON_DEFAULT_EFFORT",
+        group="Session Defaults",
+        label="Default Effort",
+        help_text="Thinking effort level for sessions",
+        input_type="choice",
+        choices=("low", "medium", "high", "max"),
+    ),
+    ConfigOption(
+        field_name="channel_prefix",
+        env_key="SUMMON_CHANNEL_PREFIX",
+        group="Session Defaults",
+        label="Channel Prefix",
+        help_text="Prefix for Slack channel names created by summon",
+        input_type="text",
+    ),
+    # Display
+    ConfigOption(
+        field_name="max_inline_chars",
+        env_key="SUMMON_MAX_INLINE_CHARS",
+        group="Display",
+        label="Max Inline Chars",
+        help_text="Maximum characters to display inline before uploading as a file",
+        input_type="int",
+    ),
+    # Behavior
+    ConfigOption(
+        field_name="permission_debounce_ms",
+        env_key="SUMMON_PERMISSION_DEBOUNCE_MS",
+        group="Behavior",
+        label="Permission Debounce (ms)",
+        help_text="Milliseconds to debounce permission prompts",
+        input_type="int",
+    ),
+    ConfigOption(
+        field_name="no_update_check",
+        env_key="SUMMON_NO_UPDATE_CHECK",
+        group="Behavior",
+        label="Disable Update Check",
+        help_text="Disable automatic update checks on startup",
+        input_type="flag",
+    ),
+    # Thinking
+    ConfigOption(
+        field_name="enable_thinking",
+        env_key="SUMMON_ENABLE_THINKING",
+        group="Thinking",
+        label="Enable Thinking",
+        help_text="Pass ThinkingConfigAdaptive to the Claude SDK",
+        input_type="flag",
+    ),
+    ConfigOption(
+        field_name="show_thinking",
+        env_key="SUMMON_SHOW_THINKING",
+        group="Thinking",
+        label="Show Thinking",
+        help_text="Route thinking blocks to the Slack turn thread",
+        input_type="flag",
+    ),
+    # GitHub
+    ConfigOption(
+        field_name="github_pat",
+        env_key="SUMMON_GITHUB_PAT",
+        group="GitHub",
+        label="GitHub PAT",
+        help_text="GitHub Personal Access Token for the GitHub remote MCP server",
+        input_type="secret",
+        validate_fn=lambda v: (
+            None
+            if not v or v.startswith(("ghp_", "github_pat_"))
+            else "Must start with ghp_ or github_pat_"
+        ),
+    ),
+    # Scribe
+    ConfigOption(
+        field_name="scribe_enabled",
+        env_key="SUMMON_SCRIBE_ENABLED",
+        group="Scribe",
+        label="Enable Scribe",
+        help_text="Enable the background scribe agent",
+        input_type="flag",
+    ),
+    ConfigOption(
+        field_name="scribe_scan_interval_minutes",
+        env_key="SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES",
+        group="Scribe",
+        label="Scan Interval (minutes)",
+        help_text="How often the scribe agent scans for new data",
+        input_type="int",
+        visible=_scribe_enabled,
+        validate_fn=_validate_scribe_scan_interval,
+    ),
+    ConfigOption(
+        field_name="scribe_cwd",
+        env_key="SUMMON_SCRIBE_CWD",
+        group="Scribe",
+        label="Scribe Working Directory",
+        help_text="Working directory for the scribe agent (default: XDG data dir)",
+        input_type="text",
+        visible=_scribe_enabled,
+    ),
+    ConfigOption(
+        field_name="scribe_model",
+        env_key="SUMMON_SCRIBE_MODEL",
+        group="Scribe",
+        label="Scribe Model",
+        help_text="Claude model for the scribe agent (default: inherits default_model)",
+        input_type="text",
+        visible=_scribe_enabled,
+    ),
+    ConfigOption(
+        field_name="scribe_importance_keywords",
+        env_key="SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
+        group="Scribe",
+        label="Importance Keywords",
+        help_text="Comma-separated keywords that raise message importance (e.g. urgent,deadline)",
+        input_type="text",
+        visible=_scribe_enabled,
+    ),
+    ConfigOption(
+        field_name="scribe_quiet_hours",
+        env_key="SUMMON_SCRIBE_QUIET_HOURS",
+        group="Scribe",
+        label="Quiet Hours",
+        help_text="Time window for reduced alerts, format HH:MM-HH:MM (e.g. 22:00-07:00)",
+        input_type="text",
+        visible=_scribe_enabled,
+    ),
+    # Scribe Google
+    ConfigOption(
+        field_name="scribe_google_services",
+        env_key="SUMMON_SCRIBE_GOOGLE_SERVICES",
+        group="Scribe Google",
+        label="Google Services",
+        help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
+        input_type="text",
+        visible=lambda cfg: _scribe_enabled(cfg) and _is_extra_installed("workspace_mcp"),
+    ),
+    # Scribe Slack
+    ConfigOption(
+        field_name="scribe_slack_enabled",
+        env_key="SUMMON_SCRIBE_SLACK_ENABLED",
+        group="Scribe Slack",
+        label="Enable Scribe Slack Collector",
+        help_text="Enable the Slack data collector for the scribe agent",
+        input_type="flag",
+        visible=_scribe_enabled,
+    ),
+    ConfigOption(
+        field_name="scribe_slack_browser",
+        env_key="SUMMON_SCRIBE_SLACK_BROWSER",
+        group="Scribe Slack",
+        label="Scribe Slack Browser",
+        help_text="Playwright browser for the Slack collector",
+        input_type="choice",
+        choices=("chrome", "firefox", "webkit"),
+        visible=_scribe_slack_enabled,
+    ),
+    ConfigOption(
+        field_name="scribe_slack_monitored_channels",
+        env_key="SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS",
+        group="Scribe Slack",
+        label="Monitored Slack Channels",
+        help_text="Comma-separated Slack channel names for the scribe collector",
+        input_type="text",
+        visible=_scribe_slack_enabled,
+    ),
+]
+
+
+def get_config_options() -> list[ConfigOption]:
+    """Return all config options in display order."""
+    return list(CONFIG_OPTIONS)
+
+
+def get_config_default(option: ConfigOption) -> Any:
+    """Get the default value for a config option from SummonConfig."""
+    field_info = SummonConfig.model_fields.get(option.field_name)
+    if field_info is None:
+        return None
+    return field_info.default

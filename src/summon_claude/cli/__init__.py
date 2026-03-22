@@ -48,6 +48,9 @@ from summon_claude.cli.project import (
     async_project_add,
     async_project_list,
     async_project_remove,
+    async_workflow_clear,
+    async_workflow_set,
+    async_workflow_show,
     launch_project_managers,
     stop_project_managers,
 )
@@ -59,7 +62,7 @@ from summon_claude.cli.session import (
 )
 from summon_claude.cli.start import async_start
 from summon_claude.cli.stop import async_stop
-from summon_claude.config import SummonConfig, get_config_dir, get_config_file, get_data_dir
+from summon_claude.config import SummonConfig, get_config_file, get_data_dir
 from summon_claude.daemon import start_daemon
 from summon_claude.sessions import registry as _registry
 
@@ -243,7 +246,7 @@ def cmd_start(
             format_update_message,
         )
 
-        info = check_for_update()
+        info = check_for_update(no_update_check=config.no_update_check)
         if info:
             update_result.append(format_update_message(info))
 
@@ -504,6 +507,41 @@ def project_down(ctx: click.Context, name: str | None) -> None:
         raise SystemExit(1) from e
 
 
+@cmd_project.group("workflow")
+def project_workflow() -> None:
+    """Manage PM workflow instructions."""
+
+
+@project_workflow.command("show")
+@click.argument("project_name", required=False, default=None)
+@click.option(
+    "--raw",
+    is_flag=True,
+    default=False,
+    help="Show raw template without expanding $GLOBAL_WORKFLOW",
+)
+@click.pass_context
+def workflow_show(ctx: click.Context, project_name: str | None, raw: bool) -> None:
+    """Show workflow instructions. Without PROJECT_NAME, shows global defaults."""
+    asyncio.run(async_workflow_show(project_name, raw=raw))
+
+
+@project_workflow.command("set")
+@click.argument("project_name", required=False, default=None)
+@click.pass_context
+def workflow_set(ctx: click.Context, project_name: str | None) -> None:
+    """Set workflow instructions via $EDITOR. Without PROJECT_NAME, sets global defaults."""
+    asyncio.run(async_workflow_set(project_name))
+
+
+@project_workflow.command("clear")
+@click.argument("project_name", required=False, default=None)
+@click.pass_context
+def workflow_clear(ctx: click.Context, project_name: str | None) -> None:
+    """Clear workflow instructions. Without PROJECT_NAME, clears global defaults."""
+    asyncio.run(async_workflow_clear(project_name))
+
+
 # ---------------------------------------------------------------------------
 # Top-level commands: init, config
 # ---------------------------------------------------------------------------
@@ -513,37 +551,131 @@ def project_down(ctx: click.Context, name: str | None) -> None:
 @click.pass_context
 def cmd_init(ctx: click.Context) -> None:
     """Interactive setup wizard for summon-claude configuration."""
+    from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
+    from summon_claude.config import CONFIG_OPTIONS, get_config_default  # noqa: PLC0415
+
+    # Preflight check
+    cli_status = check_claude_cli()
+    if not cli_status.found:
+        click.echo("Warning: Claude CLI not found in PATH.", err=True)
+        click.echo("Install from https://claude.ai/code before running sessions.", err=True)
+        click.echo()
+    elif cli_status.version:
+        click.echo(f"Claude CLI: {cli_status.version}")
+
     click.echo("Setting up summon-claude configuration...")
     click.echo()
 
-    bot_token = click.prompt("  Slack Bot Token (xoxb-...)", hide_input=True)
-    while not bot_token.startswith("xoxb-"):
-        click.echo("  Error: Bot token must start with 'xoxb-'")
-        bot_token = click.prompt("  Slack Bot Token (xoxb-...)", hide_input=True)
-
-    app_token = click.prompt("  Slack App Token (xapp-...)", hide_input=True)
-    while not app_token.startswith("xapp-"):
-        click.echo("  Error: App token must start with 'xapp-'")
-        app_token = click.prompt("  Slack App Token (xapp-...)", hide_input=True)
-
-    signing_secret = click.prompt("  Slack Signing Secret", hide_input=True)
-
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
-    if config_path_override:
-        config_file = pathlib.Path(config_path_override)
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        config_dir = get_config_dir()
-        config_dir.mkdir(parents=True, exist_ok=True)
-        config_file = get_config_file()
+    config_file = pathlib.Path(config_path_override) if config_path_override else get_config_file()
 
-    lines = [
-        f"SUMMON_SLACK_BOT_TOKEN={bot_token}",
-        f"SUMMON_SLACK_APP_TOKEN={app_token}",
-        f"SUMMON_SLACK_SIGNING_SECRET={signing_secret}",
-    ]
-    config_file.write_text("\n".join(lines) + "\n")
-    # Restrict config file to owner-only access (0600)
+    # Load existing config values for pre-filling
+    existing: dict[str, str] = {}
+    if config_file.exists():
+        for raw_line in config_file.read_text().splitlines():
+            stripped = raw_line.strip()
+            if stripped and not stripped.startswith("#") and "=" in stripped:
+                k, _, v = stripped.partition("=")
+                existing[k.strip()] = v.strip()
+        click.echo(f"  Existing config found at {config_file}")
+        click.echo("  Press Enter to keep current values.\n")
+
+    # Collect values via prompts
+    collected: dict[str, str] = {}
+    current_group = ""
+
+    for opt in CONFIG_OPTIONS:
+        # Build the in-progress config dict for visibility predicates
+        in_progress = {**existing, **collected}
+
+        # Check visibility
+        if opt.visible is not None and not opt.visible(in_progress):
+            continue
+
+        # Print group header on group change
+        if opt.group != current_group:
+            current_group = opt.group
+            click.echo(click.style(f"  {opt.group}", bold=True))
+
+        current_value = existing.get(opt.env_key)
+        default = get_config_default(opt)
+
+        if opt.input_type == "secret":
+            if current_value:
+                raw = click.prompt(
+                    f"    {opt.label} [configured — Enter to keep]",
+                    default="",
+                    show_default=False,
+                    hide_input=True,
+                )
+                value = raw if raw else current_value
+            elif opt.required:
+                value = click.prompt(f"    {opt.label}", hide_input=True)
+                while opt.validate_fn and opt.validate_fn(value):
+                    click.echo(f"    Error: {opt.validate_fn(value)}")
+                    value = click.prompt(f"    {opt.label}", hide_input=True)
+            else:
+                # Optional secret — empty input accepted (skip)
+                value = click.prompt(
+                    f"    {opt.label} (optional, Enter to skip)",
+                    default="",
+                    show_default=False,
+                    hide_input=True,
+                )
+                if value and opt.validate_fn:
+                    err = opt.validate_fn(value)
+                    while err:
+                        click.echo(f"    Error: {err}")
+                        value = click.prompt(
+                            f"    {opt.label}",
+                            default="",
+                            show_default=False,
+                            hide_input=True,
+                        )
+                        if not value:
+                            break
+                        err = opt.validate_fn(value)
+
+        elif opt.input_type == "choice":
+            choices = list(opt.choices) if opt.choices else []
+            if opt.choices_fn:
+                choices = opt.choices_fn()
+            prompt_default = current_value or (str(default) if default is not None else "")
+            value = click.prompt(
+                f"    {opt.label}",
+                type=click.Choice(choices, case_sensitive=False) if choices else None,
+                default=prompt_default or None,
+                show_default=True,
+            )
+
+        elif opt.input_type == "flag":
+            current_bool = False
+            if current_value:
+                current_bool = current_value.lower() in ("true", "1", "yes")
+            elif default is not None:
+                current_bool = bool(default)
+            value = "true" if click.confirm(f"    {opt.label}?", default=current_bool) else "false"
+
+        elif opt.input_type == "int":
+            prompt_default = current_value or (str(default) if default is not None else None)
+            raw = click.prompt(f"    {opt.label}", default=prompt_default, show_default=True)
+            value = str(raw)
+
+        else:  # text
+            prompt_default = current_value or (str(default) if default is not None else "") or ""
+            value = click.prompt(
+                f"    {opt.label}", default=prompt_default, show_default=bool(prompt_default)
+            )
+
+        # Only store non-default values (keep config file clean)
+        default_str = str(default) if default is not None else ""
+        if opt.required or value != default_str:
+            collected[opt.env_key] = value
+
+    # Write config file
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    output_lines = [f"{k}={v}" for k, v in collected.items()]
+    config_file.write_text("\n".join(output_lines) + "\n")
     with contextlib.suppress(OSError):
         config_file.chmod(0o600)
 
@@ -559,9 +691,10 @@ def cmd_config() -> None:
 @cmd_config.command("show")
 @click.pass_context
 def config_show_cmd(ctx: click.Context) -> None:
-    """Show current configuration (tokens masked)."""
+    """Show current configuration with grouped display and source indicators."""
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
-    config_show(config_path_override)
+    use_color = ctx.color is not False
+    config_show(config_path_override, color=use_color)
 
 
 @cmd_config.command("path")

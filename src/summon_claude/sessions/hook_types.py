@@ -10,3 +10,6 @@ VALID_HOOK_TYPES: frozenset[str] = frozenset({"worktree_create", "project_up", "
 
 # Token that project hooks can include to splice in global hooks at that position.
 INCLUDE_GLOBAL_TOKEN: str = "$INCLUDE_GLOBAL"  # noqa: S105
+
+# Token that project workflow instructions can include to splice in global defaults.
+GLOBAL_WORKFLOW_TOKEN: str = "$GLOBAL_WORKFLOW"  # noqa: S105

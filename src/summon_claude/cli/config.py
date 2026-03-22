@@ -14,6 +14,7 @@ from pathlib import Path
 import click
 
 from summon_claude.config import (
+    CONFIG_OPTIONS,
     find_workspace_mcp_bin,
     get_config_file,
     get_data_dir,
@@ -24,30 +25,6 @@ from summon_claude.sessions.migrations import CURRENT_SCHEMA_VERSION, get_schema
 from summon_claude.sessions.registry import SessionRegistry
 
 logger = logging.getLogger(__name__)
-
-_SETTABLE_KEYS = frozenset(
-    {
-        "SUMMON_SLACK_BOT_TOKEN",
-        "SUMMON_SLACK_APP_TOKEN",
-        "SUMMON_SLACK_SIGNING_SECRET",
-        "SUMMON_DEFAULT_MODEL",
-        "SUMMON_DEFAULT_EFFORT",
-        "SUMMON_CHANNEL_PREFIX",
-        "SUMMON_PERMISSION_DEBOUNCE_MS",
-        "SUMMON_MAX_INLINE_CHARS",
-        # Scribe agent
-        "SUMMON_SCRIBE_ENABLED",
-        "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES",
-        "SUMMON_SCRIBE_CWD",
-        "SUMMON_SCRIBE_MODEL",
-        "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
-        "SUMMON_SCRIBE_QUIET_HOURS",
-        "SUMMON_SCRIBE_GOOGLE_SERVICES",
-        "SUMMON_SCRIBE_SLACK_ENABLED",
-        "SUMMON_SCRIBE_SLACK_BROWSER",
-        "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS",
-    }
-)
 
 
 def _require_config_file(override: str | None = None):
@@ -64,31 +41,85 @@ def config_path(override: str | None = None) -> None:
     click.echo(str(get_config_file(override)))
 
 
-def config_show(override: str | None = None) -> None:
-    config_file = _require_config_file(override)
-    if config_file is None:
-        return
+def config_show(override: str | None = None, *, color: bool = True) -> None:
+    """Show all config options with grouped display and source indicators."""
+    from summon_claude.config import get_config_default  # noqa: PLC0415
 
-    secret_keys = {
-        "SUMMON_SLACK_BOT_TOKEN",
-        "SUMMON_SLACK_APP_TOKEN",
-        "SUMMON_SLACK_SIGNING_SECRET",
-    }
+    config_file = get_config_file(override)
 
-    for raw_line in config_file.read_text().splitlines():
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
+    # Parse config file into dict (works even if no file exists)
+    values: dict[str, str] = {}
+    if config_file.exists():
+        for raw_line in config_file.read_text().splitlines():
+            stripped = raw_line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" in stripped:
+                k, _, v = stripped.partition("=")
+                values[k.strip()] = v.strip()
+
+    current_group = ""
+    for opt in CONFIG_OPTIONS:
+        # Evaluate visibility predicate
+        if opt.visible is not None and not opt.visible(values):
+            # Show dim hint for hidden groups (only once per group)
+            if opt.group != current_group:
+                current_group = opt.group
+                hint = (
+                    click.style(f"  {opt.group}: disabled", dim=True)
+                    if color
+                    else f"  {opt.group}: disabled"
+                )
+                click.echo(hint)
             continue
-        if "=" in stripped:
-            k, _, v = stripped.partition("=")
-            k = k.strip()
-            v = v.strip()
-            if k in secret_keys:
-                click.echo(f"{k}={'configured' if v else 'missing'}")
+
+        # Print group header on group change
+        if opt.group != current_group:
+            current_group = opt.group
+            if color:
+                click.echo(click.style(f"\n  {opt.group}", bold=True))
             else:
-                click.echo(f"{k}={v}")
+                click.echo(f"\n  {opt.group}")
+
+        # Determine value and source
+        file_value = values.get(opt.env_key)
+        default = get_config_default(opt)
+
+        if opt.input_type == "secret":
+            if file_value:
+                display_value = "configured"
+                source = "set"
+            elif opt.required:
+                display_value = ""
+                source = "not set"
+            else:
+                display_value = ""
+                source = "not set"
+        elif file_value is not None:
+            display_value = file_value
+            default_str = str(default) if default is not None else ""
+            source = "default" if file_value == default_str else "set"
+        elif opt.required:
+            display_value = ""
+            source = "not set"
         else:
-            click.echo(raw_line)
+            display_value = str(default) if default is not None else ""
+            source = "default"
+
+        # Format output with color
+        if color:
+            if source == "set":
+                source_label = click.style("(set)", fg="green")
+            elif source == "not set":
+                source_label = click.style("(not set)", fg="yellow")
+            else:
+                source_label = click.style("(default)", dim=True)
+            val_display = display_value if display_value else click.style("—", dim=True)
+        else:
+            source_label = f"({source})"
+            val_display = display_value if display_value else "—"
+
+        click.echo(f"    {opt.env_key:<45} {val_display:<20} {source_label}")
 
 
 def config_edit(override: str | None = None) -> None:
@@ -106,10 +137,23 @@ def config_edit(override: str | None = None) -> None:
 
 def config_set(key: str, value: str, override: str | None = None) -> None:
     key = key.strip().upper()
-    if key not in _SETTABLE_KEYS:
+    valid_keys = {opt.env_key for opt in CONFIG_OPTIONS}
+    if key not in valid_keys:
         click.echo(f"Unknown config key: {key!r}", err=True)
-        click.echo(f"Valid keys: {', '.join(sorted(_SETTABLE_KEYS))}", err=True)
+        click.echo(f"Valid keys: {', '.join(sorted(valid_keys))}", err=True)
         sys.exit(1)
+
+    # Bool normalization for flag-type options
+    option = next((opt for opt in CONFIG_OPTIONS if opt.env_key == key), None)
+    if option and option.input_type == "flag":
+        lower = value.lower()
+        if lower in ("true", "1", "yes", "on"):
+            value = "true"
+        elif lower in ("false", "0", "no", "off"):
+            value = "false"
+        else:
+            click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
+            sys.exit(1)
 
     # Strip newlines to prevent injection into the .env format
     value = value.replace("\n", "").replace("\r", "")
@@ -332,17 +376,22 @@ def google_status() -> None:
     _check_google_status()
 
 
-_REQUIRED_KEYS = (
-    "SUMMON_SLACK_BOT_TOKEN",
-    "SUMMON_SLACK_APP_TOKEN",
-    "SUMMON_SLACK_SIGNING_SECRET",
-)
-
-
 def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     """Check config validity. Returns True if all checks pass."""
+    from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
+
     config_file = get_config_file(config_path)
     all_pass = True
+
+    # Claude CLI preflight
+    cli_status = check_claude_cli()
+    if cli_status.found:
+        if not quiet:
+            version_str = f" ({cli_status.version})" if cli_status.version else ""
+            click.echo(f"  [PASS] Claude CLI found{version_str}")
+    else:
+        click.echo("  [FAIL] Claude CLI not found — install from https://claude.ai/code")
+        all_pass = False
 
     # Parse the config file into a dict
     values: dict[str, str] = {}
@@ -356,7 +405,8 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
                 values[k.strip()] = v.strip()
 
     # Required keys
-    for key in _REQUIRED_KEYS:
+    required_keys = [opt.env_key for opt in CONFIG_OPTIONS if opt.required]
+    for key in required_keys:
         present = bool(values.get(key))
         if present:
             if not quiet:

@@ -129,11 +129,12 @@ class TestScribeConfigValidation:
 
 
 class TestScribeConfigSettableKeys:
-    """Verify all scribe keys are in _SETTABLE_KEYS."""
+    """Verify all scribe keys are in CONFIG_OPTIONS."""
 
-    def test_scribe_keys_in_settable(self):
-        from summon_claude.cli.config import _SETTABLE_KEYS
+    def test_scribe_keys_in_config_options(self):
+        from summon_claude.config import CONFIG_OPTIONS
 
+        valid_keys = {opt.env_key for opt in CONFIG_OPTIONS}
         expected_scribe_keys = {
             "SUMMON_SCRIBE_ENABLED",
             "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES",
@@ -146,7 +147,7 @@ class TestScribeConfigSettableKeys:
             "SUMMON_SCRIBE_SLACK_BROWSER",
             "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS",
         }
-        assert expected_scribe_keys.issubset(_SETTABLE_KEYS)
+        assert expected_scribe_keys.issubset(valid_keys)
 
 
 class TestGoogleWorkspaceMCP:

@@ -789,9 +789,9 @@ class TestWorkflowDefaults:
 
 class TestProjectWorkflow:
     async def test_get_project_workflow_missing_project(self, registry):
-        """Returns empty string when project_id not in table."""
+        """Returns None when project_id not in table (no row found)."""
         result = await registry.get_project_workflow("no-such")
-        assert result == ""
+        assert result is None
 
     async def test_get_project_workflow_returns_instructions(self, registry):
         """Returns stored instructions when project exists."""
@@ -813,13 +813,13 @@ class TestProjectWorkflow:
         with pytest.raises(KeyError, match="proj-missing"):
             await registry.set_project_workflow("proj-missing", "instructions")
 
-    async def test_clear_project_workflow_resets_to_empty(self, registry):
-        """Clears instructions by setting to empty string."""
+    async def test_clear_project_workflow_resets_to_null(self, registry):
+        """Clears instructions by setting to NULL (falls back to global defaults)."""
         project_id = await registry.add_project("wflow-clear", "/tmp/wflow-clear")
         await registry.set_project_workflow(project_id, "Some instructions.")
         await registry.clear_project_workflow(project_id)
         result = await registry.get_project_workflow(project_id)
-        assert result == ""
+        assert result is None
 
     async def test_clear_project_workflow_noop_for_missing_project(self, registry):
         """Clearing a non-existent project is a silent no-op."""

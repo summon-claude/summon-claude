@@ -9,6 +9,11 @@ from click.testing import CliRunner
 
 from summon_claude.cli import cli
 from summon_claude.cli.config import config_path, config_set, config_show
+from summon_claude.cli.preflight import CliStatus as _CliStatus
+
+
+def _cli_status(found: bool, version: str | None, path: str | None) -> _CliStatus:
+    return _CliStatus(found=found, version=version, path=path)
 
 
 class TestCLIInitCommand:
@@ -54,25 +59,44 @@ class TestCLIConfigSubcommands:
 class TestCmdInit:
     def test_init_creates_config_file(self, tmp_path):
         """init should create config.env with provided values."""
-        config_dir = tmp_path / "summon"
-        config_file = config_dir / "config.env"
+        config_file = tmp_path / "config.env"
 
-        inputs = "\n".join(
-            [
-                "xoxb-valid-bot-token",  # bot token (valid)
-                "xapp-valid-app-token",  # app token (valid)
-                "mysecret",  # signing secret
-            ]
+        # New init walks through all always-visible options (13 prompts):
+        # 3 secrets, 1 text (model), 1 choice (effort), 1 text (prefix),
+        # 2 ints, 3 flags, 1 secret (github_pat), 1 flag (scribe_enabled)
+        inputs = (
+            "\n".join(
+                [
+                    "xoxb-valid-bot-token",  # slack_bot_token (secret)
+                    "xapp-valid-app-token",  # slack_app_token (secret)
+                    "mysecret",  # signing_secret (secret)
+                    "",  # default_model (text, accept default)
+                    "high",  # default_effort (choice)
+                    "",  # channel_prefix (text, accept default)
+                    "",  # max_inline_chars (int, accept default)
+                    "",  # permission_debounce_ms (int, accept default)
+                    "n",  # no_update_check (flag)
+                    "y",  # enable_thinking (flag)
+                    "n",  # show_thinking (flag)
+                    "",  # github_pat (secret, empty = skip)
+                    "n",  # scribe_enabled (flag)
+                ]
+            )
+            + "\n"
         )
 
         with (
-            patch("summon_claude.cli.get_config_dir", return_value=config_dir),
             patch("summon_claude.cli.get_config_file", return_value=config_file),
+            patch("summon_claude.config.get_config_file", return_value=config_file),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=_cli_status(True, "1.0.0", "/usr/bin/claude"),
+            ),
         ):
             runner = CliRunner()
-            runner.invoke(cli, ["init"], input=inputs)
+            result = runner.invoke(cli, ["init"], input=inputs)
 
-        assert config_file.exists()
+        assert config_file.exists(), f"Config file not created. Output: {result.output}"
         content = config_file.read_text()
         assert "xoxb-valid-bot-token" in content
         assert "xapp-valid-app-token" in content
@@ -144,9 +168,8 @@ class TestConfigShow:
         assert "xoxb-secret-should-not-appear" not in captured.out
         assert "xapp-another-secret" not in captured.out
         assert "mysecretvalue12345" not in captured.out
-        assert "SUMMON_SLACK_BOT_TOKEN=configured" in captured.out
-        assert "SUMMON_SLACK_APP_TOKEN=configured" in captured.out
-        assert "SUMMON_SLACK_SIGNING_SECRET=configured" in captured.out
+        assert "configured" in captured.out
+        assert "SUMMON_SLACK_BOT_TOKEN" in captured.out
 
     def test_config_show_missing_secret(self, tmp_path, capsys):
         """config show should show 'missing' for empty secret values."""
@@ -157,7 +180,8 @@ class TestConfigShow:
             config_show()
 
         captured = capsys.readouterr()
-        assert "SUMMON_SLACK_BOT_TOKEN=missing" in captured.out
+        assert "SUMMON_SLACK_BOT_TOKEN" in captured.out
+        assert "not set" in captured.out
 
     def test_config_show_non_secret_values_shown(self, tmp_path, capsys):
         config_file = tmp_path / "config.env"
@@ -171,14 +195,17 @@ class TestConfigShow:
         captured = capsys.readouterr()
         assert "claude-opus-4-6" in captured.out
 
-    def test_config_show_no_file_prints_message(self, tmp_path, capsys):
+    def test_config_show_no_file_shows_defaults(self, tmp_path, capsys):
+        """config show works even when no config file exists — shows all options with defaults."""
         missing_file = tmp_path / "nonexistent.env"
 
         with patch("summon_claude.cli.config.get_config_file", return_value=missing_file):
             config_show()
 
         captured = capsys.readouterr()
-        assert "No config file" in captured.out or "summon init" in captured.out
+        # Should still show all options with default/not-set indicators
+        assert "Slack Credentials" in captured.out
+        assert "SUMMON_SLACK_BOT_TOKEN" in captured.out
 
 
 class TestConfigSet:
