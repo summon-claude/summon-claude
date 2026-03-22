@@ -990,6 +990,25 @@ class TestDispatchSpawnToken:
         assert "session_id" in response
         await manager.shutdown()
 
+    async def test_dispatch_spawn_rejects_oversized_system_prompt(self):
+        """Defense-in-depth: daemon rejects system_prompt_append exceeding limit."""
+        from summon_claude.summon_cli_mcp import MAX_SYSTEM_PROMPT_CHARS
+
+        manager, _, _ = _make_manager()
+        response = await manager._dispatch_control(
+            {
+                "type": "create_session_with_spawn_token",
+                "options": {
+                    "cwd": "/tmp",
+                    "name": "t",
+                    "system_prompt_append": "x" * (MAX_SYSTEM_PROMPT_CHARS + 1),
+                },
+                "spawn_token": "tok",
+            }
+        )
+        assert response["type"] == "error"
+        assert "system_prompt_append" in response["message"]
+
 
 # ---------------------------------------------------------------------------
 # Helpers: project up

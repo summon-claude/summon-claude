@@ -40,6 +40,7 @@ from summon_claude.sessions.auth import (
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.sessions.session import SessionOptions, SummonSession, format_pm_topic
 from summon_claude.slack.client import redact_secrets
+from summon_claude.summon_cli_mcp import MAX_SYSTEM_PROMPT_CHARS
 
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
@@ -492,6 +493,15 @@ class SessionManager:
                     spawn_token = msg["spawn_token"]
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid request: {e}"}
+                # Defense-in-depth: re-validate free-text fields at the daemon boundary
+                if (
+                    options.system_prompt_append
+                    and len(options.system_prompt_append) > MAX_SYSTEM_PROMPT_CHARS
+                ):
+                    return {
+                        "type": "error",
+                        "message": f"system_prompt_append exceeds {MAX_SYSTEM_PROMPT_CHARS} chars",
+                    }
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
                 except ValueError as e:

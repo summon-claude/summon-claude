@@ -509,6 +509,73 @@ class TestSessionStart:
         assert result["is_error"] is True
         assert "spawn depth" in result["content"][0]["text"]
 
+    def test_schema_includes_system_prompt(self, tools):
+        """session_start tool schema has optional system_prompt property."""
+        schema = tools["session_start"].input_schema
+        assert "system_prompt" in schema["properties"]
+        assert "system_prompt" not in schema.get("required", [])
+
+    def test_schema_system_prompt_max_length(self, tools):
+        """Guard test: maxLength matches MAX_SYSTEM_PROMPT_CHARS constant."""
+        from summon_claude.summon_cli_mcp import MAX_SYSTEM_PROMPT_CHARS
+
+        schema = tools["session_start"].input_schema
+        assert schema["properties"]["system_prompt"]["maxLength"] == MAX_SYSTEM_PROMPT_CHARS
+
+    async def test_rejects_oversized_system_prompt(self, tools):
+        """system_prompt exceeding _MAX_SYSTEM_PROMPT_CHARS returns error."""
+        result = await tools["session_start"].handler(
+            {"name": "test-rv", "system_prompt": "x" * 10_001}
+        )
+        assert result["is_error"] is True
+        assert "exceeds" in result["content"][0]["text"]
+
+    async def test_passes_system_prompt_to_options(self, populated_registry, tmp_path):
+        """system_prompt arg flows through to SessionOptions.system_prompt_append."""
+        from summon_claude.sessions.auth import SpawnAuth
+
+        mock_spawn = AsyncMock(
+            return_value=SpawnAuth(
+                token="tok123",
+                parent_session_id="parent-1111",
+                parent_channel_id="C100",
+                target_user_id="U_OWNER",
+                cwd=str(tmp_path),
+                spawn_source="session",
+                expires_at=None,
+            )
+        )
+        captured_options = []
+
+        async def capturing_ipc(options, token):
+            captured_options.append(options)
+            return "new-session-id"
+
+        local_tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd=str(tmp_path),
+                scheduler=make_scheduler(),
+                is_pm=True,
+                _generate_spawn_token=mock_spawn,
+                _ipc_create_session=capturing_ipc,
+            )
+        }
+
+        result = await local_tools["session_start"].handler(
+            {
+                "name": "test-review",
+                "system_prompt": "Review PR #42 thoroughly",
+            }
+        )
+        assert not result.get("is_error"), result
+        assert len(captured_options) == 1
+        assert captured_options[0].system_prompt_append == "Review PR #42 thoroughly"
+
 
 class TestSessionStop:
     async def test_not_found(self, tools):

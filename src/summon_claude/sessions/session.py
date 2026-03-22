@@ -295,8 +295,27 @@ _OVERFLOW_RECOVERY_PROMPT = (
 )
 
 
+_REVIEWER_SYSTEM_PROMPT_TEMPLATE = (
+    "Review PR #{number} on {owner}/{repo}. The branch is checked out "
+    "in this directory.\n\n"
+    "SAFETY RULES (never violate):\n"
+    "- Only push to the PR's head branch. NEVER push to main or master.\n"
+    "- NEVER force-push. Use regular `git push` only.\n"
+    "- Run the project's test suite before every push. Do not push if tests fail.\n"
+    "- Do not modify files outside the scope of this PR's changes unless directly "
+    "related to fixing an issue you found.\n\n"
+    "REVIEW PROCESS:\n"
+    "Thoroughly review all changes — check for bugs, security issues, logic errors, "
+    "and style problems. For each issue you find, fix it directly, commit with a "
+    "descriptive message, and push. Iterate until the PR is clean and tests pass. "
+    "When satisfied:\n"
+    "1. Apply the 'Ready for Review' label using GitHub MCP\n"
+    "2. Post a detailed summary of what you reviewed and fixed in this channel\n\n"
+    "Keep commit messages concise and focused on the change."
+)
+
 _PM_SYSTEM_PROMPT_APPEND = (
-    "You are a Project Manager (PM) agent running headlessly via summon-claude, "
+    "You are a Project Manager (PM) agent running headlessly via summon-claude, "  # noqa: S608
     "bridged to a private Slack channel. There is no terminal, no visible desktop. "
     "The user interacts through Slack messages. Use standard markdown formatting. "
     "Your output is auto-converted for Slack display.\n\n"
@@ -341,6 +360,80 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "5. **Handle failures** — if EnterWorktree fails (branch already exists, "
     "worktree path conflict), choose a different name (e.g. append '-v2') and "
     "retry. If it fails again, report the error to the user."
+    "\n\n"
+    "## PR Review\n\n"
+    "Skip this section entirely if GitHub MCP tools are not available "
+    "(no `github_pat` configured).\n\n"
+    "After each periodic scan, check for completed sub-sessions that may have "
+    "produced pull requests:\n\n"
+    '1. Use `session_list` with `filter="mine"` to get all your child sessions, '
+    "then select those with status `completed` that you have not yet processed.\n"
+    "2. For each completed session, read its Slack channel history "
+    "(`slack_read_history`) looking for GitHub PR URLs (pattern: "
+    "github.com/{owner}/{repo}/pull/{number}).\n"
+    "3. Check your canvas — has this PR already been reviewed?\n"
+    "4. If not reviewed:\n"
+    "   a. **Check workflow instructions for pre-review steps.** Your workflow "
+    "instructions may define steps that must complete before spawning a "
+    "reviewer (e.g., running a quality gate, verifying tests pass). If "
+    "pre-review steps are defined:\n"
+    "      - Follow the workflow instructions to execute the required steps. "
+    "This may involve communicating with the sub-session using "
+    "`session_message` to inject commands, or `session_resume` to "
+    "restart completed sessions, as defined in your workflow "
+    "instructions.\n"
+    "      - Monitor the sub-session's channel via `slack_read_history` for "
+    "completion of the pre-review step. Look for success/failure "
+    "indicators in the channel messages.\n"
+    "      - Only proceed to spawn a reviewer after pre-review steps pass and "
+    "all changes are pushed.\n"
+    "      - If pre-review steps fail, note the failure in your canvas and "
+    "report to the user. Do NOT spawn a reviewer for failed pre-review.\n"
+    "   b. Get the completed session's CWD from `session_info`\n"
+    "   c. Spawn a reviewer session:\n"
+    "      - Use `session_start` with:\n"
+    "        - `cwd`: the completed session's CWD (branch is already checked out)\n"
+    '        - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
+    '        - `model`: "opus"\n'
+    "        - `system_prompt`: the review instructions below (between "
+    "BEGIN/END markers), with {number}, {owner}, {repo} filled in\n"
+    "      --- BEGIN REVIEW TEMPLATE ---\n" + _REVIEWER_SYSTEM_PROMPT_TEMPLATE + "\n"
+    "      --- END REVIEW TEMPLATE ---\n"
+    '   d. Note in your canvas: "PR #{number} — review spawned"\n'
+    "5. When a reviewer session completes, read its channel for the summary. "
+    'Update your canvas: "PR #{number} — reviewed"\n'
+    "\n\n"
+    "## On-Demand PR Review\n\n"
+    'When a user asks you to review a specific PR (e.g., "review PR #42" or '
+    '"review https://github.com/owner/repo/pull/42"):\n\n'
+    "1. Extract the PR number and repo from the request.\n"
+    "2. Use GitHub MCP `pull_request_read` to get the PR details (head branch "
+    "name, base branch, status).\n"
+    "3. If the PR is draft or closed, inform the user and do not spawn a review.\n"
+    "4. Create a git worktree for the PR branch:\n"
+    "   - Validate: {number} must be a numeric integer; {head_branch} must match "
+    "[a-zA-Z0-9/_.-]. Reject values with shell metacharacters.\n"
+    "   - Run: `git worktree add .worktrees/review-pr{number} {head_branch}`\n"
+    "   - If the worktree already exists, skip creation.\n"
+    "5. Spawn a reviewer session:\n"
+    "   - Use `session_start` with:\n"
+    '     - `cwd`: "{project_directory}/.worktrees/review-pr{number}"\n'
+    '     - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
+    '     - `model`: "opus"\n'
+    "     - `system_prompt`: the same review instructions as the automatic flow\n"
+    '6. Note in your canvas: "PR #{number} — manual review spawned"\n'
+    '7. Inform the user: "Spawned a reviewer for PR #{number}"\n'
+    "\n\n"
+    "## Worktree Cleanup\n\n"
+    "During periodic scans, check for worktrees that are no longer needed:\n\n"
+    "1. List worktrees: `git worktree list`\n"
+    "2. For each worktree under `.worktrees/review-pr*`:\n"
+    "   a. Extract the PR number from the directory name.\n"
+    "   b. Use GitHub MCP `pull_request_read` to check the PR status.\n"
+    "   c. If the PR is merged or closed:\n"
+    "      - Run: `git worktree remove .worktrees/review-pr{number}`\n"
+    "      - Update canvas: remove the PR entry.\n"
+    "3. Do NOT remove worktrees for open PRs — the user may still need them.\n"
 )
 
 
@@ -688,6 +781,7 @@ class SessionOptions:
     auth_only: bool = False
     project_id: str | None = None
     scan_interval_s: int = 900
+    system_prompt_append: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -814,6 +908,7 @@ class SummonSession:
         self._auth_only = options.auth_only
         self._project_id = options.project_id
         self._scan_interval_s = max(30, options.scan_interval_s)
+        self._system_prompt_append = options.system_prompt_append
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -1816,13 +1911,24 @@ class SummonSession:
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
                 )
-                # PM prompt is built separately — inject cron recovery if present
+                # PM prompt is built separately — inject compaction context if present
+                if restart_count > 0 and system_prompt_append != base_prompt:
+                    # system_prompt_append was updated with compaction summary or recovery
+                    # prompt after the previous iteration's restart. Extract the delta
+                    # (everything after base_prompt) and append to PM prompt.
+                    compaction_delta = system_prompt_append[len(base_prompt) :]
+                    if compaction_delta:
+                        system_prompt["append"] += compaction_delta
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery
+                if self._system_prompt_append:
+                    system_prompt["append"] += "\n\n" + self._system_prompt_append
             else:
                 effective_append = system_prompt_append
                 if _cron_recovery:
                     effective_append = system_prompt_append + _cron_recovery
+                if self._system_prompt_append:
+                    effective_append += "\n\n" + self._system_prompt_append
                 system_prompt = {
                     "type": "preset",
                     "preset": "claude_code",

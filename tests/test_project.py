@@ -412,6 +412,26 @@ class TestBuildPmSystemPromptWorkflow:
         result = build_pm_system_prompt(cwd=cwd, scan_interval_s=900)
         assert cwd in result["append"]
 
+    def test_pm_prompt_contains_pr_review_section(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "## PR Review" in result["append"]
+
+    def test_pm_prompt_contains_on_demand_review(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "## On-Demand PR Review" in result["append"]
+
+    def test_pm_prompt_contains_worktree_cleanup(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "## Worktree Cleanup" in result["append"]
+
+    def test_pm_prompt_contains_safety_rules(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "NEVER force-push" in result["append"]
+
+    def test_pm_prompt_contains_ready_for_review_label(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "Ready for Review" in result["append"]
+
 
 # ---------------------------------------------------------------------------
 # PM welcome message
