@@ -1,0 +1,191 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'src/**/*.py'
+      - 'README.md'
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+  workflow_dispatch:
+    inputs:
+      section:
+        description: 'Screenshot section to capture (leave empty for all)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - slack-setup
+          - session-ux
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  deploy:
+    name: Deploy docs
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: pages-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy with mike
+        run: uv run mike deploy latest --push --update-aliases --strict
+
+      - name: Set default version
+        run: uv run mike set-default latest --push
+
+  preview:
+    name: Preview docs (PR)
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: pages-preview-${{ github.event.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Build docs
+        run: uv run mkdocs build -d site-pr/
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          ref: gh-pages
+          path: gh-pages-dir
+
+      - name: Copy preview to gh-pages
+        run: |
+          mkdir -p gh-pages-dir/_previews/pr-${{ github.event.number }}
+          cp -r site-pr/. gh-pages-dir/_previews/pr-${{ github.event.number }}/
+
+      - name: Push preview to gh-pages
+        run: |
+          cd gh-pages-dir
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _previews/pr-${{ github.event.number }}
+          git commit -m "docs: preview for PR #${{ github.event.number }}" || true
+          git push origin gh-pages
+
+      - name: Post PR comment with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const previewUrl = `https://summon-claude.github.io/summon-claude/_previews/pr-${{ github.event.number }}/`;
+            const body = `## Docs Preview\n\nPreview available at: ${previewUrl}\n\n_Updated by commit ${{ github.sha }}_`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.number }},
+            });
+            const existing = comments.find(c => c.body.startsWith('## Docs Preview'));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: ${{ github.event.number }},
+                body,
+              });
+            }
+
+  preview-cleanup:
+    name: Cleanup preview (PR closed)
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Remove preview directory
+        run: |
+          if [ -d "_previews/pr-${{ github.event.number }}" ]; then
+            rm -rf "_previews/pr-${{ github.event.number }}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "docs: remove preview for PR #${{ github.event.number }}"
+            git push origin gh-pages
+          else
+            echo "No preview directory found, skipping."
+          fi
+
+  screenshots:
+    name: Capture documentation screenshots
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Install Chromium
+        run: uv run playwright install chromium
+
+      - name: Capture screenshots
+        env:
+          SUMMON_TEST_SLACK_WORKSPACE_URL: ${{ vars.SUMMON_TEST_SLACK_WORKSPACE_URL }}
+          SUMMON_TEST_SLACK_COOKIE: ${{ secrets.SUMMON_TEST_SLACK_COOKIE }}
+        run: |
+          SECTION="${{ github.event.inputs.section }}"
+          if [ -n "$SECTION" ]; then
+            uv run python scripts/docs-screenshots.py --section "$SECTION" --output docs/assets/screenshots/
+          else
+            uv run python scripts/docs-screenshots.py --output docs/assets/screenshots/
+          fi
+
+      - name: Create PR with screenshot updates
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "docs: update screenshots"
+          branch: docs/update-screenshots
+          delete-branch: true
+          title: "docs: update documentation screenshots"
+          body: |
+            Automated screenshot update triggered by workflow dispatch.
+
+            Section: ${{ github.event.inputs.section || 'all' }}
+          labels: documentation

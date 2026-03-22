@@ -67,6 +67,14 @@ dev = [
     "ruff==0.15.5",
     "workspace-mcp==1.14.2",
 ]
+docs = [
+    "mkdocs-material>=9.7,<10",
+    "mike>=2.1",
+    "mkdocs-click>=0.9",
+    "mkdocstrings[python]>=0.29",
+    "mkdocs-llmstxt>=0.4",
+    "playwright>=1.40",
+]
 
 # ============================================================================
 # RUFF

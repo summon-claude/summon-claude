@@ -53,6 +53,9 @@ _inspect_sdk2.py
 # Serena MCP
 .serena/
 
+# MkDocs build output
+site/
+
 # Project memory (cross-session notes, not for version control)
 hack
 

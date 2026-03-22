@@ -1,0 +1,106 @@
+site_name: summon-claude
+site_url: https://summon-claude.github.io/summon-claude/
+repo_url: https://github.com/summon-claude/summon-claude
+repo_name: summon-claude/summon-claude
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - content.code.select
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - mkdocs-click
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+  - llmstxt:
+      sections:
+        summon-claude:
+          - "*"
+
+extra:
+  version:
+    provider: mike
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Slack Setup: getting-started/slack-setup.md
+    - Quick Start: getting-started/quickstart.md
+    - Upgrading: getting-started/upgrading.md
+  - User Guide:
+    - Sessions: guide/sessions.md
+    - Commands: guide/commands.md
+    - Configuration: guide/configuration.md
+    - Permissions: guide/permissions.md
+    - Threading: guide/threading.md
+    - Projects: guide/projects.md
+    - PM Agents: guide/pm-agents.md
+    - Scribe: guide/scribe.md
+    - Canvas: guide/canvas.md
+    - Cron & Tasks: guide/cron-tasks.md
+    - GitHub Integration: guide/github-integration.md
+  - Reference:
+    - CLI: reference/cli.md
+    - Environment Variables: reference/environment-variables.md
+    - MCP Tools: reference/mcp-tools.md
+    - API Reference:
+      - reference/api/index.md
+      - Configuration: reference/api/config.md
+      - Sessions: reference/api/sessions.md
+      - Slack: reference/api/slack.md
+      - CLI Modules: reference/api/cli.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Daemon: architecture/daemon.md
+    - Slack Integration: architecture/slack-integration.md
+    - Database: architecture/database.md
+    - Security: architecture/security.md
+  - Troubleshooting: troubleshooting.md
+  - Development:
+    - Contributing: development/contributing.md
+    - Testing: development/testing.md
+    - Releasing: development/releasing.md
