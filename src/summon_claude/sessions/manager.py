@@ -1054,7 +1054,7 @@ class SessionManager:
         # Pre-flight: validate dependencies before spawning.
         # workspace-mcp uses bare top-level modules (not a 'workspace_mcp' package),
         # so find_spec('workspace_mcp') always returns None. Use the binary check.
-        if self._config.scribe_google_services:
+        if self._config.scribe_google_enabled and self._config.scribe_google_services:
             from summon_claude.config import find_workspace_mcp_bin  # noqa: PLC0415
 
             if not find_workspace_mcp_bin().exists():

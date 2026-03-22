@@ -2143,7 +2143,7 @@ class SummonSession:
 
         # Wire Google Workspace MCP for scribe sessions if configured.
         google_mcp_wired = False
-        if is_scribe and self._config.scribe_google_services:
+        if is_scribe and self._config.scribe_google_enabled and self._config.scribe_google_services:
             try:
                 google_mcp = _build_google_workspace_mcp(self._config.scribe_google_services)
                 mcp_servers["workspace"] = google_mcp

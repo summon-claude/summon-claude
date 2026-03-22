@@ -49,6 +49,10 @@ class TestScribeConfigDefaults:
         cfg = _make_config()
         assert cfg.scribe_quiet_hours == ""
 
+    def test_google_enabled_default_true(self):
+        cfg = _make_config()
+        assert cfg.scribe_google_enabled is True
+
     def test_google_services_default(self):
         cfg = _make_config()
         assert cfg.scribe_google_services == "gmail,calendar,drive"
