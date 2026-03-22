@@ -1459,6 +1459,118 @@ class TestSystemPromptAppendRestart:
         assert "Build widget" in restarted_prompt
         assert "custom-review-instructions" in restarted_prompt
 
+    async def test_pm_restart_includes_compaction_summary(self, registry):
+        """PM sessions receive compaction summary after restart."""
+        from summon_claude.sessions.session import (
+            _COMPACT_SUMMARY_PREFIX,
+            _SessionRestartError,
+        )
+
+        captured_prompts = []
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                captured_prompts.append(options.system_prompt["append"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        consumer_call = 0
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(summary="## Status\nManaging 3 sessions")
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session(pm_profile=True, system_prompt_append="review-inject")
+        session._authenticated_user_id = "U_TEST"
+        rt = make_rt(registry)
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch(
+                "summon_claude.sessions.session.discover_plugin_skills",
+                return_value=[],
+            ),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert len(captured_prompts) == 2
+        restarted_prompt = captured_prompts[1]
+        # PM prompt should include compaction summary after restart
+        assert _COMPACT_SUMMARY_PREFIX in restarted_prompt
+        assert "Managing 3 sessions" in restarted_prompt
+        # system_prompt_append should also survive
+        assert "review-inject" in restarted_prompt
+
+    async def test_recovery_mode_restart_preserves_system_prompt_append(self, registry):
+        """system_prompt_append survives recovery_mode restart (overflow)."""
+        from summon_claude.sessions.session import (
+            _OVERFLOW_RECOVERY_PROMPT,
+            _SessionRestartError,
+        )
+
+        captured_prompts = []
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                captured_prompts.append(options.system_prompt["append"])
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        consumer_call = 0
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(recovery_mode=True)
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session(system_prompt_append="must-survive-overflow")
+        rt = make_rt(registry)
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert len(captured_prompts) == 2
+        restarted_prompt = captured_prompts[1]
+        assert _OVERFLOW_RECOVERY_PROMPT in restarted_prompt
+        assert "must-survive-overflow" in restarted_prompt
+
 
 class TestThinkingConfig:
     """Verify that enable_thinking produces the correct ThinkingConfig on ClaudeAgentOptions."""

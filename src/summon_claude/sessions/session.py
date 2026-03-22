@@ -1911,7 +1911,14 @@ class SummonSession:
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
                 )
-                # PM prompt is built separately — inject cron recovery if present
+                # PM prompt is built separately — inject compaction context if present
+                if restart_count > 0 and system_prompt_append != base_prompt:
+                    # system_prompt_append was updated with compaction summary or recovery
+                    # prompt after the previous iteration's restart. Extract the delta
+                    # (everything after base_prompt) and append to PM prompt.
+                    compaction_delta = system_prompt_append[len(base_prompt) :]
+                    if compaction_delta:
+                        system_prompt["append"] += compaction_delta
                 if _cron_recovery:
                     system_prompt["append"] += _cron_recovery
                 if self._system_prompt_append:
