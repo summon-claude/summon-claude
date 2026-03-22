@@ -886,24 +886,33 @@ class SessionManager:
                     sess_name = sess.get("session_name", "")
                     is_pm = "-pm-" in sess_name
                     try:
-                        resume_params = await self._validate_resume_target(
-                            sess_id, allow_suspended=True
+                        # Build resume params directly from the session dict we already
+                        # have, plus one get_channel() call for the Claude session ID.
+                        # This avoids opening a second SessionRegistry inside
+                        # _validate_resume_target (which would re-read the same session).
+                        channel_id = sess.get("slack_channel_id")
+                        if not channel_id:
+                            raise ValueError("Session has no associated channel")
+                        channel = await registry.get_channel(channel_id)
+                        claude_sid: str | None = (
+                            channel["claude_session_id"]
+                            if channel and channel.get("claude_session_id")
+                            else sess.get("claude_session_id")
                         )
-                        claude_sid = resume_params["claude_session_id"]
                         options = SessionOptions(
-                            cwd=resume_params["cwd"],
+                            cwd=sess.get("cwd", project["directory"]),
                             name=sess_name or "",
-                            model=resume_params.get("model"),
-                            effort=resume_params.get("effort") or "high",
+                            model=sess.get("model"),
+                            effort=sess.get("effort") or "high",
                             resume=claude_sid,  # None → channel-reuse-only fallback
-                            channel_id=resume_params["channel_id"],
+                            channel_id=channel_id,
                             project_id=project_id,
                             pm_profile=is_pm,
                         )
                         await self.create_resumed_session(
                             options,
                             authenticated_user_id=user_id,
-                            parent_session_id=resume_params.get("parent_session_id"),
+                            parent_session_id=sess.get("parent_session_id"),
                         )
                         # Mark old suspended record as completed
                         await registry.update_status(sess_id, "completed")

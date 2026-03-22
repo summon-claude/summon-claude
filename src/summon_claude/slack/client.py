@@ -16,6 +16,12 @@ from slack_sdk.web.async_client import AsyncWebClient
 logger = logging.getLogger(__name__)
 
 ZZZ_PREFIX = "zzz-"
+_SLACK_CHANNEL_NAME_MAX = 80
+
+
+def make_zzz_name(channel_name: str) -> str:
+    """Return channel_name with zzz- prefix, truncated to Slack's 80-char limit."""
+    return ZZZ_PREFIX + channel_name[: _SLACK_CHANNEL_NAME_MAX - len(ZZZ_PREFIX)]
 
 
 @dataclass(frozen=True, slots=True)

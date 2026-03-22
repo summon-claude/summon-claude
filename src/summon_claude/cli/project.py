@@ -17,7 +17,7 @@ from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.slack.client import ZZZ_PREFIX
+from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +223,7 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             web_client = AsyncWebClient(token=config.slack_bot_token)
 
             async def _rename_one(cid: str, cname: str) -> None:
-                max_len = 80
-                zzz_name = ZZZ_PREFIX + cname[: max_len - len(ZZZ_PREFIX)]
+                zzz_name = make_zzz_name(cname)
                 try:
                     await web_client.conversations_rename(channel=cid, name=zzz_name)
                     logger.info("zzz-rename: #%s → #%s", cname, zzz_name)

@@ -448,6 +448,22 @@ class TestZzzPrefix:
         """ZZZ_PREFIX module constant must be exactly 'zzz-'."""
         assert ZZZ_PREFIX == "zzz-"
 
+    def test_zzz_make_zzz_name_short(self):
+        """make_zzz_name prepends zzz- to short names."""
+        from summon_claude.slack.client import make_zzz_name
+
+        assert make_zzz_name("myproj-abc") == "zzz-myproj-abc"
+
+    def test_zzz_make_zzz_name_truncates_to_80(self):
+        """make_zzz_name truncates so result is at most 80 chars."""
+        from summon_claude.slack.client import make_zzz_name
+
+        long_name = "a" * 80
+        result = make_zzz_name(long_name)
+        assert len(result) == 80
+        assert result.startswith("zzz-")
+        assert result == "zzz-" + "a" * 76
+
 
 class TestZzzRenameChannel:
     def _make_client(self, channel_id: str = "C123") -> tuple[SlackClient, MagicMock]:

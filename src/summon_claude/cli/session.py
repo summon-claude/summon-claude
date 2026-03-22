@@ -31,7 +31,7 @@ from summon_claude.cli.interactive import (
 from summon_claude.config import SummonConfig, get_data_dir
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.slack.client import ZZZ_PREFIX
+from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 logger = logging.getLogger(__name__)
 
@@ -247,8 +247,7 @@ async def async_session_cleanup(ctx: click.Context, *, archive: bool = False) ->
                     and not channel_name.startswith(ZZZ_PREFIX)
                 ):
                     # Rename stale channel with zzz- prefix
-                    max_len = 80
-                    zzz_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                    zzz_name = make_zzz_name(channel_name)
                     try:
                         await slack_client.conversations_rename(channel=channel_id, name=zzz_name)
                         logger.info(

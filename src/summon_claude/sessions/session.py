@@ -76,7 +76,7 @@ from summon_claude.sessions.scheduler import SessionScheduler, explain_cron, san
 from summon_claude.sessions.types import FileChange
 from summon_claude.slack.canvas_store import CanvasStore
 from summon_claude.slack.canvas_templates import get_canvas_template
-from summon_claude.slack.client import ZZZ_PREFIX, SlackClient, redact_secrets
+from summon_claude.slack.client import ZZZ_PREFIX, SlackClient, make_zzz_name, redact_secrets
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
@@ -2588,8 +2588,7 @@ class SummonSession:
                 if channel_name.startswith(ZZZ_PREFIX):
                     logger.debug("zzz-rename: channel already prefixed (%s)", channel_name)
                     return
-                max_len = 80
-                new_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                new_name = make_zzz_name(channel_name)
                 result = await client.rename_channel(new_name)
                 if result is None:
                     try:

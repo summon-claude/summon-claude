@@ -33,7 +33,7 @@ from summon_claude.event_dispatcher import EventDispatcher
 from summon_claude.sessions.manager import SessionManager
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.slack.bolt import BoltRouter
-from summon_claude.slack.client import ZZZ_PREFIX
+from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 if TYPE_CHECKING:
     from slack_sdk.web.async_client import AsyncWebClient
@@ -186,8 +186,7 @@ async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
                         logger.debug("Could not post disconnect to channel %s: %s", channel_id, e)
                     # Rename with zzz- prefix to signal session is inactive
                     if channel_name and not channel_name.startswith(ZZZ_PREFIX):
-                        max_len = 80
-                        zzz_name = ZZZ_PREFIX + channel_name[: max_len - len(ZZZ_PREFIX)]
+                        zzz_name = make_zzz_name(channel_name)
                         try:
                             await web_client.conversations_rename(channel=channel_id, name=zzz_name)
                             logger.info(
