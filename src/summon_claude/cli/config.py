@@ -820,3 +820,113 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         if not has_bridge:
             click.echo("  summon hooks install                Install Claude Code hook bridge")
         click.echo("  summon project up                   Start PM agents for all projects")
+
+
+# ---------------------------------------------------------------------------
+# External Slack workspace commands (C9)
+# ---------------------------------------------------------------------------
+
+_SLACK_WORKSPACE_FILE = "slack_workspace.json"
+
+
+def _get_workspace_config_path() -> Path:
+    """Path to the external Slack workspace config."""
+    return get_data_dir() / _SLACK_WORKSPACE_FILE
+
+
+def slack_auth(workspace_url: str) -> None:
+    """Interactive Slack workspace authentication via Playwright.
+
+    Opens a real browser window for the user to log in. Saves auth state
+    to ``get_data_dir() / browser_auth/``.
+    """
+    try:
+        from summon_claude.slack_browser import interactive_slack_auth  # noqa: PLC0415
+    except ImportError:
+        click.echo(
+            "External Slack support requires the 'slack-browser' extra: "
+            "uv pip install summon-claude[slack-browser]",
+            err=True,
+        )
+        sys.exit(1)
+
+    from summon_claude.config import SummonConfig  # noqa: PLC0415
+
+    config = SummonConfig()
+    browser_type = config.scribe_slack_browser
+
+    click.echo(f"Opening {browser_type} browser for Slack login at {workspace_url}")
+    click.echo("Complete the login in the browser window (timeout: 5 minutes)")
+    click.echo(":warning: Auth state contains session cookies — treat stored files as secrets.")
+
+    import json  # noqa: PLC0415
+
+    state_file = asyncio.run(interactive_slack_auth(workspace_url, browser_type))
+
+    # Save workspace metadata
+    workspace_config = {
+        "url": workspace_url,
+        "auth_state_path": str(state_file),
+        "browser_type": browser_type,
+    }
+    config_path = _get_workspace_config_path()
+    config_path.write_text(json.dumps(workspace_config, indent=2))
+    config_path.chmod(0o600)
+
+    click.echo(f"Slack auth saved to {state_file}")
+    click.echo(f"Workspace config saved to {config_path}")
+
+
+def slack_status() -> None:
+    """Show external Slack workspace configuration and auth status."""
+    import json  # noqa: PLC0415
+
+    config_path = _get_workspace_config_path()
+    if not config_path.exists():
+        click.echo("No external Slack workspace configured.")
+        click.echo("Run: summon config slack-auth <workspace-url>")
+        return
+
+    workspace = json.loads(config_path.read_text())
+    click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
+
+    state_path = Path(workspace.get("auth_state_path", ""))
+    if state_path.exists():
+        import datetime  # noqa: PLC0415
+
+        mtime = datetime.datetime.fromtimestamp(state_path.stat().st_mtime, tz=datetime.UTC)
+        click.echo(f"Auth state: {state_path} (saved {mtime.isoformat()})")
+    else:
+        click.echo("Auth state: MISSING (re-run slack-auth)")
+
+    from summon_claude.config import SummonConfig  # noqa: PLC0415
+
+    config = SummonConfig()
+    channels = config.scribe_slack_monitored_channels
+    if channels:
+        click.echo(f"Monitored channels: {channels}")
+    else:
+        click.echo("Monitored channels: none (DMs and @mentions always captured)")
+
+
+def slack_remove() -> None:
+    """Remove external Slack workspace auth state."""
+    import json  # noqa: PLC0415
+
+    config_path = _get_workspace_config_path()
+    if not config_path.exists():
+        click.echo("No external Slack workspace configured.")
+        return
+
+    if not click.confirm("Remove Slack auth state? This cannot be undone."):
+        return
+
+    workspace = json.loads(config_path.read_text())
+    state_path = Path(workspace.get("auth_state_path", ""))
+
+    with contextlib.suppress(FileNotFoundError):
+        state_path.unlink()
+    with contextlib.suppress(FileNotFoundError):
+        config_path.unlink()
+
+    click.echo("Slack auth state removed.")

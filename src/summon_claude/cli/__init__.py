@@ -33,6 +33,9 @@ from summon_claude.cli.config import (
     config_show,
     google_auth,
     google_status,
+    slack_auth,
+    slack_remove,
+    slack_status,
 )
 from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
@@ -781,6 +784,25 @@ def config_google_auth_cmd() -> None:
 def config_google_status_cmd() -> None:
     """Check Google Workspace authentication status."""
     google_status()
+
+
+@cmd_config.command("slack-auth")
+@click.argument("workspace_url")
+def config_slack_auth_cmd(workspace_url: str) -> None:
+    """Authenticate with an external Slack workspace for scribe monitoring."""
+    slack_auth(workspace_url)
+
+
+@cmd_config.command("slack-status")
+def config_slack_status_cmd() -> None:
+    """Show external Slack workspace auth status."""
+    slack_status()
+
+
+@cmd_config.command("slack-remove")
+def config_slack_remove_cmd() -> None:
+    """Remove external Slack workspace auth state."""
+    slack_remove()
 
 
 # ---------------------------------------------------------------------------
