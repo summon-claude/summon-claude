@@ -851,13 +851,21 @@ class TestEffectiveWorkflow:
         result = await registry.get_effective_workflow(project_id)
         assert result == "Project-level."
 
-    async def test_effective_workflow_empty_project_falls_through(self, registry):
-        """Empty per-project instructions fall through to global defaults."""
+    async def test_effective_workflow_null_project_falls_through(self, registry):
+        """NULL per-project instructions fall through to global defaults."""
         project_id = await registry.add_project("eff-empty", "/tmp/eff-empty")
-        # workflow_instructions defaults to '' on project creation
+        # workflow_instructions defaults to NULL on project creation
         await registry.set_workflow_defaults("Global fallback.")
         result = await registry.get_effective_workflow(project_id)
         assert result == "Global fallback."
+
+    async def test_effective_workflow_explicit_empty_suppresses_global(self, registry):
+        """Explicitly empty per-project instructions suppress global defaults."""
+        project_id = await registry.add_project("eff-suppress", "/tmp/eff-suppress")
+        await registry.set_project_workflow(project_id, "")
+        await registry.set_workflow_defaults("Global fallback.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == ""
 
     async def test_effective_workflow_missing_project_falls_through(self, registry):
         """Project not in table falls through to global defaults."""
@@ -869,6 +877,37 @@ class TestEffectiveWorkflow:
         """Returns empty when projects table exists but nothing is configured."""
         result = await registry.get_effective_workflow("proj-1")
         assert result == ""
+
+    async def test_effective_workflow_global_workflow_token_expansion(self, registry):
+        """$GLOBAL_WORKFLOW token in project instructions is replaced with global defaults."""
+        project_id = await registry.add_project("eff-token", "/tmp/eff-token")
+        await registry.set_workflow_defaults("Global rules here.")
+        await registry.set_project_workflow(project_id, "Before.\n$GLOBAL_WORKFLOW\nAfter.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Before.\nGlobal rules here.\nAfter."
+
+    async def test_effective_workflow_global_token_empty_global(self, registry):
+        """$GLOBAL_WORKFLOW expands to empty string when global is not set."""
+        project_id = await registry.add_project("eff-token-empty", "/tmp/eff-token-empty")
+        await registry.set_project_workflow(project_id, "Before.\n$GLOBAL_WORKFLOW\nAfter.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Before.\n\nAfter."
+
+    async def test_effective_workflow_global_token_multiple(self, registry):
+        """Multiple $GLOBAL_WORKFLOW tokens all expand."""
+        project_id = await registry.add_project("eff-multi", "/tmp/eff-multi")
+        await registry.set_workflow_defaults("G")
+        await registry.set_project_workflow(project_id, "$GLOBAL_WORKFLOW-$GLOBAL_WORKFLOW")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "G-G"
+
+    async def test_effective_workflow_no_token_no_expansion(self, registry):
+        """Project instructions without $GLOBAL_WORKFLOW are returned as-is."""
+        project_id = await registry.add_project("eff-no-token", "/tmp/eff-no-token")
+        await registry.set_workflow_defaults("Should not appear.")
+        await registry.set_project_workflow(project_id, "Only project content.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Only project content."
 
 
 class TestWorkflowDefaultsTable:

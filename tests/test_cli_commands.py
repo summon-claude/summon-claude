@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
@@ -269,6 +269,51 @@ class TestConfigSet:
         assert "xoxb-keep" in content
         assert "new-prefix" in content
         assert "SUMMON_CHANNEL_PREFIX=test" not in content
+
+
+class TestConfigSetValidation:
+    def test_config_set_rejects_unknown_key(self, tmp_path):
+        """config set should reject keys not in CONFIG_OPTIONS."""
+        config_file = tmp_path / "config.env"
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_BOGUS_KEY", "value")
+
+    def test_config_set_normalizes_bool_true(self, tmp_path):
+        """config set should normalize 'yes' to 'true' for flag options."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_set("SUMMON_NO_UPDATE_CHECK", "yes")
+        assert "SUMMON_NO_UPDATE_CHECK=true" in config_file.read_text()
+
+    def test_config_set_normalizes_bool_false(self, tmp_path):
+        """config set should normalize '0' to 'false' for flag options."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_set("SUMMON_NO_UPDATE_CHECK", "0")
+        assert "SUMMON_NO_UPDATE_CHECK=false" in config_file.read_text()
+
+    def test_config_set_rejects_invalid_bool(self, tmp_path):
+        """config set should reject invalid boolean values for flag options."""
+        config_file = tmp_path / "config.env"
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_NO_UPDATE_CHECK", "nah")
+
+    def test_config_set_runs_validate_fn(self, tmp_path):
+        """config set should reject values that fail validate_fn."""
+        config_file = tmp_path / "config.env"
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_SLACK_BOT_TOKEN", "invalid-no-prefix")
 
 
 class TestConfigPath:
