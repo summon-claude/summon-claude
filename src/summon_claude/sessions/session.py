@@ -1442,6 +1442,17 @@ class SummonSession:
         if self._pm_profile:
             await self._post_pm_welcome(client, web_client)
 
+        # Scribe welcome message (first run only — check channel history)
+        if self._scribe_profile and not self._channel_id_option:
+            try:
+                interval_min = max(1, self._scan_interval_s // 60)
+                await client.post(
+                    f"Scribe agent started — scanning every {interval_min} minutes.\n"
+                    "Post notes or action items here and I'll track them."
+                )
+            except Exception:
+                logger.debug("Failed to post scribe welcome message")
+
         git_branch = await _get_git_branch(self._cwd)
         self._last_topic_model = self._model
         self._last_topic_branch = git_branch
