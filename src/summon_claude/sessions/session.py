@@ -974,10 +974,12 @@ class SummonSession:
 
         # Session state
         self._last_heartbeat_time: float = 0.0
+        self._last_pm_topic: str | None = None
         self._channel_id: str | None = None  # set after channel creation
         self._canvas_store: CanvasStore | None = None
         self._scheduler: SessionScheduler | None = None
         self._changed_files: dict[str, FileChange] = {}
+        self._pm_status_ts: str | None = None
 
     # ------------------------------------------------------------------
     # Public API (called by SessionManager / BoltRouter)
@@ -1352,6 +1354,7 @@ class SummonSession:
         self._last_topic_branch = git_branch
         if self._pm_profile:
             topic = format_pm_topic(0)
+            self._last_pm_topic = topic
         else:
             topic = _format_topic(model=self._model, cwd=self._cwd, git_branch=git_branch)
         try:
@@ -1702,7 +1705,8 @@ class SummonSession:
 
         try:
             msg_ref = await client.post(welcome_text)
-            # Pin the status message
+            self._pm_status_ts = msg_ref.ts
+            # Pin the status message (non-fatal — tool still works without pin)
             try:
                 await web_client.pins_add(
                     channel=client.channel_id,
@@ -1711,7 +1715,7 @@ class SummonSession:
             except Exception as e:
                 logger.debug("PM: failed to pin status message: %s", e)
         except Exception as e:
-            logger.debug("PM: failed to post welcome message: %s", e)
+            logger.warning("PM: failed to post welcome message: %s", e)
 
     async def _init_canvas(
         self, client: SlackClient, registry: SessionRegistry, channel_id: str
@@ -1752,27 +1756,32 @@ class SummonSession:
 
         # Channel scoping: every session type gets an explicit async resolver.
         # Regular sessions: own channel only.
-        # PM sessions: own channel + channels of sessions they spawned.
-        if is_pm:
-            _own_cid = rt.client.channel_id
-            _reg = rt.registry
-            _sid = self._session_id
-            _owner = self._authenticated_user_id
+        # Project PMs: own channel + channels of child sessions they spawned.
+        # Global PM (no project_id): own channel + all active user channels.
+        _own_cid = rt.client.channel_id
+        _reg = rt.registry
+        _sid = self._session_id
+        _owner = self._authenticated_user_id
 
+        if is_pm and not self._project_id:
+            # Global PM: access all active channels for this user
+            async def _global_pm_channel_scope() -> set[str]:
+                channels = {_own_cid}
+                if _owner:
+                    channels |= await _reg.get_all_active_channels(_owner)
+                return channels
+
+            channel_scope = _global_pm_channel_scope
+        elif is_pm:
+            # Project PM: own channel + child session channels
             async def _pm_channel_scope() -> set[str]:
                 channels = {_own_cid}
-                children = await _reg.list_children(_sid, limit=500)
-                for child in children:
-                    if child.get("authenticated_user_id") != _owner:
-                        continue
-                    cid = child.get("slack_channel_id")
-                    if cid:
-                        channels.add(cid)
+                if _owner:
+                    channels |= await _reg.get_child_channels(_sid, _owner)
                 return channels
 
             channel_scope = _pm_channel_scope
         else:
-            _own_cid = rt.client.channel_id
 
             async def _session_channel_scope() -> set[str]:
                 return {_own_cid}
@@ -1840,6 +1849,7 @@ class SummonSession:
                 scheduler=scheduler,
                 project_id=self._project_id,
                 on_task_change=_on_task_change,
+                pm_status_ts=self._pm_status_ts,
             )
             mcp_servers["summon-cli"] = cli_mcp
 
@@ -2402,6 +2412,19 @@ class SummonSession:
                 self._last_heartbeat_time = asyncio.get_running_loop().time()
             except Exception as e:
                 logger.warning("Heartbeat failed: %s", redact_secrets(str(e)))
+                continue  # skip PM topic update when DB is unhealthy
+            if self._pm_profile:
+                try:
+                    child_count = await rt.registry.count_active_children(self._session_id)
+                    topic = format_pm_topic(child_count)
+                    if topic != self._last_pm_topic:
+                        await rt.client.set_topic(topic)
+                        self._last_pm_topic = topic
+                except Exception as e:
+                    logger.debug(
+                        "PM topic heartbeat update failed: %s",
+                        redact_secrets(str(e)),
+                    )
 
     async def _post_session_summary(self, router: ThreadRouter, claude: ClaudeSDKClient) -> None:
         """Generate and post a session summary via Claude."""

@@ -16,7 +16,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +195,18 @@ async def _migrate_11_to_12(db: aiosqlite.Connection) -> None:
             logger.debug("Column hooks on %s already exists or table absent, skipping", table)
 
 
+async def _migrate_12_to_13(db: aiosqlite.Connection) -> None:
+    """Add index on authenticated_user_id + status for channel scoping queries.
+
+    Covers get_all_active_channels (Global PM) and get_child_channels (Project PM).
+    Without this index, both queries do a full table scan on every MCP tool call.
+    """
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_auth_user_status "
+        "ON sessions (authenticated_user_id, status, slack_channel_id)"
+    )
+
+
 # Mapping from version N to the coroutine that migrates N → N+1.
 # Migration 0→1 is a no-op: the baseline DDL in _connect() produces schema v1.
 _MIGRATIONS: dict[int, Any] = {
@@ -210,6 +222,7 @@ _MIGRATIONS: dict[int, Any] = {
     9: _migrate_9_to_10,
     10: _migrate_10_to_11,
     11: _migrate_11_to_12,
+    12: _migrate_12_to_13,
 }
 
 

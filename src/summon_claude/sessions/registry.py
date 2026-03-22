@@ -431,6 +431,46 @@ class SessionRegistry:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
+    async def get_child_channels(
+        self, parent_session_id: str, authenticated_user_id: str
+    ) -> set[str]:
+        """Return channel IDs of active child sessions for the given parent, scoped to user."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT slack_channel_id FROM sessions "
+            "WHERE parent_session_id = ? AND authenticated_user_id = ? "
+            "AND status IN ('active', 'pending_auth') "
+            "AND slack_channel_id IS NOT NULL",
+            (parent_session_id, authenticated_user_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return {row[0] for row in rows}
+
+    async def get_all_active_channels(self, authenticated_user_id: str) -> set[str]:
+        """Return all active session channel IDs scoped to user (for Global PM)."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT slack_channel_id FROM sessions "
+            "WHERE authenticated_user_id = ? "
+            "AND status IN ('active', 'pending_auth') "
+            "AND slack_channel_id IS NOT NULL",
+            (authenticated_user_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return {row[0] for row in rows}
+
+    async def count_active_children(self, parent_session_id: str) -> int:
+        """Count active/pending child sessions for the given parent."""
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT COUNT(*) FROM sessions "
+            "WHERE parent_session_id = ? "
+            "AND status IN ('active', 'pending_auth')",
+            (parent_session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
     async def compute_spawn_depth(self, session_id: str) -> int:
         """Count ancestor levels by following parent_session_id chain.
 

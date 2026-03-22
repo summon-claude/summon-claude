@@ -1106,3 +1106,159 @@ class TestChannelsMethods:
         await registry.update_status("sess-eff", "active", effort="low")
         session = await registry.get_session("sess-eff")
         assert session["effort"] == "low"
+
+
+class TestChildChannelMethods:
+    """Tests for get_child_channels, get_all_active_channels, count_active_children."""
+
+    async def test_get_child_channels_returns_active_only(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-cc1", pid, "/tmp")
+        await registry.update_status("parent-cc1", "active", authenticated_user_id="U_OWNER")
+
+        await registry.register("child-active", pid, "/tmp", parent_session_id="parent-cc1")
+        await registry.update_status(
+            "child-active",
+            "active",
+            slack_channel_id="C_ACTIVE",
+            authenticated_user_id="U_OWNER",
+        )
+
+        await registry.register("child-done", pid, "/tmp", parent_session_id="parent-cc1")
+        await registry.update_status(
+            "child-done",
+            "completed",
+            slack_channel_id="C_DONE",
+            authenticated_user_id="U_OWNER",
+        )
+
+        channels = await registry.get_child_channels("parent-cc1", "U_OWNER")
+        assert channels == {"C_ACTIVE"}
+
+    async def test_get_child_channels_scopes_by_user(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-cc2", pid, "/tmp")
+
+        await registry.register("child-usera", pid, "/tmp", parent_session_id="parent-cc2")
+        await registry.update_status(
+            "child-usera",
+            "active",
+            slack_channel_id="C_USERA",
+            authenticated_user_id="U_A",
+        )
+
+        await registry.register("child-userb", pid, "/tmp", parent_session_id="parent-cc2")
+        await registry.update_status(
+            "child-userb",
+            "active",
+            slack_channel_id="C_USERB",
+            authenticated_user_id="U_B",
+        )
+
+        channels_a = await registry.get_child_channels("parent-cc2", "U_A")
+        assert channels_a == {"C_USERA"}
+        assert "C_USERB" not in channels_a
+
+    async def test_get_child_channels_excludes_null_channels(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-cc3", pid, "/tmp")
+
+        await registry.register("child-no-chan", pid, "/tmp", parent_session_id="parent-cc3")
+        await registry.update_status(
+            "child-no-chan",
+            "active",
+            authenticated_user_id="U_OWNER",
+        )
+
+        channels = await registry.get_child_channels("parent-cc3", "U_OWNER")
+        assert channels == set()
+
+    async def test_get_all_active_channels_returns_user_scoped(self, registry):
+        pid = os.getpid()
+        await registry.register("sess-u1a", pid, "/tmp")
+        await registry.update_status(
+            "sess-u1a", "active", slack_channel_id="C_U1A", authenticated_user_id="U_1"
+        )
+
+        await registry.register("sess-u1b", pid, "/tmp")
+        await registry.update_status(
+            "sess-u1b", "active", slack_channel_id="C_U1B", authenticated_user_id="U_1"
+        )
+
+        await registry.register("sess-u2", pid, "/tmp")
+        await registry.update_status(
+            "sess-u2", "active", slack_channel_id="C_U2", authenticated_user_id="U_2"
+        )
+
+        channels = await registry.get_all_active_channels("U_1")
+        assert channels == {"C_U1A", "C_U1B"}
+        assert "C_U2" not in channels
+
+    async def test_get_all_active_channels_excludes_completed(self, registry):
+        pid = os.getpid()
+        await registry.register("sess-done-gaa", pid, "/tmp")
+        await registry.update_status(
+            "sess-done-gaa",
+            "completed",
+            slack_channel_id="C_DONE_GAA",
+            authenticated_user_id="U_OWNER",
+        )
+
+        channels = await registry.get_all_active_channels("U_OWNER")
+        assert "C_DONE_GAA" not in channels
+
+    async def test_count_active_children(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-cac", pid, "/tmp")
+
+        for i in range(2):
+            await registry.register(
+                f"child-active-cac-{i}",
+                pid,
+                "/tmp",
+                parent_session_id="parent-cac",
+            )
+            await registry.update_status(
+                f"child-active-cac-{i}",
+                "active",
+                authenticated_user_id="U_OWNER",
+            )
+
+        await registry.register("child-err-cac", pid, "/tmp", parent_session_id="parent-cac")
+        await registry.update_status("child-err-cac", "errored", authenticated_user_id="U_OWNER")
+
+        count = await registry.count_active_children("parent-cac")
+        assert count == 2
+
+    async def test_count_active_children_includes_pending_auth(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-pa", pid, "/tmp")
+        await registry.register("child-pending", pid, "/tmp", parent_session_id="parent-pa")
+        # pending_auth is the default status from register()
+        count = await registry.count_active_children("parent-pa")
+        assert count == 1
+
+    async def test_get_child_channels_excludes_suspended(self, registry):
+        pid = os.getpid()
+        await registry.register("parent-susp", pid, "/tmp")
+        await registry.register("child-susp", pid, "/tmp", parent_session_id="parent-susp")
+        await registry.update_status(
+            "child-susp",
+            "suspended",
+            slack_channel_id="C_SUSP",
+            authenticated_user_id="U_OWNER",
+        )
+        channels = await registry.get_child_channels("parent-susp", "U_OWNER")
+        assert "C_SUSP" not in channels
+
+    async def test_get_all_active_channels_excludes_suspended(self, registry):
+        pid = os.getpid()
+        await registry.register("sess-susp-gaa", pid, "/tmp")
+        await registry.update_status(
+            "sess-susp-gaa",
+            "suspended",
+            slack_channel_id="C_SUSP_GAA",
+            authenticated_user_id="U_OWNER",
+        )
+        channels = await registry.get_all_active_channels("U_OWNER")
+        assert "C_SUSP_GAA" not in channels

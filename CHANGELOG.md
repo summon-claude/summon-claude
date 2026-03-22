@@ -23,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Interactive session picker** — `summon session list` and related commands use `pick` for terminal-based interactive selection with `--no-interactive` fallback (#27)
 - **mrkdwn conversion** — `slack/formatting.py` converts Claude's markdown replies to Slack mrkdwn format before posting (#28)
 - **Declarative command dispatch** — `sessions/commands.py` uses a `COMMAND_ACTIONS` dict for declarative `!`-command definitions with mid-message detection (#26)
+- **PM status messages** — `session_status_update` MCP tool enables PM agents to update a pinned status message in their channel with current session state. Includes mention sanitization, secret redaction, and audit logging
+- **Dynamic channel scoping** — PM sessions use registry-driven channel resolvers: project PMs see own channel + child session channels; global PMs see all user channels. Replaces inline Python filtering with SQL-level `authenticated_user_id` scoping
+- **PM heartbeat topic reconciliation** — PM sessions update channel topic every 30s via `count_active_children` DB query, providing a safety net for crashed children alongside the event-driven topic updates
 
 ### Changed
 
