@@ -840,6 +840,13 @@ def slack_auth(workspace_url: str) -> None:
     Opens a real browser window for the user to log in. Saves auth state
     to ``get_data_dir() / browser_auth/``.
     """
+    if not workspace_url.startswith("https://") or "slack.com" not in workspace_url:
+        click.echo(
+            "Expected a Slack workspace URL like https://myteam.slack.com",
+            err=True,
+        )
+        sys.exit(1)
+
     try:
         from summon_claude.slack_browser import interactive_slack_auth  # noqa: PLC0415
     except ImportError:
@@ -857,7 +864,7 @@ def slack_auth(workspace_url: str) -> None:
 
     click.echo(f"Opening {browser_type} browser for Slack login at {workspace_url}")
     click.echo("Complete the login in the browser window (timeout: 5 minutes)")
-    click.echo(":warning: Auth state contains session cookies — treat stored files as secrets.")
+    click.echo("WARNING: Auth state contains session cookies — treat stored files as secrets.")
 
     import json  # noqa: PLC0415
 

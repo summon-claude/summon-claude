@@ -218,19 +218,27 @@ class SlackBrowserMonitor:
     async def stop(self) -> None:
         """Save auth state and close the browser."""
         if self._context is not None:
-            try:
-                await self._context.storage_state(path=str(self._state_file))
-                # [SEC-005] Ensure saved state file has restricted permissions
-                self._state_file.chmod(0o600)
-                logger.info(
-                    "SlackBrowserMonitor: saved auth state for workspace %s", self._workspace_id
+            # [SEC-R-002] Verify state file is not a symlink before writing
+            if self._state_file.is_symlink():
+                logger.error(
+                    "SlackBrowserMonitor: refusing to save auth state — %s is a symlink",
+                    self._state_file,
                 )
-            except Exception as exc:
-                logger.warning(
-                    "SlackBrowserMonitor: failed to save auth state for workspace %s: %s",
-                    self._workspace_id,
-                    exc,
-                )
+            else:
+                try:
+                    await self._context.storage_state(path=str(self._state_file))
+                    # [SEC-005] Ensure saved state file has restricted permissions
+                    self._state_file.chmod(0o600)
+                    logger.info(
+                        "SlackBrowserMonitor: saved auth state for workspace %s",
+                        self._workspace_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "SlackBrowserMonitor: failed to save auth state for %s: %s",
+                        self._workspace_id,
+                        exc,
+                    )
 
             with contextlib.suppress(Exception):
                 await self._context.close()

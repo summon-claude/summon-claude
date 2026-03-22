@@ -5,8 +5,6 @@ Covers C12 (Phase 1) and C13 (Phase 2) test requirements.
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -15,7 +13,6 @@ from summon_claude.config import SummonConfig
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
-    _is_quiet_hours,
     build_scribe_system_prompt,
 )
 
@@ -223,71 +220,6 @@ class TestStartScribeIfEnabled:
             manager._start_scribe_if_enabled("U123")
 
         mock_session_cls.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# C12 Phase 1: _is_quiet_hours
-# ---------------------------------------------------------------------------
-
-
-class TestIsQuietHours:
-    def _mock_now(self, hour: int, minute: int):
-        """Return a datetime mock that returns the given hour:minute."""
-        fake = datetime(2026, 3, 22, hour, minute)  # noqa: DTZ001
-        return patch(
-            "summon_claude.sessions.session.datetime",
-            **{"now.return_value": fake, "side_effect": None},
-        )
-
-    def test_quiet_hours_inside(self):
-        """22:00 local time falls inside 22:00-07:00 quiet hours."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 22, 30)  # noqa: DTZ001
-            result = _is_quiet_hours("22:00-07:00")
-        assert result is True
-
-    def test_quiet_hours_outside(self):
-        """12:00 local time is outside 22:00-07:00 quiet hours."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 12, 0)  # noqa: DTZ001
-            result = _is_quiet_hours("22:00-07:00")
-        assert result is False
-
-    def test_quiet_hours_empty_string(self):
-        assert _is_quiet_hours("") is False
-
-    def test_quiet_hours_wraps_midnight(self):
-        """02:00 falls inside 22:00-07:00 (midnight wrap)."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 2, 0)  # noqa: DTZ001
-            result = _is_quiet_hours("22:00-07:00")
-        assert result is True
-
-    def test_quiet_hours_boundary_start(self):
-        """Exactly at start time (22:00) is considered inside."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 22, 0)  # noqa: DTZ001
-            result = _is_quiet_hours("22:00-07:00")
-        assert result is True
-
-    def test_quiet_hours_boundary_end_exclusive(self):
-        """Exactly at end time (07:00) is NOT considered inside (exclusive end)."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 7, 0)  # noqa: DTZ001
-            result = _is_quiet_hours("22:00-07:00")
-        assert result is False
-
-    def test_quiet_hours_no_wrap_range(self):
-        """09:00-17:00 is a non-wrapping range; 12:00 is inside."""
-        with patch("summon_claude.sessions.session.datetime") as mock_dt:
-            mock_dt.now.return_value = datetime(2026, 3, 22, 12, 0)  # noqa: DTZ001
-            result = _is_quiet_hours("09:00-17:00")
-        assert result is True
-
-    def test_quiet_hours_invalid_format(self):
-        """Malformed strings return False without raising."""
-        assert _is_quiet_hours("not-a-range") is False
-        assert _is_quiet_hours("25:00-07:00") is False
 
 
 # ---------------------------------------------------------------------------

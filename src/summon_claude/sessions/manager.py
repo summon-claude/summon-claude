@@ -853,7 +853,8 @@ class SessionManager:
                         e,
                     )
 
-            # Start scribe if enabled and not already running
+            # Start scribe if enabled and not already running.
+            # Note (M4): scribe spawns only via project_up. Standalone start deferred to M5.
             self._start_scribe_if_enabled(user_id)
 
 
@@ -1050,7 +1051,7 @@ class SessionManager:
                 logger.info("SessionManager: scribe already running — skipping")
                 return
 
-        # Pre-flight: validate Google Workspace dependency if enabled.
+        # Pre-flight: validate dependencies before spawning.
         # workspace-mcp uses bare top-level modules (not a 'workspace_mcp' package),
         # so find_spec('workspace_mcp') always returns None. Use the binary check.
         if self._config.scribe_google_services:
@@ -1058,6 +1059,27 @@ class SessionManager:
 
             if not find_workspace_mcp_bin().exists():
                 logger.error("Scribe requires Google support: pip install summon-claude[google]")
+                return
+            # Check for OAuth credentials
+            from summon_claude.config import get_google_credentials_dir  # noqa: PLC0415
+
+            creds_dir = get_google_credentials_dir()
+            if not any(creds_dir.glob("*.json")) if creds_dir.is_dir() else True:
+                logger.error("Run 'summon config google-auth' before starting scribe")
+                return
+
+        if self._config.scribe_slack_enabled:
+            import importlib.util  # noqa: PLC0415
+
+            if importlib.util.find_spec("playwright") is None:
+                logger.error(
+                    "Scribe Slack support requires: pip install summon-claude[slack-browser]"
+                )
+                return
+            # Check for Slack auth state
+            ws_config = get_data_dir() / "slack_workspace.json"
+            if not ws_config.is_file():
+                logger.error("Run 'summon config slack-auth' before enabling scribe Slack")
                 return
 
         # Resolve CWD
