@@ -198,11 +198,15 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
             click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
             sys.exit(1)
 
-    # Validate choices for choice-type options
+    # Validate choices for choice-type options (static choices or dynamic choices_fn)
     if option and value:
         choices = list(option.choices) if option.choices else []
         if option.choices_fn:
-            choices = option.choices_fn()
+            try:
+                choices = option.choices_fn()
+            except Exception as e:
+                click.echo(f"Error resolving choices for {key}: {e}", err=True)
+                sys.exit(1)
         if choices and value not in choices:
             click.echo(
                 f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(choices)}",

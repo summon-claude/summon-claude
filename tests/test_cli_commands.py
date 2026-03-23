@@ -620,6 +620,85 @@ class TestConfigSetChoiceValidation:
         assert "SUMMON_DEFAULT_EFFORT=high" in config_file.read_text()
 
 
+class TestConfigSetChoicesFn:
+    """Tests for choices_fn validation path in config_set."""
+
+    def test_config_set_rejects_value_from_choices_fn(self, tmp_path):
+        """config set should reject values not in choices_fn result."""
+        from summon_claude.config import CONFIG_OPTIONS, ConfigOption
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+
+        fake_option = ConfigOption(
+            field_name="default_model",
+            env_key="SUMMON_DEFAULT_MODEL",
+            group="Test",
+            label="Test",
+            help_text="Test",
+            input_type="choice",
+            choices_fn=lambda: ["model-a", "model-b"],
+        )
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.CONFIG_OPTIONS", [fake_option]),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_DEFAULT_MODEL", "model-z")
+
+    def test_config_set_accepts_value_from_choices_fn(self, tmp_path):
+        """config set should accept values in choices_fn result."""
+        from summon_claude.config import ConfigOption
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+
+        fake_option = ConfigOption(
+            field_name="default_model",
+            env_key="SUMMON_DEFAULT_MODEL",
+            group="Test",
+            label="Test",
+            help_text="Test",
+            input_type="choice",
+            choices_fn=lambda: ["model-a", "model-b"],
+        )
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.CONFIG_OPTIONS", [fake_option]),
+        ):
+            config_set("SUMMON_DEFAULT_MODEL", "model-a")
+        assert "SUMMON_DEFAULT_MODEL=model-a" in config_file.read_text()
+
+    def test_config_set_handles_choices_fn_error(self, tmp_path):
+        """config set should handle choices_fn that raises."""
+        from summon_claude.config import ConfigOption
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+
+        def _broken():
+            raise RuntimeError("API down")
+
+        fake_option = ConfigOption(
+            field_name="default_model",
+            env_key="SUMMON_DEFAULT_MODEL",
+            group="Test",
+            label="Test",
+            help_text="Test",
+            input_type="choice",
+            choices_fn=_broken,
+        )
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.CONFIG_OPTIONS", [fake_option]),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_DEFAULT_MODEL", "anything")
+
+
 class TestConfigPath:
     def test_config_path_prints_location(self, tmp_path, capsys):
         """config path should print the config file location."""
