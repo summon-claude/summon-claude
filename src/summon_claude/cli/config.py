@@ -857,10 +857,7 @@ def slack_auth(workspace_url: str) -> None:
         )
         sys.exit(1)
 
-    from summon_claude.config import SummonConfig  # noqa: PLC0415
-
-    config = SummonConfig()
-    browser_type = config.scribe_slack_browser
+    browser_type = os.environ.get("SUMMON_SCRIBE_SLACK_BROWSER", "chrome")
 
     click.echo(f"Opening {browser_type} browser for Slack login at {workspace_url}")
     click.echo("Complete the login in the browser window (timeout: 5 minutes)")
@@ -921,10 +918,7 @@ def slack_status() -> None:
     else:
         click.echo("Auth state: MISSING (re-run slack-auth)")
 
-    from summon_claude.config import SummonConfig  # noqa: PLC0415
-
-    config = SummonConfig()
-    channels = config.scribe_slack_monitored_channels
+    channels = os.environ.get("SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS", "")
     if channels:
         click.echo(f"Monitored channels: {channels}")
     else:
