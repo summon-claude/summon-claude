@@ -56,6 +56,9 @@ _inspect_sdk2.py
 # MkDocs build output
 site/
 
+# Playwright MCP debug logs
+.playwright-mcp/
+
 # Project memory (cross-session notes, not for version control)
 hack
 
