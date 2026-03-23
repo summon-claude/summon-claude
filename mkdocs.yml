@@ -57,8 +57,19 @@ plugins:
             show_source: false
   - llmstxt:
       sections:
-        summon-claude:
-          - "*"
+        Getting Started:
+          - getting-started/*.md
+        User Guide:
+          - guide/*.md
+        Reference:
+          - reference/*.md
+          - reference/api/*.md
+        Architecture:
+          - architecture/*.md
+        Troubleshooting:
+          - troubleshooting.md
+        Development:
+          - development/*.md
 
 extra:
   version:

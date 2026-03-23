@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-serve docs-build docs-screenshots
+.PHONY: docs-serve docs-build docs-check docs-screenshots
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -78,7 +78,10 @@ py-all: py-install py-lint py-test ## Python workflow: install → lint → test
 docs-serve: ## Serve docs locally with live reload
 	uv run mkdocs serve
 
-docs-build: ## Build docs (strict mode)
+docs-build: ## Build docs site
+	uv run mkdocs build
+
+docs-check: ## Verify docs build (strict mode, catches broken links)
 	uv run mkdocs build --strict
 
 docs-screenshots: ## Generate documentation screenshots
