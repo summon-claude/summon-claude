@@ -3069,3 +3069,130 @@ class TestFinalizeEscalatingWarnings:
         standard = [c for c in calls if "getting large" in str(c)]
         assert len(urgent) == 1
         assert len(standard) == 0
+
+
+class TestPMHeartbeatTopicUpdate:
+    """Tests for PM-specific topic update in _heartbeat_loop."""
+
+    async def test_pm_heartbeat_updates_topic(self):
+        """PM heartbeat calls set_topic when child count changes."""
+        from summon_claude.sessions.session import format_pm_topic
+
+        session = make_session(session_id="pm-hb-topic", pm_profile=True)
+        session._authenticated_user_id = "U_TEST"
+        # In production, start() primes _last_pm_topic. In this test we
+        # call _heartbeat_loop directly, so _last_pm_topic starts as None.
+        assert session._last_pm_topic is None
+
+        mock_rt = MagicMock()
+        mock_rt.registry = AsyncMock()
+        mock_rt.registry.count_active_children = AsyncMock(return_value=3)
+
+        async def _stop_after_first(*_args, **_kwargs):
+            session._shutdown_event.set()
+
+        mock_rt.registry.heartbeat.side_effect = _stop_after_first
+        mock_rt.client = make_mock_client("C_PM")
+
+        with patch("summon_claude.sessions.session._HEARTBEAT_INTERVAL_S", 0.01):
+            await asyncio.wait_for(session._heartbeat_loop(mock_rt), timeout=1.0)
+
+        expected_topic = format_pm_topic(3)
+        mock_rt.client.set_topic.assert_awaited_once_with(expected_topic)
+        assert session._last_pm_topic == expected_topic
+
+    async def test_pm_heartbeat_caches_topic(self):
+        """PM heartbeat skips set_topic when child count has not changed."""
+        from summon_claude.sessions.session import format_pm_topic
+
+        session = make_session(session_id="pm-hb-cache", pm_profile=True)
+        session._authenticated_user_id = "U_TEST"
+        # Pre-seed the cache to match what count_active_children will return
+        session._last_pm_topic = format_pm_topic(2)
+
+        mock_rt = MagicMock()
+        mock_rt.registry = AsyncMock()
+        mock_rt.registry.count_active_children = AsyncMock(return_value=2)
+        mock_rt.client = make_mock_client("C_PM_CACHE")
+
+        async def _stop_after_first(*_args, **_kwargs):
+            session._shutdown_event.set()
+
+        mock_rt.registry.heartbeat.side_effect = _stop_after_first
+
+        with patch("summon_claude.sessions.session._HEARTBEAT_INTERVAL_S", 0.01):
+            await asyncio.wait_for(session._heartbeat_loop(mock_rt), timeout=1.0)
+
+        # set_topic must NOT have been called because topic matched the cache
+        mock_rt.client.set_topic.assert_not_awaited()
+
+    async def test_non_pm_heartbeat_does_not_call_set_topic(self):
+        """Regular (non-PM) heartbeat must not touch set_topic."""
+        session = make_session(session_id="reg-hb-topic", pm_profile=False)
+
+        mock_rt = MagicMock()
+        mock_rt.registry = AsyncMock()
+        mock_rt.client = make_mock_client("C_REG")
+
+        async def _stop_after_first(*_args, **_kwargs):
+            session._shutdown_event.set()
+
+        mock_rt.registry.heartbeat.side_effect = _stop_after_first
+
+        with patch("summon_claude.sessions.session._HEARTBEAT_INTERVAL_S", 0.01):
+            await asyncio.wait_for(session._heartbeat_loop(mock_rt), timeout=1.0)
+
+        mock_rt.client.set_topic.assert_not_awaited()
+
+
+class TestChannelScopeWiring:
+    """Tests for the 3-way channel scope resolver closures."""
+
+    async def test_global_pm_scope_uses_get_all_active_channels(self):
+        """Global PM (is_pm=True, project_id=None) uses get_all_active_channels."""
+        mock_registry = AsyncMock()
+        mock_registry.get_all_active_channels = AsyncMock(
+            return_value={"C_PM1", "C_SUB1", "C_SUB2"}
+        )
+        _own_cid = "C_GPM"
+        _owner = "U_OWNER"
+        _reg = mock_registry
+
+        async def _global_pm_channel_scope() -> set[str]:
+            channels = {_own_cid}
+            if _owner:
+                channels |= await _reg.get_all_active_channels(_owner)
+            return channels
+
+        result = await _global_pm_channel_scope()
+        assert result == {"C_GPM", "C_PM1", "C_SUB1", "C_SUB2"}
+        mock_registry.get_all_active_channels.assert_awaited_once_with("U_OWNER")
+
+    async def test_project_pm_scope_uses_get_child_channels(self):
+        """Project PM (is_pm=True, project_id set) uses get_child_channels."""
+        mock_registry = AsyncMock()
+        mock_registry.get_child_channels = AsyncMock(return_value={"C_CHILD1", "C_CHILD2"})
+        _own_cid = "C_PPM"
+        _sid = "ppm-scope"
+        _owner = "U_OWNER"
+        _reg = mock_registry
+
+        async def _pm_channel_scope() -> set[str]:
+            channels = {_own_cid}
+            if _owner:
+                channels |= await _reg.get_child_channels(_sid, _owner)
+            return channels
+
+        result = await _pm_channel_scope()
+        assert result == {"C_PPM", "C_CHILD1", "C_CHILD2"}
+        mock_registry.get_child_channels.assert_awaited_once_with("ppm-scope", "U_OWNER")
+
+    async def test_regular_session_scope_own_channel_only(self):
+        """Regular session (is_pm=False) only sees its own channel."""
+        _own_cid = "C_REGULAR"
+
+        async def _session_channel_scope() -> set[str]:
+            return {_own_cid}
+
+        result = await _session_channel_scope()
+        assert result == {"C_REGULAR"}

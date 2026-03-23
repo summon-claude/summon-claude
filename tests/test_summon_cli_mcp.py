@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from conftest import make_scheduler
@@ -762,6 +762,32 @@ class TestSessionMessage:
         assert "channel" in posted
         assert "user:U123ABC" in posted
 
+    async def test_slack_post_sanitizes_sender_info(self, populated_registry):
+        """Mentions and secrets in session_name are sanitized in the attribution line."""
+        mock_send = AsyncMock(
+            return_value={"type": "message_sent", "session_id": "child-2222", "channel_id": "C200"}
+        )
+        mock_web = AsyncMock()
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                session_name="<!channel> evil <@U999>",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                _ipc_send_message=mock_send,
+                _web_client=mock_web,
+            )
+        }
+        await tools["session_message"].handler({"session_id": "child-2222", "text": "hello"})
+        posted = mock_web.chat_postMessage.call_args[1]["text"]
+        assert "<!channel>" not in posted
+        assert "<@U999>" not in posted
+
     async def test_slack_post_failure_non_fatal(self, msg_tools):
         tools, mock_send, mock_web = msg_tools
         mock_web.chat_postMessage.side_effect = Exception("Slack down")
@@ -930,3 +956,193 @@ class TestMCPServerCreation:
         )
         # session_list, session_info, cron x3, task x3 = 8 (no PM tools)
         assert len(tools) == 8
+
+
+class TestSessionStatusUpdate:
+    """Tests for the session_status_update MCP tool."""
+
+    def _make_tools(self, registry, *, pm_status_ts="1234567890.123456", mock_web_client=None):
+        if mock_web_client is None:
+            mock_web_client = AsyncMock()
+            mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        return {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                pm_status_ts=pm_status_ts,
+                _web_client=mock_web_client,
+            )
+        }
+
+    async def test_session_status_update_updates_pinned_message(self, populated_registry):
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        result = await tools["session_status_update"].handler({"summary": "All tasks running"})
+
+        assert not result.get("is_error")
+        mock_web_client.chat_update.assert_awaited_once()
+        call_kwargs = mock_web_client.chat_update.call_args.kwargs
+        assert call_kwargs["channel"] == "C100"
+        assert call_kwargs["ts"] == "1234567890.123456"
+        assert "All tasks running" in call_kwargs["text"]
+
+    async def test_session_status_update_requires_summary(self, populated_registry):
+        tools = self._make_tools(populated_registry)
+        result = await tools["session_status_update"].handler({"summary": ""})
+        assert result.get("is_error") is True
+        assert "summary" in result["content"][0]["text"].lower()
+
+    async def test_session_status_update_requires_summary_whitespace(self, populated_registry):
+        tools = self._make_tools(populated_registry)
+        result = await tools["session_status_update"].handler({"summary": "   "})
+        assert result.get("is_error") is True
+
+    async def test_session_status_update_truncates_long_input(self, populated_registry):
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        long_summary = "x" * 600
+        result = await tools["session_status_update"].handler({"summary": long_summary})
+
+        assert not result.get("is_error")
+        call_kwargs = mock_web_client.chat_update.call_args.kwargs
+        # The text in the message should contain only up to 500 chars of the summary
+        # but we verify via the response text which echoes up to 100 chars
+        assert "x" * 100 in result["content"][0]["text"]
+        # The full 600-char summary must not appear verbatim in the posted text
+        assert "x" * 501 not in call_kwargs["text"]
+
+    async def test_session_status_update_pm_only(self, populated_registry):
+        """session_status_update must appear in PM tool list."""
+        pm_tools = {
+            t.name
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                pm_status_ts="1234567890.123456",
+                _web_client=AsyncMock(),
+            )
+        }
+        non_pm_tools = {
+            t.name
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=False,
+            )
+        }
+        assert "session_status_update" in pm_tools
+        assert "session_status_update" not in non_pm_tools
+
+    async def test_session_status_update_absent_without_status_ts(self, populated_registry):
+        """When pm_status_ts is None, session_status_update must not be registered."""
+        tools = {
+            t.name
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                pm_status_ts=None,
+                _web_client=AsyncMock(),
+            )
+        }
+        assert "session_status_update" not in tools
+
+    async def test_session_status_update_absent_without_web_client(self, populated_registry):
+        """When _web_client is None, session_status_update must not be registered."""
+        tools = {
+            t.name
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                pm_status_ts="1234567890.123456",
+                _web_client=None,
+            )
+        }
+        assert "session_status_update" not in tools
+
+    async def test_session_status_update_logs_audit_event(self, populated_registry):
+        """session_status_update logs a pm_status_update audit event."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        # Patch log_event to verify it's called (real method needs audit_events table)
+        with patch.object(populated_registry, "log_event", new_callable=AsyncMock) as mock_log:
+            tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+            await tools["session_status_update"].handler({"summary": "All clear"})
+            mock_log.assert_awaited_once()
+            assert mock_log.call_args.args[0] == "pm_pinned_status_update"
+            assert mock_log.call_args.kwargs.get("user_id") == "U_OWNER"
+
+    async def test_session_status_update_with_details(self, populated_registry):
+        """session_status_update includes details in the posted message."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        result = await tools["session_status_update"].handler(
+            {"summary": "2 active", "details": "- feat-auth: 10 turns\n- fix-login: 3 turns"}
+        )
+        assert not result.get("is_error")
+        call_kwargs = mock_web_client.chat_update.call_args.kwargs
+        assert "feat-auth: 10 turns" in call_kwargs["text"]
+        assert "fix-login: 3 turns" in call_kwargs["text"]
+
+    async def test_session_status_update_truncates_details(self, populated_registry):
+        """details exceeding 2000 chars are truncated."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        long_details = "d" * 2500
+        result = await tools["session_status_update"].handler(
+            {"summary": "Status", "details": long_details}
+        )
+        assert not result.get("is_error")
+        text = mock_web_client.chat_update.call_args.kwargs["text"]
+        assert "d" * 2001 not in text
+
+    async def test_session_status_update_sanitizes_mentions(self, populated_registry):
+        """Slack mentions in summary and details are neutralized."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        result = await tools["session_status_update"].handler(
+            {
+                "summary": "<!channel> alert from <@U12345>",
+                "details": "<!here> check <!subteam^S123|team>",
+            }
+        )
+        assert not result.get("is_error")
+        text = mock_web_client.chat_update.call_args.kwargs["text"]
+        assert "<!channel>" not in text
+        assert "<@U12345>" not in text
+        assert "<!here>" not in text
+        assert "<!subteam" not in text

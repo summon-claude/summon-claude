@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime
 import logging
 import re
 import secrets
@@ -20,6 +22,7 @@ from summon_claude.sessions.scheduler import (
     explain_cron,
     sanitize_for_table,
 )
+from summon_claude.slack.client import redact_secrets
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -59,6 +62,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
     _ipc_send_message: Callable[..., Awaitable[dict]] | None = None,
     _ipc_resume_session: Callable[..., Awaitable[dict]] | None = None,
     _web_client: Any | None = None,
+    pm_status_ts: str | None = None,
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances for session lifecycle and scheduling.
 
@@ -636,7 +640,10 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 safe_text = re.sub(r"<!(channel|here|everyone)>", r"\1", text)
                 safe_text = re.sub(r"<@(U\w+)>", r"user:\1", safe_text)
                 safe_text = re.sub(r"<!subteam\^[^>]+>", "group", safe_text)
-                attribution = f"_Message from {sender_info}:_\n{safe_text}"
+                safe_sender = re.sub(r"<!(channel|here|everyone)>", r"\1", sender_info)
+                safe_sender = re.sub(r"<@(U\w+)>", r"user:\1", safe_sender)
+                safe_sender = re.sub(r"<!subteam\^[^>]+>", "group", safe_sender)
+                attribution = redact_secrets(f"_Message from {safe_sender}:_\n{safe_text}")
                 try:
                     await _web_client.chat_postMessage(channel=target_channel_id, text=attribution)
                 except Exception:
@@ -1036,6 +1043,78 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         except Exception as e:
             return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
 
+    _pm_status_tool: SdkMcpTool | None = None
+    if is_pm and pm_status_ts and _web_client:
+
+        @tool(
+            "session_status_update",
+            (
+                "Update the pinned status message in this PM channel. "
+                "Use this to keep your status message current with active session information. "
+                "summary: Required brief status (max 500 chars). "
+                "details: Optional detailed breakdown (max 2000 chars)."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "maxLength": 500},
+                    "details": {"type": "string", "maxLength": 2000},
+                },
+                "required": ["summary"],
+            },
+        )
+        async def session_status_update(args: dict) -> dict:
+            summary = args.get("summary", "").strip()
+            if not summary:
+                return {
+                    "content": [{"type": "text", "text": "Error: summary is required"}],
+                    "is_error": True,
+                }
+            summary = summary[:500]
+            details = args.get("details", "").strip()[:2000]
+
+            # Sanitize mentions (same pattern as session_message)
+            summary = re.sub(r"<!(channel|here|everyone)>", r"\1", summary)
+            summary = re.sub(r"<@(U\w+)>", r"user:\1", summary)
+            summary = re.sub(r"<!subteam\^[^>]+>", "group", summary)
+            details = re.sub(r"<!(channel|here|everyone)>", r"\1", details)
+            details = re.sub(r"<@(U\w+)>", r"user:\1", details)
+            details = re.sub(r"<!subteam\^[^>]+>", "group", details)
+
+            now = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d %I:%M %p UTC")
+            text = f"*Project Manager Status*\n---\n{summary}"
+            if details:
+                text += f"\n\n{details}"
+            text += f"\n\n_Last updated: {now}_"
+
+            text = redact_secrets(text)
+
+            try:
+                await _web_client.chat_update(
+                    channel=channel_id,
+                    ts=pm_status_ts,
+                    text=text,
+                )
+                with contextlib.suppress(Exception):
+                    await registry.log_event(
+                        "pm_pinned_status_update",
+                        session_id=session_id,
+                        user_id=authenticated_user_id,
+                        details={"summary_len": len(summary)},
+                    )
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Status message updated: {summary[:100]}"}
+                    ]
+                }
+            except Exception as e:
+                return {
+                    "content": [{"type": "text", "text": f"Error updating status: {e}"}],
+                    "is_error": True,
+                }
+
+        _pm_status_tool = session_status_update
+
     # Common tools: session info (2) + cron (3) + task (3) = 8; PM adds 5 more
     tools: list[SdkMcpTool] = [
         session_list,
@@ -1057,6 +1136,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 session_resume,
             ]
         )
+        if _pm_status_tool is not None:
+            tools.append(_pm_status_tool)
     return tools
 
 
@@ -1073,6 +1154,7 @@ def create_summon_cli_mcp_server(  # noqa: PLR0913
     scheduler: SessionScheduler,
     project_id: str | None = None,
     on_task_change: Callable[[], Coroutine[Any, Any, None]] | None = None,
+    pm_status_ts: str | None = None,
 ) -> McpSdkServerConfig:
     """Create an MCP server with session lifecycle + scheduling tools."""
     tools = create_summon_cli_mcp_tools(
@@ -1087,5 +1169,6 @@ def create_summon_cli_mcp_server(  # noqa: PLR0913
         project_id=project_id,
         on_task_change=on_task_change,
         _web_client=web_client,
+        pm_status_ts=pm_status_ts,
     )
     return create_sdk_mcp_server(name="summon-cli", version="1.0.0", tools=tools)
