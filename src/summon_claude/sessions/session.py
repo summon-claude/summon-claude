@@ -175,10 +175,12 @@ _CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
 _MAX_SESSION_RESTARTS = 3  # Circuit breaker for compaction restart loop
 _MAX_PENDING_TURNS = 100  # Backpressure for inject_message
 _MAX_CHANNEL_NAME_LEN = 80
-_WORKTREE_DISALLOWED_TOOLS = [
-    "Bash(git worktree add*)",
-    "Bash(git worktree move*)",
-]
+_WORKTREE_DISALLOWED_TOOLS = frozenset(
+    {
+        "Bash(git worktree add*)",
+        "Bash(git worktree move*)",
+    }
+)
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
 # When detected, a :brain: reaction is added to the user's message (permanent).
@@ -414,22 +416,22 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "2. Use GitHub MCP `pull_request_read` to get the PR details (head branch "
     "name, base branch, status).\n"
     "3. If the PR is draft or closed, inform the user and do not spawn a review.\n"
-    "4. Resolve the review CWD:\n"
+    "4. Validate inputs: {number} must be a numeric integer; {head_branch} must "
+    "match [a-zA-Z0-9/_.-]. Reject values with shell metacharacters.\n"
+    "5. Resolve the review CWD:\n"
     "   - If the PR is from a known child session: use `session_info` to get that "
     "session's CWD and spawn the reviewer there directly.\n"
     "   - For external PRs: spawn the reviewer at the project root and instruct it "
     'to run `EnterWorktree(name="review-pr{number}")` followed by '
     "`git fetch origin {head_branch} && git checkout {head_branch}`.\n"
-    "   - Validate: {number} must be a numeric integer; {head_branch} must match "
-    "[a-zA-Z0-9/_.-]. Reject values with shell metacharacters.\n"
-    "5. Spawn a reviewer session:\n"
+    "6. Spawn a reviewer session:\n"
     "   - Use `session_start` with:\n"
-    "     - `cwd`: resolved CWD from step 4\n"
+    "     - `cwd`: resolved CWD from step 5\n"
     '     - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
     '     - `model`: "opus"\n'
     "     - `system_prompt`: the same review instructions as the automatic flow\n"
-    '6. Note in your canvas: "PR #{number} — manual review spawned"\n'
-    '7. Inform the user: "Spawned a reviewer for PR #{number}"\n'
+    '7. Note in your canvas: "PR #{number} — manual review spawned"\n'
+    '8. Inform the user: "Spawned a reviewer for PR #{number}"\n'
     "\n\n"
     "## Worktree Cleanup\n\n"
     "During periodic scans, check for worktrees that are no longer needed:\n\n"
@@ -1960,7 +1962,7 @@ class SummonSession:
                     else ThinkingConfigDisabled(type="disabled")
                 ),
                 effort=self._effort,
-                disallowed_tools=_WORKTREE_DISALLOWED_TOOLS,
+                disallowed_tools=list(_WORKTREE_DISALLOWED_TOOLS),
             )
 
             restart: _SessionRestartError | None = None
