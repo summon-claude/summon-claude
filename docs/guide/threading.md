@@ -2,7 +2,7 @@
 
 summon uses Slack threads to organize Claude's output. Each Claude turn gets its own thread, keeping the main channel readable while preserving full detail in threads.
 
-![Turn thread in Slack](../assets/screenshots/threading-turn-thread.png)
+![Turn thread in Slack](../assets/screenshots/quickstart-first-message.png)
 
 ---
 

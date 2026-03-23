@@ -323,6 +323,42 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     return help_ts  # Return ts anyway so we can still try to screenshot
 
 
+def wait_for_permission_request(bot_token: str, channel_id: str, timeout: int = 60) -> str | None:
+    """Wait for a permission request to appear in a turn thread.
+
+    Polls conversations_history for new turn starters (messages containing "Turn"),
+    then checks each turn's thread replies for a permission request.
+
+    Returns the turn starter ts containing the permission, or None on timeout.
+    """
+    from slack_sdk import WebClient
+
+    client = WebClient(token=bot_token)
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        resp = client.conversations_history(channel=channel_id, limit=50)
+        messages = resp.get("messages", [])
+
+        # Look for new turn starters (beyond what existed at baseline)
+        turn_starters = [
+            m for m in messages if "Turn" in m.get("text", "") and m.get("reply_count", 0) > 0
+        ]
+
+        for turn in turn_starters:
+            # Check thread replies for permission request
+            replies = client.conversations_replies(channel=channel_id, ts=turn["ts"])
+            for reply in replies.get("messages", [])[1:]:  # Skip parent
+                if "permission" in reply.get("text", "").lower():
+                    click.echo(f"  Permission request found in turn thread: ts={turn['ts']}")
+                    return turn["ts"]
+
+        time.sleep(3)
+
+    click.echo("  WARNING: No permission request found", err=True)
+    return None
+
+
 def capture_screenshots(  # noqa: PLR0913
     page,
     output_dir: Path,
@@ -331,6 +367,7 @@ def capture_screenshots(  # noqa: PLR0913
     *,
     bot_token: str,
     help_ts: str | None = None,
+    perm_ts: str | None = None,
 ) -> list[str]:
     """Navigate to the session channel and capture all screenshots."""
     captured = []
@@ -349,6 +386,10 @@ def capture_screenshots(  # noqa: PLR0913
     # Navigate to channel
     click.echo("  Capturing channel screenshots...")
     nav(channel_url)
+
+    # Hide sidebar to maximize content area
+    page.keyboard.press("Meta+Shift+d")
+    page.wait_for_timeout(1_000)
 
     # Scroll to top for auth/welcome message
     click.echo("  Scrolling to top for auth screenshot...")
@@ -386,19 +427,17 @@ def capture_screenshots(  # noqa: PLR0913
         thread_url = f"{channel_url}/thread/{channel_id}-{thread_ts}"
         click.echo(f"  Capturing turn thread: {thread_url}")
         nav(thread_url, wait_ms=5_000)
-        # This shows Claude's response with tool calls — used for first-message & threading docs
         snap("quickstart-first-message.png")
-        snap("threading-turn-thread.png")
 
-    # Find permission thread (contains "permission" case-insensitive)
-    permission_threads = [m["ts"] for m in messages if "permission" in m.get("text", "").lower()]
-    if permission_threads:
-        perm_ts = permission_threads[-1]
+    # Navigate to permission thread (ts provided by caller via wait_for_permission_request)
+    if perm_ts:
         perm_url = f"{channel_url}/thread/{channel_id}-{perm_ts}"
         click.echo(f"  Capturing permission thread: {perm_url}")
         nav(perm_url, wait_ms=5_000)
         snap("quickstart-permission-request.png")
         snap("permissions-approval.png")
+    else:
+        click.echo("  No permission thread ts — skipping permission screenshots")
 
     return captured
 
@@ -809,7 +848,6 @@ def main(
                         "description": "Permission buttons",
                     },
                     {"name": "permissions-approval.png", "description": "Permission approval"},
-                    {"name": "threading-turn-thread.png", "description": "Thread model"},
                 ]
             )
             tag = "manual" if sec == "slack-setup" else "e2e (real session)"
@@ -899,12 +937,37 @@ def main(
             # 5. Wait for Claude to respond
             wait_for_claude_response(bot_token, channel_id, timeout=120)
 
-            # 6. Send !help and wait for thread reply
+            # 6. Send a message that triggers a permission request (Bash tool)
+            page.wait_for_timeout(3_000)
+            send_message_via_slack(
+                page, "Run `pwd` in the terminal to verify the working directory."
+            )
+
+            # 7. Wait for permission request, approve it, then wait for completion
+            perm_ts = wait_for_permission_request(bot_token, channel_id, timeout=60)
+            if perm_ts:
+                # Navigate to the permission thread and click Approve
+                perm_thread_url = (
+                    f"https://app.slack.com/client/{team_id}/{channel_id}"
+                    f"/thread/{channel_id}-{perm_ts}"
+                )
+                page.goto(perm_thread_url, wait_until="domcontentloaded", timeout=60_000)
+                page.wait_for_timeout(5_000)
+                try:
+                    approve_btn = page.locator('button:has-text("Approve")')
+                    approve_btn.click(timeout=10_000)
+                    click.echo("  Clicked Approve on permission request")
+                except Exception as exc:
+                    click.echo(f"  WARNING: Could not click Approve: {exc}", err=True)
+                # Wait for the turn to complete after approval
+                wait_for_claude_response(bot_token, channel_id, timeout=120)
+
+            # 8. Send !help and wait for thread reply
             page.wait_for_timeout(3_000)
             send_message_via_slack(page, "!help")
             help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
 
-            # 7. Capture all screenshots
+            # 9. Capture all screenshots
             captured = capture_screenshots(
                 page,
                 output_dir,
@@ -912,6 +975,7 @@ def main(
                 channel_id,
                 bot_token=bot_token,
                 help_ts=help_ts,
+                perm_ts=perm_ts,
             )
             click.echo(f"\n  Done: {len(captured)} screenshots captured.")
 
