@@ -158,6 +158,19 @@ def archive_channel(bot_token: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _dismiss_overlays(page) -> None:
+    """Click the first visible close/dismiss button, if any."""
+    try:
+        selectors = '[data-qa="explore_ai_dismiss"], button:has-text("Close"), [aria-label="Close"]'
+        close_btn = page.locator(selectors)
+        if close_btn.count() > 0:
+            close_btn.first.click(timeout=3_000)
+            click.echo("  Dismissed overlay")
+            page.wait_for_timeout(1_000)
+    except Exception:  # noqa: S110
+        pass  # Overlay may not be present — safe to skip
+
+
 def create_browser_context(pw, cookie_value: str, *, headless: bool = True):
     browser = pw.chromium.launch(headless=headless)
     context = browser.new_context(
@@ -191,16 +204,7 @@ def authenticate_via_slack(page, team_id: str, short_code: str, output_dir: Path
     page.screenshot(path=str(debug_path), full_page=False)
     click.echo(f"  Debug screenshot saved: {debug_path}")
 
-    # Dismiss any "Explore AI" or promo overlays
-    try:
-        selectors = '[data-qa="explore_ai_dismiss"], button:has-text("Close"), [aria-label="Close"]'
-        close_btn = page.locator(selectors)
-        if close_btn.count() > 0:
-            close_btn.first.click(timeout=3_000)
-            click.echo("  Dismissed overlay")
-            page.wait_for_timeout(1_000)
-    except Exception:  # noqa: S110
-        pass
+    _dismiss_overlays(page)
 
     # Find the message input and type the slash command
     # Use press_sequentially (not fill) so Slack's JS recognizes the / prefix as a slash command
@@ -319,12 +323,13 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     return help_ts  # Return ts anyway so we can still try to screenshot
 
 
-def capture_screenshots(
+def capture_screenshots(  # noqa: PLR0913
     page,
     output_dir: Path,
     team_id: str,
     channel_id: str,
     *,
+    bot_token: str,
     help_ts: str | None = None,
 ) -> list[str]:
     """Navigate to the session channel and capture all screenshots."""
@@ -366,7 +371,6 @@ def capture_screenshots(
     # Find threads by looking for turn starters in the channel
     from slack_sdk import WebClient
 
-    bot_token = os.environ["SUMMON_TEST_SLACK_BOT_TOKEN"]
     client = WebClient(token=bot_token)
     resp = client.conversations_history(channel=channel_id, limit=50)
     messages = resp.get("messages", [])
@@ -386,12 +390,8 @@ def capture_screenshots(
         snap("quickstart-first-message.png")
         snap("threading-turn-thread.png")
 
-    # Find permission thread (contains "Permission" or approval buttons)
-    permission_threads = [
-        m["ts"]
-        for m in messages
-        if "permission" in m.get("text", "").lower() or "Permission" in m.get("text", "")
-    ]
+    # Find permission thread (contains "permission" case-insensitive)
+    permission_threads = [m["ts"] for m in messages if "permission" in m.get("text", "").lower()]
     if permission_threads:
         perm_ts = permission_threads[-1]
         perm_url = f"{channel_url}/thread/{channel_id}-{perm_ts}"
@@ -887,18 +887,7 @@ def main(
             page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_timeout(8_000)
 
-            # Dismiss any overlays that may block the composer
-            try:
-                selectors = (
-                    '[data-qa="explore_ai_dismiss"], button:has-text("Close"), [aria-label="Close"]'
-                )
-                close_btn = page.locator(selectors)
-                if close_btn.count() > 0:
-                    close_btn.first.click(timeout=3_000)
-                    click.echo("  Dismissed overlay")
-                    page.wait_for_timeout(1_000)
-            except Exception:  # noqa: S110
-                pass
+            _dismiss_overlays(page)
 
             # Debug screenshot to verify channel loaded
             debug_path = output_dir / "_debug_channel_page.png"
@@ -916,7 +905,14 @@ def main(
             help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
 
             # 7. Capture all screenshots
-            captured = capture_screenshots(page, output_dir, team_id, channel_id, help_ts=help_ts)
+            captured = capture_screenshots(
+                page,
+                output_dir,
+                team_id,
+                channel_id,
+                bot_token=bot_token,
+                help_ts=help_ts,
+            )
             click.echo(f"\n  Done: {len(captured)} screenshots captured.")
 
             context.close()
