@@ -974,6 +974,53 @@ class TestMigration12To13DataPreservation:
                 assert row[0] == "Real instructions"
 
 
+class TestReleasedMigrationsImmutable:
+    """Guard: released migration functions must never be modified.
+
+    Once a migration is on upstream/main, databases may have already executed it.
+    Modifying the function body changes behavior for fresh installs but not for
+    existing databases, creating silent schema drift.  Add new schema changes as
+    NEW migration functions only.
+
+    To update this test after a release that adds new migrations:
+    1. Run ``uv run python3 hack/tmp/compute_hashes.py`` (or equivalent)
+    2. Add the new migration's hash to _RELEASED_HASHES below
+    """
+
+    # SHA-256 prefix (16 hex chars) of inspect.getsource() for each released migration.
+    # Bump this dict ONLY when a migration is first released to upstream/main.
+    _RELEASED_HASHES: dict[str, str] = {
+        "_migrate_1_to_2": "7270f30345c4b3f1",
+        "_migrate_2_to_3": "c96ee8025ac3846b",
+        "_migrate_3_to_4": "10a286e7d653934a",
+        "_migrate_4_to_5": "ccc306a3dc45b0a8",
+        "_migrate_5_to_6": "08fd446bd22ad223",
+        "_migrate_6_to_7": "abe35cbacabc9cd8",
+        "_migrate_7_to_8": "d5bfa086a2475a9b",
+        "_migrate_8_to_9": "064f77e3de2068ee",
+        "_migrate_9_to_10": "854c3f575d475d8b",
+        "_migrate_10_to_11": "503ed98064bd1138",
+        "_migrate_11_to_12": "bfc95f1b44faef79",
+        "_migrate_12_to_13": "4dd835d5b9aefb63",
+    }
+
+    def test_released_migrations_unchanged(self):
+        """Fail if any released migration function's source has been modified."""
+        import hashlib
+        import inspect
+
+        from summon_claude.sessions import migrations
+
+        for fn_name, expected_hash in self._RELEASED_HASHES.items():
+            fn = getattr(migrations, fn_name)
+            src = inspect.getsource(fn)
+            actual_hash = hashlib.sha256(src.encode()).hexdigest()[:16]
+            assert actual_hash == expected_hash, (
+                f"{fn_name} source has changed (hash {actual_hash} != {expected_hash}). "
+                f"Released migrations are IMMUTABLE — add a new migration function instead."
+            )
+
+
 class TestMigration13To14CreatesParentStatusIndex:
     """Databases already at v13 (from PR #65) must get idx_sessions_parent_status via 13→14."""
 
