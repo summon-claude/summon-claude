@@ -149,7 +149,7 @@ The PM session gets a project canvas tab in its Slack channel. The canvas shows:
 
 The PM can update the canvas at any time using the `summon_canvas_update_section` MCP tool. See [Canvas Integration](canvas.md) for details.
 
-![PM canvas showing Active Work table](../assets/screenshots/pm-canvas-active-work.png)
+<!-- TODO: add pm-canvas-active-work.png screenshot (requires paid Slack plan) -->
 
 ---
 

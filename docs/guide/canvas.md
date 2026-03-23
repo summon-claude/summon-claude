@@ -40,7 +40,7 @@ Used for PM sessions (started via `summon project up`):
 - **Completed Work** — summary of finished sessions
 - **Notes** — PM-level notes and decisions
 
-![PM canvas showing Active Work table](../assets/screenshots/pm-canvas-template.png)
+<!-- TODO: add pm-canvas-template.png screenshot (requires paid Slack plan) -->
 
 ### Global PM canvas
 

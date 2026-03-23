@@ -26,7 +26,7 @@ Session started. Authenticate in Slack with:
 Waiting for authentication...
 ```
 
-![Terminal output after summon start](../assets/screenshots/quickstart-terminal-start.png)
+<!-- TODO: add quickstart-terminal-start.png screenshot -->
 
 !!! note "Background process"
     The session runs as a background daemon. You can close this terminal window after authenticating — Claude keeps running.
