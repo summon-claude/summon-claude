@@ -574,6 +574,7 @@ CAPTURES: list[CaptureSpec] = [
         marker="config-check",
         md_file="docs/guide/configuration.md",
         command=["summon", "config", "check"],
+        timeout=30,
         post_process=_sanitize_paths,
     ),
 ]
@@ -589,11 +590,22 @@ def _make_env() -> dict[str, str]:
     return env
 
 
+# Cache for custom capture functions — avoids running expensive captures
+# (like summon start) multiple times when the same capture_fn is shared
+# across registry entries.
+_capture_cache: dict[Callable[[], str], str] = {}
+
+
 def _run_capture(spec: CaptureSpec) -> str | None:
     """Execute a single capture spec and return its output, or None on failure."""
     if spec.capture_fn:
+        if spec.capture_fn in _capture_cache:
+            click.echo("    (cached)")
+            return _capture_cache[spec.capture_fn]
         try:
-            return spec.capture_fn()
+            result = spec.capture_fn()
+            _capture_cache[spec.capture_fn] = result
+            return result
         except Exception as exc:
             click.echo(f"    WARNING: {spec.marker} custom capture failed: {exc}", err=True)
             return None
@@ -639,7 +651,11 @@ def _inject_terminal_block(
     if extra_md:
         block += extra_md
 
-    new_text, count = pattern.subn(rf"\1\n{block}\n\2", md_text)
+    # Use a function replacement to avoid backreference interpretation in content
+    def _replacer(m: re.Match[str]) -> str:
+        return f"{m.group(1)}\n{block}\n{m.group(2)}"
+
+    new_text, count = pattern.subn(_replacer, md_text)
     if count == 0:
         return False
 
