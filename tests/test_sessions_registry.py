@@ -974,6 +974,55 @@ class TestMigration12To13DataPreservation:
                 assert row[0] == "Real instructions"
 
 
+class TestMigration13To14CreatesParentStatusIndex:
+    """Databases already at v13 (from PR #65) must get idx_sessions_parent_status via 13→14."""
+
+    async def test_parent_status_index_created_by_migrate_13_to_14(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_13_to_14
+
+        db_path = tmp_path / "v13_db.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            # Simulate a v13 DB that ran the OLD migration 12→13 (only auth_user_status index)
+            await db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
+                " parent_session_id TEXT, status TEXT,"
+                " authenticated_user_id TEXT, slack_channel_id TEXT)"
+            )
+            await db.execute(
+                "CREATE INDEX idx_sessions_auth_user_status "
+                "ON sessions (authenticated_user_id, status, slack_channel_id)"
+            )
+            await db.execute(
+                "CREATE TABLE projects ("
+                " project_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+                " directory TEXT NOT NULL, channel_prefix TEXT NOT NULL,"
+                " pm_channel_id TEXT, workflow_instructions TEXT NOT NULL DEFAULT '',"
+                " created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                " hooks TEXT DEFAULT NULL)"
+            )
+            await db.execute(
+                "CREATE UNIQUE INDEX idx_projects_channel_prefix ON projects (channel_prefix)"
+            )
+            await db.commit()
+
+            # Run only 13→14 (as would happen for a DB already at v13)
+            await _migrate_13_to_14(db)
+            await db.commit()
+
+            # The parent_status index must exist — created by 13→14
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_parent_status'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row is not None, (
+                    "idx_sessions_parent_status not created by migration 13→14 — "
+                    "databases at v13 from PR #65 would be missing this index"
+                )
+
+
 class TestMigration12To13IndexCreation:
     async def test_auth_user_status_index_exists(self, tmp_path):
         """Migration 12→13 creates idx_sessions_auth_user_status."""
