@@ -398,8 +398,12 @@ class TestFeatureInventory:
         """Feature inventory suppresses 'Getting started' nudge on DB failure."""
         from summon_claude.cli.config import _print_feature_inventory
 
+        def _failing_run(coro, *a, **kw):
+            coro.close()
+            raise OSError("DB fail")
+
         db_path = tmp_path / "registry.db"
-        with patch("summon_claude.cli.config.asyncio.run", side_effect=OSError("DB fail")):
+        with patch("summon_claude.cli.config.asyncio.run", side_effect=_failing_run):
             _print_feature_inventory(db_path, {})
 
         out = capsys.readouterr().out
