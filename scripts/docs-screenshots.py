@@ -46,10 +46,16 @@ MANUAL_SCREENSHOTS = [
 ]
 
 SESSION_UX_SCREENSHOTS = [
-    {"name": "session-ux-channel-overview.png", "description": "Session channel with messages"},
+    # Quickstart flow
+    {"name": "quickstart-slack-auth.png", "description": "Slash command auth response"},
+    {"name": "quickstart-first-message.png", "description": "First message exchange"},
+    {"name": "quickstart-permission-request.png", "description": "Permission request buttons"},
+    {"name": "quickstart-help.png", "description": "!help command output"},
+    # Guide pages
+    {"name": "session-ux-channel-overview.png", "description": "Session channel overview"},
     {"name": "session-ux-turn-thread.png", "description": "Turn thread with tool activity"},
-    {"name": "session-ux-permissions-prompt.png", "description": "Permission approval buttons"},
-    {"name": "session-ux-canvas-view.png", "description": "Session canvas tab"},
+    {"name": "permissions-approval.png", "description": "Permission approval buttons"},
+    {"name": "threading-turn-thread.png", "description": "Thread model illustration"},
 ]
 
 
@@ -96,6 +102,15 @@ def create_session_fixture(bot_token: str) -> dict:
                     pass  # already in channel or can't be invited
     except SlackApiError:
         pass  # best-effort
+
+    # --- Auth response (simulates /summon command result) ---
+    client.chat_postMessage(
+        channel=channel_id,
+        text=(
+            ":white_check_mark: *Authenticated!* Session `myproject-a1b2c3` is now active.\n"
+            "This channel is your workspace — talk to Claude here."
+        ),
+    )
 
     # --- Session header ---
     client.chat_postMessage(
@@ -251,30 +266,63 @@ def create_session_fixture(bot_token: str) -> dict:
         ],
     )
 
+    # --- !help command response ---
+    help_msg = client.chat_postMessage(
+        channel=channel_id,
+        text="!help",
+    )
+    help_ts = help_msg["ts"]
+    client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=help_ts)
+
+    client.chat_postMessage(
+        channel=channel_id,
+        text=(
+            "*Available commands:*\n\n"
+            "| Command | Description |\n"
+            "|---------|-------------|\n"
+            "| `!help` | Show this help message |\n"
+            "| `!status` | Show session status |\n"
+            "| `!end` | End the current session |\n"
+            "| `!stop` | Cancel the current turn |\n"
+            "| `!clear` | Clear conversation history |\n"
+            "| `!model [name]` | Show or switch model |\n"
+            "| `!effort [level]` | Show or switch effort |\n"
+            "| `!compact` | Compact conversation context |\n\n"
+            "_Aliases:_ `!quit`/`!exit`/`!logout` \u2192 `!end` \u00b7 "
+            "`!new`/`!reset` \u2192 `!clear`"
+        ),
+    )
+
     # --- Canvas (if possible) ---
     canvas_id = None
     try:
-        canvas_resp = client.canvases_create(
-            title="myproject-a1b2c3",
-            channel_id=channel_id,
-            document_content={
-                "type": "markdown",
-                "markdown": (
-                    "# myproject-a1b2c3\n\n"
-                    "**Model:** claude-opus-4-6 | **Effort:** high\n\n"
-                    "## Active Work\n\n"
-                    "| Task | Status | Priority |\n"
-                    "|------|--------|----------|\n"
-                    "| Fix auth bug | Completed | High |\n"
-                    "| Deploy to staging | In Progress | Medium |\n\n"
-                    "## Scheduled Jobs\n\n"
-                    "No active cron jobs.\n"
-                ),
+        canvas_resp = client.api_call(
+            "canvases.create",
+            json={
+                "title": "myproject-a1b2c3",
+                "channel_id": channel_id,
+                "document_content": {
+                    "type": "markdown",
+                    "markdown": (
+                        "# myproject-a1b2c3\n\n"
+                        "**Model:** claude-opus-4-6 | **Effort:** high\n\n"
+                        "## Active Work\n\n"
+                        "| Task | Status | Priority |\n"
+                        "|------|--------|----------|\n"
+                        "| Fix auth bug | Completed | High |\n"
+                        "| Deploy to staging | In Progress | Medium |\n\n"
+                        "## Scheduled Jobs\n\n"
+                        "No active cron jobs.\n"
+                    ),
+                },
             },
         )
         canvas_id = canvas_resp.get("canvas_id")
-        click.echo(f"  Created canvas: {canvas_id}")
-    except (SlackApiError, Exception) as exc:
+        if canvas_id:
+            click.echo(f"  Created canvas: {canvas_id}")
+        else:
+            click.echo(f"  Canvas creation failed: {canvas_resp.get('error')}", err=True)
+    except Exception as exc:
         click.echo(f"  Canvas creation skipped: {exc}", err=True)
 
     return {
@@ -282,6 +330,7 @@ def create_session_fixture(bot_token: str) -> dict:
         "channel_name": channel_name,
         "team_id": team_id,
         "turn_ts": turn_ts,
+        "turn2_ts": turn2_ts,
         "permission_ts": permission_msg["ts"],
         "canvas_id": canvas_id,
     }
@@ -344,50 +393,41 @@ def capture_session_ux(
         )
         page = context.new_page()
 
-        # --- Channel overview ---
-        click.echo(f"  Navigating to channel: {channel_url}")
-        page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
-        # Wait for Slack SPA to render messages
-        page.wait_for_timeout(8_000)
-
-        dest = output_dir / "session-ux-channel-overview.png"
-        page.screenshot(path=str(dest), full_page=False)
-        click.echo(f"  captured: {dest}")
-        captured.append(dest.name)
-
-        # --- Turn thread ---
-        click.echo(f"  Navigating to thread: {thread_url}")
-        page.goto(thread_url, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(3_000)
-
-        dest = output_dir / "session-ux-turn-thread.png"
-        page.screenshot(path=str(dest), full_page=False)
-        click.echo(f"  captured: {dest}")
-        captured.append(dest.name)
-
-        # --- Permission prompt (same thread view, scroll to buttons) ---
-        # Navigate back to channel to find the permission thread
-        page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
-        page.wait_for_timeout(3_000)
-
-        dest = output_dir / "session-ux-permissions-prompt.png"
-        page.screenshot(path=str(dest), full_page=False)
-        click.echo(f"  captured: {dest}")
-        captured.append(dest.name)
-
-        # --- Canvas view ---
-        if fixture.get("canvas_id"):
-            canvas_url = f"{channel_url}/canvas"
-            click.echo(f"  Navigating to canvas: {canvas_url}")
-            page.goto(canvas_url, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(3_000)
-
-            dest = output_dir / "session-ux-canvas-view.png"
+        def snap(name: str) -> None:
+            dest = output_dir / name
             page.screenshot(path=str(dest), full_page=False)
             click.echo(f"  captured: {dest}")
             captured.append(dest.name)
-        else:
-            click.echo("  SKIPPED: session-ux-canvas-view.png (no canvas created)")
+
+        def nav(url: str, wait_ms: int = 8_000) -> None:
+            click.echo(f"  Navigating: {url}")
+            page.goto(url, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(wait_ms)
+
+        # 1. Channel overview — shows auth, header, first exchange, turn summary
+        nav(channel_url)
+        snap("quickstart-slack-auth.png")  # Auth response visible at top
+        snap("quickstart-first-message.png")  # First message exchange visible
+        snap("session-ux-channel-overview.png")  # Full channel view
+
+        # 2. Turn 1 thread — tool calls, diffs, results
+        nav(thread_url, wait_ms=5_000)
+        snap("session-ux-turn-thread.png")
+        snap("threading-turn-thread.png")  # Same content, referenced by threading.md
+
+        # 3. Turn 2 thread — permission buttons
+        turn2_ts = fixture["turn2_ts"]
+        turn2_thread = f"{channel_url}/thread/{channel_id}-{turn2_ts}"
+        nav(turn2_thread, wait_ms=5_000)
+        snap("quickstart-permission-request.png")
+        snap("permissions-approval.png")  # Same content, referenced by permissions.md
+
+        # 4. Back to channel — scroll to !help output at bottom
+        nav(channel_url, wait_ms=5_000)
+        # Scroll to bottom to see !help
+        page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        page.wait_for_timeout(2_000)
+        snap("quickstart-help.png")
 
         context.close()
         browser.close()
