@@ -378,42 +378,6 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     return help_ts  # Return ts anyway so we can still try to screenshot
 
 
-def wait_for_permission_request(bot_token: str, channel_id: str, timeout: int = 60) -> str | None:
-    """Wait for a permission request to appear in a turn thread.
-
-    Polls conversations_history for new turn starters (messages containing "Turn"),
-    then checks each turn's thread replies for a permission request.
-
-    Returns the turn starter ts containing the permission, or None on timeout.
-    """
-    from slack_sdk import WebClient
-
-    client = WebClient(token=bot_token)
-    deadline = time.time() + timeout
-
-    while time.time() < deadline:
-        resp = client.conversations_history(channel=channel_id, limit=50)
-        messages = resp.get("messages", [])
-
-        # Look for new turn starters (beyond what existed at baseline)
-        turn_starters = [
-            m for m in messages if "Turn" in m.get("text", "") and m.get("reply_count", 0) > 0
-        ]
-
-        for turn in turn_starters:
-            # Check thread replies for permission request
-            replies = client.conversations_replies(channel=channel_id, ts=turn["ts"])
-            for reply in replies.get("messages", [])[1:]:  # Skip parent
-                if "permission" in reply.get("text", "").lower():
-                    click.echo(f"  Permission request found in turn thread: ts={turn['ts']}")
-                    return turn["ts"]
-
-        time.sleep(3)
-
-    click.echo("  WARNING: No permission request found", err=True)
-    return None
-
-
 def capture_screenshots(  # noqa: PLR0913
     page,
     output_dir: Path,
