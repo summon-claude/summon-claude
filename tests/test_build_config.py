@@ -235,6 +235,38 @@ class TestWorkflowFiles:
         content = path.read_text()
         assert "contents: read" in content, "ci.yaml missing 'contents: read' permission"
 
+    def test_docs_yaml_exists(self) -> None:
+        """Verify docs.yaml exists."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        assert path.exists(), f"docs.yaml not found at {path}"
+        assert path.is_file(), "docs.yaml should be a file"
+
+    def test_docs_yaml_is_valid_yaml(self) -> None:
+        """docs.yaml parses as valid YAML."""
+        docs_path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = docs_path.read_text()
+        data = yaml.safe_load(content)
+        assert isinstance(data, dict)
+        assert "name" in data
+        assert True in data or "on" in data
+        assert "jobs" in data
+
+    def test_docs_yaml_deploy_has_concurrency_guard(self) -> None:
+        """Verify docs.yaml deploy job uses cancel-in-progress: false."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = path.read_text()
+        assert "cancel-in-progress: false" in content, (
+            "docs.yaml missing 'cancel-in-progress: false' on gh-pages-deploy group"
+        )
+
+    def test_docs_yaml_preview_blocks_forks(self) -> None:
+        """Verify preview-deploy restricts to same-repo PRs (not forks)."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = path.read_text()
+        assert "head.repo.full_name == github.repository" in content, (
+            "docs.yaml preview-deploy missing fork guard"
+        )
+
 
 class TestPrekToml:
     """Validate prek.toml pre-commit configuration."""

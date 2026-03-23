@@ -765,7 +765,7 @@ def _inject_terminal_block(
     md_text = md_path.read_text()
     esc = re.escape(marker)
     pattern = re.compile(
-        rf"(<!-- terminal:{esc} -->)\n(.*\n)?(<!-- /terminal:{esc} -->)",
+        rf"(<!-- terminal:{esc} -->)\n(.*?\n)?(<!-- /terminal:{esc} -->)",
         re.DOTALL,
     )
 
