@@ -10,17 +10,6 @@ on:
       - 'README.md'
   pull_request:
     types: [opened, synchronize, reopened, closed]
-  workflow_dispatch:
-    inputs:
-      section:
-        description: 'Screenshot section to capture (leave empty for all)'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - slack-setup
-          - session-ux
 
 # Permissions scoped per-job to prevent PR preview builds from getting write access (SEC-001)
 permissions:
@@ -181,48 +170,3 @@ jobs:
           else
             echo "No preview directory found, skipping."
           fi
-
-  screenshots:
-    name: Capture documentation screenshots
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: astral-sh/setup-uv@v4
-
-      - name: Install docs dependencies
-        run: uv sync --group docs
-
-      - name: Install Chromium
-        run: uv run playwright install chromium
-
-      - name: Capture screenshots
-        env:
-          SUMMON_TEST_SLACK_WORKSPACE_URL: ${{ vars.SUMMON_TEST_SLACK_WORKSPACE_URL }}
-          SUMMON_TEST_SLACK_COOKIE: ${{ secrets.SUMMON_TEST_SLACK_COOKIE }}
-        run: |
-          SECTION="${{ github.event.inputs.section }}"
-          if [ "$SECTION" != "all" ] && [ -n "$SECTION" ]; then
-            uv run python scripts/docs-screenshots.py --section "$SECTION" --output docs/assets/screenshots/
-          else
-            uv run python scripts/docs-screenshots.py --output docs/assets/screenshots/
-          fi
-
-      - name: Create PR with screenshot updates
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "docs: updates screenshots"
-          branch: docs/update-screenshots
-          delete-branch: true
-          title: "docs: updates documentation screenshots"
-          body: |
-            Automated screenshot update triggered by workflow dispatch.
-
-            Section: ${{ github.event.inputs.section || 'all' }}
-          labels: documentation
