@@ -114,6 +114,7 @@ jobs:
           mkdir -p gh-pages-dir
           cd gh-pages-dir
           git init
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
           git checkout --orphan gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
