@@ -267,11 +267,59 @@ def wait_for_claude_response(bot_token: str, channel_id: str, timeout: int = 120
     return None
 
 
+def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -> str | None:
+    """Poll for the !help thread reply using conversations_replies.
+
+    The !help response is posted as a thread reply to the user's !help message,
+    NOT as a top-level channel message. So conversations_history won't see the
+    response — we must use conversations_replies.
+
+    Returns the !help message ts if a reply was detected, None on timeout.
+    """
+    from slack_sdk import WebClient
+
+    client = WebClient(token=bot_token)
+    deadline = time.time() + timeout
+
+    # Find the !help message in conversations_history (it IS a top-level message)
+    help_ts = None
+    while time.time() < deadline:
+        resp = client.conversations_history(channel=channel_id, limit=10)
+        for msg in resp.get("messages", []):
+            if msg.get("text", "").strip() == "!help":
+                help_ts = msg["ts"]
+                break
+        if help_ts:
+            break
+        time.sleep(2)
+
+    if not help_ts:
+        click.echo("  WARNING: Could not find !help message in channel", err=True)
+        return None
+
+    click.echo(f"  Found !help message: ts={help_ts}")
+
+    # Poll conversations_replies for the daemon's thread reply
+    while time.time() < deadline:
+        resp = client.conversations_replies(channel=channel_id, ts=help_ts)
+        messages = resp.get("messages", [])
+        # First message is the parent (!help itself), replies follow
+        if len(messages) > 1:
+            click.echo("  !help response detected in thread")
+            return help_ts
+        time.sleep(2)
+
+    click.echo("  WARNING: Timed out waiting for !help thread reply", err=True)
+    return help_ts  # Return ts anyway so we can still try to screenshot
+
+
 def capture_screenshots(
     page,
     output_dir: Path,
     team_id: str,
     channel_id: str,
+    *,
+    help_ts: str | None = None,
 ) -> list[str]:
     """Navigate to the session channel and capture all screenshots."""
     captured = []
@@ -297,10 +345,16 @@ def capture_screenshots(
     page.wait_for_timeout(2_000)
     snap("quickstart-slack-auth.png")
 
-    # Scroll back to bottom for help output
-    click.echo("  Scrolling to bottom for help/overview screenshots...")
-    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-    page.wait_for_timeout(2_000)
+    # Navigate to !help thread for help output screenshot
+    if help_ts:
+        help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
+        click.echo(f"  Capturing !help thread: {help_thread_url}")
+        nav(help_thread_url, wait_ms=5_000)
+    else:
+        # Fallback: scroll to bottom of channel (won't show help response)
+        click.echo("  No !help thread ts — falling back to channel bottom")
+        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
+        page.wait_for_timeout(2_000)
     snap("quickstart-help.png")
 
     # Find threads by looking for turn starters in the channel
@@ -656,13 +710,13 @@ def main(
             # 5. Wait for Claude to respond
             wait_for_claude_response(bot_token, channel_id, timeout=120)
 
-            # 6. Send !help for the help screenshot
+            # 6. Send !help and wait for thread reply
             page.wait_for_timeout(3_000)
             send_message_via_slack(page, "!help")
-            page.wait_for_timeout(5_000)
+            help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
 
             # 7. Capture all screenshots
-            captured = capture_screenshots(page, output_dir, team_id, channel_id)
+            captured = capture_screenshots(page, output_dir, team_id, channel_id, help_ts=help_ts)
             click.echo(f"\n  Done: {len(captured)} screenshots captured.")
 
             context.close()
