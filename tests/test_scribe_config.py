@@ -146,6 +146,7 @@ class TestScribeConfigSettableKeys:
             "SUMMON_SCRIBE_MODEL",
             "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
             "SUMMON_SCRIBE_QUIET_HOURS",
+            "SUMMON_SCRIBE_GOOGLE_ENABLED",
             "SUMMON_SCRIBE_GOOGLE_SERVICES",
             "SUMMON_SCRIBE_SLACK_ENABLED",
             "SUMMON_SCRIBE_SLACK_BROWSER",

@@ -215,6 +215,8 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             all_active = await registry.list_active()
             for sess in all_active:
                 sname = sess.get("session_name", "")
+                # Scribe is identified by name convention (no project_id, name="scribe").
+                # Same pattern as PM detection ("-pm-" in sname) — both are string conventions.
                 if sname == "scribe" and sess.get("project_id") is None:
                     sid = sess["session_id"]
                     try:
