@@ -982,13 +982,14 @@ class TestReleasedMigrationsImmutable:
     existing databases, creating silent schema drift.  Add new schema changes as
     NEW migration functions only.
 
-    To update this test after a release that adds new migrations:
-    1. Run ``uv run python3 hack/tmp/compute_hashes.py`` (or equivalent)
-    2. Add the new migration's hash to _RELEASED_HASHES below
+    When adding a new migration:
+    1. Compute its hash (see test_all_migrations_have_hashes error for instructions)
+    2. Add the hash to _RELEASED_HASHES below
+    The test_all_migrations_have_hashes test will FAIL if you forget step 2.
     """
 
-    # SHA-256 prefix (16 hex chars) of inspect.getsource() for each released migration.
-    # Bump this dict ONLY when a migration is first released to upstream/main.
+    # SHA-256 prefix (16 hex chars) of inspect.getsource() for each migration.
+    # Every migration in _MIGRATIONS (except the v0 no-op) must have an entry.
     _RELEASED_HASHES: dict[str, str] = {
         "_migrate_1_to_2": "7270f30345c4b3f1",
         "_migrate_2_to_3": "c96ee8025ac3846b",
@@ -1002,6 +1003,7 @@ class TestReleasedMigrationsImmutable:
         "_migrate_10_to_11": "503ed98064bd1138",
         "_migrate_11_to_12": "bfc95f1b44faef79",
         "_migrate_12_to_13": "4dd835d5b9aefb63",
+        "_migrate_13_to_14": "cc893dd5f5eacae0",
     }
 
     def test_released_migrations_unchanged(self):
@@ -1018,6 +1020,21 @@ class TestReleasedMigrationsImmutable:
             assert actual_hash == expected_hash, (
                 f"{fn_name} source has changed (hash {actual_hash} != {expected_hash}). "
                 f"Released migrations are IMMUTABLE — add a new migration function instead."
+            )
+
+    def test_all_migrations_have_hashes(self):
+        """Fail if a migration function exists in _MIGRATIONS without a hash."""
+        from summon_claude.sessions.migrations import _MIGRATIONS
+
+        for version, fn in _MIGRATIONS.items():
+            if fn is None:
+                continue  # v0 no-op
+            assert fn.__name__ in self._RELEASED_HASHES, (
+                f"{fn.__name__} (version {version}→{version + 1}) is in _MIGRATIONS "
+                f"but has no entry in _RELEASED_HASHES. Compute its hash with:\n"
+                f"  import hashlib, inspect\n"
+                f"  hashlib.sha256(inspect.getsource(fn).encode()).hexdigest()[:16]\n"
+                f"and add it to _RELEASED_HASHES."
             )
 
 
