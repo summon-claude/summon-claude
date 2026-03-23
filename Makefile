@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-serve docs-build docs-check docs-screenshots
+.PHONY: docs-serve docs-build docs-check docs-screenshots docs-terminal
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -84,8 +84,11 @@ docs-build: ## Build docs site
 docs-check: ## Verify docs build (strict mode, catches broken links)
 	uv run mkdocs build --strict
 
-docs-screenshots: ## Generate documentation screenshots
+docs-screenshots: ## Generate documentation screenshots (all sections)
 	uv run python scripts/docs-screenshots.py --output docs/assets/screenshots/
+
+docs-terminal: ## Capture terminal output and inject into docs
+	uv run python scripts/docs-screenshots.py --section terminal
 
 # ============================================================================
 # REPO HOOKS

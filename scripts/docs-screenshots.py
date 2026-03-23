@@ -11,6 +11,11 @@ The flow:
   5. Screenshots the channel, thread, and permission UI
   6. Stops the session and archives the channel
 
+Sections:
+  slack-setup   — validates manually-captured Slack setup screenshots
+  session-ux    — end-to-end Playwright screenshots of a real session
+  terminal      — captures real CLI terminal output and injects into docs markdown
+
 Environment variables:
   SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery, cleanup, and team ID
   SUMMON_TEST_SLACK_COOKIE         Browser session cookie (`d` cookie, `xoxd-` prefix)
@@ -339,6 +344,158 @@ def capture_screenshots(
 
 
 # ---------------------------------------------------------------------------
+# Terminal output capture
+# ---------------------------------------------------------------------------
+
+QUICKSTART_MD = Path("docs/getting-started/quickstart.md")
+TERMINAL_SESSION_NAME = "docs-terminal"
+
+# Matches <!-- terminal:NAME -->...<!-- /terminal:NAME -->
+TERMINAL_MARKER_RE = re.compile(
+    r"(<!-- terminal:([\w-]+) -->)\n.*?\n(<!-- /terminal:\2 -->)",
+    re.DOTALL,
+)
+
+
+def capture_summon_start_banner() -> str:
+    """Run ``uv run summon start`` and capture the auth banner output.
+
+    Kills the process and stops the session after capturing the banner.
+    Returns the banner lines (``====...``, code line, instructions, ``====...``).
+    """
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)  # Avoid nested session detection
+
+    click.echo("  Starting summon session for terminal capture...")
+    proc = subprocess.Popen(
+        ["uv", "run", "summon", "start", "--name", TERMINAL_SESSION_NAME],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+
+    lines: list[str] = []
+    banner_re = re.compile(r"^={10,}$")
+    in_banner = False
+    deadline = time.time() + 30
+
+    try:
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+                continue
+
+            stripped = line.rstrip()
+            if not stripped:
+                if in_banner:
+                    lines.append(stripped)
+                continue
+
+            if banner_re.match(stripped):
+                lines.append(stripped)
+                if in_banner:
+                    break  # Closing border — done
+                in_banner = True
+            elif in_banner:
+                lines.append(stripped)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+        # Clean up the session we started
+        try:
+            subprocess.run(
+                ["uv", "run", "summon", "stop", TERMINAL_SESSION_NAME],
+                capture_output=True,
+                timeout=15,
+                env=env,
+            )
+        except Exception:  # noqa: S110
+            pass
+
+    if len(lines) < 3:
+        raise RuntimeError(f"Failed to capture auth banner (got {len(lines)} lines): {lines}")
+
+    click.echo(f"  Captured {len(lines)} lines of banner output")
+    return "\n".join(lines)
+
+
+def _add_annotations(banner: str) -> str:
+    """Add Material for MkDocs annotations to the captured banner.
+
+    Inserts ``# (1)`` after the SUMMON CODE line and ``# (2)`` after the
+    Expires line so the ``{ .text .annotate }`` fence renders callouts.
+    """
+    out = []
+    for line in banner.split("\n"):
+        if "SUMMON CODE:" in line:
+            out.append(f"{line}  # (1)")
+        elif "Expires in" in line:
+            out.append(f"{line}  # (2)")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def inject_terminal_block(md_path: Path, name: str, content: str) -> bool:
+    """Replace content between ``<!-- terminal:NAME -->`` markers.
+
+    Returns True if a replacement was made.
+    """
+    md_text = md_path.read_text()
+
+    pattern = re.compile(
+        rf"(<!-- terminal:{re.escape(name)} -->)\n.*?\n(<!-- /terminal:{re.escape(name)} -->)",
+        re.DOTALL,
+    )
+
+    replacement = (
+        rf"\1\n"
+        "``` { .text .annotate }\n"
+        f"{content}\n"
+        "```\n"
+        "\n"
+        "1. This is a one-time code. Type it exactly as shown in any Slack channel.\n"
+        "2. Codes expire after 5 minutes. Run `summon start` again if it expires.\n"
+        rf"\2"
+    )
+
+    new_text, count = pattern.subn(replacement, md_text)
+    if count == 0:
+        return False
+
+    md_path.write_text(new_text)
+    return True
+
+
+def run_terminal_section(dry_run: bool = False) -> None:
+    """Capture terminal output and inject into documentation."""
+    click.echo("\n[terminal] Capturing CLI terminal output...")
+
+    if dry_run:
+        click.echo(f"  (capture) summon start banner → {QUICKSTART_MD}")
+        return
+
+    banner = capture_summon_start_banner()
+    annotated = _add_annotations(banner)
+
+    if inject_terminal_block(QUICKSTART_MD, "summon-start", annotated):
+        click.echo(f"  Injected summon-start banner into {QUICKSTART_MD}")
+    else:
+        click.echo(
+            f"  WARNING: No <!-- terminal:summon-start --> markers found in {QUICKSTART_MD}",
+            err=True,
+        )
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -355,7 +512,7 @@ def capture_screenshots(
 @click.option(
     "--section",
     default=None,
-    type=click.Choice(["slack-setup", "session-ux"]),
+    type=click.Choice(["slack-setup", "session-ux", "terminal"]),
     help="Capture only a specific section.",
 )
 @click.option(
@@ -394,10 +551,13 @@ def main(
     Requires: SUMMON_TEST_SLACK_BOT_TOKEN, SUMMON_TEST_SLACK_COOKIE.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    sections = [section] if section else ["slack-setup", "session-ux"]
+    sections = [section] if section else ["slack-setup", "session-ux", "terminal"]
 
     if dry_run:
         for sec in sections:
+            if sec == "terminal":
+                run_terminal_section(dry_run=True)
+                continue
             items = (
                 MANUAL_SCREENSHOTS
                 if sec == "slack-setup"
@@ -422,6 +582,10 @@ def main(
                 click.echo(f"  ({tag}) {output_dir / shot['name']}")
                 click.echo(f"         {shot['description']}")
         return
+
+    # Terminal capture (no Slack/Playwright prereqs needed)
+    if "terminal" in sections:
+        run_terminal_section()
 
     # Validate manual screenshots
     if "slack-setup" in sections:

@@ -19,6 +19,7 @@ summon start
 
 summon-claude launches a Claude Code session in the background and prints an authentication code:
 
+<!-- terminal:summon-start -->
 ``` { .text .annotate }
 ==================================================
   SUMMON CODE: a7f3b219  # (1)
@@ -29,6 +30,7 @@ summon-claude launches a Claude Code session in the background and prints an aut
 
 1. This is a one-time code. Type it exactly as shown in any Slack channel.
 2. Codes expire after 5 minutes. Run `summon start` again if it expires.
+<!-- /terminal:summon-start -->
 
 !!! note "Background process"
     The session runs as a background daemon. You can close this terminal window after authenticating — Claude keeps running.
