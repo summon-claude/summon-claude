@@ -74,7 +74,7 @@ summon-claude uses emoji reactions to show what Claude is doing:
 | :inbox_tray: | Message received, Claude is thinking |
 | :gear: | Claude is actively working (running tools) |
 | :white_check_mark: | Turn completed successfully |
-| :x: | Turn ended with an error |
+| :warning: | Turn ended with an error |
 
 ---
 

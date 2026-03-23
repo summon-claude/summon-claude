@@ -137,7 +137,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
     **Cause:** The `/summon` slash command is not configured in the Slack app, or the app has not been reinstalled after adding it.
 
-    **Fix:** Go to **api.slack.com/apps → Your App → Slash Commands** and add the `/summon` command. Then reinstall the app to the workspace. The request URL should point to your summon daemon's HTTP endpoint (if using HTTP mode) or is not needed for Socket Mode.
+    **Fix:** Go to **api.slack.com/apps → Your App → Slash Commands** and add the `/summon` command. Then reinstall the app to the workspace. With Socket Mode enabled, no Request URL is needed.
 
 ---
 
@@ -149,28 +149,27 @@ This page covers common problems and their solutions. Issues are grouped by cate
     **Cause:** Common causes include: daemon not running, Claude CLI not found, bad config, or a port/socket conflict.
 
     **Fix:**
-    1. Check the daemon is running: `summon daemon status`
-    2. If not running, start it: `summon daemon start`
-    3. Check logs for errors: `summon daemon logs` or view `~/.summon/sessions/` directly
+    1. Check for active sessions: `summon session list`
+    2. Clean up stale sessions: `summon session cleanup`
+    3. Check logs for errors: `summon session logs <session-name>`
     4. Verify Claude CLI is available: `claude --version`
     5. Validate config: `summon config check`
 
-???+ tip "Daemon already running / can't start daemon"
-    **Symptom:** `summon daemon start` says the daemon is already running, but sessions aren't working.
+???+ tip "Stale daemon / can't start new session"
+    **Symptom:** `summon start` fails or sessions aren't working despite config being valid.
 
-    **Cause:** A stale PID file or socket from a previous daemon crash.
+    **Cause:** A stale daemon process from a previous crash. The daemon starts automatically with `summon start` and stops when all sessions end.
 
     **Fix:**
     ```bash
-    summon daemon stop
-    summon daemon start
+    summon stop --all
     ```
-    If `daemon stop` fails, find and kill the process manually:
+    If that fails, find and kill the daemon process manually:
     ```bash
-    # Check if daemon process is actually running
-    summon daemon status
+    # Find the daemon process
+    pgrep -f "summon.*start"
     ```
-    If the status shows no live process, delete the stale lock file and restart.
+    Then start a fresh session with `summon start`.
 
 ???+ tip "Stale sessions in session list"
     **Symptom:** `summon session list` shows sessions that are no longer running (status stuck at "active").
@@ -272,42 +271,38 @@ This page covers common problems and their solutions. Issues are grouped by cate
 ## Daemon
 
 ???+ tip "Checking daemon status and health"
-    Use the built-in status command:
+    The daemon starts automatically with `summon start` and stops when all sessions end. To check if it's running:
     ```bash
-    summon daemon status
+    summon session list
     ```
-    This shows whether the daemon is running, its PID, and basic health info.
+    This shows whether the daemon is running, its PID, uptime, and all active sessions.
 
-???+ tip "Finding daemon logs"
-    Session logs are written to `~/.summon/sessions/`. Each session has its own log file named by session ID.
-
-    To view logs for a specific session:
+???+ tip "Finding logs"
+    Session logs are stored in the data directory (typically `~/.local/share/summon/logs/`). To view logs for a specific session:
     ```bash
     summon session logs <session-name>
     ```
 
-    For daemon-level logs, start the daemon with verbose logging:
+    The daemon log is at `<data-dir>/logs/daemon.log`. Check the data directory with:
     ```bash
-    summon daemon start -v
+    summon config check
     ```
-    Or check the daemon log file directly in `~/.summon/`.
 
 ???+ tip "Enabling verbose logging for debugging"
-    Pass `-v` (or `-vv` for more detail) to the daemon or session commands:
+    Pass `-v` (or `-vv` for more detail) as a top-level flag:
     ```bash
-    summon daemon start -v
-    summon start -v my-session
+    summon -v start --name my-session
     ```
     Verbose logs include SDK events, Slack API calls, and permission flow details.
 
 ???+ tip "Daemon won't stop cleanly"
-    **Symptom:** `summon daemon stop` hangs or the daemon process remains after stopping.
+    **Symptom:** `summon stop --all` hangs or the daemon process remains after stopping.
 
     **Cause:** Active sessions may be taking time to shut down gracefully, or the daemon is waiting for in-flight Slack API calls.
 
-    **Fix:** Wait a few seconds — the daemon performs a graceful shutdown that stops all active sessions first. If it hangs for more than 30 seconds, you can force-kill it:
+    **Fix:** Wait a few seconds — the daemon performs a graceful shutdown that stops all active sessions first. If it hangs for more than 30 seconds, kill the daemon process directly:
     ```bash
-    summon daemon stop --force
+    pgrep -f "summon.*start" | xargs kill
     ```
 
 ---
@@ -357,6 +352,6 @@ This page covers common problems and their solutions. Issues are grouped by cate
 If your issue isn't covered here:
 
 1. Check the session logs: `summon session logs <session-name>`
-2. Enable verbose daemon logging: `summon daemon start -v`
+2. Enable verbose logging: `summon -v start --name my-session`
 3. Run config validation: `summon config check`
 4. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)
