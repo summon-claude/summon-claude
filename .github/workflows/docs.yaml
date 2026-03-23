@@ -64,7 +64,7 @@ jobs:
         run: uv sync --group docs
 
       - name: Build docs
-        run: uv run mkdocs build -d site-pr/
+        run: uv run mkdocs build --strict -d site-pr/
 
       - name: Upload preview artifact
         uses: actions/upload-artifact@v4

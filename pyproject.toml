@@ -38,6 +38,7 @@ all = ["summon-claude[google,slack-browser]"]
 
 [project.urls]
 Homepage = "https://github.com/summon-claude/summon-claude"
+Documentation = "https://summon-claude.github.io/summon-claude/"
 Repository = "https://github.com/summon-claude/summon-claude"
 "Bug Tracker" = "https://github.com/summon-claude/summon-claude/issues"
 

@@ -50,7 +50,7 @@ jobs:
         run: uv sync --group docs
 
       - name: Build docs
-        run: uv run mkdocs build
+        run: uv run mkdocs build --strict
 
   slack-integration:
     name: Slack Integration Tests
