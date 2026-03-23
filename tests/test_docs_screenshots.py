@@ -243,3 +243,26 @@ class TestRunCaptureCache:
 
         assert r1 == r2 == "shared"
         fn.assert_called_once()
+
+    def test_subprocess_success_returns_stripped_stdout(self, monkeypatch) -> None:
+        import subprocess as sp
+
+        mock_result = MagicMock(returncode=0, stdout="  output\n")
+        monkeypatch.setattr(sp, "run", MagicMock(return_value=mock_result))
+        spec = CaptureSpec(marker="t", md_file="f.md", command=["summon", "--version"])
+        assert _run_capture(spec) == "output"
+
+    def test_subprocess_nonzero_returns_none(self, monkeypatch) -> None:
+        import subprocess as sp
+
+        mock_result = MagicMock(returncode=1, stderr="error msg")
+        monkeypatch.setattr(sp, "run", MagicMock(return_value=mock_result))
+        spec = CaptureSpec(marker="t", md_file="f.md", command=["summon", "--version"])
+        assert _run_capture(spec) is None
+
+    def test_subprocess_timeout_returns_none(self, monkeypatch) -> None:
+        import subprocess as sp
+
+        monkeypatch.setattr(sp, "run", MagicMock(side_effect=sp.TimeoutExpired(cmd=[], timeout=1)))
+        spec = CaptureSpec(marker="t", md_file="f.md", command=["summon", "--version"])
+        assert _run_capture(spec) is None

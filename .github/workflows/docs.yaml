@@ -114,7 +114,8 @@ jobs:
           mkdir -p gh-pages-dir
           cd gh-pages-dir
           git init
-          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git remote add origin "https://github.com/${{ github.repository }}.git"
+          git config "http.https://github.com/.extraheader" "AUTHORIZATION: basic $(echo -n 'x-access-token:${{ github.token }}' | base64)"
           git checkout --orphan gh-pages
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -165,7 +166,10 @@ jobs:
 
   preview-cleanup:
     name: Cleanup preview (PR closed)
-    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
