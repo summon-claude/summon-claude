@@ -11,6 +11,7 @@ Validates:
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -262,10 +263,22 @@ class TestWorkflowFiles:
     def test_docs_yaml_preview_blocks_forks(self) -> None:
         """Verify preview-deploy restricts to same-repo PRs (not forks)."""
         path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
-        content = path.read_text()
-        assert "head.repo.full_name == github.repository" in content, (
-            "docs.yaml preview-deploy missing fork guard"
+        data = yaml.safe_load(path.read_text())
+        preview_deploy = data["jobs"]["preview-deploy"]
+        condition = str(preview_deploy.get("if", ""))
+        assert "head.repo.full_name == github.repository" in condition, (
+            "docs.yaml preview-deploy job if-condition missing fork guard"
         )
+
+    def test_docs_yaml_actions_are_pinned_by_sha(self) -> None:
+        """All action refs in docs.yaml must use full 40-char commit SHAs."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = path.read_text()
+        uses_re = re.compile(r"uses:\s+\S+@(\S+)")
+        refs = uses_re.findall(content)
+        assert len(refs) > 0, "No action refs found in docs.yaml"
+        for ref in refs:
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), f"Action ref '{ref}' is not a full SHA pin"
 
 
 class TestPrekToml:
