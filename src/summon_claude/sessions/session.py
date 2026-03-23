@@ -1839,17 +1839,20 @@ class SummonSession:
             logger.warning("Scribe: Slack auth state missing at %s", state_file_str)
             return
 
-        # Resolve monitored channel IDs (for now use channel names from config)
+        # Channel IDs from config (users provide IDs, not names)
         monitored = [
             c.strip() for c in self._config.scribe_slack_monitored_channels.split(",") if c.strip()
         ]
+
+        # Use workspace-specific user ID for @mention detection (not summon user ID)
+        ext_user_id = workspace.get("user_id", "")
 
         monitor = SlackBrowserMonitor(
             workspace_id=_slugify(workspace.get("url", "unknown")),
             workspace_url=workspace.get("url", ""),
             state_file=Path(state_file_str),
             monitored_channel_ids=monitored,
-            user_id=self._authenticated_user_id or "",
+            user_id=ext_user_id,
         )
         await monitor.start(browser_type=self._config.scribe_slack_browser)
         self._slack_monitors.append(monitor)

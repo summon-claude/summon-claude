@@ -870,18 +870,31 @@ def slack_auth(workspace_url: str) -> None:
 
     state_file = asyncio.run(interactive_slack_auth(workspace_url, browser_type))
 
+    click.echo(f"Slack auth saved to {state_file}")
+    click.echo()
+    click.echo("To enable @mention detection, enter your Slack user ID for this workspace.")
+    click.echo("Find it: click your profile picture → Profile → ⋮ → Copy member ID")
+    user_id = click.prompt("External workspace user ID (or press Enter to skip)", default="")
+
     # Save workspace metadata
-    workspace_config = {
+    workspace_config: dict[str, str] = {
         "url": workspace_url,
         "auth_state_path": str(state_file),
         "browser_type": browser_type,
     }
+    if user_id:
+        workspace_config["user_id"] = user_id
     config_path = _get_workspace_config_path()
     config_path.write_text(json.dumps(workspace_config, indent=2))
     config_path.chmod(0o600)
 
-    click.echo(f"Slack auth saved to {state_file}")
     click.echo(f"Workspace config saved to {config_path}")
+    if not user_id:
+        click.echo("Note: @mention detection disabled (no user ID). Re-run slack-auth to add it.")
+    click.echo()
+    click.echo("To monitor specific channels, set their IDs in config:")
+    click.echo("  summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01ABC,C02DEF")
+    click.echo("Find channel IDs: right-click channel → View channel details → ID at bottom")
 
 
 def slack_status() -> None:

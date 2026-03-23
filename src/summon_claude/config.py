@@ -348,7 +348,7 @@ class SummonConfig(BaseSettings):
     # External Slack data collector
     scribe_slack_enabled: bool = False
     scribe_slack_browser: str = "chrome"  # "chrome", "firefox", or "webkit"
-    scribe_slack_monitored_channels: str = ""  # comma-separated channel names
+    scribe_slack_monitored_channels: str = ""  # comma-separated channel IDs (e.g. "C01ABC,C02DEF")
 
     @field_validator("default_effort")
     @classmethod
