@@ -11,10 +11,21 @@ theme:
     - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.footer
+    - navigation.indexes
     - content.code.copy
     - content.code.select
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
     - search.suggest
     - search.highlight
+    - search.share
+    - header.autohide
+    - toc.integrate
   palette:
     - media: "(prefers-color-scheme)"
       toggle:
@@ -78,11 +89,13 @@ extra:
 nav:
   - Home: index.md
   - Getting Started:
+    - getting-started/index.md
     - Installation: getting-started/installation.md
     - Slack Setup: getting-started/slack-setup.md
     - Quick Start: getting-started/quickstart.md
     - Upgrading: getting-started/upgrading.md
   - User Guide:
+    - guide/index.md
     - Sessions: guide/sessions.md
     - Commands: guide/commands.md
     - Configuration: guide/configuration.md
@@ -95,6 +108,7 @@ nav:
     - Cron & Tasks: guide/cron-tasks.md
     - GitHub Integration: guide/github-integration.md
   - Reference:
+    - reference/index.md
     - CLI: reference/cli.md
     - Environment Variables: reference/environment-variables.md
     - MCP Tools: reference/mcp-tools.md
@@ -105,6 +119,7 @@ nav:
       - Slack: reference/api/slack.md
       - CLI Modules: reference/api/cli.md
   - Architecture:
+    - architecture/index.md
     - Overview: architecture/overview.md
     - Daemon: architecture/daemon.md
     - Slack Integration: architecture/slack-integration.md
@@ -112,6 +127,7 @@ nav:
     - Security: architecture/security.md
   - Troubleshooting: troubleshooting.md
   - Development:
+    - development/index.md
     - Contributing: development/contributing.md
     - Testing: development/testing.md
     - Releasing: development/releasing.md

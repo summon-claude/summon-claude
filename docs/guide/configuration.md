@@ -46,13 +46,18 @@ This prompts for the three required Slack tokens and writes them to the config f
 
 ## Required settings
 
-| Variable | Description |
-|----------|-------------|
-| `SUMMON_SLACK_BOT_TOKEN` | Bot token (`xoxb-...`) from your Slack app |
-| `SUMMON_SLACK_APP_TOKEN` | App-level token (`xapp-...`) for Socket Mode |
-| `SUMMON_SLACK_SIGNING_SECRET` | Signing secret for request verification |
+``` { .bash .annotate }
+# Required — Slack tokens
+SUMMON_SLACK_BOT_TOKEN=xoxb-...    # (1)
+SUMMON_SLACK_APP_TOKEN=xapp-...    # (2)
+SUMMON_SLACK_SIGNING_SECRET=abc... # (3)
+```
 
-These three values must be set. summon validates token prefixes at startup (`xoxb-` and `xapp-`) and fails with a clear error if they are missing or malformed.
+1. **Bot User OAuth Token** — found at **OAuth & Permissions** in your Slack app settings. Starts with `xoxb-`.
+2. **App-Level Token** — found at **Basic Information → App-Level Tokens**. Must have `connections:write` scope. Starts with `xapp-`.
+3. **Signing Secret** — found at **Basic Information → App Credentials**. A hex string used to verify incoming requests.
+
+These three values must be set. summon validates token prefixes at startup and fails with a clear error if they are missing or malformed.
 
 See [Slack Setup](../getting-started/slack-setup.md) for how to obtain these values.
 
