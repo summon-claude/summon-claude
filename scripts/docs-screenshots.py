@@ -109,15 +109,25 @@ def stop_summon_session(proc: subprocess.Popen) -> None:
 
 
 def find_session_channel(bot_token: str) -> str | None:
-    """Find the session channel by looking for recent channels matching the session name."""
+    """Find the session channel by looking for channels matching the session name.
+
+    Paginates through all channels since the bot may be in many channels.
+    """
     from slack_sdk import WebClient
 
     client = WebClient(token=bot_token)
-    # List recent conversations created by the bot
-    resp = client.conversations_list(types="public_channel,private_channel", limit=50)
-    for ch in resp.get("channels", []):
-        if SESSION_NAME in ch.get("name", ""):
-            return ch["id"]
+    cursor = None
+    while True:
+        kwargs = {"types": "public_channel,private_channel", "limit": 200, "exclude_archived": True}
+        if cursor:
+            kwargs["cursor"] = cursor
+        resp = client.conversations_list(**kwargs)
+        for ch in resp.get("channels", []):
+            if SESSION_NAME in ch.get("name", ""):
+                return ch["id"]
+        cursor = resp.get("response_metadata", {}).get("next_cursor")
+        if not cursor:
+            break
     return None
 
 
@@ -142,8 +152,8 @@ def archive_channel(bot_token: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def create_browser_context(pw, cookie_value: str):
-    browser = pw.chromium.launch(headless=True)
+def create_browser_context(pw, cookie_value: str, *, headless: bool = True):
+    browser = pw.chromium.launch(headless=headless)
     context = browser.new_context(
         viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
     )
@@ -162,21 +172,40 @@ def create_browser_context(pw, cookie_value: str):
     return browser, context
 
 
-def authenticate_via_slack(page, workspace_url: str, short_code: str) -> None:
+def authenticate_via_slack(page, team_id: str, short_code: str, output_dir: Path) -> None:
     """Type `/summon CODE` in the Slack web UI to authenticate."""
+    slack_url = f"https://app.slack.com/client/{team_id}"
     click.echo(f"  Authenticating in Slack: /summon {short_code}")
-    page.goto(workspace_url, wait_until="domcontentloaded", timeout=60_000)
-    page.wait_for_timeout(8_000)
+    click.echo(f"  Navigating to: {slack_url}")
+    page.goto(slack_url, wait_until="domcontentloaded", timeout=60_000)
+    page.wait_for_timeout(12_000)
+
+    # Debug screenshot to see page state
+    debug_path = output_dir / "_debug_auth_page.png"
+    page.screenshot(path=str(debug_path), full_page=False)
+    click.echo(f"  Debug screenshot saved: {debug_path}")
+
+    # Dismiss any "Explore AI" or promo overlays
+    try:
+        selectors = '[data-qa="explore_ai_dismiss"], button:has-text("Close"), [aria-label="Close"]'
+        close_btn = page.locator(selectors)
+        if close_btn.count() > 0:
+            close_btn.first.click(timeout=3_000)
+            click.echo("  Dismissed overlay")
+            page.wait_for_timeout(1_000)
+    except Exception:  # noqa: S110
+        pass
 
     # Find the message input and type the slash command
-    composer = page.locator('[data-qa="message_input"] [contenteditable="true"]')
-    composer.click()
+    # Use press_sequentially (not fill) so Slack's JS recognizes the / prefix as a slash command
+    composer = page.locator('[data-qa="texty_input"]')
+    composer.click(timeout=15_000)
     page.wait_for_timeout(500)
-    composer.fill(f"/summon {short_code}")
-    page.wait_for_timeout(500)
+    composer.press_sequentially(f"/summon {short_code}", delay=50)
+    page.wait_for_timeout(1_000)
     page.keyboard.press("Enter")
     click.echo("  Sent /summon command, waiting for auth...")
-    page.wait_for_timeout(5_000)
+    page.wait_for_timeout(8_000)
 
 
 def wait_for_session_channel(bot_token: str, timeout: int = 60) -> str:
@@ -194,9 +223,10 @@ def wait_for_session_channel(bot_token: str, timeout: int = 60) -> str:
 def send_message_via_slack(page, message: str) -> None:
     """Type a message in the Slack message composer and send it."""
     click.echo(f"  Sending message: {message[:50]}...")
-    composer = page.locator('[data-qa="message_input"] [contenteditable="true"]')
+    composer = page.locator('[data-qa="texty_input"]')
     composer.click()
     page.wait_for_timeout(500)
+    # Use fill for regular messages (not slash commands)
     composer.fill(message)
     page.wait_for_timeout(500)
     page.keyboard.press("Enter")
@@ -253,11 +283,21 @@ def capture_screenshots(
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(wait_ms)
 
-    # Channel overview (shows auth, header, messages, emoji lifecycle)
-    click.echo("  Capturing channel overview...")
+    # Navigate to channel
+    click.echo("  Capturing channel screenshots...")
     nav(channel_url)
+
+    # Scroll to top for auth/welcome message
+    click.echo("  Scrolling to top for auth screenshot...")
+    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 0)")
+    page.wait_for_timeout(2_000)
     snap("quickstart-slack-auth.png")
-    snap("quickstart-first-message.png")
+
+    # Scroll back to bottom for help output
+    click.echo("  Scrolling to bottom for help/overview screenshots...")
+    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
+    page.wait_for_timeout(2_000)
+    snap("quickstart-help.png")
     snap("session-ux-channel-overview.png")
 
     # Find threads by looking for turn starters in the channel
@@ -274,11 +314,13 @@ def capture_screenshots(
     ]
 
     if turn_threads:
-        # Navigate to the first turn thread
-        thread_ts = turn_threads[-1]  # Oldest thread (last in reverse-chrono list)
+        # Navigate to the first turn thread (oldest = last in reverse-chrono list)
+        thread_ts = turn_threads[-1]
         thread_url = f"{channel_url}/thread/{channel_id}-{thread_ts}"
         click.echo(f"  Capturing turn thread: {thread_url}")
         nav(thread_url, wait_ms=5_000)
+        # This shows Claude's response with tool calls — used for first-message & threading docs
+        snap("quickstart-first-message.png")
         snap("session-ux-turn-thread.png")
         snap("threading-turn-thread.png")
 
@@ -295,13 +337,6 @@ def capture_screenshots(
         nav(perm_url, wait_ms=5_000)
         snap("quickstart-permission-request.png")
         snap("permissions-approval.png")
-
-    # Help output — scroll to bottom of channel
-    click.echo("  Capturing help output...")
-    nav(channel_url, wait_ms=5_000)
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    page.wait_for_timeout(2_000)
-    snap("quickstart-help.png")
 
     return captured
 
@@ -451,10 +486,10 @@ def main(
             browser, context = create_browser_context(pw, cookie_value)
             page = context.new_page()
 
-            authenticate_via_slack(page, workspace_url, short_code)
+            authenticate_via_slack(page, team_id, short_code, output_dir)
 
             # 3. Wait for session channel
-            channel_id = wait_for_session_channel(bot_token, timeout=30)
+            channel_id = wait_for_session_channel(bot_token, timeout=60)
 
             # 4. Navigate to session channel and send message
             channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
