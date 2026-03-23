@@ -556,6 +556,50 @@ class TestCheckGithubPat:
         assert "PASS" not in captured.out
 
 
+class TestCheckGithubPatSanitization:
+    """Tests for login field sanitization in _check_github_pat."""
+
+    def test_login_with_special_chars_sanitized(self, capsys):
+        """Login with terminal escape sequences is stripped."""
+        import json
+        import urllib.request
+
+        from summon_claude.cli.config import _check_github_pat
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"login": "evil<>user\x1b[31m"}).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(urllib.request, "urlopen", return_value=mock_resp):
+            result = _check_github_pat("ghp_test")
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "eviluser" in captured.out
+        assert "<>" not in captured.out
+        assert "\x1b" not in captured.out
+
+    def test_login_strips_to_empty_falls_back(self, capsys):
+        """Login that strips to empty string falls back to 'unknown'."""
+        import json
+        import urllib.request
+
+        from summon_claude.cli.config import _check_github_pat
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"login": "!!!"}).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(urllib.request, "urlopen", return_value=mock_resp):
+            result = _check_github_pat("ghp_test")
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "unknown" in captured.out
+
+
 class TestConfigSetChoiceValidation:
     def test_config_set_rejects_invalid_choice(self, tmp_path):
         """config set should reject values not in choices for choice-type options."""
