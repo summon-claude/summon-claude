@@ -248,7 +248,6 @@ def wait_for_claude_response(bot_token: str, channel_id: str, timeout: int = 120
 
     client = WebClient(token=bot_token)
     deadline = time.time() + timeout
-    baseline_count = 0
 
     # Get current message count
     resp = client.conversations_history(channel=channel_id, limit=50)
@@ -429,6 +428,9 @@ def capture_screenshots(  # noqa: PLR0913
     captured = []
     channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
 
+    # Slack sidebar is ~250px wide — crop it out of all screenshots
+    sidebar_width = 260
+
     def snap(name: str) -> None:
         dest = output_dir / name
         page.screenshot(
@@ -442,9 +444,6 @@ def capture_screenshots(  # noqa: PLR0913
         )
         click.echo(f"  captured: {dest}")
         captured.append(name)
-
-    # Slack sidebar is ~250px wide — crop it out of all screenshots
-    sidebar_width = 260
 
     def nav(url: str, wait_ms: int = 8_000) -> None:
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
@@ -746,6 +745,8 @@ def _validate_content(content: str, marker: str) -> str | None:
 
     Returns an error message if the content is unsafe, or None if OK.
     """
+    if f"<!-- terminal:{marker} -->" in content:
+        return "content contains the opening marker comment"
     if f"<!-- /terminal:{marker} -->" in content:
         return "content contains the closing marker comment"
     if "```" in content:
@@ -762,8 +763,9 @@ def _inject_terminal_block(
 ) -> bool:
     """Replace content between ``<!-- terminal:MARKER -->`` markers."""
     md_text = md_path.read_text()
+    esc = re.escape(marker)
     pattern = re.compile(
-        rf"(<!-- terminal:{re.escape(marker)} -->)\n.*?\n(<!-- /terminal:{re.escape(marker)} -->)",
+        rf"(<!-- terminal:{esc} -->)\n(.*\n)?(<!-- /terminal:{esc} -->)",
         re.DOTALL,
     )
 
@@ -773,7 +775,7 @@ def _inject_terminal_block(
 
     # Use a function replacement to avoid backreference interpretation in content
     def _replacer(m: re.Match[str]) -> str:
-        return f"{m.group(1)}\n{block}\n{m.group(2)}"
+        return f"{m.group(1)}\n{block}\n{m.group(3)}"
 
     new_text, count = pattern.subn(_replacer, md_text)
     if count == 0:
@@ -1012,7 +1014,7 @@ def main(
             send_message_via_slack(page, "!help")
             help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
 
-            # 9. Capture all screenshots
+            # 8. Capture all screenshots
             captured = capture_screenshots(
                 page,
                 output_dir,

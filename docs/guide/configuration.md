@@ -75,7 +75,7 @@ See [Slack Setup](../getting-started/slack-setup.md) for how to obtain these val
 | `SUMMON_ENABLE_THINKING` | `true` | Enable extended thinking (passed to Claude SDK) |
 | `SUMMON_SHOW_THINKING` | `false` | Post thinking blocks to Slack turn threads |
 | `SUMMON_GITHUB_PAT` | (none) | GitHub PAT for GitHub MCP integration |
-| `SUMMON_NO_UPDATE_CHECK` | (unset) | Set to any value to disable update checks |
+| `SUMMON_NO_UPDATE_CHECK` | (unset) | Set to `1` to disable update checks |
 
 ### Channel naming
 
@@ -201,7 +201,7 @@ Validates configuration and tests connectivity to Slack. Exits with code 1 if an
   [PASS] App token format is valid (xapp-)
   [PASS] Signing secret format looks valid (hex)
   [PASS] DB path is writable: ~/.local/share/summon/registry.db
-  [PASS] Schema version 11 (current)
+  [PASS] Schema version 12 (current)
   [PASS] Database integrity OK
   [INFO] Sessions: 0, Audit log: 0
   [PASS] Slack API reachable (team: my-workspace)

@@ -172,7 +172,7 @@ Some Claude CLI commands are blocked in Slack sessions because they depend on a 
 
 These commands require the interactive Claude CLI and are blocked with: _"Only available in the interactive CLI"_
 
-`!config` (`!settings`), `!doctor`, `!desktop` (`!app`), `!feedback` (`!bug`), `!permissions` (`!allowed-tools`), `!mobile`, `!resume` (`!continue`), `!rewind` (`!checkpoint`), `!remote-control` (`!rc`), `!add-dir`, `!agents`, `!chrome`, `!copy`, `!export`, `!extra-usage`, `!fast`, `!fork`, `!hooks`, `!ide`, `!install-github-app`, `!install-slack-app`, `!keybindings`, `!mcp`, `!memory`, `!output-style`, `!passes`, `!plan`, `!plugin`, `!privacy-settings`, `!reload-plugins`, `!remote-env`, `!rename`, `!sandbox`, `!skills`, `!stats`, `!statusline`, `!stickers`, `!tasks`, `!terminal-setup`, `!theme`, `!upgrade`, `!usage`, `!vim`
+`!config` (`!settings`), `!doctor`, `!desktop` (`!app`), `!feedback` (`!bug`), `!permissions` (`!allowed-tools`), `!mobile` (`!ios`, `!android`), `!resume` (`!continue`), `!rewind` (`!checkpoint`), `!remote-control` (`!rc`), `!add-dir`, `!agents`, `!chrome`, `!copy`, `!export`, `!extra-usage`, `!fast`, `!fork`, `!hooks`, `!ide`, `!install-github-app`, `!install-slack-app`, `!keybindings`, `!mcp`, `!memory`, `!output-style`, `!passes`, `!plan`, `!plugin`, `!privacy-settings`, `!reload-plugins`, `!remote-env`, `!rename`, `!sandbox`, `!skills`, `!stats`, `!statusline`, `!stickers`, `!tasks`, `!terminal-setup`, `!theme`, `!upgrade`, `!usage`, `!vim`
 
 When a blocked command is used, summon responds with a clear explanation rather than forwarding it to Claude.
 
