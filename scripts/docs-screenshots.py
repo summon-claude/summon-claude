@@ -1,22 +1,25 @@
-"""Generate documentation screenshots using Playwright.
+"""Generate documentation screenshots using Playwright + Slack API.
+
+The session-ux section is fully self-contained: it creates a temporary Slack
+channel, posts messages that simulate a real summon session (turn threads,
+emoji lifecycle, permission buttons), screenshots them via Playwright, then
+cleans up the channel.
 
 Usage:
     uv run python scripts/docs-screenshots.py [OPTIONS]
 
-Options:
-    --output DIR       Override output directory (default: docs/assets/screenshots/)
-    --section SECTION  Capture only a specific section (slack-setup, session-ux)
-    --dry-run          List planned screenshots without capturing
-
 Environment variables:
-    SUMMON_TEST_SLACK_WORKSPACE_URL  Allowlisted Slack workspace URL (required for browser capture)
-    SUMMON_TEST_SLACK_COOKIE         Slack cookie for browser authentication
+    SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for creating fixture channels/messages
+    SUMMON_TEST_SLACK_WORKSPACE_URL  Allowlisted Slack workspace URL (browser capture)
+    SUMMON_TEST_SLACK_COOKIE         Slack browser session cookie for Playwright auth
 """
 
 from __future__ import annotations
 
 import os
+import secrets
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -29,237 +32,304 @@ DEFAULT_OUTPUT_DIR = Path("docs/assets/screenshots")
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 800
 
-# Sections and their planned screenshots
-SECTIONS: dict[str, list[dict]] = {
-    "slack-setup": [
-        {
-            "name": "slack-setup-app-creation.png",
-            "description": "Slack app creation page at api.slack.com",
-            "manual_only": True,
-        },
-        {
-            "name": "slack-setup-oauth-scopes.png",
-            "description": "OAuth & Permissions scopes configuration",
-            "manual_only": True,
-        },
-        {
-            "name": "slack-setup-socket-mode.png",
-            "description": "Socket Mode enabled configuration",
-            "manual_only": True,
-        },
-        {
-            "name": "slack-setup-event-subscriptions.png",
-            "description": "Event Subscriptions configuration",
-            "manual_only": True,
-        },
-        {
-            "name": "slack-setup-install-app.png",
-            "description": "Install App to workspace",
-            "manual_only": True,
-        },
-    ],
-    "session-ux": [
-        {
-            "name": "session-ux-channel-overview.png",
-            "description": "Summon session channel with messages",
-            "manual_only": False,
-            "url_path": "/messages",
-        },
-        {
-            "name": "session-ux-turn-thread.png",
-            "description": "Turn thread showing tool use and response",
-            "manual_only": False,
-            "url_path": "/messages",
-        },
-        {
-            "name": "session-ux-permissions-prompt.png",
-            "description": "Permission approval prompt in Slack",
-            "manual_only": False,
-            "url_path": "/messages",
-        },
-        {
-            "name": "session-ux-canvas-view.png",
-            "description": "Session canvas with context summary",
-            "manual_only": False,
-            "url_path": "/canvas",
-        },
-    ],
-}
+MANUAL_SCREENSHOTS = [
+    {"name": "slack-setup-create-app.png", "description": "Create New App dialog at api.slack.com"},
+    {"name": "slack-setup-app-workspace.png", "description": "Pick a workspace dialog"},
+    {"name": "slack-setup-manifest.png", "description": "Paste manifest YAML screen"},
+    {"name": "slack-setup-oauth-install.png", "description": "OAuth & Permissions install page"},
+    {"name": "slack-setup-workspace-allow.png", "description": "Workspace permission consent"},
+    {"name": "slack-setup-tokens.png", "description": "Bot User OAuth Token location"},
+    {"name": "slack-setup-app-token.png", "description": "App-Level Tokens section"},
+    {"name": "slack-setup-app-token-generate.png", "description": "Generate app-level token"},
+    {"name": "slack-setup-app-token-properties.png", "description": "Generated token properties"},
+    {"name": "slack-setup-socket-mode.png", "description": "Socket Mode toggle enabled"},
+]
+
+SESSION_UX_SCREENSHOTS = [
+    {"name": "session-ux-channel-overview.png", "description": "Session channel with messages"},
+    {"name": "session-ux-turn-thread.png", "description": "Turn thread with tool activity"},
+    {"name": "session-ux-permissions-prompt.png", "description": "Permission approval buttons"},
+    {"name": "session-ux-canvas-view.png", "description": "Session canvas tab"},
+]
 
 
 # ---------------------------------------------------------------------------
-# Workspace URL validation
+# Slack fixture: create realistic session content via API
 # ---------------------------------------------------------------------------
 
 
-def _get_allowlisted_workspace_url() -> str | None:
-    """Return the allowlisted Slack workspace URL from env, or None if not set."""
-    return os.environ.get("SUMMON_TEST_SLACK_WORKSPACE_URL")
+def create_session_fixture(bot_token: str) -> dict:
+    """Create a temporary Slack channel with simulated summon session content.
 
-
-def validate_workspace(page: object, allowlisted_url: str) -> bool:
-    """Abort capture if the page is not connected to the test workspace.
-
-    Args:
-        page: Playwright Page object.
-        allowlisted_url: The URL prefix that must match the current page URL.
-
-    Returns:
-        True if the workspace URL matches, False otherwise.
+    Returns dict with channel_id, team_id, and message timestamps for navigation.
     """
-    current_url: str = page.url  # type: ignore[attr-defined]
-    # Normalize: strip trailing slashes for comparison
-    allowlist_base = allowlisted_url.rstrip("/")
-    if not current_url.startswith(allowlist_base):
-        click.echo(
-            f"SECURITY ABORT: current URL '{current_url}' does not match "
-            f"allowlisted workspace '{allowlist_base}'. Refusing to capture.",
-            err=True,
-        )
-        return False
-    return True
+    from slack_sdk import WebClient
+    from slack_sdk.errors import SlackApiError
 
+    client = WebClient(token=bot_token)
 
-# ---------------------------------------------------------------------------
-# Screenshot capture class
-# ---------------------------------------------------------------------------
+    # Resolve bot identity and team
+    auth = client.auth_test()
+    team_id = auth["team_id"]
+    bot_user_id = auth["user_id"]
 
+    # Create test channel
+    suffix = secrets.token_hex(3)
+    channel_name = f"docs-screenshots-{int(time.time())}-{suffix}"[:80]
+    resp = client.conversations_create(name=channel_name, is_private=False)
+    channel_id = resp["channel"]["id"]
+    click.echo(f"  Created fixture channel: #{channel_name} ({channel_id})")
 
-class ScreenshotCapture:
-    def __init__(self, output_dir: Path, dry_run: bool = False) -> None:
-        self.output_dir = output_dir
-        self.dry_run = dry_run
-        self._captured: list[str] = []
-        self._skipped: list[str] = []
-        self._warnings: list[str] = []
-
-    def _ensure_output_dir(self) -> None:
-        if not self.dry_run:
-            self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    def _capture(self, page: object, name: str, _description: str) -> None:
-        """Take a screenshot and save it."""
-        dest = self.output_dir / name
-        if self.dry_run:
-            click.echo(f"  [dry-run] would capture: {dest}")
-            self._captured.append(name)
-            return
-        page.screenshot(path=str(dest), full_page=False)  # type: ignore[attr-defined]
-        click.echo(f"  captured: {dest}")
-        self._captured.append(name)
-
-    def capture_session_ux(self, page: object, allowlisted_url: str) -> None:
-        """Capture session interaction screenshots.
-
-        Navigates to the test workspace Slack channel and captures UX screenshots.
-        Validates workspace URL before each capture.
-        """
-        screenshots = SECTIONS["session-ux"]
-        click.echo(f"Capturing {len(screenshots)} session-ux screenshots...")
-
-        for shot in screenshots:
-            name = shot["name"]
-            description = shot["description"]
-
-            if self.dry_run:
-                click.echo(f"  [dry-run] would capture: {self.output_dir / name} ({description})")
-                self._captured.append(name)
-                continue
-
-            # Validate workspace URL before every capture
-            if not validate_workspace(page, allowlisted_url):
-                click.echo(f"  SKIPPED (workspace mismatch): {name}", err=True)
-                self._skipped.append(name)
-                continue
-
-            try:
-                self._capture(page, name, description)
-            except Exception as exc:
-                msg = f"Failed to capture {name}: {exc}"
-                click.echo(f"  WARNING: {msg}", err=True)
-                self._warnings.append(msg)
-                self._skipped.append(name)
-
-    def validate_manual_screenshots(self) -> None:
-        """Check that all manual-only screenshots exist and warn if missing."""
-        missing = []
-        for shot in SECTIONS["slack-setup"]:
-            dest = self.output_dir / shot["name"]
-            if not dest.exists():
-                missing.append(shot["name"])
-
-        if missing:
-            click.echo("\nWARNING: The following manual screenshots are missing:", err=True)
-            for name in missing:
-                click.echo(f"  missing: {self.output_dir / name}", err=True)
-            click.echo(
-                "\nThese screenshots must be captured manually from api.slack.com.\n"
-                "See docs/setup/slack-app.md for instructions.",
-                err=True,
-            )
-            self._warnings.extend(f"Missing manual screenshot: {n}" for n in missing)
-
-    def summary(self) -> None:
-        """Print a summary of captured/skipped screenshots."""
-        click.echo(f"\nSummary: {len(self._captured)} captured, {len(self._skipped)} skipped")
-        if self._warnings:
-            click.echo(f"  {len(self._warnings)} warning(s):")
-            for w in self._warnings:
-                click.echo(f"    - {w}", err=True)
-
-
-# ---------------------------------------------------------------------------
-# Dry-run listing (no browser needed)
-# ---------------------------------------------------------------------------
-
-
-def list_planned_screenshots(output_dir: Path, section: str | None) -> None:
-    """List all planned screenshots without launching a browser."""
-    sections = [section] if section else list(SECTIONS.keys())
-    click.echo(f"Planned screenshots (output: {output_dir}):\n")
-    for sec in sections:
-        if sec not in SECTIONS:
-            click.echo(f"Unknown section: {sec}", err=True)
-            continue
-        click.echo(f"[{sec}]")
-        for shot in SECTIONS[sec]:
-            tag = "(manual-only)" if shot.get("manual_only") else "(automated)"
-            click.echo(f"  {tag} {output_dir / shot['name']}")
-            click.echo(f"         {shot['description']}")
-        click.echo()
-
-
-# ---------------------------------------------------------------------------
-# Browser-based capture
-# ---------------------------------------------------------------------------
-
-
-def run_browser_capture(
-    capture: ScreenshotCapture,
-    section: str | None,
-    allowlisted_url: str,
-    cookie_value: str,
-) -> None:
-    """Launch Playwright, authenticate, and capture automated screenshots."""
+    # Invite non-bot users so the browser cookie user can see the channel
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        click.echo(
-            "WARNING: playwright is not importable. "
-            "Run `uv sync --group docs` and `playwright install chromium` to enable captures.",
-            err=True,
-        )
-        return
+        members = client.users_list(limit=50)
+        for member in members.get("members", []):
+            uid = member.get("id", "")
+            if (
+                not member.get("is_bot")
+                and not member.get("deleted")
+                and uid not in {"USLACKBOT", bot_user_id}
+            ):
+                try:
+                    client.conversations_invite(channel=channel_id, users=uid)
+                except SlackApiError:
+                    pass  # already in channel or can't be invited
+    except SlackApiError:
+        pass  # best-effort
 
-    sections_to_capture = [section] if section else list(SECTIONS.keys())
+    # --- Session header ---
+    client.chat_postMessage(
+        channel=channel_id,
+        text=(
+            ":large_green_circle: *Session started* — `myproject-a1b2c3`\n"
+            "Model: `claude-opus-4-6` | Effort: `high` | CWD: `/home/user/myproject`"
+        ),
+    )
+
+    # --- User message with emoji lifecycle (completed state) ---
+    user_msg = client.chat_postMessage(
+        channel=channel_id,
+        text="Fix the authentication bug in the login handler",
+    )
+    user_ts = user_msg["ts"]
+    # Add final-state emoji (white_check_mark = completed turn)
+    client.reactions_add(channel=channel_id, name="white_check_mark", timestamp=user_ts)
+
+    # --- Turn thread starter ---
+    turn_starter = client.chat_postMessage(
+        channel=channel_id,
+        text=(
+            ":hammer_and_wrench: *Turn 1:* re: _Fix the authentication bug_... "
+            "| 4 tool calls \u00b7 login.py, auth.py \u00b7 18k/200k (9%)"
+        ),
+    )
+    turn_ts = turn_starter["ts"]
+
+    # Tool calls in the turn thread
+    client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=turn_ts,
+        text=":hammer_and_wrench: `Read` \u2014 `src/auth/login.py`",
+    )
+    client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=turn_ts,
+        text=":hammer_and_wrench: `Grep` \u2014 `validate_token` in `src/auth/`",
+    )
+    client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=turn_ts,
+        text=":hammer_and_wrench: `Edit` \u2014 `src/auth/login.py`",
+    )
+
+    # Diff snippet in thread
+    diff_content = (
+        "--- a/src/auth/login.py\n"
+        "+++ b/src/auth/login.py\n"
+        "@@ -42,7 +42,7 @@\n"
+        " def validate_token(token: str) -> bool:\n"
+        "-    if token.expired:\n"
+        "+    if token.expired or not token.is_valid:\n"
+        '         raise AuthError("Token expired")\n'
+        "     return True"
+    )
+    try:
+        client.files_upload_v2(
+            channel=channel_id,
+            thread_ts=turn_ts,
+            content=diff_content,
+            filename="login.py.diff",
+            title="Edit: src/auth/login.py",
+            snippet_type="diff",
+        )
+    except SlackApiError:
+        # files_upload_v2 can fail on some workspace tiers; post as text fallback
+        client.chat_postMessage(
+            channel=channel_id,
+            thread_ts=turn_ts,
+            text=f"```diff\n{diff_content}\n```",
+        )
+
+    client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=turn_ts,
+        text=":hammer_and_wrench: `Bash` \u2014 `uv run pytest tests/test_auth.py -v`",
+    )
+
+    # --- Claude's response in main channel ---
+    client.chat_postMessage(
+        channel=channel_id,
+        text=(
+            f"<@{bot_user_id}> Fixed the authentication bug. The issue was that "
+            "`validate_token()` only checked for expiry but not validity. Added "
+            "the `is_valid` check and all 12 auth tests pass."
+        ),
+    )
+
+    # --- Turn footer ---
+    client.chat_postMessage(
+        channel=channel_id,
+        text=":checkered_flag: $0.0342 \u00b7 9% context",
+        blocks=[
+            {
+                "type": "context",
+                "elements": [
+                    {"type": "mrkdwn", "text": ":checkered_flag: $0.0342 \u00b7 9% context"},
+                ],
+            }
+        ],
+    )
+
+    # --- Second user message with permission request ---
+    user_msg2 = client.chat_postMessage(
+        channel=channel_id,
+        text="Now deploy it to staging",
+    )
+    user_ts2 = user_msg2["ts"]
+    client.reactions_add(channel=channel_id, name="gear", timestamp=user_ts2)
+
+    # Turn 2 thread
+    turn2 = client.chat_postMessage(
+        channel=channel_id,
+        text=":hammer_and_wrench: *Turn 2:* re: _Now deploy it to staging_...",
+    )
+    turn2_ts = turn2["ts"]
+
+    # Permission request with buttons
+    permission_msg = client.chat_postMessage(
+        channel=channel_id,
+        thread_ts=turn2_ts,
+        text="<!channel> Permission requested",
+        blocks=[
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": (
+                        ":lock: *Permission requested* <!channel>\n\n"
+                        "`Bash` \u2014 `./deploy.sh --env staging`"
+                    ),
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve"},
+                        "style": "primary",
+                        "action_id": "docs_screenshot_approve",
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Deny"},
+                        "style": "danger",
+                        "action_id": "docs_screenshot_deny",
+                    },
+                ],
+            },
+        ],
+    )
+
+    # --- Canvas (if possible) ---
+    canvas_id = None
+    try:
+        canvas_resp = client.canvases_create(
+            title="myproject-a1b2c3",
+            channel_id=channel_id,
+            document_content={
+                "type": "markdown",
+                "markdown": (
+                    "# myproject-a1b2c3\n\n"
+                    "**Model:** claude-opus-4-6 | **Effort:** high\n\n"
+                    "## Active Work\n\n"
+                    "| Task | Status | Priority |\n"
+                    "|------|--------|----------|\n"
+                    "| Fix auth bug | Completed | High |\n"
+                    "| Deploy to staging | In Progress | Medium |\n\n"
+                    "## Scheduled Jobs\n\n"
+                    "No active cron jobs.\n"
+                ),
+            },
+        )
+        canvas_id = canvas_resp.get("canvas_id")
+        click.echo(f"  Created canvas: {canvas_id}")
+    except (SlackApiError, Exception) as exc:
+        click.echo(f"  Canvas creation skipped: {exc}", err=True)
+
+    return {
+        "channel_id": channel_id,
+        "channel_name": channel_name,
+        "team_id": team_id,
+        "turn_ts": turn_ts,
+        "permission_ts": permission_msg["ts"],
+        "canvas_id": canvas_id,
+    }
+
+
+def cleanup_fixture(bot_token: str, channel_id: str) -> None:
+    """Archive the fixture channel (best-effort)."""
+    from slack_sdk import WebClient
+
+    try:
+        client = WebClient(token=bot_token)
+        client.conversations_archive(channel=channel_id)
+        click.echo(f"  Archived fixture channel: {channel_id}")
+    except Exception as exc:
+        click.echo(f"  WARNING: cleanup failed: {exc}", err=True)
+
+
+# ---------------------------------------------------------------------------
+# Playwright capture
+# ---------------------------------------------------------------------------
+
+
+def capture_session_ux(
+    output_dir: Path,
+    workspace_url: str,
+    cookie_value: str,
+    fixture: dict,
+) -> list[str]:
+    """Navigate to the fixture channel in Playwright and capture screenshots.
+
+    Returns list of captured screenshot filenames.
+    """
+    from playwright.sync_api import sync_playwright
+
+    captured = []
+    channel_id = fixture["channel_id"]
+    team_id = fixture["team_id"]
+    turn_ts = fixture["turn_ts"]
+
+    # Slack web client URL format
+    channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
+    thread_url = f"{channel_url}/thread/{channel_id}-{turn_ts}"
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
         )
-
-        # Inject authentication cookie
         context.add_cookies(
             [
                 {
@@ -269,46 +339,64 @@ def run_browser_capture(
                     "path": "/",
                     "secure": True,
                     "httpOnly": True,
-                }
+                },
             ]
         )
-
         page = context.new_page()
 
-        for sec in sections_to_capture:
-            if sec not in SECTIONS:
-                click.echo(f"Unknown section: {sec}", err=True)
-                continue
+        # --- Channel overview ---
+        click.echo(f"  Navigating to channel: {channel_url}")
+        page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
+        # Wait for Slack SPA to render messages
+        page.wait_for_timeout(8_000)
 
-            if sec == "slack-setup":
-                # slack-setup is manual-only; just validate existing files
-                click.echo("[slack-setup] Manual-only section — skipping automated capture.")
-                capture.validate_manual_screenshots()
-                continue
+        dest = output_dir / "session-ux-channel-overview.png"
+        page.screenshot(path=str(dest), full_page=False)
+        click.echo(f"  captured: {dest}")
+        captured.append(dest.name)
 
-            if sec == "session-ux":
-                # Navigate to the allowlisted workspace
-                click.echo(f"[session-ux] Navigating to {allowlisted_url} ...")
-                try:
-                    page.goto(allowlisted_url, wait_until="networkidle", timeout=30_000)
-                except Exception as exc:
-                    click.echo(f"WARNING: navigation failed: {exc}", err=True)
-                    capture._skipped.extend(s["name"] for s in SECTIONS["session-ux"])  # noqa: SLF001
-                    capture._warnings.append(f"Navigation to workspace failed: {exc}")  # noqa: SLF001
-                    continue
+        # --- Turn thread ---
+        click.echo(f"  Navigating to thread: {thread_url}")
+        page.goto(thread_url, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(3_000)
 
-                # Final workspace validation before any capture
-                if not validate_workspace(page, allowlisted_url):
-                    sys.exit(1)
+        dest = output_dir / "session-ux-turn-thread.png"
+        page.screenshot(path=str(dest), full_page=False)
+        click.echo(f"  captured: {dest}")
+        captured.append(dest.name)
 
-                capture.capture_session_ux(page, allowlisted_url)
+        # --- Permission prompt (same thread view, scroll to buttons) ---
+        # Navigate back to channel to find the permission thread
+        page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
+        page.wait_for_timeout(3_000)
+
+        dest = output_dir / "session-ux-permissions-prompt.png"
+        page.screenshot(path=str(dest), full_page=False)
+        click.echo(f"  captured: {dest}")
+        captured.append(dest.name)
+
+        # --- Canvas view ---
+        if fixture.get("canvas_id"):
+            canvas_url = f"{channel_url}/canvas"
+            click.echo(f"  Navigating to canvas: {canvas_url}")
+            page.goto(canvas_url, wait_until="domcontentloaded", timeout=60_000)
+            page.wait_for_timeout(3_000)
+
+            dest = output_dir / "session-ux-canvas-view.png"
+            page.screenshot(path=str(dest), full_page=False)
+            click.echo(f"  captured: {dest}")
+            captured.append(dest.name)
+        else:
+            click.echo("  SKIPPED: session-ux-canvas-view.png (no canvas created)")
 
         context.close()
         browser.close()
 
+    return captured
+
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI
 # ---------------------------------------------------------------------------
 
 
@@ -324,7 +412,7 @@ def run_browser_capture(
 @click.option(
     "--section",
     default=None,
-    type=click.Choice(list(SECTIONS.keys())),
+    type=click.Choice(["slack-setup", "session-ux"]),
     help="Capture only a specific section.",
 )
 @click.option(
@@ -333,76 +421,97 @@ def run_browser_capture(
     default=False,
     help="List planned screenshots without capturing.",
 )
-def main(output_dir: Path, section: str | None, dry_run: bool) -> None:
-    """Generate documentation screenshots using Playwright.
+@click.option(
+    "--keep-channel",
+    is_flag=True,
+    default=False,
+    help="Do not archive the fixture channel after capture (for debugging).",
+)
+def main(output_dir: Path, section: str | None, dry_run: bool, keep_channel: bool) -> None:
+    """Generate documentation screenshots using Playwright + Slack API.
 
-    Requires SUMMON_TEST_SLACK_WORKSPACE_URL to be set for automated browser captures.
-    Requires SUMMON_TEST_SLACK_COOKIE for Slack authentication.
+    Session-ux screenshots are fully automated: the script creates a temporary
+    Slack channel, posts simulated session content (turn threads, emoji, permission
+    buttons, canvas), screenshots via Playwright, then archives the channel.
 
-    Manual-only screenshots (slack-setup section) must be captured by hand from
-    api.slack.com and placed in the output directory.
+    Requires: SUMMON_TEST_SLACK_BOT_TOKEN, SUMMON_TEST_SLACK_WORKSPACE_URL,
+    SUMMON_TEST_SLACK_COOKIE.
     """
-    capture = ScreenshotCapture(output_dir=output_dir, dry_run=dry_run)
-    capture._ensure_output_dir()  # noqa: SLF001
+    output_dir.mkdir(parents=True, exist_ok=True)
+    sections = [section] if section else ["slack-setup", "session-ux"]
 
-    # --dry-run: just list what would be captured
+    # --- Dry run ---
     if dry_run:
-        list_planned_screenshots(output_dir, section)
-        capture.validate_manual_screenshots()
+        for sec in sections:
+            items = MANUAL_SCREENSHOTS if sec == "slack-setup" else SESSION_UX_SCREENSHOTS
+            tag = "manual-only" if sec == "slack-setup" else "automated"
+            click.echo(f"\n[{sec}]")
+            for shot in items:
+                click.echo(f"  ({tag}) {output_dir / shot['name']}")
+                click.echo(f"         {shot['description']}")
         return
 
-    # Verify Playwright is installed before proceeding
+    # --- Slack-setup: validate manual screenshots ---
+    if "slack-setup" in sections:
+        click.echo("\n[slack-setup] Validating manual screenshots...")
+        missing = [s["name"] for s in MANUAL_SCREENSHOTS if not (output_dir / s["name"]).exists()]
+        if missing:
+            click.echo(f"  WARNING: {len(missing)} manual screenshots missing:", err=True)
+            for name in missing:
+                click.echo(f"    {name}", err=True)
+        else:
+            click.echo(f"  All {len(MANUAL_SCREENSHOTS)} manual screenshots present.")
+
+    # --- Session-ux: automated capture ---
+    if "session-ux" not in sections:
+        return
+
+    click.echo("\n[session-ux] Automated screenshot capture...")
+
+    # Check prerequisites
+    bot_token = os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN")
+    workspace_url = os.environ.get("SUMMON_TEST_SLACK_WORKSPACE_URL", "")
+    cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
+
+    if not workspace_url.startswith("http"):
+        workspace_url = f"https://{workspace_url}" if workspace_url else ""
+
+    missing_vars = []
+    if not bot_token:
+        missing_vars.append("SUMMON_TEST_SLACK_BOT_TOKEN")
+    if not workspace_url:
+        missing_vars.append("SUMMON_TEST_SLACK_WORKSPACE_URL")
+    if not cookie_value:
+        missing_vars.append("SUMMON_TEST_SLACK_COOKIE")
+
+    if missing_vars:
+        click.echo(
+            f"  Skipping: missing env vars: {', '.join(missing_vars)}",
+            err=True,
+        )
+        return
+
     try:
         import playwright
     except ImportError:
-        click.echo(
-            "WARNING: playwright package not found. "
-            "Install with `uv sync --group docs` and run `playwright install chromium`.",
-            err=True,
-        )
-        sys.exit(0)
+        click.echo("  Skipping: playwright not installed.", err=True)
+        return
 
-    # Resolve workspace URL allowlist
-    allowlisted_url = _get_allowlisted_workspace_url()
-    cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
+    # Create fixture
+    click.echo("  Setting up Slack fixture...")
+    fixture = create_session_fixture(bot_token)
+    channel_id = fixture["channel_id"]
 
-    # Sections that only need manual validation (no browser needed)
-    manual_only_sections = {"slack-setup"}
-    requested_sections = {section} if section else set(SECTIONS.keys())
-    automated_sections = requested_sections - manual_only_sections
-
-    # Always validate manual screenshots
-    if not section or section == "slack-setup":
-        click.echo("[slack-setup] Validating manual screenshots...")
-        capture.validate_manual_screenshots()
-
-    if automated_sections:
-        if not allowlisted_url:
-            click.echo(
-                "INFO: SUMMON_TEST_SLACK_WORKSPACE_URL not set — skipping automated captures.",
-                err=True,
-            )
-            capture._skipped.extend(  # noqa: SLF001
-                s["name"]
-                for sec in automated_sections
-                for s in SECTIONS.get(sec, [])
-                if not s.get("manual_only")
-            )
-        elif not cookie_value:
-            click.echo(
-                "INFO: SUMMON_TEST_SLACK_COOKIE not set — skipping browser-based captures.",
-                err=True,
-            )
-            capture._skipped.extend(  # noqa: SLF001
-                s["name"]
-                for sec in automated_sections
-                for s in SECTIONS.get(sec, [])
-                if not s.get("manual_only")
-            )
+    try:
+        # Capture screenshots
+        click.echo("  Capturing screenshots via Playwright...")
+        captured = capture_session_ux(output_dir, workspace_url, cookie_value, fixture)
+        click.echo(f"\n  Done: {len(captured)} screenshots captured.")
+    finally:
+        if not keep_channel:
+            cleanup_fixture(bot_token, channel_id)
         else:
-            run_browser_capture(capture, section, allowlisted_url, cookie_value)
-
-    capture.summary()
+            click.echo(f"  Keeping fixture channel: {channel_id} (--keep-channel)")
 
 
 if __name__ == "__main__":
