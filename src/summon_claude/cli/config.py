@@ -381,6 +381,7 @@ def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
 
     Returns True if valid, False if the token is rejected.
     """
+    import json  # noqa: PLC0415
     import urllib.error  # noqa: PLC0415
     import urllib.request  # noqa: PLC0415
 
@@ -390,8 +391,6 @@ def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            import json  # noqa: PLC0415
-
             data = json.loads(resp.read(65536))
             login = re.sub(r"[^a-zA-Z0-9\-]", "", data.get("login", "unknown")) or "unknown"
             if not quiet:

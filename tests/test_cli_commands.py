@@ -625,7 +625,7 @@ class TestConfigSetChoicesFn:
 
     def test_config_set_rejects_value_from_choices_fn(self, tmp_path):
         """config set should reject values not in choices_fn result."""
-        from summon_claude.config import CONFIG_OPTIONS, ConfigOption
+        from summon_claude.config import ConfigOption
 
         config_file = tmp_path / "config.env"
         config_file.write_text("")
