@@ -633,6 +633,18 @@ def _run_capture(spec: CaptureSpec) -> str | None:
     return result.stdout.strip()
 
 
+def _validate_content(content: str, marker: str) -> str | None:
+    """Check captured content for patterns that would corrupt the markdown.
+
+    Returns an error message if the content is unsafe, or None if OK.
+    """
+    if f"<!-- /terminal:{marker} -->" in content:
+        return "content contains the closing marker comment"
+    if "```" in content:
+        return "content contains triple backticks (would break fences)"
+    return None
+
+
 def _inject_terminal_block(
     md_path: Path,
     marker: str,
@@ -663,15 +675,18 @@ def _inject_terminal_block(
     return True
 
 
-def run_terminal_section(dry_run: bool = False) -> None:
-    """Run all registered captures and inject results into docs."""
+def run_terminal_section(dry_run: bool = False) -> bool:
+    """Run all registered captures and inject results into docs.
+
+    Returns True if at least one capture succeeded, False if all failed.
+    """
     click.echo("\n[terminal] Capturing CLI terminal output...")
 
     if dry_run:
         for spec in CAPTURES:
             cmd_str = " ".join(spec.command) if spec.command else "(custom)"
             click.echo(f"  (capture) {cmd_str} → {spec.md_file}#{spec.marker}")
-        return
+        return True
 
     succeeded = 0
     failed = 0
@@ -690,6 +705,13 @@ def run_terminal_section(dry_run: bool = False) -> None:
         if spec.show_command and spec.command:
             output = f"$ {' '.join(spec.command)}\n{output}"
 
+        # Validate content won't corrupt the markdown
+        error = _validate_content(output, spec.marker)
+        if error:
+            click.echo(f"    WARNING: skipping {spec.marker}: {error}", err=True)
+            failed += 1
+            continue
+
         md_path = Path(spec.md_file)
         if _inject_terminal_block(md_path, spec.marker, output, spec.fence, spec.extra_md):
             click.echo(f"    → injected into {spec.md_file}")
@@ -702,6 +724,7 @@ def run_terminal_section(dry_run: bool = False) -> None:
             failed += 1
 
     click.echo(f"\n  Done: {succeeded} captured, {failed} skipped/failed.")
+    return succeeded > 0
 
 
 # ---------------------------------------------------------------------------
@@ -793,8 +816,8 @@ def main(
         return
 
     # Terminal capture (no Slack/Playwright prereqs needed)
-    if "terminal" in sections:
-        run_terminal_section()
+    if "terminal" in sections and not run_terminal_section() and sections == ["terminal"]:
+        raise SystemExit(1)
 
     # Validate manual screenshots
     if "slack-setup" in sections:
