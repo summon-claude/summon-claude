@@ -175,6 +175,10 @@ _CONTEXT_AUTO_COMPACT_THRESHOLD = 95.0  # Auto-trigger compaction
 _MAX_SESSION_RESTARTS = 3  # Circuit breaker for compaction restart loop
 _MAX_PENDING_TURNS = 100  # Backpressure for inject_message
 _MAX_CHANNEL_NAME_LEN = 80
+_WORKTREE_DISALLOWED_TOOLS = [
+    "Bash(git worktree add*)",
+    "Bash(git worktree move*)",
+]
 
 # Words/phrases that trigger extended thinking (ultrathink) in the Claude CLI.
 # When detected, a :brain: reaction is added to the user's message (permanent).
@@ -410,14 +414,17 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "2. Use GitHub MCP `pull_request_read` to get the PR details (head branch "
     "name, base branch, status).\n"
     "3. If the PR is draft or closed, inform the user and do not spawn a review.\n"
-    "4. Create a git worktree for the PR branch:\n"
+    "4. Resolve the review CWD:\n"
+    "   - If the PR is from a known child session: use `session_info` to get that "
+    "session's CWD and spawn the reviewer there directly.\n"
+    "   - For external PRs: spawn the reviewer at the project root and instruct it "
+    'to run `EnterWorktree(name="review-pr{number}")` followed by '
+    "`git fetch origin {head_branch} && git checkout {head_branch}`.\n"
     "   - Validate: {number} must be a numeric integer; {head_branch} must match "
     "[a-zA-Z0-9/_.-]. Reject values with shell metacharacters.\n"
-    "   - Run: `git worktree add .worktrees/review-pr{number} {head_branch}`\n"
-    "   - If the worktree already exists, skip creation.\n"
     "5. Spawn a reviewer session:\n"
     "   - Use `session_start` with:\n"
-    '     - `cwd`: "{project_directory}/.worktrees/review-pr{number}"\n'
+    "     - `cwd`: resolved CWD from step 4\n"
     '     - `name`: "rv-pr{number}" (session names max 20 chars; keep short)\n'
     '     - `model`: "opus"\n'
     "     - `system_prompt`: the same review instructions as the automatic flow\n"
@@ -427,11 +434,11 @@ _PM_SYSTEM_PROMPT_APPEND = (
     "## Worktree Cleanup\n\n"
     "During periodic scans, check for worktrees that are no longer needed:\n\n"
     "1. List worktrees: `git worktree list`\n"
-    "2. For each worktree under `.worktrees/review-pr*`:\n"
+    "2. For each worktree under `.claude/worktrees/review-pr*`:\n"
     "   a. Extract the PR number from the directory name.\n"
     "   b. Use GitHub MCP `pull_request_read` to check the PR status.\n"
     "   c. If the PR is merged or closed:\n"
-    "      - Run: `git worktree remove .worktrees/review-pr{number}`\n"
+    "      - Run: `git worktree remove .claude/worktrees/review-pr{number}`\n"
     "      - Update canvas: remove the PR entry.\n"
     "3. Do NOT remove worktrees for open PRs — the user may still need them.\n"
 )
@@ -1953,6 +1960,7 @@ class SummonSession:
                     else ThinkingConfigDisabled(type="disabled")
                 ),
                 effort=self._effort,
+                disallowed_tools=_WORKTREE_DISALLOWED_TOOLS,
             )
 
             restart: _SessionRestartError | None = None

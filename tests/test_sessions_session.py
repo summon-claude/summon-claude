@@ -1354,6 +1354,56 @@ class TestMCPRegistration:
         assert with_none["system_prompt"]["append"] == without["system_prompt"]["append"]
 
 
+class TestWorktreeDisallowedTools:
+    """Guard tests for _WORKTREE_DISALLOWED_TOOLS constant and wiring."""
+
+    def test_worktree_disallowed_tools_pinned(self):
+        """Guard: _WORKTREE_DISALLOWED_TOOLS must be consciously changed."""
+        from summon_claude.sessions.session import _WORKTREE_DISALLOWED_TOOLS
+
+        assert _WORKTREE_DISALLOWED_TOOLS == [
+            "Bash(git worktree add*)",
+            "Bash(git worktree move*)",
+        ]
+
+    async def test_disallowed_tools_wired_into_claude_agent_options(self):
+        """disallowed_tools passed to ClaudeAgentOptions equals _WORKTREE_DISALLOWED_TOOLS."""
+        from summon_claude.sessions.session import _WORKTREE_DISALLOWED_TOOLS
+
+        session = make_session()
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["disallowed_tools"] = options.disallowed_tools
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert captured["disallowed_tools"] == _WORKTREE_DISALLOWED_TOOLS
+
+    async def test_pm_prompt_does_not_contain_raw_worktree_add(self):
+        """Guard: PM system prompt must not instruct raw git worktree add."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "git worktree add" not in prompt["append"]
+
+
 class TestSystemPromptAppendRestart:
     """Verify system_prompt_append survives compaction restarts."""
 
