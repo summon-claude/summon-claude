@@ -273,6 +273,62 @@ def wait_for_claude_response(bot_token: str, channel_id: str, timeout: int = 120
     return None
 
 
+def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
+    """Post a mock permission request message for screenshot purposes.
+
+    Real permission requests can't be triggered reliably because Claude Code's
+    SDK mode auto-approves most tools within the project directory. This posts
+    a realistic-looking permission message using the same Block Kit format that
+    summon's PermissionHandler uses.
+
+    Returns the message ts for use in capture_screenshots.
+    """
+    from slack_sdk import WebClient
+
+    client = WebClient(token=bot_token)
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    ":lock: *Permission requested* <!channel>\n"
+                    "Claude wants to run:\n"
+                    "`Bash` — `./deploy.sh --env staging`"
+                ),
+            },
+        },
+        {
+            "type": "actions",
+            "block_id": "permission_mock",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Approve"},
+                    "style": "primary",
+                    "action_id": "permission_approve_mock",
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Deny"},
+                    "style": "danger",
+                    "action_id": "permission_deny_mock",
+                },
+            ],
+        },
+    ]
+
+    resp = client.chat_postMessage(
+        channel=channel_id,
+        text="Permission requested: Bash — ./deploy.sh --env staging",
+        blocks=blocks,
+    )
+    ts = resp.get("ts")
+    click.echo(f"  Posted mock permission message: ts={ts}")
+    return ts
+
+
 def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -> str | None:
     """Poll for the !help thread reply using conversations_replies.
 
@@ -375,9 +431,20 @@ def capture_screenshots(  # noqa: PLR0913
 
     def snap(name: str) -> None:
         dest = output_dir / name
-        page.screenshot(path=str(dest), full_page=False)
+        page.screenshot(
+            path=str(dest),
+            clip={
+                "x": sidebar_width,
+                "y": 0,
+                "width": VIEWPORT_WIDTH - sidebar_width,
+                "height": VIEWPORT_HEIGHT,
+            },
+        )
         click.echo(f"  captured: {dest}")
         captured.append(name)
+
+    # Slack sidebar is ~250px wide — crop it out of all screenshots
+    sidebar_width = 260
 
     def nav(url: str, wait_ms: int = 8_000) -> None:
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
@@ -386,10 +453,6 @@ def capture_screenshots(  # noqa: PLR0913
     # Navigate to channel
     click.echo("  Capturing channel screenshots...")
     nav(channel_url)
-
-    # Hide sidebar to maximize content area
-    page.keyboard.press("Meta+Shift+d")
-    page.wait_for_timeout(1_000)
 
     # Scroll to top for auth/welcome message
     click.echo("  Scrolling to top for auth screenshot...")
@@ -429,15 +492,17 @@ def capture_screenshots(  # noqa: PLR0913
         nav(thread_url, wait_ms=5_000)
         snap("quickstart-first-message.png")
 
-    # Navigate to permission thread (ts provided by caller via wait_for_permission_request)
+    # Capture permission request (mock message posted to channel by _post_mock_permission)
     if perm_ts:
-        perm_url = f"{channel_url}/thread/{channel_id}-{perm_ts}"
-        click.echo(f"  Capturing permission thread: {perm_url}")
-        nav(perm_url, wait_ms=5_000)
+        # Navigate to channel and scroll to bottom where the mock message is
+        click.echo("  Capturing permission request screenshot...")
+        nav(channel_url, wait_ms=3_000)
+        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
+        page.wait_for_timeout(2_000)
         snap("quickstart-permission-request.png")
         snap("permissions-approval.png")
     else:
-        click.echo("  No permission thread ts — skipping permission screenshots")
+        click.echo("  No permission ts — skipping permission screenshots")
 
     return captured
 
@@ -937,32 +1002,12 @@ def main(
             # 5. Wait for Claude to respond
             wait_for_claude_response(bot_token, channel_id, timeout=120)
 
-            # 6. Send a message that triggers a permission request (Bash tool)
-            page.wait_for_timeout(3_000)
-            send_message_via_slack(
-                page, "Run `pwd` in the terminal to verify the working directory."
-            )
+            # 6. Post a mock permission request for screenshot purposes.
+            #    Real permission requests can't be triggered reliably because
+            #    Claude Code SDK mode auto-approves most tools within the project.
+            perm_ts = _post_mock_permission(bot_token, channel_id)
 
-            # 7. Wait for permission request, approve it, then wait for completion
-            perm_ts = wait_for_permission_request(bot_token, channel_id, timeout=60)
-            if perm_ts:
-                # Navigate to the permission thread and click Approve
-                perm_thread_url = (
-                    f"https://app.slack.com/client/{team_id}/{channel_id}"
-                    f"/thread/{channel_id}-{perm_ts}"
-                )
-                page.goto(perm_thread_url, wait_until="domcontentloaded", timeout=60_000)
-                page.wait_for_timeout(5_000)
-                try:
-                    approve_btn = page.locator('button:has-text("Approve")')
-                    approve_btn.click(timeout=10_000)
-                    click.echo("  Clicked Approve on permission request")
-                except Exception as exc:
-                    click.echo(f"  WARNING: Could not click Approve: {exc}", err=True)
-                # Wait for the turn to complete after approval
-                wait_for_claude_response(bot_token, channel_id, timeout=120)
-
-            # 8. Send !help and wait for thread reply
+            # 7. Send !help and wait for thread reply
             page.wait_for_timeout(3_000)
             send_message_via_slack(page, "!help")
             help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
