@@ -1354,6 +1354,104 @@ class TestMCPRegistration:
         assert with_none["system_prompt"]["append"] == without["system_prompt"]["append"]
 
 
+class TestWorktreeDisallowedTools:
+    """Guard tests for _WORKTREE_DISALLOWED_TOOLS constant and wiring."""
+
+    def test_worktree_disallowed_tools_pinned(self):
+        """Guard: _WORKTREE_DISALLOWED_TOOLS must be consciously changed."""
+        from summon_claude.sessions.session import _WORKTREE_DISALLOWED_TOOLS
+
+        assert isinstance(_WORKTREE_DISALLOWED_TOOLS, frozenset)
+        assert {
+            "Bash(git worktree add*)",
+            "Bash(git worktree move*)",
+        } == _WORKTREE_DISALLOWED_TOOLS
+
+    async def test_disallowed_tools_wired_into_claude_agent_options(self):
+        """disallowed_tools passed to ClaudeAgentOptions equals _WORKTREE_DISALLOWED_TOOLS."""
+        from summon_claude.sessions.session import _WORKTREE_DISALLOWED_TOOLS
+
+        session = make_session()
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["disallowed_tools"] = options.disallowed_tools
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert set(captured["disallowed_tools"]) == _WORKTREE_DISALLOWED_TOOLS
+
+    async def test_disallowed_tools_wired_for_pm_sessions(self):
+        """disallowed_tools applies to PM sessions too, not just regular sessions."""
+        from summon_claude.sessions.session import _WORKTREE_DISALLOWED_TOOLS
+
+        session = make_session(pm_profile=True)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["disallowed_tools"] = options.disallowed_tools
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert set(captured["disallowed_tools"]) == _WORKTREE_DISALLOWED_TOOLS
+
+    async def test_pm_prompt_does_not_contain_raw_worktree_add(self):
+        """Guard: PM system prompt must not instruct raw git worktree add."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "git worktree add" not in prompt["append"]
+
+    def test_pm_prompt_contains_enterworktree_instruction(self):
+        """Guard: PM prompt must instruct child to use EnterWorktree."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert 'EnterWorktree(name="review-pr{number}")' in prompt["append"]
+
+    def test_pm_prompt_uses_claude_worktrees_path(self):
+        """Guard: PM cleanup must reference .claude/worktrees/, not .worktrees/."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert ".claude/worktrees/review-pr" in prompt["append"]
+        assert ".worktrees/review-pr" not in prompt["append"].replace(
+            ".claude/worktrees/review-pr", ""
+        )
+
+
 class TestSystemPromptAppendRestart:
     """Verify system_prompt_append survives compaction restarts."""
 
