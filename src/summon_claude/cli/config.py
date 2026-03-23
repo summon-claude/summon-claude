@@ -909,6 +909,8 @@ def slack_status() -> None:
 
     workspace = json.loads(config_path.read_text())
     click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
+    user_id = workspace.get("user_id", "")
+    click.echo(f"User ID: {user_id or 'not set (re-run slack-auth to add)'}")
 
     state_path = Path(workspace.get("auth_state_path", ""))
     if state_path.exists():
@@ -927,6 +929,11 @@ def slack_status() -> None:
         click.echo(f"Monitored channels: {channels}")
     else:
         click.echo("Monitored channels: none (DMs and @mentions always captured)")
+    click.echo()
+    click.echo("How to find IDs:")
+    click.echo("  User ID: click profile picture > Profile > ... > Copy member ID")
+    click.echo("  Channel ID: right-click channel > View channel details > ID at bottom")
+    click.echo("  Set channels: summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01,C02")
 
 
 def slack_remove() -> None:
