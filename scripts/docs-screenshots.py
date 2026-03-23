@@ -281,11 +281,14 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     from slack_sdk import WebClient
 
     client = WebClient(token=bot_token)
-    deadline = time.time() + timeout
+    # Each phase gets its own deadline to prevent starvation — if finding
+    # the message is slow, the reply poll still gets its full budget.
+    phase_timeout = timeout // 2
+    find_deadline = time.time() + phase_timeout
 
     # Find the !help message in conversations_history (it IS a top-level message)
     help_ts = None
-    while time.time() < deadline:
+    while time.time() < find_deadline:
         resp = client.conversations_history(channel=channel_id, limit=10)
         for msg in resp.get("messages", []):
             if msg.get("text", "").strip() == "!help":
@@ -302,7 +305,8 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     click.echo(f"  Found !help message: ts={help_ts}")
 
     # Poll conversations_replies for the daemon's thread reply
-    while time.time() < deadline:
+    reply_deadline = time.time() + phase_timeout
+    while time.time() < reply_deadline:
         resp = client.conversations_replies(channel=channel_id, ts=help_ts)
         messages = resp.get("messages", [])
         # First message is the parent (!help itself), replies follow
