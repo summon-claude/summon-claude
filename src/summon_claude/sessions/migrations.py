@@ -251,6 +251,13 @@ async def _migrate_13_to_14(db: aiosqlite.Connection) -> None:
     await db.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_channel_prefix ON projects (channel_prefix)"
     )
+    # Also create the parent_status index here (not only in 12→13) so that
+    # databases already at version 13 from PR #65's original migration still
+    # get this index.  IF NOT EXISTS makes it safe if 12→13 already created it.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_status "
+        "ON sessions (parent_session_id, status)"
+    )
 
 
 # Mapping from version N to the coroutine that migrates N → N+1.

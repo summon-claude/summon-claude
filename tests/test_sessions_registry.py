@@ -937,6 +937,12 @@ class TestMigration12To13DataPreservation:
             await db.execute(
                 "CREATE UNIQUE INDEX idx_projects_channel_prefix ON projects (channel_prefix)"
             )
+            # Migration 13→14 also creates idx_sessions_parent_status, so we
+            # need a sessions table for that CREATE INDEX to succeed.
+            await db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
+                " parent_session_id TEXT, status TEXT)"
+            )
             # Insert rows: one with empty string, one with real content
             cols = "project_id, name, directory, channel_prefix, workflow_instructions"
             await db.execute(
