@@ -69,6 +69,24 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
     **Fix:** Go to **api.slack.com/apps → Your App → OAuth & Permissions → Scopes** and add the required bot token scopes. After adding scopes, reinstall the app to your workspace. See [Slack Setup](getting-started/slack-setup.md) for the full scope list.
 
+???+ tip "Messages sent but Claude never responds"
+    **Symptom:** You can authenticate with `/summon`, the session channel is created, but messages you type in the channel get no response from Claude. `summon session info` shows `Turns: 0`.
+
+    **Cause:** Event Subscriptions are disabled in the Slack app settings. Without events enabled, Slack delivers slash commands (so `/summon` works) but does NOT deliver `message.channels` events, so the daemon never sees your messages.
+
+    **Fix:**
+
+    1. Go to **api.slack.com/apps → Your App → Event Subscriptions**
+    2. Toggle **Enable Events** to **On** (Socket Mode means no Request URL is needed)
+    3. Expand **Subscribe to bot events** and verify these events are listed: `message.channels`, `message.groups`, `reaction_added`, `app_home_opened`, `file_shared`
+    4. Click **Save Changes**
+    5. If prompted, **reinstall the app** to the workspace
+
+    !!! note "The manifest should set this automatically"
+        If you created the app from `slack-app-manifest.yaml`, events should be pre-configured. If the toggle is off despite using the manifest, you may need to reinstall the app or re-apply the manifest.
+
+    **How to verify:** Run `summon config check` — if it reports "Slack API reachable" but sessions show 0 turns, event subscriptions are the likely cause.
+
 ???+ tip "Socket Mode not enabled"
     **Symptom:** The daemon starts but does not receive Slack events. No messages appear in session channels.
 
