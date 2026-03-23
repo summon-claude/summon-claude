@@ -29,7 +29,7 @@ Waiting for authentication... # (2)
 1. This is a one-time code that expires in 5 minutes. Type it exactly as shown in any Slack channel.
 2. The daemon runs in the background. You can close this terminal after authenticating.
 
-<!-- TODO: add quickstart-terminal-start.png screenshot -->
+![Terminal output after summon start](../assets/screenshots/quickstart-terminal-start.png)
 
 !!! note "Background process"
     The session runs as a background daemon. You can close this terminal window after authenticating — Claude keeps running.
