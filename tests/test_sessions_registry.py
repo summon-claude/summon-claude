@@ -1024,18 +1024,22 @@ class TestReleasedMigrationsImmutable:
 
     def test_all_migrations_have_hashes(self):
         """Fail if a migration function exists in _MIGRATIONS without a hash."""
+        import hashlib
+        import inspect
+
         from summon_claude.sessions.migrations import _MIGRATIONS
 
         for version, fn in _MIGRATIONS.items():
             if fn is None:
                 continue  # v0 no-op
-            assert fn.__name__ in self._RELEASED_HASHES, (
-                f"{fn.__name__} (version {version}→{version + 1}) is in _MIGRATIONS "
-                f"but has no entry in _RELEASED_HASHES. Compute its hash with:\n"
-                f"  import hashlib, inspect\n"
-                f"  hashlib.sha256(inspect.getsource(fn).encode()).hexdigest()[:16]\n"
-                f"and add it to _RELEASED_HASHES."
-            )
+            if fn.__name__ not in self._RELEASED_HASHES:
+                src = inspect.getsource(fn)
+                computed = hashlib.sha256(src.encode()).hexdigest()[:16]
+                pytest.fail(
+                    f"{fn.__name__} (version {version}→{version + 1}) is in _MIGRATIONS "
+                    f"but has no entry in _RELEASED_HASHES. Add this line:\n\n"
+                    f'        "{fn.__name__}": "{computed}",\n'
+                )
 
 
 class TestMigration13To14CreatesParentStatusIndex:
