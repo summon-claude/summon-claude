@@ -12,9 +12,8 @@ The flow:
   6. Stops the session and archives the channel
 
 Environment variables:
-  SUMMON_TEST_SLACK_WORKSPACE_URL  Slack workspace URL (e.g. gtest.enterprise.slack.com)
+  SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery, cleanup, and team ID
   SUMMON_TEST_SLACK_COOKIE         Browser session cookie (`d` cookie, `xoxd-` prefix)
-  SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery + cleanup
 
 Usage:
   uv run python scripts/docs-screenshots.py [OPTIONS]
@@ -298,7 +297,6 @@ def capture_screenshots(
     page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
     page.wait_for_timeout(2_000)
     snap("quickstart-help.png")
-    snap("session-ux-channel-overview.png")
 
     # Find threads by looking for turn starters in the channel
     from slack_sdk import WebClient
@@ -321,7 +319,6 @@ def capture_screenshots(
         nav(thread_url, wait_ms=5_000)
         # This shows Claude's response with tool calls — used for first-message & threading docs
         snap("quickstart-first-message.png")
-        snap("session-ux-turn-thread.png")
         snap("threading-turn-thread.png")
 
     # Find permission thread (contains "Permission" or approval buttons)
@@ -394,8 +391,7 @@ def main(
     This is a LOCAL developer tool — requires Claude CLI, summon config,
     and Slack browser credentials. Cannot run in CI.
 
-    Requires: SUMMON_TEST_SLACK_BOT_TOKEN, SUMMON_TEST_SLACK_WORKSPACE_URL,
-    SUMMON_TEST_SLACK_COOKIE.
+    Requires: SUMMON_TEST_SLACK_BOT_TOKEN, SUMMON_TEST_SLACK_COOKIE.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     sections = [section] if section else ["slack-setup", "session-ux"]
@@ -406,15 +402,16 @@ def main(
                 MANUAL_SCREENSHOTS
                 if sec == "slack-setup"
                 else [
-                    {"name": "quickstart-slack-auth.png", "description": "Auth response"},
-                    {"name": "quickstart-first-message.png", "description": "First exchange"},
+                    {"name": "quickstart-slack-auth.png", "description": "Auth/welcome message"},
+                    {
+                        "name": "quickstart-first-message.png",
+                        "description": "First exchange (turn thread)",
+                    },
+                    {"name": "quickstart-help.png", "description": "!help output"},
                     {
                         "name": "quickstart-permission-request.png",
                         "description": "Permission buttons",
                     },
-                    {"name": "quickstart-help.png", "description": "!help output"},
-                    {"name": "session-ux-channel-overview.png", "description": "Channel overview"},
-                    {"name": "session-ux-turn-thread.png", "description": "Turn thread"},
                     {"name": "permissions-approval.png", "description": "Permission approval"},
                     {"name": "threading-turn-thread.png", "description": "Thread model"},
                 ]
@@ -443,17 +440,11 @@ def main(
     # Check prerequisites
     click.echo("\n[session-ux] End-to-end screenshot capture (real summon session)...")
     bot_token = os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN")
-    workspace_url = os.environ.get("SUMMON_TEST_SLACK_WORKSPACE_URL", "")
     cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
-
-    if not workspace_url.startswith("http"):
-        workspace_url = f"https://{workspace_url}" if workspace_url else ""
 
     missing_vars = []
     if not bot_token:
         missing_vars.append("SUMMON_TEST_SLACK_BOT_TOKEN")
-    if not workspace_url:
-        missing_vars.append("SUMMON_TEST_SLACK_WORKSPACE_URL")
     if not cookie_value:
         missing_vars.append("SUMMON_TEST_SLACK_COOKIE")
     if missing_vars:

@@ -20,7 +20,7 @@ theme:
     - content.code.select
     - content.code.annotate
     - content.tabs.link
-    - content.tooltips
+    # - content.tooltips  # Enable when abbreviation definitions are added
     - search.suggest
     - search.highlight
     - search.share
