@@ -1048,30 +1048,6 @@ class TestMigration12To13IndexCreation:
                 row = await cursor.fetchone()
                 assert row is not None, "idx_sessions_auth_user_status not created"
 
-    async def test_parent_status_index_exists(self, tmp_path):
-        """Migration 12→13 creates idx_sessions_parent_status."""
-        import aiosqlite
-
-        from summon_claude.sessions.migrations import _migrate_12_to_13
-
-        db_path = tmp_path / "index_test2.db"
-        async with aiosqlite.connect(str(db_path)) as db:
-            await db.execute(
-                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
-                " authenticated_user_id TEXT, status TEXT, slack_channel_id TEXT,"
-                " parent_session_id TEXT)"
-            )
-            await db.commit()
-            await _migrate_12_to_13(db)
-            await db.commit()
-
-            async with db.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-                " AND name='idx_sessions_parent_status'"
-            ) as cursor:
-                row = await cursor.fetchone()
-                assert row is not None, "idx_sessions_parent_status not created"
-
 
 class TestWorkflowDefaultsTable:
     async def test_workflow_defaults_table_exists(self, registry):

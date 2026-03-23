@@ -205,10 +205,6 @@ async def _migrate_12_to_13(db: aiosqlite.Connection) -> None:
         "CREATE INDEX IF NOT EXISTS idx_sessions_auth_user_status "
         "ON sessions (authenticated_user_id, status, slack_channel_id)"
     )
-    await db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_status "
-        "ON sessions (parent_session_id, status)"
-    )
 
 
 async def _migrate_13_to_14(db: aiosqlite.Connection) -> None:
