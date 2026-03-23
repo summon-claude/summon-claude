@@ -20,7 +20,7 @@ def _make_config():
         {
             "slack_bot_token": "xoxb-t",
             "slack_app_token": "xapp-t",
-            "slack_signing_secret": "s",
+            "slack_signing_secret": "abcdef",
             "permission_debounce_ms": 10,
         }
     )

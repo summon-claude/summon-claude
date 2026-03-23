@@ -263,6 +263,31 @@ class TestConfigCheck:
             assert result.exit_code != 0
             assert "FAIL" in result.output
 
+    def test_config_check_claude_cli_not_found(self, tmp_path):
+        """Test config check fails when Claude CLI is not found."""
+        from summon_claude.cli.preflight import CliStatus
+
+        runner = CliRunner()
+        config_file = tmp_path / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
+        )
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(False, None, None),
+            ),
+        ):
+            result = runner.invoke(cli, ["config", "check"])
+            assert result.exit_code == 1
+            assert "FAIL" in result.output
+            assert "Claude CLI not found" in result.output
+
     def test_config_check_invalid_token_format(self, tmp_path):
         """Test config check reports invalid token format."""
         runner = CliRunner()

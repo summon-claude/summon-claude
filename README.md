@@ -47,10 +47,15 @@ export SUMMON_NO_UPDATE_CHECK=1
 ```bash
 # 1. Set up your Slack app (see Slack App Setup below)
 
-# 2. Run the interactive setup wizard
+# 2. Run the interactive setup wizard (auto-validates connectivity)
 summon init
 
-# 3. Start a session
+# 3. Register a project and start the PM agent
+summon project add my-project ~/code/my-project
+summon project workflow set     # set global workflow instructions
+summon project up               # start PM agents for all projects
+
+# Or start an ad-hoc session directly
 summon start
 ```
 
@@ -95,7 +100,7 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 |---------|-------------|
 | `summon --version` | Show CLI version |
 | `summon version` | Show version and environment info (Python, platform, paths) |
-| `summon init` | Interactive setup wizard — walks through all config options with typed prompts |
+| `summon init` | Interactive setup wizard — core options first, advanced on request, auto-runs `config check` |
 | `summon start` | Start a new session (prints auth code, waits for `/summon` in Slack) |
 | `summon session list` | Show active sessions (use `--all` for all recent, `--name` to filter) |
 | `summon session info SESSION` | Show detailed view of one session (by name or ID) |
@@ -106,7 +111,7 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config set KEY VALUE` | Set a config value (validates key against registry, normalizes booleans) |
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
-| `summon config check` | Validate config (Claude CLI, keys, token format, DB, schema, Slack API, Google) |
+| `summon config check` | Validate config, test connectivity (Slack, GitHub, Google), and show feature inventory |
 | `summon config google-auth` | Authenticate with Google Workspace for scribe monitoring |
 | `summon config google-status` | Check Google Workspace authentication status |
 | `summon db status` | Show schema version, integrity, and row counts (migrations apply automatically on connect) |
@@ -121,6 +126,11 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon project workflow show [NAME]` | Show workflow instructions (global or per-project) |
 | `summon project workflow set [NAME]` | Set workflow instructions via `$EDITOR` |
 | `summon project workflow clear [NAME]` | Clear workflow instructions (restores global fallback) |
+| `summon hooks show` | Show configured lifecycle hooks (global and per-project) |
+| `summon hooks set` | Set lifecycle hooks via `$EDITOR` or JSON string |
+| `summon hooks clear` | Clear lifecycle hooks (restores global fallback) |
+| `summon hooks install` | Install Claude Code hook bridge (settings.json + shell wrappers) |
+| `summon hooks uninstall` | Remove summon entries from Claude Code settings.json |
 
 > **Aliases:** `summon s` is shorthand for `summon session`, `summon p` for `summon project`.
 

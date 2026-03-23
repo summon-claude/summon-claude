@@ -26,6 +26,29 @@ from summon_claude.sessions.registry import SessionRegistry
 
 logger = logging.getLogger(__name__)
 
+# Required Slack bot scopes — must match slack-app-manifest.yaml.
+# Guard test test_required_scopes_match_manifest pins this set.
+_REQUIRED_SLACK_SCOPES: frozenset[str] = frozenset(
+    {
+        "canvases:read",
+        "canvases:write",
+        "channels:history",
+        "channels:join",
+        "channels:manage",
+        "channels:read",
+        "chat:write",
+        "commands",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "groups:read",
+        "groups:write",
+        "reactions:read",
+        "reactions:write",
+        "users:read",
+    }
+)
+
 
 def _require_config_file(override: str | None = None):
     """Return the config file Path if it exists, else print a hint and return None."""
@@ -49,6 +72,9 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
 
     # Parse config file into dict (works even if no file exists)
     values: dict[str, str] = {}
+    if not config_file.exists():
+        click.echo(f"No config file found at {config_file}")
+        click.echo("Run `summon init` to create one.\n")
     if config_file.exists():
         for raw_line in config_file.read_text().splitlines():
             stripped = raw_line.strip()
@@ -97,14 +123,25 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
                 source = "optional"
         elif file_value is not None:
             display_value = file_value
-            default_str = str(default) if default is not None else ""
+            if isinstance(default, bool):
+                default_str = str(default).lower()
+            else:
+                default_str = str(default) if default is not None else ""
             source = "default" if file_value == default_str else "set"
         elif opt.required:
             display_value = ""
             source = "not set"
         else:
-            display_value = str(default) if default is not None else ""
+            if isinstance(default, bool):
+                display_value = str(default).lower()
+            else:
+                display_value = str(default) if default is not None else ""
             source = "default"
+
+        # Truncate long values to keep columns aligned
+        val_col = 30
+        if display_value and len(display_value) > val_col:
+            display_value = display_value[: val_col - 1] + "\u2026"
 
         # Format output with color
         if color:
@@ -116,12 +153,16 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
                 source_label = click.style("(optional)", dim=True)
             else:
                 source_label = click.style("(default)", dim=True)
-            val_display = display_value if display_value else click.style("—", dim=True)
+            # Pad before styling to avoid ANSI escape codes breaking alignment
+            if display_value:
+                val_display = f"{display_value:<{val_col}}"
+            else:
+                val_display = click.style(f"{'—':<{val_col}}", dim=True)
         else:
             source_label = f"({source})"
-            val_display = display_value if display_value else "—"
+            val_display = f"{(display_value if display_value else '—'):<{val_col}}"
 
-        click.echo(f"    {opt.env_key:<45} {val_display:<20} {source_label}")
+        click.echo(f"    {opt.env_key:<40} {val_display} {source_label}")
 
 
 def config_edit(override: str | None = None) -> None:
@@ -327,6 +368,40 @@ def google_auth() -> None:
         sys.exit(1)
 
 
+def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
+    """Check GitHub PAT by calling the /user endpoint.
+
+    Returns True if valid, False if the token is rejected.
+    """
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {pat}", "Accept": "application/vnd.github+json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            import json as _json  # noqa: PLC0415
+
+            data = _json.loads(resp.read())
+            login = data.get("login", "unknown")
+            if not quiet:
+                click.echo(f"  [PASS] GitHub PAT: valid (user: {login})")
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            click.echo(
+                "  [FAIL] GitHub PAT: invalid or expired (summon config set SUMMON_GITHUB_PAT)"
+            )
+            return False
+        click.echo(f"  [WARN] GitHub PAT: API returned {e.code}")
+        return True  # non-auth HTTP error, don't fail the check
+    except Exception as e:
+        click.echo(f"  [WARN] GitHub PAT: check skipped ({e})")
+        return True  # network issue, not a token problem
+
+
 def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
     """Check Google Workspace authentication status.
 
@@ -355,6 +430,19 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
             click.echo(f"{prefix}Google: no credentials found")
         return None
 
+    # Read configured services once, outside the per-user loop.
+    services = ["gmail", "calendar", "drive"]  # fallback
+    config_file = get_config_file()
+    if config_file.exists():
+        for _line in config_file.read_text().splitlines():
+            _s = _line.strip()
+            if _s.startswith("SUMMON_SCRIBE_GOOGLE_SERVICES="):
+                svc_str = _s.split("=", 1)[1].strip()
+                if svc_str:
+                    services = [s.strip() for s in svc_str.split(",") if s.strip()]
+                break
+    required = set(get_scopes_for_tools(services))
+
     all_ok = True
     for user in users:
         cred = store.get_credential(user)
@@ -372,9 +460,8 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
             all_ok = False
             continue
 
-        # Scope validation: check granted scopes against configured services
+        # Scope validation against configured services.
         granted = set(cred.scopes or [])
-        required = set(get_scopes_for_tools(["gmail", "calendar", "drive"]))
         if granted and not has_required_scopes(granted, required):
             missing = required - granted
             click.echo(f"{prefix}Google: {status} but missing scopes ({user})")
@@ -461,6 +548,25 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Signing secret should be a hex string")
             all_pass = False
 
+    # Pydantic validation — catches @field_validator rules (effort, quiet_hours,
+    # google_services, channel_prefix, etc.) that individual key checks above miss.
+    if values:
+        from summon_claude.config import SummonConfig  # noqa: PLC0415
+
+        try:
+            SummonConfig.model_validate(
+                {
+                    opt.field_name: values[opt.env_key]
+                    for opt in CONFIG_OPTIONS
+                    if opt.env_key in values
+                }
+            )
+            if not quiet:
+                click.echo("  [PASS] Config values pass validation")
+        except Exception as e:
+            click.echo(f"  [FAIL] Config validation: {e}")
+            all_pass = False
+
     # DB writable
     db_path = get_data_dir() / "registry.db"
     try:
@@ -532,7 +638,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo("  [FAIL] Database validation error")
         all_pass = False
 
-    # Slack API reachable (optional, best-effort)
+    # Slack API reachable + scope verification (optional, best-effort)
     if bot_token.startswith("xoxb-"):
         try:
             from slack_sdk import WebClient  # noqa: PLC0415
@@ -542,11 +648,45 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             if resp["ok"]:
                 if not quiet:
                     click.echo(f"  [PASS] Slack API reachable (team: {resp.get('team')})")
+                # Check bot scopes via x-oauth-scopes response header.
+                # Header name casing varies by HTTP library, so do a
+                # case-insensitive lookup.
+                headers_lower = {k.lower(): v for k, v in resp.headers.items()}
+                granted_str = headers_lower.get("x-oauth-scopes", "")
+                if granted_str:
+                    granted = {s.strip() for s in granted_str.split(",") if s.strip()}
+                    missing = _REQUIRED_SLACK_SCOPES - granted
+                    if missing:
+                        click.echo(
+                            f"  [FAIL] Slack bot missing scopes: {', '.join(sorted(missing))}"
+                        )
+                        click.echo(
+                            "  Update at: api.slack.com/apps → your app"
+                            " → OAuth & Permissions → Scopes"
+                        )
+                        all_pass = False
+                    elif not quiet:
+                        click.echo(
+                            f"  [PASS] Slack bot scopes:"
+                            f" all {len(_REQUIRED_SLACK_SCOPES)} required scopes granted"
+                        )
             else:
                 click.echo(f"  [FAIL] Slack API auth.test failed: {resp.get('error')}")
                 all_pass = False
         except Exception as e:
             click.echo(f"  [WARN] Slack API check skipped: {e}")
+
+    # GitHub PAT (optional, with connectivity check)
+    github_pat = values.get("SUMMON_GITHUB_PAT", "")
+    if github_pat:
+        gh_status = _check_github_pat(github_pat, quiet=quiet)
+        if gh_status is False:
+            all_pass = False
+    elif not quiet:
+        click.echo(
+            "  [INFO] GitHub PAT: not set — sessions won't have GitHub tools"
+            " (summon config set SUMMON_GITHUB_PAT <token>)"
+        )
 
     # Google Workspace (optional, only if credentials exist)
     google_result = _check_google_status(prefix="  ", quiet=quiet)
@@ -559,7 +699,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Google Workspace credentials have issues")
             all_pass = False
     elif not quiet:
-        click.echo("  [INFO] Google Workspace: not configured (optional)")
+        click.echo("  [INFO] Google Workspace: not configured (summon config google-auth)")
 
     # Optional extras availability (informational)
     if not quiet:
@@ -573,4 +713,93 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             status = "installed" if _is_extra_installed(pkg) else "not installed"
             click.echo(f"  [INFO] {label}: {status}")
 
+    # Feature inventory — surface external flows so users know they exist
+    if not quiet:
+        click.echo()
+        click.echo(click.style("Features:", bold=True))
+        _print_feature_inventory(db_path, values)
+
     return all_pass
+
+
+def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> None:
+    """Print discoverable status of external setup flows."""
+    project_count = 0
+    has_workflow = False
+
+    try:
+
+        async def _check_features() -> tuple[bool, bool, int]:
+            _has_workflow = False
+            _has_hooks = False
+            _project_count = 0
+            reg = SessionRegistry(db_path=db_path)
+            async with reg:
+                wf = await reg.get_workflow_defaults()
+                _has_workflow = bool(wf)
+                raw_hooks = await reg.get_raw_hooks_json(project_id=None)
+                _has_hooks = raw_hooks is not None
+                projects = await reg.list_projects()
+                _project_count = len(projects)
+            return _has_workflow, _has_hooks, _project_count
+
+        has_workflow, has_hooks, project_count = asyncio.run(_check_features())
+
+        # Projects — the primary workflow
+        if project_count:
+            click.echo(f"  [PASS] Projects: {project_count} registered")
+        else:
+            click.echo("  [INFO] Projects: none registered (summon project add)")
+
+        if has_workflow:
+            click.echo("  [PASS] Workflow instructions: configured")
+        else:
+            click.echo("  [INFO] Workflow instructions: not set (summon project workflow set)")
+
+        if has_hooks:
+            click.echo("  [PASS] Lifecycle hooks: configured")
+        else:
+            click.echo("  [INFO] Lifecycle hooks: not set (summon hooks set)")
+
+    except Exception:
+        logging.getLogger(__name__).debug("Feature inventory DB error", exc_info=True)
+
+    # Hook bridge — check settings.json for summon-owned entries
+    has_bridge = False
+    try:
+        from summon_claude.cli.hooks import _read_settings  # noqa: PLC0415
+
+        settings = _read_settings()
+        hooks_list = settings.get("hooks", [])
+        has_bridge = any(
+            "summon-pre-worktree" in str(h) or "summon-post-worktree" in str(h) for h in hooks_list
+        )
+        if has_bridge:
+            click.echo("  [PASS] Hook bridge: installed")
+        else:
+            click.echo("  [INFO] Hook bridge: not installed (summon hooks install)")
+    except Exception:
+        logging.getLogger(__name__).debug("Hook bridge check error", exc_info=True)
+
+    # Scribe → Google auth nudge
+    scribe_on = config_values.get("SUMMON_SCRIBE_ENABLED", "").lower() in ("true", "1", "yes")
+    if scribe_on:
+        try:
+            google_dir = get_google_credentials_dir()
+            has_creds = google_dir.exists() and any(google_dir.iterdir())
+        except OSError:
+            has_creds = False
+        if not has_creds:
+            click.echo(
+                "  [INFO] Scribe enabled but Google not configured (summon config google-auth)"
+            )
+
+    # Getting started nudge
+    if not project_count:
+        click.echo()
+        click.echo(click.style("Getting started:", bold=True))
+        click.echo("  summon project add <path>           Register a project directory")
+        click.echo("  summon project workflow set          Set workflow instructions")
+        if not has_bridge:
+            click.echo("  summon hooks install                Install Claude Code hook bridge")
+        click.echo("  summon project up                   Start PM agents for all projects")

@@ -22,7 +22,7 @@ def _make_config(**overrides) -> SummonConfig:
     defaults = {
         "slack_bot_token": "xoxb-test-token",
         "slack_app_token": "xapp-test-token",
-        "slack_signing_secret": "test-secret",
+        "slack_signing_secret": "abc123def456",
     }
     defaults.update(overrides)
     # Prevent pydantic-settings from reading any .env file during tests
@@ -149,7 +149,7 @@ class TestSecretFieldsHiddenFromRepr:
         assert "ghp_shouldntsee" not in r
         assert "xoxb-test-token" not in r
         assert "xapp-test-token" not in r
-        assert "test-secret" not in r
+        assert "abc123def456" not in r
 
 
 class TestDiscoverInstalledPlugins:

@@ -879,35 +879,93 @@ class TestEffectiveWorkflow:
         assert result == ""
 
     async def test_effective_workflow_global_workflow_token_expansion(self, registry):
-        """$GLOBAL_WORKFLOW token in project instructions is replaced with global defaults."""
+        """$INCLUDE_GLOBAL token in project instructions is replaced with global defaults."""
         project_id = await registry.add_project("eff-token", "/tmp/eff-token")
         await registry.set_workflow_defaults("Global rules here.")
-        await registry.set_project_workflow(project_id, "Before.\n$GLOBAL_WORKFLOW\nAfter.")
+        await registry.set_project_workflow(project_id, "Before.\n$INCLUDE_GLOBAL\nAfter.")
         result = await registry.get_effective_workflow(project_id)
         assert result == "Before.\nGlobal rules here.\nAfter."
 
     async def test_effective_workflow_global_token_empty_global(self, registry):
-        """$GLOBAL_WORKFLOW expands to empty string when global is not set."""
+        """$INCLUDE_GLOBAL expands to empty string when global is not set."""
         project_id = await registry.add_project("eff-token-empty", "/tmp/eff-token-empty")
-        await registry.set_project_workflow(project_id, "Before.\n$GLOBAL_WORKFLOW\nAfter.")
+        await registry.set_project_workflow(project_id, "Before.\n$INCLUDE_GLOBAL\nAfter.")
         result = await registry.get_effective_workflow(project_id)
         assert result == "Before.\n\nAfter."
 
     async def test_effective_workflow_global_token_multiple(self, registry):
-        """Multiple $GLOBAL_WORKFLOW tokens all expand."""
+        """Multiple $INCLUDE_GLOBAL tokens all expand."""
         project_id = await registry.add_project("eff-multi", "/tmp/eff-multi")
         await registry.set_workflow_defaults("G")
-        await registry.set_project_workflow(project_id, "$GLOBAL_WORKFLOW-$GLOBAL_WORKFLOW")
+        await registry.set_project_workflow(project_id, "$INCLUDE_GLOBAL-$INCLUDE_GLOBAL")
         result = await registry.get_effective_workflow(project_id)
         assert result == "G-G"
 
     async def test_effective_workflow_no_token_no_expansion(self, registry):
-        """Project instructions without $GLOBAL_WORKFLOW are returned as-is."""
+        """Project instructions without $INCLUDE_GLOBAL are returned as-is."""
         project_id = await registry.add_project("eff-no-token", "/tmp/eff-no-token")
         await registry.set_workflow_defaults("Should not appear.")
         await registry.set_project_workflow(project_id, "Only project content.")
         result = await registry.get_effective_workflow(project_id)
         assert result == "Only project content."
+
+
+class TestMigration12To13DataPreservation:
+    async def test_empty_string_workflow_becomes_null(self, tmp_path):
+        """Migration 13→14 NULLIF converts empty-string workflow_instructions to NULL."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_13_to_14
+
+        db_path = tmp_path / "migrate_test.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            # Create a v12-style projects table (workflow_instructions NOT NULL DEFAULT '')
+            await db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL,
+                    pm_channel_id TEXT,
+                    workflow_instructions TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    hooks TEXT DEFAULT NULL
+                )
+                """
+            )
+            await db.execute(
+                "CREATE UNIQUE INDEX idx_projects_channel_prefix ON projects (channel_prefix)"
+            )
+            # Insert rows: one with empty string, one with real content
+            cols = "project_id, name, directory, channel_prefix, workflow_instructions"
+            await db.execute(
+                f"INSERT INTO projects ({cols})"  # noqa: S608
+                " VALUES ('p-empty', 'empty-wf', '/tmp/e', 'pfx-e', '')"
+            )
+            await db.execute(
+                f"INSERT INTO projects ({cols})"  # noqa: S608
+                " VALUES ('p-set', 'set-wf', '/tmp/s', 'pfx-s', 'Real instructions')"
+            )
+            await db.commit()
+
+            # Run the migration
+            await _migrate_13_to_14(db)
+            await db.commit()
+
+            # Verify: empty string became NULL
+            async with db.execute(
+                "SELECT workflow_instructions FROM projects WHERE project_id = 'p-empty'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row[0] is None, f"Expected NULL, got {row[0]!r}"
+
+            # Verify: real content preserved
+            async with db.execute(
+                "SELECT workflow_instructions FROM projects WHERE project_id = 'p-set'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row[0] == "Real instructions"
 
 
 class TestWorkflowDefaultsTable:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -9,8 +10,17 @@ import pytest
 from summon_claude.config import (
     CONFIG_OPTIONS,
     SummonConfig,
+    _is_extra_installed,
     get_config_default,
 )
+
+
+@pytest.fixture(autouse=True)
+def _clear_extra_installed_cache():
+    """Prevent cross-test contamination from @functools.cache."""
+    _is_extra_installed.cache_clear()
+    yield
+    _is_extra_installed.cache_clear()
 
 
 class TestConfigOptionRegistryGuard:
@@ -84,6 +94,29 @@ class TestConfigOptionRegistryGuard:
                     f"ConfigOption {opt.env_key!r} is 'choice' type but has no choices"
                 )
 
+    def test_field_validators_have_validate_fn(self):
+        """Fields with @field_validator must have validate_fn on their ConfigOption.
+
+        Without validate_fn, `config set` accepts invalid values — the pydantic
+        validator only fires at SummonConfig construction time.
+        Choice-type options are exempt (choices= enforces valid values).
+        """
+        validators = SummonConfig.__pydantic_decorators__.field_validators
+        validated_fields: set[str] = set()
+        for _name, dec in validators.items():
+            validated_fields.update(dec.info.fields)
+
+        for opt in CONFIG_OPTIONS:
+            if opt.field_name not in validated_fields:
+                continue
+            # Choice-type options enforce valid values via choices=
+            if opt.input_type == "choice":
+                continue
+            assert opt.validate_fn is not None, (
+                f"ConfigOption {opt.env_key!r} has a @field_validator on SummonConfig"
+                f" but no validate_fn — `config set` would accept invalid values"
+            )
+
 
 class TestConfigOptionVisibility:
     """Test visibility predicates for conditional options."""
@@ -146,7 +179,7 @@ class TestVisibilityGracefulDegradation:
         cfg = {"SUMMON_SCRIBE_ENABLED": "true"}
         google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
         assert google_opt.visible is not None
-        with patch("summon_claude.config.importlib.import_module", side_effect=ImportError):
+        with patch("summon_claude.config._is_extra_installed", return_value=False):
             assert not google_opt.visible(cfg)
 
     def test_scribe_slack_browser_hidden_without_playwright(self):
@@ -154,7 +187,7 @@ class TestVisibilityGracefulDegradation:
         cfg = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_SLACK_ENABLED": "true"}
         browser_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_slack_browser")
         assert browser_opt.visible is not None
-        with patch("summon_claude.config.importlib.import_module", side_effect=ImportError):
+        with patch("summon_claude.config._is_extra_installed", return_value=False):
             assert not browser_opt.visible(cfg)
 
 
@@ -187,7 +220,7 @@ class TestConfigShowIntegration:
             config_show(color=False)
 
         out = capsys.readouterr().out
-        assert "Scribe: disabled" not in out or "disabled" in out
+        assert "disabled" in out
         assert "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES" not in out
 
     def test_config_show_no_ansi_with_color_false(self, tmp_path, capsys):
@@ -236,16 +269,122 @@ class TestNoUpdateCheckField:
         assert matches[0].group == "Behavior"
 
 
-class TestWorkflowToken:
-    """Tests for the GLOBAL_WORKFLOW_TOKEN."""
+class TestConfigOptionOrdering:
+    """Guard: CONFIG_OPTIONS must list all core options before any advanced options."""
 
-    def test_global_workflow_token_defined(self):
-        from summon_claude.sessions.hook_types import GLOBAL_WORKFLOW_TOKEN
+    def test_core_options_precede_advanced(self):
+        """Once an advanced option appears, no core options may follow."""
+        seen_advanced = False
+        for opt in CONFIG_OPTIONS:
+            if opt.advanced:
+                seen_advanced = True
+            elif seen_advanced:
+                # Core option after an advanced one — ordering is broken.
+                # visibility-gated options (like scribe sub-options) that appear
+                # before the advanced block are fine since they're core.
+                pytest.fail(
+                    f"Core option {opt.env_key!r} appears after advanced options. "
+                    "Move it before the advanced block in CONFIG_OPTIONS."
+                )
 
-        assert GLOBAL_WORKFLOW_TOKEN == "$GLOBAL_WORKFLOW"
 
-    def test_include_global_token_unchanged(self):
-        """Verify INCLUDE_GLOBAL_TOKEN wasn't altered."""
+class TestChannelPrefixValidation:
+    """Guard: channel_prefix must conform to Slack channel naming rules."""
+
+    def test_valid_prefix(self):
+        cfg = SummonConfig(
+            slack_bot_token="xoxb-test",
+            slack_app_token="xapp-test",
+            slack_signing_secret="abc123",
+            channel_prefix="my-team",
+        )
+        assert cfg.channel_prefix == "my-team"
+
+    def test_invalid_prefix_uppercase(self):
+        with pytest.raises(ValueError, match="channel_prefix must be"):
+            SummonConfig(
+                slack_bot_token="xoxb-test",
+                slack_app_token="xapp-test",
+                slack_signing_secret="abc123",
+                channel_prefix="MyTeam",
+            )
+
+    def test_invalid_prefix_spaces(self):
+        with pytest.raises(ValueError, match="channel_prefix must be"):
+            SummonConfig(
+                slack_bot_token="xoxb-test",
+                slack_app_token="xapp-test",
+                slack_signing_secret="abc123",
+                channel_prefix="my team",
+            )
+
+    def test_invalid_prefix_empty(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            SummonConfig(
+                slack_bot_token="xoxb-test",
+                slack_app_token="xapp-test",
+                slack_signing_secret="abc123",
+                channel_prefix="",
+            )
+
+
+class TestSigningSecretValidation:
+    """Guard: signing_secret must be a hex string."""
+
+    def test_valid_hex(self):
+        cfg = SummonConfig(
+            slack_bot_token="xoxb-test",
+            slack_app_token="xapp-test",
+            slack_signing_secret="abcdef012345",
+        )
+        assert cfg.slack_signing_secret == "abcdef012345"
+
+    def test_invalid_non_hex(self):
+        with pytest.raises(ValueError, match="hex string"):
+            SummonConfig(
+                slack_bot_token="xoxb-test",
+                slack_app_token="xapp-test",
+                slack_signing_secret="not-hex-value",
+            )
+
+    def test_empty_passes_validator(self):
+        """Empty string bypasses the @field_validator; caught by validate() instead."""
+        cfg = SummonConfig(
+            slack_bot_token="xoxb-test",
+            slack_app_token="xapp-test",
+            slack_signing_secret="",
+        )
+        assert cfg.slack_signing_secret == ""
+
+
+class TestSlackScopeGuard:
+    """Guard: hardcoded required scopes in config_check must match the manifest."""
+
+    def test_required_scopes_match_manifest(self):
+        import yaml
+
+        manifest_path = Path(__file__).resolve().parent.parent / "slack-app-manifest.yaml"
+        if not manifest_path.exists():
+            pytest.skip("slack-app-manifest.yaml not found")
+
+        manifest = yaml.safe_load(manifest_path.read_text())
+        manifest_scopes = set(manifest["oauth_config"]["scopes"]["bot"])
+
+        # Import the same set used in config_check
+        # (hardcoded in _check_slack_scopes → inline in config_check)
+        from summon_claude.cli.config import _REQUIRED_SLACK_SCOPES
+
+        assert manifest_scopes == _REQUIRED_SLACK_SCOPES, (
+            f"Scope mismatch.\n"
+            f"  In manifest but not in code: {manifest_scopes - _REQUIRED_SLACK_SCOPES}\n"
+            f"  In code but not in manifest: {_REQUIRED_SLACK_SCOPES - manifest_scopes}"
+        )
+
+
+class TestIncludeGlobalToken:
+    """Tests for the INCLUDE_GLOBAL_TOKEN."""
+
+    def test_include_global_token_defined(self):
         from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 
         assert INCLUDE_GLOBAL_TOKEN == "$INCLUDE_GLOBAL"

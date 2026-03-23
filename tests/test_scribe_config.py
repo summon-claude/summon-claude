@@ -17,7 +17,7 @@ def _make_config(**overrides) -> SummonConfig:
     defaults = {
         "slack_bot_token": "xoxb-test-token",
         "slack_app_token": "xapp-test-token",
-        "slack_signing_secret": "test-secret",
+        "slack_signing_secret": "abc123def456",
     }
     defaults.update(overrides)
     with patch.dict(os.environ, {}, clear=False):

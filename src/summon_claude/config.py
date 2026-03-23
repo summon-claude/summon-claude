@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import functools
 import importlib
 import json
 import logging
@@ -423,6 +424,25 @@ class SummonConfig(BaseSettings):
             raise ValueError("SUMMON_SLACK_APP_TOKEN must start with 'xapp-'")
         return v
 
+    @field_validator("slack_signing_secret")
+    @classmethod
+    def _check_signing_secret(cls, v: str) -> str:
+        if v and not re.match(r"^[0-9a-f]+$", v):
+            raise ValueError("slack_signing_secret must be a hex string")
+        return v
+
+    @field_validator("channel_prefix")
+    @classmethod
+    def _check_channel_prefix(cls, v: str) -> str:
+        if not v:
+            raise ValueError("channel_prefix cannot be empty")
+        if not re.match(r"^[a-z0-9][a-z0-9\-_]*$", v):
+            raise ValueError(
+                "channel_prefix must be lowercase alphanumeric, hyphens, and underscores only"
+                " (Slack channel naming rules)"
+            )
+        return v
+
     @field_validator("github_pat")
     @classmethod
     def _check_github_pat(cls, v: str | None) -> str | None:
@@ -483,12 +503,15 @@ class ConfigOption:
     help_text: str  # One-line description
     input_type: str  # 'text', 'secret', 'choice', 'flag', 'int'
     required: bool = False
+    advanced: bool = False  # Hidden behind "Configure advanced settings?" in init wizard
+    help_hint: str | None = None  # Contextual guidance shown before prompt in init wizard
     choices: tuple[str, ...] | None = None
     choices_fn: Callable[[], list[str]] | None = None
     visible: Callable[[dict[str, str]], bool] | None = None
     validate_fn: Callable[[str], str | None] | None = None
 
 
+@functools.cache
 def _is_extra_installed(package: str) -> bool:
     """Check if an optional dependency is importable."""
     try:
@@ -517,6 +540,38 @@ def _validate_scribe_scan_interval(v: str) -> str | None:
         return "Must be an integer"
 
 
+def _validate_channel_prefix(v: str) -> str | None:
+    if not v:
+        return "Cannot be empty"
+    if not re.match(r"^[a-z0-9][a-z0-9\-_]*$", v):
+        return "Must be lowercase alphanumeric, hyphens, and underscores only"
+    return None
+
+
+def _validate_quiet_hours(v: str) -> str | None:
+    if not v:
+        return None
+    parts = v.split("-")
+    if len(parts) != 2:
+        return "Must be in HH:MM-HH:MM format"
+    for part in parts:
+        try:
+            datetime.strptime(part, "%H:%M")  # noqa: DTZ007
+        except ValueError:
+            return "Must be in HH:MM-HH:MM format"
+    return None
+
+
+def _validate_google_services(v: str) -> str | None:
+    if not v:
+        return None
+    services = [s.strip() for s in v.split(",") if s.strip()]
+    invalid = set(services) - VALID_GOOGLE_SERVICES
+    if invalid:
+        return f"Unknown services: {sorted(invalid)}. Valid: {sorted(VALID_GOOGLE_SERVICES)}"
+    return None
+
+
 CONFIG_OPTIONS: list[ConfigOption] = [
     # Slack Credentials
     ConfigOption(
@@ -527,6 +582,9 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Slack bot token (xoxb-...)",
         input_type="secret",
         required=True,
+        help_hint=(
+            "Find at: api.slack.com/apps → your app → OAuth & Permissions → Bot User OAuth Token"
+        ),
         validate_fn=lambda v: None if v.startswith("xoxb-") else "Must start with xoxb-",
     ),
     ConfigOption(
@@ -537,6 +595,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Slack Socket Mode app-level token (xapp-...)",
         input_type="secret",
         required=True,
+        help_hint="Find at: api.slack.com/apps → your app → Basic Information → App-Level Tokens",
         validate_fn=lambda v: None if v.startswith("xapp-") else "Must start with xapp-",
     ),
     ConfigOption(
@@ -547,6 +606,8 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Slack app signing secret for request verification",
         input_type="secret",
         required=True,
+        help_hint="Find at: api.slack.com/apps → your app → Basic Information → App Credentials",
+        validate_fn=lambda v: None if re.match(r"^[0-9a-f]+$", v) else "Must be a hex string",
     ),
     # Session Defaults
     ConfigOption(
@@ -573,63 +634,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Channel Prefix",
         help_text="Prefix for Slack channel names created by summon",
         input_type="text",
-    ),
-    # Display
-    ConfigOption(
-        field_name="max_inline_chars",
-        env_key="SUMMON_MAX_INLINE_CHARS",
-        group="Display",
-        label="Max Inline Chars",
-        help_text="Maximum characters to display inline before uploading as a file",
-        input_type="int",
-    ),
-    # Behavior
-    ConfigOption(
-        field_name="permission_debounce_ms",
-        env_key="SUMMON_PERMISSION_DEBOUNCE_MS",
-        group="Behavior",
-        label="Permission Debounce (ms)",
-        help_text="Milliseconds to debounce permission prompts",
-        input_type="int",
-    ),
-    ConfigOption(
-        field_name="no_update_check",
-        env_key="SUMMON_NO_UPDATE_CHECK",
-        group="Behavior",
-        label="Disable Update Check",
-        help_text="Disable automatic update checks on startup",
-        input_type="flag",
-    ),
-    # Thinking
-    ConfigOption(
-        field_name="enable_thinking",
-        env_key="SUMMON_ENABLE_THINKING",
-        group="Thinking",
-        label="Enable Thinking",
-        help_text="Pass ThinkingConfigAdaptive to the Claude SDK",
-        input_type="flag",
-    ),
-    ConfigOption(
-        field_name="show_thinking",
-        env_key="SUMMON_SHOW_THINKING",
-        group="Thinking",
-        label="Show Thinking",
-        help_text="Route thinking blocks to the Slack turn thread",
-        input_type="flag",
-    ),
-    # GitHub
-    ConfigOption(
-        field_name="github_pat",
-        env_key="SUMMON_GITHUB_PAT",
-        group="GitHub",
-        label="GitHub PAT",
-        help_text="GitHub Personal Access Token for the GitHub remote MCP server",
-        input_type="secret",
-        validate_fn=lambda v: (
-            None
-            if not v or v.startswith(("ghp_", "github_pat_"))
-            else "Must start with ghp_ or github_pat_"
-        ),
+        validate_fn=_validate_channel_prefix,
     ),
     # Scribe
     ConfigOption(
@@ -639,6 +644,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Enable Scribe",
         help_text="Enable the background scribe agent",
         input_type="flag",
+        help_hint="Background agent that monitors Slack/Google and provides context to sessions",
     ),
     ConfigOption(
         field_name="scribe_scan_interval_minutes",
@@ -685,6 +691,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Time window for reduced alerts, format HH:MM-HH:MM (e.g. 22:00-07:00)",
         input_type="text",
         visible=_scribe_enabled,
+        validate_fn=_validate_quiet_hours,
     ),
     # Scribe Google
     ConfigOption(
@@ -695,6 +702,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
         input_type="text",
         visible=lambda cfg: _scribe_enabled(cfg) and _is_extra_installed("workspace_mcp"),
+        validate_fn=_validate_google_services,
     ),
     # Scribe Slack
     ConfigOption(
@@ -725,12 +733,74 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         input_type="text",
         visible=_scribe_slack_enabled,
     ),
+    # GitHub
+    ConfigOption(
+        field_name="github_pat",
+        env_key="SUMMON_GITHUB_PAT",
+        group="GitHub",
+        label="GitHub PAT",
+        help_text="GitHub Personal Access Token for the GitHub remote MCP server",
+        input_type="secret",
+        help_hint=(
+            "Gives all sessions GitHub tools (search code, read PRs, etc)."
+            " Create at: github.com/settings/tokens"
+        ),
+        validate_fn=lambda v: (
+            None
+            if not v or v.startswith(("ghp_", "github_pat_"))
+            else "Must start with ghp_ or github_pat_"
+        ),
+    ),
+    # Advanced options below this point
+    # Display
+    ConfigOption(
+        field_name="max_inline_chars",
+        env_key="SUMMON_MAX_INLINE_CHARS",
+        group="Display",
+        label="Max Inline Chars",
+        help_text="Maximum characters to display inline before uploading as a file",
+        input_type="int",
+        advanced=True,
+    ),
+    # Behavior
+    ConfigOption(
+        field_name="permission_debounce_ms",
+        env_key="SUMMON_PERMISSION_DEBOUNCE_MS",
+        group="Behavior",
+        label="Permission Debounce (ms)",
+        help_text="Milliseconds to debounce permission prompts",
+        input_type="int",
+        advanced=True,
+    ),
+    ConfigOption(
+        field_name="no_update_check",
+        env_key="SUMMON_NO_UPDATE_CHECK",
+        group="Behavior",
+        label="Disable Update Check",
+        help_text="Disable automatic update checks on startup",
+        input_type="flag",
+        advanced=True,
+    ),
+    # Thinking
+    ConfigOption(
+        field_name="enable_thinking",
+        env_key="SUMMON_ENABLE_THINKING",
+        group="Thinking",
+        label="Enable Thinking",
+        help_text="Pass ThinkingConfigAdaptive to the Claude SDK",
+        input_type="flag",
+        advanced=True,
+    ),
+    ConfigOption(
+        field_name="show_thinking",
+        env_key="SUMMON_SHOW_THINKING",
+        group="Thinking",
+        label="Show Thinking",
+        help_text="Route thinking blocks to the Slack turn thread",
+        input_type="flag",
+        advanced=True,
+    ),
 ]
-
-
-def get_config_options() -> list[ConfigOption]:
-    """Return all config options in display order."""
-    return list(CONFIG_OPTIONS)
 
 
 def get_config_default(option: ConfigOption) -> Any:

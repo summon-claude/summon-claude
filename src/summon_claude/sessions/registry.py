@@ -1196,20 +1196,18 @@ class SessionRegistry:
 
         Logic:
         - If project has a non-NULL ``workflow_instructions``, use it (even if empty).
-          - If it contains ``$GLOBAL_WORKFLOW``, replace the token with global defaults.
+          - If it contains ``$INCLUDE_GLOBAL``, replace the token with global defaults.
         - If project ``workflow_instructions`` IS NULL, fall back to global defaults.
         """
-        from summon_claude.sessions.hook_types import GLOBAL_WORKFLOW_TOKEN  # noqa: PLC0415
-
         project_wf = await self.get_project_workflow(project_id)
 
         if project_wf is None:
             return await self.get_workflow_defaults()
 
         # Project has an explicit value (may be empty string = "no instructions").
-        if GLOBAL_WORKFLOW_TOKEN in project_wf:
+        if INCLUDE_GLOBAL_TOKEN in project_wf:
             global_wf = await self.get_workflow_defaults()
-            return project_wf.replace(GLOBAL_WORKFLOW_TOKEN, global_wf)
+            return project_wf.replace(INCLUDE_GLOBAL_TOKEN, global_wf)
 
         return project_wf
 

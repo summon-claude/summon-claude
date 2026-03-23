@@ -11,7 +11,7 @@ import click
 
 from summon_claude.cli import daemon_client
 from summon_claude.daemon import is_daemon_running
-from summon_claude.sessions.hook_types import GLOBAL_WORKFLOW_TOKEN
+from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
 
@@ -259,7 +259,7 @@ async def async_workflow_show(project_name: str | None = None, *, raw: bool = Fa
                     f"Workflow for '{project['name']}' (explicitly cleared — no instructions):"
                 )
             else:
-                has_token = GLOBAL_WORKFLOW_TOKEN in project_wf
+                has_token = INCLUDE_GLOBAL_TOKEN in project_wf
                 if raw:
                     label = f"Workflow for '{project['name']}' (project-specific, raw):"
                     click.echo(label)
@@ -268,12 +268,12 @@ async def async_workflow_show(project_name: str | None = None, *, raw: bool = Fa
                     if has_token:
                         label = (
                             f"Workflow for '{project['name']}'"
-                            f" (project-specific, includes global via {GLOBAL_WORKFLOW_TOKEN}):"
+                            f" (project-specific, includes global via {INCLUDE_GLOBAL_TOKEN}):"
                         )
                     else:
                         label = f"Workflow for '{project['name']}' (project-specific):"
                     click.echo(label)
-                    effective = project_wf.replace(GLOBAL_WORKFLOW_TOKEN, global_wf)
+                    effective = project_wf.replace(INCLUDE_GLOBAL_TOKEN, global_wf)
                     click.echo(effective)
         else:
             global_wf = await registry.get_workflow_defaults()
@@ -302,18 +302,19 @@ async def async_workflow_set(project_name: str | None = None) -> None:
                 "#",
             ]
             if global_wf:
+                glines = global_wf.splitlines()
                 lines.append("# Current global defaults (for reference):")
                 lines.append("# " + "\u2500" * 40)
-                for gline in global_wf.splitlines()[:5]:
+                for gline in glines[:5]:
                     lines.append(f"# {gline}")
-                if len(global_wf.splitlines()) > 5:
+                if len(glines) > 5:
                     lines.append("# ...")
                 lines.append("#")
             lines.append(
-                f"# Use {GLOBAL_WORKFLOW_TOKEN} anywhere to include the global defaults inline."
+                f"# Use {INCLUDE_GLOBAL_TOKEN} anywhere to include the global defaults inline."
             )
             lines.append(
-                f"# Without {GLOBAL_WORKFLOW_TOKEN},"
+                f"# Without {INCLUDE_GLOBAL_TOKEN},"
                 " these instructions fully replace the global defaults."
             )
             lines.append("")
@@ -334,12 +335,16 @@ async def async_workflow_set(project_name: str | None = None) -> None:
 
         content = _strip_comment_lines(edited)
 
+        if not content:
+            click.echo("No content entered — no changes made.")
+            return
+
         if project_name:
             await registry.set_project_workflow(pid, content)
-            if GLOBAL_WORKFLOW_TOKEN in content:
+            if INCLUDE_GLOBAL_TOKEN in content:
                 click.echo(
                     f"Workflow updated for project '{pname}'"
-                    f" (includes global defaults via {GLOBAL_WORKFLOW_TOKEN})."
+                    f" (includes global defaults via {INCLUDE_GLOBAL_TOKEN})."
                 )
             else:
                 click.echo(f"Workflow updated for project '{pname}'.")

@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
 from summon_claude.cli.config import config_path, config_set, config_show
-from summon_claude.cli.preflight import CliStatus as _CliStatus
-
-
-def _cli_status(found: bool, version: str | None, path: str | None) -> _CliStatus:
-    return _CliStatus(found=found, version=version, path=path)
+from summon_claude.cli.preflight import CliStatus
 
 
 class TestCLIInitCommand:
@@ -61,25 +57,21 @@ class TestCmdInit:
         """init should create config.env with provided values."""
         config_file = tmp_path / "config.env"
 
-        # New init walks through all always-visible options (13 prompts):
-        # 3 secrets, 1 text (model), 1 choice (effort), 1 text (prefix),
-        # 2 ints, 3 flags, 1 secret (github_pat), 1 flag (scribe_enabled)
+        # Core prompts: 3 secrets, 1 text (model), 1 choice (effort),
+        # 1 text (prefix), 1 flag (scribe), 1 secret (github_pat),
+        # then "Configure advanced settings?" (no)
         inputs = (
             "\n".join(
                 [
                     "xoxb-valid-bot-token",  # slack_bot_token (secret)
                     "xapp-valid-app-token",  # slack_app_token (secret)
-                    "mysecret",  # signing_secret (secret)
+                    "abcdef012345",  # signing_secret (secret, hex)
                     "",  # default_model (text, accept default)
                     "high",  # default_effort (choice)
                     "",  # channel_prefix (text, accept default)
-                    "",  # max_inline_chars (int, accept default)
-                    "",  # permission_debounce_ms (int, accept default)
-                    "n",  # no_update_check (flag)
-                    "y",  # enable_thinking (flag)
-                    "n",  # show_thinking (flag)
-                    "",  # github_pat (secret, empty = skip)
                     "n",  # scribe_enabled (flag)
+                    "",  # github_pat (secret, empty = skip)
+                    "n",  # Configure advanced settings? (no)
                 ]
             )
             + "\n"
@@ -90,8 +82,9 @@ class TestCmdInit:
             patch("summon_claude.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.preflight.check_claude_cli",
-                return_value=_cli_status(True, "1.0.0", "/usr/bin/claude"),
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
             ),
+            patch("summon_claude.cli.config.config_check"),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["init"], input=inputs)
@@ -100,7 +93,7 @@ class TestCmdInit:
         content = config_file.read_text()
         assert "xoxb-valid-bot-token" in content
         assert "xapp-valid-app-token" in content
-        assert "mysecret" in content
+        assert "abcdef012345" in content
 
     def test_init_validates_bot_token_prefix(self, tmp_path):
         """init should reject bot tokens that don't start with xoxb-."""
@@ -314,6 +307,69 @@ class TestConfigSetValidation:
             pytest.raises(SystemExit),
         ):
             config_set("SUMMON_SLACK_BOT_TOKEN", "invalid-no-prefix")
+
+
+class TestCheckClaudeCli:
+    """Unit tests for check_claude_cli preflight function."""
+
+    def test_not_found(self):
+        """Returns found=False when claude is not on PATH."""
+        from summon_claude.cli.preflight import check_claude_cli
+
+        with patch("summon_claude.cli.preflight.shutil.which", return_value=None):
+            result = check_claude_cli()
+        assert result.found is False
+        assert result.version is None
+        assert result.path is None
+
+    def test_found_with_version(self):
+        """Returns found=True and version when claude runs successfully."""
+        from summon_claude.cli.preflight import check_claude_cli
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "claude-code 1.2.3\n"
+        with (
+            patch("summon_claude.cli.preflight.shutil.which", return_value="/usr/bin/claude"),
+            patch("summon_claude.cli.preflight.subprocess.run", return_value=mock_result),
+        ):
+            result = check_claude_cli()
+        assert result.found is True
+        assert result.version == "claude-code 1.2.3"
+        assert result.path == "/usr/bin/claude"
+
+    def test_found_but_timeout(self):
+        """Returns found=True, version=None when subprocess times out."""
+        import subprocess
+
+        from summon_claude.cli.preflight import check_claude_cli
+
+        with (
+            patch("summon_claude.cli.preflight.shutil.which", return_value="/usr/bin/claude"),
+            patch(
+                "summon_claude.cli.preflight.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="claude", timeout=5),
+            ),
+        ):
+            result = check_claude_cli()
+        assert result.found is True
+        assert result.version is None
+        assert result.path == "/usr/bin/claude"
+
+    def test_found_but_nonzero_exit(self):
+        """Returns found=True, version=None when claude exits with error."""
+        from summon_claude.cli.preflight import check_claude_cli
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stdout = ""
+        with (
+            patch("summon_claude.cli.preflight.shutil.which", return_value="/usr/bin/claude"),
+            patch("summon_claude.cli.preflight.subprocess.run", return_value=mock_result),
+        ):
+            result = check_claude_cli()
+        assert result.found is True
+        assert result.version is None
 
 
 class TestConfigPath:

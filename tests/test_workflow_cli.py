@@ -12,6 +12,7 @@ from summon_claude.cli import cli
 from summon_claude.cli.project import (
     _strip_comment_lines,
     async_workflow_clear,
+    async_workflow_set,
     async_workflow_show,
 )
 
@@ -131,19 +132,19 @@ class TestWorkflowShow:
     def test_show_raw_unexpanded(self, capsys):
         mock_ctx, _reg = _mock_registry(
             projects=[_PROJECT],
-            project_wf="Before\n$GLOBAL_WORKFLOW\nAfter",
+            project_wf="Before\n$INCLUDE_GLOBAL\nAfter",
             global_wf="GLOBAL CONTENT",
         )
         with patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx):
             asyncio.run(async_workflow_show("myapp", raw=True))
         out = capsys.readouterr().out
-        assert "$GLOBAL_WORKFLOW" in out
+        assert "$INCLUDE_GLOBAL" in out
         assert "GLOBAL CONTENT" not in out
 
     def test_show_resolved_expanded(self, capsys):
         mock_ctx, _reg = _mock_registry(
             projects=[_PROJECT],
-            project_wf="Before\n$GLOBAL_WORKFLOW\nAfter",
+            project_wf="Before\n$INCLUDE_GLOBAL\nAfter",
             global_wf="GLOBAL CONTENT",
         )
         with patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx):
@@ -152,6 +153,19 @@ class TestWorkflowShow:
         assert "GLOBAL CONTENT" in out
         assert "includes global" in out
 
+    def test_show_project_by_id_prefix(self, capsys):
+        """_resolve_project matches on project_id prefix."""
+        mock_ctx, _reg = _mock_registry(
+            projects=[_PROJECT],
+            project_wf="ID-matched rules.",
+            global_wf="G",
+        )
+        with patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx):
+            asyncio.run(async_workflow_show("proj-1"))
+        out = capsys.readouterr().out
+        assert "project-specific" in out
+        assert "ID-matched rules." in out
+
     def test_show_project_not_found(self):
         mock_ctx, _reg = _mock_registry(projects=[])
         with (
@@ -159,6 +173,79 @@ class TestWorkflowShow:
             pytest.raises(Exception, match="not found"),
         ):
             asyncio.run(async_workflow_show("nonexistent"))
+
+
+# ---------------------------------------------------------------------------
+# Workflow set
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowSet:
+    def test_set_global_saves_content(self, capsys):
+        mock_ctx, reg = _mock_registry(global_wf="")
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            patch("click.edit", return_value="# comment\nNew global rules."),
+        ):
+            asyncio.run(async_workflow_set())
+        reg.set_workflow_defaults.assert_awaited_once_with("New global rules.")
+        out = capsys.readouterr().out
+        assert "Global workflow defaults updated." in out
+
+    def test_set_project_saves_content(self, capsys):
+        mock_ctx, reg = _mock_registry(projects=[_PROJECT], project_wf=None, global_wf="G")
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            patch("click.edit", return_value="# comment\nProject rules."),
+        ):
+            asyncio.run(async_workflow_set("myapp"))
+        reg.set_project_workflow.assert_awaited_once_with("proj-123", "Project rules.")
+        out = capsys.readouterr().out
+        assert "Workflow updated for project 'myapp'." in out
+
+    def test_set_editor_returns_none_aborts(self, capsys):
+        mock_ctx, reg = _mock_registry()
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            patch("click.edit", return_value=None),
+        ):
+            asyncio.run(async_workflow_set())
+        reg.set_workflow_defaults.assert_not_awaited()
+        out = capsys.readouterr().out
+        assert "No changes made." in out
+
+    def test_set_all_comments_aborts(self, capsys):
+        """Editor content that is all comments results in no changes."""
+        mock_ctx, reg = _mock_registry()
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            patch("click.edit", return_value="# only comments\n# nothing else\n"),
+        ):
+            asyncio.run(async_workflow_set())
+        reg.set_workflow_defaults.assert_not_awaited()
+        out = capsys.readouterr().out
+        assert "No content entered" in out
+
+    def test_set_project_with_global_token(self, capsys):
+        mock_ctx, reg = _mock_registry(projects=[_PROJECT], project_wf=None, global_wf="G")
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            patch("click.edit", return_value="Before\n$INCLUDE_GLOBAL\nAfter"),
+        ):
+            asyncio.run(async_workflow_set("myapp"))
+        reg.set_project_workflow.assert_awaited_once_with(
+            "proj-123", "Before\n$INCLUDE_GLOBAL\nAfter"
+        )
+        out = capsys.readouterr().out
+        assert "includes global defaults" in out
+
+    def test_set_project_not_found(self):
+        mock_ctx, _reg = _mock_registry(projects=[])
+        with (
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx),
+            pytest.raises(Exception, match="not found"),
+        ):
+            asyncio.run(async_workflow_set("nonexistent"))
 
 
 # ---------------------------------------------------------------------------

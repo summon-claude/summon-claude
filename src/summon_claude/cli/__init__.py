@@ -235,6 +235,7 @@ def cmd_start(
         config.validate()
     except Exception as e:
         click.echo(f"Configuration error: {e}", err=True)
+        click.echo("Run `summon init` to set up your configuration.", err=True)
         sys.exit(1)
 
     # Background update check (non-blocking)
@@ -518,7 +519,7 @@ def project_workflow() -> None:
     "--raw",
     is_flag=True,
     default=False,
-    help="Show raw template without expanding $GLOBAL_WORKFLOW",
+    help="Show raw template without expanding $INCLUDE_GLOBAL",
 )
 @click.pass_context
 def workflow_show(ctx: click.Context, project_name: str | None, raw: bool) -> None:
@@ -583,6 +584,7 @@ def cmd_init(ctx: click.Context) -> None:
     # Collect values via prompts
     collected: dict[str, str] = {}
     current_group = ""
+    show_advanced: bool | None = None  # None = not yet asked
 
     for opt in CONFIG_OPTIONS:
         # Build the in-progress config dict for visibility predicates
@@ -592,6 +594,13 @@ def cmd_init(ctx: click.Context) -> None:
         if opt.visible is not None and not opt.visible(in_progress):
             continue
 
+        # Gate advanced options behind a single prompt
+        if opt.advanced and show_advanced is None:
+            click.echo()
+            show_advanced = click.confirm("  Configure advanced settings?", default=False)
+            if not show_advanced:
+                break
+
         # Print group header on group change
         if opt.group != current_group:
             current_group = opt.group
@@ -599,6 +608,10 @@ def cmd_init(ctx: click.Context) -> None:
 
         current_value = existing.get(opt.env_key)
         default = get_config_default(opt)
+
+        # Show contextual help hint for new values
+        if opt.help_hint and not current_value:
+            click.echo(click.style(f"    {opt.help_hint}", dim=True))
 
         if opt.input_type == "secret":
             if current_value:
@@ -671,7 +684,10 @@ def cmd_init(ctx: click.Context) -> None:
             )
 
         # Only store non-default values (keep config file clean)
-        default_str = str(default) if default is not None else ""
+        if isinstance(default, bool):
+            default_str = str(default).lower()
+        else:
+            default_str = str(default) if default is not None else ""
         if opt.required or value != default_str:
             collected[opt.env_key] = value
 
@@ -689,15 +705,22 @@ def cmd_init(ctx: click.Context) -> None:
         click.echo("Config file NOT written. Fix the errors and re-run `summon init`.", err=True)
         raise SystemExit(1) from e
 
-    # Write config file
+    # Write config file — strip newlines to prevent injection into .env format
     config_file.parent.mkdir(parents=True, exist_ok=True)
-    output_lines = [f"{k}={v}" for k, v in collected.items()]
+    sanitized = {k: v.replace("\n", "").replace("\r", "") for k, v in collected.items()}
+    output_lines = [f"{k}={v}" for k, v in sanitized.items()]
     config_file.write_text("\n".join(output_lines) + "\n")
     with contextlib.suppress(OSError):
         config_file.chmod(0o600)
 
     click.echo()
     click.echo(f"Configuration saved to {config_file}")
+    click.echo()
+
+    # Auto-run config check — validates connectivity and shows feature inventory
+    from summon_claude.cli.config import config_check  # noqa: PLC0415
+
+    config_check(config_path=config_path_override)
 
 
 @cli.group("config")
