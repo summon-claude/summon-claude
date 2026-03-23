@@ -149,7 +149,15 @@ See [Scribe](scribe.md) for full setup instructions.
 summon config show
 ```
 
-Prints all current configuration values with tokens masked (e.g., `xoxb-****`). Useful for verifying what summon is using.
+Prints all current configuration values with tokens masked. Useful for verifying what summon is using.
+
+<!-- terminal:config-show -->
+```text
+SUMMON_SLACK_BOT_TOKEN=configured
+SUMMON_SLACK_APP_TOKEN=configured
+SUMMON_SLACK_SIGNING_SECRET=configured
+```
+<!-- /terminal:config-show -->
 
 ### summon config path
 
@@ -183,6 +191,22 @@ summon config check
 ```
 
 Validates configuration and tests connectivity to Slack. Exits with code 1 if any check fails. Run this after making changes to verify everything is correct.
+
+<!-- terminal:config-check -->
+```text
+  [PASS] SUMMON_SLACK_BOT_TOKEN is set
+  [PASS] SUMMON_SLACK_APP_TOKEN is set
+  [PASS] SUMMON_SLACK_SIGNING_SECRET is set
+  [PASS] Bot token format is valid (xoxb-)
+  [PASS] App token format is valid (xapp-)
+  [PASS] Signing secret format looks valid (hex)
+  [PASS] DB path is writable: ~/.local/share/summon/registry.db
+  [PASS] Schema version 11 (current)
+  [PASS] Database integrity OK
+  [INFO] Sessions: 0, Audit log: 0
+  [PASS] Slack API reachable (team: my-workspace)
+```
+<!-- /terminal:config-check -->
 
 ### summon config google-auth
 

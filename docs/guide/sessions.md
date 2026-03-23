@@ -12,6 +12,7 @@ summon start
 
 summon registers the session with the background daemon, creates a Slack channel, and prints an auth code to your terminal:
 
+<!-- terminal:summon-start -->
 ```
 ==================================================
   SUMMON CODE: abc123
@@ -19,6 +20,7 @@ summon registers the session with the background daemon, creates a Slack channel
   Expires in 5 minutes
 ==================================================
 ```
+<!-- /terminal:summon-start -->
 
 Open Slack and type `/summon abc123` in any channel to claim the session. Once claimed, Claude is ready to receive messages in the dedicated channel.
 
@@ -188,6 +190,17 @@ summon session logs
 ```
 
 Logs are stored in the data directory (see `summon version` for the path). Each session writes to its own log file.
+
+<!-- terminal:summon-version -->
+```text
+summon, version 0.0.0
+Python:      3.x.x
+Platform:    darwin
+Config file: ~/.config/summon/config.env
+Data dir:    ~/.local/share/summon
+DB path:     ~/.local/share/summon/registry.db
+```
+<!-- /terminal:summon-version -->
 
 ---
 

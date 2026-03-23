@@ -48,9 +48,11 @@ summon --version
 
 You should see output like:
 
+<!-- terminal:summon-version-short -->
 ```
 summon-claude, version 1.2.3
 ```
+<!-- /terminal:summon-version-short -->
 
 ---
 

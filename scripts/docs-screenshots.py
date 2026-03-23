@@ -30,6 +30,8 @@ import os
 import re
 import subprocess
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import click
@@ -398,29 +400,67 @@ def capture_screenshots(
 
 
 # ---------------------------------------------------------------------------
-# Terminal output capture
+# Terminal output capture — registry-based CLI output capture system
 # ---------------------------------------------------------------------------
 
-QUICKSTART_MD = Path("docs/getting-started/quickstart.md")
 TERMINAL_SESSION_NAME = "docs-terminal"
 
-# Matches <!-- terminal:NAME -->...<!-- /terminal:NAME -->
-TERMINAL_MARKER_RE = re.compile(
-    r"(<!-- terminal:([\w-]+) -->)\n.*?\n(<!-- /terminal:\2 -->)",
-    re.DOTALL,
-)
+
+@dataclass
+class CaptureSpec:
+    """Specification for capturing terminal output from a CLI command.
+
+    Each spec maps a CLI command to a marker in a markdown file.  The runner
+    executes the command, optionally post-processes the output, and injects
+    the result between ``<!-- terminal:MARKER -->`` / ``<!-- /terminal:MARKER -->``
+    comment pairs in the target file.
+    """
+
+    marker: str  # marker name in <!-- terminal:MARKER -->
+    md_file: str  # relative path from repo root
+    command: list[str]  # CLI command args (prefixed with "uv run" automatically)
+    fence: str = "text"  # code fence language / attributes
+    timeout: int = 15  # capture timeout in seconds
+    capture_fn: Callable[[], str] | None = None  # custom capture (overrides command)
+    post_process: Callable[[str], str] | None = None  # transform captured output
+    extra_md: str = ""  # markdown appended after code fence, before closing marker
+    show_command: bool = False  # prepend "$ command" line to output
 
 
-def capture_summon_start_banner() -> str:
-    """Run ``uv run summon start`` and capture the auth banner output.
+# -- Post-processors -------------------------------------------------------
 
-    Kills the process and stops the session after capturing the banner.
-    Returns the banner lines (``====...``, code line, instructions, ``====...``).
+
+def _sanitize_paths(text: str) -> str:
+    """Replace the user's home directory with ``~`` for portability."""
+    return text.replace(str(Path.home()), "~")
+
+
+def _add_start_annotations(banner: str) -> str:
+    """Add Material for MkDocs annotations to the ``summon start`` banner."""
+    out = []
+    for line in banner.split("\n"):
+        if "SUMMON CODE:" in line:
+            out.append(f"{line}  # (1)")
+        elif "Expires in" in line:
+            out.append(f"{line}  # (2)")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+# -- Custom capture functions -----------------------------------------------
+
+
+def _capture_summon_start_banner() -> str:
+    """Run ``summon start`` and capture just the auth banner.
+
+    Starts a real session, reads stdout until the closing ``====`` border,
+    then terminates and cleans up.
     """
     env = os.environ.copy()
-    env.pop("CLAUDECODE", None)  # Avoid nested session detection
+    env.pop("CLAUDECODE", None)
 
-    click.echo("  Starting summon session for terminal capture...")
+    click.echo("    Starting summon session for banner capture...")
     proc = subprocess.Popen(
         ["uv", "run", "summon", "start", "--name", TERMINAL_SESSION_NAME],
         stdout=subprocess.PIPE,
@@ -430,7 +470,7 @@ def capture_summon_start_banner() -> str:
     )
 
     lines: list[str] = []
-    banner_re = re.compile(r"^={10,}$")
+    border_re = re.compile(r"^={10,}$")
     in_banner = False
     deadline = time.time() + 30
 
@@ -449,7 +489,7 @@ def capture_summon_start_banner() -> str:
                     lines.append(stripped)
                 continue
 
-            if banner_re.match(stripped):
+            if border_re.match(stripped):
                 lines.append(stripped)
                 if in_banner:
                     break  # Closing border — done
@@ -462,8 +502,6 @@ def capture_summon_start_banner() -> str:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-
-        # Clean up the session we started
         try:
             subprocess.run(
                 ["uv", "run", "summon", "stop", TERMINAL_SESSION_NAME],
@@ -477,51 +515,131 @@ def capture_summon_start_banner() -> str:
     if len(lines) < 3:
         raise RuntimeError(f"Failed to capture auth banner (got {len(lines)} lines): {lines}")
 
-    click.echo(f"  Captured {len(lines)} lines of banner output")
+    click.echo(f"    Captured {len(lines)} lines of banner output")
     return "\n".join(lines)
 
 
-def _add_annotations(banner: str) -> str:
-    """Add Material for MkDocs annotations to the captured banner.
+# -- Capture registry -------------------------------------------------------
+#
+# Add new entries here to auto-capture more CLI commands.  The runner iterates
+# this list and skips any captures whose commands fail (missing config, etc.).
 
-    Inserts ``# (1)`` after the SUMMON CODE line and ``# (2)`` after the
-    Expires line so the ``{ .text .annotate }`` fence renders callouts.
-    """
-    out = []
-    for line in banner.split("\n"):
-        if "SUMMON CODE:" in line:
-            out.append(f"{line}  # (1)")
-        elif "Expires in" in line:
-            out.append(f"{line}  # (2)")
-        else:
-            out.append(line)
-    return "\n".join(out)
+_START_EXTRA_MD = (
+    "\n"
+    "1. This is a one-time code. Type it exactly as shown in any Slack channel.\n"
+    "2. Codes expire after 5 minutes. Run `summon start` again if it expires."
+)
+
+CAPTURES: list[CaptureSpec] = [
+    # -- Getting started ----------------------------------------------------
+    CaptureSpec(
+        marker="summon-version-short",
+        md_file="docs/getting-started/installation.md",
+        command=["summon", "--version"],
+    ),
+    CaptureSpec(
+        marker="summon-start",
+        md_file="docs/getting-started/quickstart.md",
+        command=[],
+        fence="{ .text .annotate }",
+        timeout=30,
+        capture_fn=_capture_summon_start_banner,
+        post_process=_add_start_annotations,
+        extra_md=_START_EXTRA_MD,
+    ),
+    # -- Guide: sessions ----------------------------------------------------
+    CaptureSpec(
+        marker="summon-version",
+        md_file="docs/guide/sessions.md",
+        command=["summon", "version"],
+        post_process=_sanitize_paths,
+    ),
+    CaptureSpec(
+        marker="summon-start",
+        md_file="docs/guide/sessions.md",
+        command=[],
+        fence="{ .text .annotate }",
+        timeout=30,
+        capture_fn=_capture_summon_start_banner,
+        post_process=_add_start_annotations,
+        extra_md=_START_EXTRA_MD,
+    ),
+    # -- Guide: configuration -----------------------------------------------
+    CaptureSpec(
+        marker="config-show",
+        md_file="docs/guide/configuration.md",
+        command=["summon", "config", "show"],
+    ),
+    CaptureSpec(
+        marker="config-check",
+        md_file="docs/guide/configuration.md",
+        command=["summon", "config", "check"],
+        post_process=_sanitize_paths,
+    ),
+]
 
 
-def inject_terminal_block(md_path: Path, name: str, content: str) -> bool:
-    """Replace content between ``<!-- terminal:NAME -->`` markers.
+# -- Runner -----------------------------------------------------------------
 
-    Returns True if a replacement was made.
-    """
+
+def _make_env() -> dict[str, str]:
+    """Build a subprocess environment with CLAUDECODE unset."""
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+    return env
+
+
+def _run_capture(spec: CaptureSpec) -> str | None:
+    """Execute a single capture spec and return its output, or None on failure."""
+    if spec.capture_fn:
+        try:
+            return spec.capture_fn()
+        except Exception as exc:
+            click.echo(f"    WARNING: {spec.marker} custom capture failed: {exc}", err=True)
+            return None
+
+    try:
+        result = subprocess.run(
+            ["uv", "run", *spec.command],
+            capture_output=True,
+            text=True,
+            timeout=spec.timeout,
+            env=_make_env(),
+        )
+    except subprocess.TimeoutExpired:
+        click.echo(f"    WARNING: {spec.marker} timed out after {spec.timeout}s", err=True)
+        return None
+
+    if result.returncode != 0:
+        stderr_preview = result.stderr.strip()[:200]
+        click.echo(
+            f"    WARNING: {' '.join(spec.command)} exited {result.returncode}: {stderr_preview}",
+            err=True,
+        )
+        return None
+
+    return result.stdout.strip()
+
+
+def _inject_terminal_block(
+    md_path: Path,
+    marker: str,
+    content: str,
+    fence: str = "text",
+    extra_md: str = "",
+) -> bool:
+    """Replace content between ``<!-- terminal:MARKER -->`` markers."""
     md_text = md_path.read_text()
-
     pattern = re.compile(
-        rf"(<!-- terminal:{re.escape(name)} -->)\n.*?\n(<!-- /terminal:{re.escape(name)} -->)",
+        rf"(<!-- terminal:{re.escape(marker)} -->)\n.*?\n(<!-- /terminal:{re.escape(marker)} -->)",
         re.DOTALL,
     )
 
-    replacement = (
-        rf"\1\n"
-        "``` { .text .annotate }\n"
-        f"{content}\n"
-        "```\n"
-        "\n"
-        "1. This is a one-time code. Type it exactly as shown in any Slack channel.\n"
-        "2. Codes expire after 5 minutes. Run `summon start` again if it expires.\n"
-        rf"\2"
-    )
+    block = f"```{fence}\n{content}\n```"
+    if extra_md:
+        block += extra_md
 
-    new_text, count = pattern.subn(replacement, md_text)
+    new_text, count = pattern.subn(rf"\1\n{block}\n\2", md_text)
     if count == 0:
         return False
 
@@ -530,23 +648,44 @@ def inject_terminal_block(md_path: Path, name: str, content: str) -> bool:
 
 
 def run_terminal_section(dry_run: bool = False) -> None:
-    """Capture terminal output and inject into documentation."""
+    """Run all registered captures and inject results into docs."""
     click.echo("\n[terminal] Capturing CLI terminal output...")
 
     if dry_run:
-        click.echo(f"  (capture) summon start banner → {QUICKSTART_MD}")
+        for spec in CAPTURES:
+            cmd_str = " ".join(spec.command) if spec.command else "(custom)"
+            click.echo(f"  (capture) {cmd_str} → {spec.md_file}#{spec.marker}")
         return
 
-    banner = capture_summon_start_banner()
-    annotated = _add_annotations(banner)
+    succeeded = 0
+    failed = 0
 
-    if inject_terminal_block(QUICKSTART_MD, "summon-start", annotated):
-        click.echo(f"  Injected summon-start banner into {QUICKSTART_MD}")
-    else:
-        click.echo(
-            f"  WARNING: No <!-- terminal:summon-start --> markers found in {QUICKSTART_MD}",
-            err=True,
-        )
+    for spec in CAPTURES:
+        cmd_str = " ".join(spec.command) if spec.command else "(custom)"
+        click.echo(f"  Capturing: {cmd_str} → {spec.marker}...")
+
+        output = _run_capture(spec)
+        if output is None:
+            failed += 1
+            continue
+
+        if spec.post_process:
+            output = spec.post_process(output)
+        if spec.show_command and spec.command:
+            output = f"$ {' '.join(spec.command)}\n{output}"
+
+        md_path = Path(spec.md_file)
+        if _inject_terminal_block(md_path, spec.marker, output, spec.fence, spec.extra_md):
+            click.echo(f"    → injected into {spec.md_file}")
+            succeeded += 1
+        else:
+            click.echo(
+                f"    WARNING: no <!-- terminal:{spec.marker} --> marker in {spec.md_file}",
+                err=True,
+            )
+            failed += 1
+
+    click.echo(f"\n  Done: {succeeded} captured, {failed} skipped/failed.")
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +842,25 @@ def main(
             # 4. Navigate to session channel and send message
             channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
             page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(5_000)
+            page.wait_for_timeout(8_000)
+
+            # Dismiss any overlays that may block the composer
+            try:
+                selectors = (
+                    '[data-qa="explore_ai_dismiss"], button:has-text("Close"), [aria-label="Close"]'
+                )
+                close_btn = page.locator(selectors)
+                if close_btn.count() > 0:
+                    close_btn.first.click(timeout=3_000)
+                    click.echo("  Dismissed overlay")
+                    page.wait_for_timeout(1_000)
+            except Exception:  # noqa: S110
+                pass
+
+            # Debug screenshot to verify channel loaded
+            debug_path = output_dir / "_debug_channel_page.png"
+            page.screenshot(path=str(debug_path), full_page=False)
+            click.echo(f"  Debug screenshot saved: {debug_path}")
 
             send_message_via_slack(page, message)
 
