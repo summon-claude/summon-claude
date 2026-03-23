@@ -43,6 +43,10 @@ class TestStripCommentLines:
     def test_all_comments(self):
         assert _strip_comment_lines("# a\n# b\n#\n") == ""
 
+    def test_preserves_indented_comments(self):
+        """Indented comments (not column-zero) are preserved as content."""
+        assert _strip_comment_lines("  # indented\nkeep") == "# indented\nkeep"
+
 
 # ---------------------------------------------------------------------------
 # Workflow show

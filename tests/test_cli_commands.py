@@ -95,6 +95,92 @@ class TestCmdInit:
         assert "xapp-valid-app-token" in content
         assert "abcdef012345" in content
 
+    def test_init_advanced_settings_yes(self, tmp_path):
+        """init with advanced settings enabled should prompt for advanced options."""
+        config_file = tmp_path / "config.env"
+
+        inputs = (
+            "\n".join(
+                [
+                    "xoxb-valid-bot-token",  # slack_bot_token
+                    "xapp-valid-app-token",  # slack_app_token
+                    "abcdef012345",  # signing_secret
+                    "",  # default_model
+                    "high",  # default_effort
+                    "",  # channel_prefix
+                    "n",  # scribe_enabled
+                    "",  # github_pat (skip)
+                    "y",  # Configure advanced settings? (YES)
+                    "",  # max_inline_chars (accept default)
+                    "",  # permission_debounce_ms (accept default)
+                    "y",  # no_update_check (flag)
+                    "y",  # enable_thinking (flag)
+                    "n",  # show_thinking (flag)
+                ]
+            )
+            + "\n"
+        )
+
+        with (
+            patch("summon_claude.cli.get_config_file", return_value=config_file),
+            patch("summon_claude.config.get_config_file", return_value=config_file),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch("summon_claude.cli.config.config_check"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["init"], input=inputs)
+
+        assert config_file.exists(), f"Config file not created. Output: {result.output}"
+        content = config_file.read_text()
+        assert "SUMMON_NO_UPDATE_CHECK=true" in content
+
+    def test_init_with_existing_config(self, tmp_path):
+        """init with existing config preserves values when Enter is pressed."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-existing\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-existing\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abcdef012345\n"
+        )
+
+        # All empty inputs = accept existing/default values
+        inputs = (
+            "\n".join(
+                [
+                    "",  # slack_bot_token (keep existing)
+                    "",  # slack_app_token (keep existing)
+                    "",  # signing_secret (keep existing)
+                    "",  # default_model
+                    "high",  # default_effort
+                    "",  # channel_prefix
+                    "n",  # scribe_enabled
+                    "",  # github_pat (skip)
+                    "n",  # Configure advanced settings?
+                ]
+            )
+            + "\n"
+        )
+
+        with (
+            patch("summon_claude.cli.get_config_file", return_value=config_file),
+            patch("summon_claude.config.get_config_file", return_value=config_file),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch("summon_claude.cli.config.config_check"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["init"], input=inputs)
+
+        assert config_file.exists(), f"Config file not created. Output: {result.output}"
+        content = config_file.read_text()
+        assert "xoxb-existing" in content
+        assert "Existing config found" in result.output
+
     def test_init_validates_bot_token_prefix(self, tmp_path):
         """init should reject bot tokens that don't start with xoxb-."""
         config_dir = tmp_path / "summon"
@@ -370,6 +456,124 @@ class TestCheckClaudeCli:
             result = check_claude_cli()
         assert result.found is True
         assert result.version is None
+
+
+class TestCheckGithubPat:
+    """Tests for _check_github_pat function."""
+
+    def test_valid_pat_returns_true(self, capsys):
+        """200 OK response returns True and prints PASS."""
+        import json
+        import urllib.request
+
+        from summon_claude.cli.config import _check_github_pat
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"login": "testuser"}).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(urllib.request, "urlopen", return_value=mock_resp):
+            result = _check_github_pat("ghp_test123")
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "PASS" in captured.out
+        assert "testuser" in captured.out
+
+    def test_invalid_pat_returns_false(self, capsys):
+        """401 response returns False and prints FAIL."""
+        import urllib.error
+
+        from summon_claude.cli.config import _check_github_pat
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(
+                url="",
+                code=401,
+                msg="Unauthorized",
+                hdrs=None,
+                fp=None,  # type: ignore[arg-type]
+            ),
+        ):
+            result = _check_github_pat("ghp_bad")
+
+        assert result is False
+        captured = capsys.readouterr()
+        assert "FAIL" in captured.out
+
+    def test_non_auth_http_error_returns_true(self, capsys):
+        """Non-401 HTTP error returns True with WARN."""
+        import urllib.error
+
+        from summon_claude.cli.config import _check_github_pat
+
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError(
+                url="",
+                code=500,
+                msg="Server Error",
+                hdrs=None,
+                fp=None,  # type: ignore[arg-type]
+            ),
+        ):
+            result = _check_github_pat("ghp_test")
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "WARN" in captured.out
+
+    def test_network_error_returns_true(self, capsys):
+        """Network exception returns True with WARN."""
+        from summon_claude.cli.config import _check_github_pat
+
+        with patch("urllib.request.urlopen", side_effect=OSError("Connection refused")):
+            result = _check_github_pat("ghp_test")
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "WARN" in captured.out
+
+    def test_quiet_mode_suppresses_pass(self, capsys):
+        """quiet=True suppresses PASS output."""
+        import json
+        import urllib.request
+
+        from summon_claude.cli.config import _check_github_pat
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({"login": "testuser"}).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch.object(urllib.request, "urlopen", return_value=mock_resp):
+            result = _check_github_pat("ghp_test123", quiet=True)
+
+        assert result is True
+        captured = capsys.readouterr()
+        assert "PASS" not in captured.out
+
+
+class TestConfigSetChoiceValidation:
+    def test_config_set_rejects_invalid_choice(self, tmp_path):
+        """config set should reject values not in choices for choice-type options."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            pytest.raises(SystemExit),
+        ):
+            config_set("SUMMON_DEFAULT_EFFORT", "ultra")
+
+    def test_config_set_accepts_valid_choice(self, tmp_path):
+        """config set should accept valid choices."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_set("SUMMON_DEFAULT_EFFORT", "high")
+        assert "SUMMON_DEFAULT_EFFORT=high" in config_file.read_text()
 
 
 class TestConfigPath:

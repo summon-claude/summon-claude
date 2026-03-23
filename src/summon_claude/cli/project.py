@@ -287,70 +287,83 @@ async def async_workflow_show(project_name: str | None = None, *, raw: bool = Fa
 async def async_workflow_set(project_name: str | None = None) -> None:
     """Set workflow instructions via $EDITOR."""
     async with SessionRegistry() as registry:
-        pid: str = ""
-        pname: str = ""
         if project_name:
-            project = await _resolve_project(registry, project_name)
-            pid = project["project_id"]
-            pname = project["name"]
-            current = await registry.get_project_workflow(pid)
-            global_wf = await registry.get_workflow_defaults()
-
-            lines = [
-                f"# Workflow instructions for project '{pname}'",
-                "# Lines starting with # are stripped on save.",
-                "#",
-            ]
-            if global_wf:
-                glines = global_wf.splitlines()
-                lines.append("# Current global defaults (for reference):")
-                lines.append("# " + "\u2500" * 40)
-                for gline in glines[:5]:
-                    lines.append(f"# {gline}")
-                if len(glines) > 5:
-                    lines.append("# ...")
-                lines.append("#")
-            lines.append(
-                f"# Use {INCLUDE_GLOBAL_TOKEN} anywhere to include the global defaults inline."
-            )
-            lines.append(
-                f"# Without {INCLUDE_GLOBAL_TOKEN},"
-                " these instructions fully replace the global defaults."
-            )
-            lines.append("")
-            template = "\n".join(lines)
-            prefill = template + (current or "")
+            await _workflow_set_project(registry, project_name)
         else:
-            current = await registry.get_workflow_defaults()
-            template = (
-                "# Global workflow defaults — applied to all projects without overrides.\n"
-                "# Lines starting with # are stripped on save.\n\n"
-            )
-            prefill = template + (current or "")
+            await _workflow_set_global(registry)
 
-        edited = click.edit(text=prefill)
-        if edited is None:
-            click.echo("No changes made.")
-            return
 
-        content = _strip_comment_lines(edited)
+async def _workflow_set_global(registry: SessionRegistry) -> None:
+    """Set global workflow defaults via $EDITOR."""
+    current = await registry.get_workflow_defaults()
+    template = (
+        "# Global workflow defaults — applied to all projects without overrides.\n"
+        "# Lines starting with # are stripped on save.\n\n"
+    )
+    prefill = template + (current or "")
 
-        if not content:
-            click.echo("No content entered — no changes made.")
-            return
+    edited = click.edit(text=prefill)
+    if edited is None:
+        click.echo("No changes made.")
+        return
 
-        if project_name:
-            await registry.set_project_workflow(pid, content)
-            if INCLUDE_GLOBAL_TOKEN in content:
-                click.echo(
-                    f"Workflow updated for project '{pname}'"
-                    f" (includes global defaults via {INCLUDE_GLOBAL_TOKEN})."
-                )
-            else:
-                click.echo(f"Workflow updated for project '{pname}'.")
-        else:
-            await registry.set_workflow_defaults(content)
-            click.echo("Global workflow defaults updated.")
+    content = _strip_comment_lines(edited)
+    if not content:
+        click.echo("No content entered — no changes made.")
+        return
+
+    await registry.set_workflow_defaults(content)
+    click.echo("Global workflow defaults updated.")
+
+
+async def _workflow_set_project(registry: SessionRegistry, project_name: str) -> None:
+    """Set per-project workflow instructions via $EDITOR."""
+    project = await _resolve_project(registry, project_name)
+    pid = project["project_id"]
+    pname = project["name"]
+    current = await registry.get_project_workflow(pid)
+    global_wf = await registry.get_workflow_defaults()
+
+    lines = [
+        f"# Workflow instructions for project '{pname}'",
+        "# Lines starting with # are stripped on save.",
+        "#",
+    ]
+    if global_wf:
+        glines = global_wf.splitlines()
+        lines.append("# Current global defaults (for reference):")
+        lines.append("# " + "\u2500" * 40)
+        for gline in glines[:5]:
+            lines.append(f"# {gline}")
+        if len(glines) > 5:
+            lines.append("# ...")
+        lines.append("#")
+    lines.append(f"# Use {INCLUDE_GLOBAL_TOKEN} anywhere to include the global defaults inline.")
+    lines.append(
+        f"# Without {INCLUDE_GLOBAL_TOKEN}, these instructions fully replace the global defaults."
+    )
+    lines.append("")
+    template = "\n".join(lines)
+    prefill = template + (current or "")
+
+    edited = click.edit(text=prefill)
+    if edited is None:
+        click.echo("No changes made.")
+        return
+
+    content = _strip_comment_lines(edited)
+    if not content:
+        click.echo("No content entered — no changes made.")
+        return
+
+    await registry.set_project_workflow(pid, content)
+    if INCLUDE_GLOBAL_TOKEN in content:
+        click.echo(
+            f"Workflow updated for project '{pname}'"
+            f" (includes global defaults via {INCLUDE_GLOBAL_TOKEN})."
+        )
+    else:
+        click.echo(f"Workflow updated for project '{pname}'.")
 
 
 async def async_workflow_clear(project_name: str | None = None) -> None:

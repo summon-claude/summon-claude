@@ -521,24 +521,21 @@ def project_workflow() -> None:
     default=False,
     help="Show raw template without expanding $INCLUDE_GLOBAL",
 )
-@click.pass_context
-def workflow_show(ctx: click.Context, project_name: str | None, raw: bool) -> None:
+def workflow_show(project_name: str | None, raw: bool) -> None:
     """Show workflow instructions. Without PROJECT_NAME, shows global defaults."""
     asyncio.run(async_workflow_show(project_name, raw=raw))
 
 
 @project_workflow.command("set")
 @click.argument("project_name", required=False, default=None)
-@click.pass_context
-def workflow_set(ctx: click.Context, project_name: str | None) -> None:
+def workflow_set(project_name: str | None) -> None:
     """Set workflow instructions via $EDITOR. Without PROJECT_NAME, sets global defaults."""
     asyncio.run(async_workflow_set(project_name))
 
 
 @project_workflow.command("clear")
 @click.argument("project_name", required=False, default=None)
-@click.pass_context
-def workflow_clear(ctx: click.Context, project_name: str | None) -> None:
+def workflow_clear(project_name: str | None) -> None:
     """Clear workflow instructions. Without PROJECT_NAME, clears global defaults."""
     asyncio.run(async_workflow_clear(project_name))
 

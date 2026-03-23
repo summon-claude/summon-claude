@@ -512,7 +512,7 @@ class ConfigOption:
 
 
 @functools.cache
-def _is_extra_installed(package: str) -> bool:
+def is_extra_installed(package: str) -> bool:
     """Check if an optional dependency is importable."""
     try:
         importlib.import_module(package)
@@ -529,7 +529,7 @@ def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
     return (
         _scribe_enabled(cfg)
         and cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", "").lower() in ("true", "1", "yes")
-        and _is_extra_installed("playwright")
+        and is_extra_installed("playwright")
     )
 
 
@@ -607,7 +607,11 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         input_type="secret",
         required=True,
         help_hint="Find at: api.slack.com/apps → your app → Basic Information → App Credentials",
-        validate_fn=lambda v: None if re.match(r"^[0-9a-f]+$", v) else "Must be a hex string",
+        validate_fn=lambda v: (
+            "Cannot be empty"
+            if not v
+            else (None if re.match(r"^[0-9a-f]+$", v) else "Must be a hex string")
+        ),
     ),
     # Session Defaults
     ConfigOption(
@@ -701,7 +705,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Google Services",
         help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
         input_type="text",
-        visible=lambda cfg: _scribe_enabled(cfg) and _is_extra_installed("workspace_mcp"),
+        visible=lambda cfg: _scribe_enabled(cfg) and is_extra_installed("workspace_mcp"),
         validate_fn=_validate_google_services,
     ),
     # Scribe Slack

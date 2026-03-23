@@ -1198,15 +1198,30 @@ class SessionRegistry:
         - If project has a non-NULL ``workflow_instructions``, use it (even if empty).
           - If it contains ``$INCLUDE_GLOBAL``, replace the token with global defaults.
         - If project ``workflow_instructions`` IS NULL, fall back to global defaults.
+
+        Uses a single query to fetch both project and global workflow in one
+        round-trip instead of two sequential queries.
         """
-        project_wf = await self.get_project_workflow(project_id)
+        db = self._check_connected()
+        async with db.execute(
+            "SELECT p.workflow_instructions,"
+            "  (SELECT instructions FROM workflow_defaults WHERE id = 1)"
+            " FROM projects p WHERE p.project_id = ?",
+            (project_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        if not row:
+            # Project not found — fall back to global defaults
+            return await self.get_workflow_defaults()
+
+        project_wf, global_wf = row[0], row[1] or ""
 
         if project_wf is None:
-            return await self.get_workflow_defaults()
+            return global_wf
 
         # Project has an explicit value (may be empty string = "no instructions").
         if INCLUDE_GLOBAL_TOKEN in project_wf:
-            global_wf = await self.get_workflow_defaults()
             return project_wf.replace(INCLUDE_GLOBAL_TOKEN, global_wf)
 
         return project_wf

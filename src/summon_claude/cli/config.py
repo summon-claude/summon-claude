@@ -75,7 +75,7 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
     if not config_file.exists():
         click.echo(f"No config file found at {config_file}")
         click.echo("Run `summon init` to create one.\n")
-    if config_file.exists():
+    else:
         for raw_line in config_file.read_text().splitlines():
             stripped = raw_line.strip()
             if not stripped or stripped.startswith("#"):
@@ -92,9 +92,9 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
             if opt.group != current_group:
                 current_group = opt.group
                 hint = (
-                    click.style(f"  {opt.group}: disabled", dim=True)
+                    click.style(f"\n  {opt.group}: disabled", dim=True)
                     if color
-                    else f"  {opt.group}: disabled"
+                    else f"\n  {opt.group}: disabled"
                 )
                 click.echo(hint)
             continue
@@ -199,12 +199,16 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
             sys.exit(1)
 
     # Validate choices for choice-type options
-    if option and option.choices and value and value not in option.choices:
-        click.echo(
-            f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(option.choices)}",
-            err=True,
-        )
-        sys.exit(1)
+    if option and value:
+        choices = list(option.choices) if option.choices else []
+        if option.choices_fn:
+            choices = option.choices_fn()
+        if choices and value not in choices:
+            click.echo(
+                f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(choices)}",
+                err=True,
+            )
+            sys.exit(1)
 
     # Run option validator if present
     if option and option.validate_fn and value:
@@ -382,10 +386,10 @@ def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
     )
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-            import json as _json  # noqa: PLC0415
+            import json  # noqa: PLC0415
 
-            data = _json.loads(resp.read())
-            login = data.get("login", "unknown")
+            data = json.loads(resp.read(65536))
+            login = re.sub(r"[^a-zA-Z0-9\-]", "", data.get("login", "unknown")) or "unknown"
             if not quiet:
                 click.echo(f"  [PASS] GitHub PAT: valid (user: {login})")
             return True
@@ -703,14 +707,14 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
     # Optional extras availability (informational)
     if not quiet:
-        from summon_claude.config import _is_extra_installed  # noqa: PLC0415
+        from summon_claude.config import is_extra_installed  # noqa: PLC0415
 
         extras = {
             "workspace-mcp (Google)": "workspace_mcp",
             "playwright (Slack browser)": "playwright",
         }
         for label, pkg in extras.items():
-            status = "installed" if _is_extra_installed(pkg) else "not installed"
+            status = "installed" if is_extra_installed(pkg) else "not installed"
             click.echo(f"  [INFO] {label}: {status}")
 
     # Feature inventory — surface external flows so users know they exist
@@ -724,7 +728,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
 def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> None:
     """Print discoverable status of external setup flows."""
-    project_count = 0
+    project_count: int | None = None
     has_workflow = False
 
     try:
@@ -739,8 +743,10 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
                 _has_workflow = bool(wf)
                 raw_hooks = await reg.get_raw_hooks_json(project_id=None)
                 _has_hooks = raw_hooks is not None
-                projects = await reg.list_projects()
-                _project_count = len(projects)
+                db = reg.db
+                async with db.execute("SELECT COUNT(*) FROM projects") as cur:
+                    row = await cur.fetchone()
+                    _project_count = row[0] if row else 0
             return _has_workflow, _has_hooks, _project_count
 
         has_workflow, has_hooks, project_count = asyncio.run(_check_features())
@@ -767,9 +773,9 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
     # Hook bridge — check settings.json for summon-owned entries
     has_bridge = False
     try:
-        from summon_claude.cli.hooks import _read_settings  # noqa: PLC0415
+        from summon_claude.cli.hooks import read_settings  # noqa: PLC0415
 
-        settings = _read_settings()
+        settings = read_settings()
         hooks_list = settings.get("hooks", [])
         has_bridge = any(
             "summon-pre-worktree" in str(h) or "summon-post-worktree" in str(h) for h in hooks_list
@@ -794,8 +800,8 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
                 "  [INFO] Scribe enabled but Google not configured (summon config google-auth)"
             )
 
-    # Getting started nudge
-    if not project_count:
+    # Getting started nudge (only when count is confirmed 0, not on DB failure)
+    if project_count == 0:
         click.echo()
         click.echo(click.style("Getting started:", bold=True))
         click.echo("  summon project add <path>           Register a project directory")

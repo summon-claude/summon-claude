@@ -10,17 +10,17 @@ import pytest
 from summon_claude.config import (
     CONFIG_OPTIONS,
     SummonConfig,
-    _is_extra_installed,
     get_config_default,
+    is_extra_installed,
 )
 
 
 @pytest.fixture(autouse=True)
 def _clear_extra_installed_cache():
     """Prevent cross-test contamination from @functools.cache."""
-    _is_extra_installed.cache_clear()
+    is_extra_installed.cache_clear()
     yield
-    _is_extra_installed.cache_clear()
+    is_extra_installed.cache_clear()
 
 
 class TestConfigOptionRegistryGuard:
@@ -156,10 +156,10 @@ class TestConfigOptionVisibility:
         assert browser_opt.visible is not None
         assert not browser_opt.visible(cfg_scribe_only)
         # With playwright importable, both flags should make it visible
-        with patch("summon_claude.config._is_extra_installed", return_value=True):
+        with patch("summon_claude.config.is_extra_installed", return_value=True):
             assert browser_opt.visible(cfg_both)
         # Without playwright, still hidden even with both flags
-        with patch("summon_claude.config._is_extra_installed", return_value=False):
+        with patch("summon_claude.config.is_extra_installed", return_value=False):
             assert not browser_opt.visible(cfg_both)
 
     @pytest.mark.parametrize("bool_value", ["true", "1", "yes", "True", "YES"])
@@ -179,7 +179,7 @@ class TestVisibilityGracefulDegradation:
         cfg = {"SUMMON_SCRIBE_ENABLED": "true"}
         google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
         assert google_opt.visible is not None
-        with patch("summon_claude.config._is_extra_installed", return_value=False):
+        with patch("summon_claude.config.is_extra_installed", return_value=False):
             assert not google_opt.visible(cfg)
 
     def test_scribe_slack_browser_hidden_without_playwright(self):
@@ -187,7 +187,7 @@ class TestVisibilityGracefulDegradation:
         cfg = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_SLACK_ENABLED": "true"}
         browser_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_slack_browser")
         assert browser_opt.visible is not None
-        with patch("summon_claude.config._is_extra_installed", return_value=False):
+        with patch("summon_claude.config.is_extra_installed", return_value=False):
             assert not browser_opt.visible(cfg)
 
 
@@ -379,6 +379,31 @@ class TestSlackScopeGuard:
             f"  In manifest but not in code: {manifest_scopes - _REQUIRED_SLACK_SCOPES}\n"
             f"  In code but not in manifest: {_REQUIRED_SLACK_SCOPES - manifest_scopes}"
         )
+
+
+class TestFeatureInventory:
+    """Tests for _print_feature_inventory output."""
+
+    def test_shows_no_projects(self, tmp_path, capsys):
+        """Feature inventory shows 'none registered' when DB has no projects."""
+        from summon_claude.cli.config import _print_feature_inventory
+
+        db_path = tmp_path / "registry.db"
+        _print_feature_inventory(db_path, {})
+
+        out = capsys.readouterr().out
+        assert "none registered" in out
+
+    def test_db_failure_does_not_show_getting_started(self, tmp_path, capsys):
+        """Feature inventory suppresses 'Getting started' nudge on DB failure."""
+        from summon_claude.cli.config import _print_feature_inventory
+
+        db_path = tmp_path / "registry.db"
+        with patch("summon_claude.cli.config.asyncio.run", side_effect=OSError("DB fail")):
+            _print_feature_inventory(db_path, {})
+
+        out = capsys.readouterr().out
+        assert "Getting started" not in out
 
 
 class TestIncludeGlobalToken:
