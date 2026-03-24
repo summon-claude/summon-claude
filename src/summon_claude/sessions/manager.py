@@ -853,9 +853,9 @@ class SessionManager:
                         e,
                     )
 
-            # Start scribe if enabled and not already running.
+            # Resume suspended scribe or start fresh.
             # Note (M4): scribe spawns only via project_up. Standalone start deferred to M5.
-            self._start_scribe_if_enabled(user_id)
+            await self._resume_or_start_scribe(user_id)
 
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
@@ -1038,6 +1038,76 @@ class SessionManager:
             new_session_id,
             project["name"],
         )
+
+    async def _resume_or_start_scribe(self, user_id: str) -> None:
+        """Resume a suspended scribe or start fresh.
+
+        Follows the same suspend/resume pattern as PM and child sessions:
+        ``project down`` marks scribe as ``suspended``; ``project up``
+        resumes it with transcript continuity via ``create_resumed_session``.
+        Falls back to ``_start_scribe_if_enabled`` if no suspended scribe exists.
+        """
+        if not self._config.scribe_enabled:
+            return
+
+        # Check for already-running scribe
+        for sess in self._sessions.values():
+            if sess.is_scribe:
+                logger.info("SessionManager: scribe already running — skipping")
+                return
+
+        # Look for a suspended scribe session to resume
+        async with SessionRegistry() as registry:
+            all_sessions = await registry.list_all(limit=50)
+            suspended_scribe = next(
+                (
+                    s
+                    for s in all_sessions
+                    if s.get("status") == "suspended"
+                    and s.get("session_name") == "scribe"
+                    and s.get("project_id") is None
+                ),
+                None,
+            )
+            if suspended_scribe is not None:
+                sess_id = suspended_scribe["session_id"]
+                channel_id = suspended_scribe.get("slack_channel_id")
+                claude_sid: str | None = None
+                if channel_id:
+                    channel = await registry.get_channel(channel_id)
+                    claude_sid = (
+                        channel["claude_session_id"]
+                        if channel and channel.get("claude_session_id")
+                        else suspended_scribe.get("claude_session_id")
+                    )
+                options = SessionOptions(
+                    cwd=suspended_scribe.get("cwd", ""),
+                    name="scribe",
+                    model=self._config.scribe_model,
+                    scribe_profile=True,
+                    scan_interval_s=max(60, self._config.scribe_scan_interval_minutes * 60),
+                    resume=claude_sid,
+                    channel_id=channel_id,
+                )
+                try:
+                    await self.create_resumed_session(
+                        options,
+                        authenticated_user_id=user_id,
+                    )
+                    await registry.update_status(sess_id, "completed")
+                    logger.info("SessionManager: resumed suspended scribe %s", sess_id[:8])
+                    return
+                except Exception as e:
+                    logger.error("SessionManager: failed to resume scribe %s: %s", sess_id[:8], e)
+                    with contextlib.suppress(Exception):
+                        await registry.update_status(
+                            sess_id,
+                            "errored",
+                            error_message=f"Resume failed: {e}",
+                        )
+
+        # No suspended scribe found — start fresh
+        self._start_scribe_if_enabled(user_id)
 
     def _start_scribe_if_enabled(self, user_id: str) -> None:
         """Spawn the global Scribe session if configured and not already running."""

@@ -767,6 +767,8 @@ class TestProjectDownStopsScribe:
             stopped = await stop_project_managers()
 
         assert "scribe-sess-001" in stopped
+        # Scribe must be marked suspended in DB (same pattern as PM/child sessions)
+        mock_reg.update_status.assert_any_call("scribe-sess-001", "suspended")
 
     @pytest.mark.asyncio
     async def test_project_down_with_name_leaves_scribe(self):
@@ -861,3 +863,143 @@ class TestScribePreflight:
             manager._start_scribe_if_enabled("U123")
 
         mock_cls.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# _resume_or_start_scribe: suspend/resume lifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestResumeOrStartScribe:
+    @pytest.mark.asyncio
+    async def test_resumes_suspended_scribe(self):
+        """When a suspended scribe exists, resume it via create_resumed_session."""
+        manager = make_manager(scribe_enabled=True)
+
+        suspended_scribe = {
+            "session_id": "scribe-old-001",
+            "session_name": "scribe",
+            "status": "suspended",
+            "project_id": None,
+            "cwd": "/tmp/scribe",
+            "slack_channel_id": "C_SCRIBE",
+            "claude_session_id": "claude-sid-old",
+            "model": "sonnet",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.list_all.return_value = [suspended_scribe]
+        mock_reg.get_channel.return_value = {
+            "claude_session_id": "claude-sid-old",
+        }
+
+        manager.create_resumed_session = AsyncMock(return_value="scribe-new-001")
+
+        with patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg):
+            await manager._resume_or_start_scribe("U123")
+
+        # Resumed via create_resumed_session, not _start_scribe_if_enabled
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.scribe_profile is True
+        assert opts.name == "scribe"
+        assert opts.resume == "claude-sid-old"
+        assert opts.channel_id == "C_SCRIBE"
+
+        # Old suspended record marked completed
+        mock_reg.update_status.assert_any_call("scribe-old-001", "completed")
+
+    @pytest.mark.asyncio
+    async def test_falls_through_to_fresh_start(self):
+        """When no suspended scribe exists, falls through to _start_scribe_if_enabled."""
+        manager = make_manager(
+            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+        )
+
+        mock_reg = AsyncMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.list_all.return_value = []  # no suspended scribe
+
+        with (
+            patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg),
+            patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
+            patch("summon_claude.sessions.manager.asyncio.create_task") as mock_task,
+            patch("summon_claude.sessions.manager.pathlib.Path") as mock_path,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.is_scribe = True
+            mock_cls.return_value = mock_instance
+            mock_task.return_value = MagicMock()
+            mock_path.return_value = MagicMock()
+
+            await manager._resume_or_start_scribe("U123")
+
+        # Fell through to _start_scribe_if_enabled → SummonSession created
+        mock_cls.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_when_disabled(self):
+        """When scribe_enabled=False, does nothing."""
+        manager = make_manager(scribe_enabled=False)
+        # Should not raise or call anything
+        await manager._resume_or_start_scribe("U123")
+        assert len(manager._sessions) == 0
+
+    @pytest.mark.asyncio
+    async def test_skips_when_already_running(self):
+        """When a scribe is already running in memory, does nothing."""
+        manager = make_manager(scribe_enabled=True)
+        stub = MagicMock()
+        stub.is_scribe = True
+        manager._sessions["existing-scribe"] = stub
+
+        await manager._resume_or_start_scribe("U123")
+        # No new sessions created
+        assert len(manager._sessions) == 1
+
+    @pytest.mark.asyncio
+    async def test_resume_failure_marks_errored_and_falls_through(self):
+        """If resume fails, marks old session errored and falls through to fresh start."""
+        manager = make_manager(
+            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+        )
+
+        suspended_scribe = {
+            "session_id": "scribe-old-002",
+            "session_name": "scribe",
+            "status": "suspended",
+            "project_id": None,
+            "cwd": "/tmp/scribe",
+            "slack_channel_id": None,
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.list_all.return_value = [suspended_scribe]
+
+        manager.create_resumed_session = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with (
+            patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg),
+            patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
+            patch("summon_claude.sessions.manager.asyncio.create_task") as mock_task,
+            patch("summon_claude.sessions.manager.pathlib.Path") as mock_path,
+        ):
+            mock_instance = MagicMock()
+            mock_instance.is_scribe = True
+            mock_cls.return_value = mock_instance
+            mock_task.return_value = MagicMock()
+            mock_path.return_value = MagicMock()
+
+            await manager._resume_or_start_scribe("U123")
+
+        # Old record marked errored
+        mock_reg.update_status.assert_any_call(
+            "scribe-old-002", "errored", error_message="Resume failed: boom"
+        )
+        # Fell through to fresh start
+        mock_cls.assert_called_once()

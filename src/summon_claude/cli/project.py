@@ -222,8 +222,9 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                     try:
                         found = await daemon_client.stop_session(sid)
                         if found:
+                            await registry.update_status(sid, "suspended")
                             suspended.append(sid)
-                            click.echo(f"  Stopped scribe ({sid[:8]}...)")
+                            click.echo(f"  Suspended scribe ({sid[:8]}...)")
                     except Exception as e:
                         click.echo(f"  Failed to stop scribe: {e}", err=True)
 
