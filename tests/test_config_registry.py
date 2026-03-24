@@ -162,7 +162,7 @@ class TestConfigOptionVisibility:
         with patch("summon_claude.config.is_extra_installed", return_value=False):
             assert not browser_opt.visible(cfg_both)
 
-    @pytest.mark.parametrize("bool_value", ["true", "1", "yes", "True", "YES"])
+    @pytest.mark.parametrize("bool_value", ["true", "1", "yes", "on", "True", "YES", "ON"])
     def test_scribe_enabled_accepts_truthy_values(self, bool_value: str):
         """Visibility predicate should accept all truthy boolean strings."""
         cfg = {"SUMMON_SCRIBE_ENABLED": bool_value}
@@ -175,11 +175,11 @@ class TestVisibilityGracefulDegradation:
     """Visibility predicates degrade gracefully when optional extras missing."""
 
     def test_scribe_google_hidden_without_workspace_mcp(self):
-        """scribe_google_services hidden when workspace_mcp not importable."""
+        """scribe_google_services hidden when workspace-mcp binary not found."""
         cfg = {"SUMMON_SCRIBE_ENABLED": "true"}
         google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
         assert google_opt.visible is not None
-        with patch("summon_claude.config.is_extra_installed", return_value=False):
+        with patch("summon_claude.config._workspace_mcp_installed", return_value=False):
             assert not google_opt.visible(cfg)
 
     def test_scribe_slack_browser_hidden_without_playwright(self):
@@ -249,6 +249,43 @@ class TestConfigShowIntegration:
         out = capsys.readouterr().out
         assert "ghp_secret123abc" not in out
         assert "configured" in out
+
+
+class TestConfigShowBoolSourceLabel:
+    """Test that config_show correctly labels bool fields as (default) vs (set)."""
+
+    def test_bool_field_at_default_shows_default(self, tmp_path, capsys):
+        """A flag field set to its default value shows (default)."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_ENABLE_THINKING=true\n")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        # Find the SUMMON_ENABLE_THINKING line and check it says (default)
+        for line in out.splitlines():
+            if "SUMMON_ENABLE_THINKING" in line:
+                assert "(default)" in line, f"Expected (default) in: {line}"
+                break
+
+    def test_bool_field_not_at_default_shows_set(self, tmp_path, capsys):
+        """A flag field set to non-default value shows (set)."""
+        from summon_claude.cli.config import config_show
+
+        config_file = tmp_path / "config.env"
+        config_file.write_text("SUMMON_ENABLE_THINKING=false\n")
+
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_show(color=False)
+
+        out = capsys.readouterr().out
+        for line in out.splitlines():
+            if "SUMMON_ENABLE_THINKING" in line:
+                assert "(set)" in line, f"Expected (set) in: {line}"
+                break
 
 
 class TestNoUpdateCheckField:
@@ -409,6 +446,60 @@ class TestFeatureInventory:
         out = capsys.readouterr().out
         assert "Getting started" not in out
 
+    def test_shows_workflow_configured(self, tmp_path, capsys):
+        """Feature inventory shows PASS when workflow defaults are set."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with patch(
+            "summon_claude.cli.config._check_features",
+            new_callable=AsyncMock,
+            return_value=(True, False, 1),  # has_workflow, has_hooks, project_count
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {})
+
+        out = capsys.readouterr().out
+        assert "Workflow instructions: configured" in out
+
+    def test_shows_hooks_configured(self, tmp_path, capsys):
+        """Feature inventory shows PASS when lifecycle hooks are set."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with patch(
+            "summon_claude.cli.config._check_features",
+            new_callable=AsyncMock,
+            return_value=(False, True, 1),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {})
+
+        out = capsys.readouterr().out
+        assert "Lifecycle hooks: configured" in out
+
+    def test_shows_scribe_google_nudge(self, tmp_path, capsys):
+        """Feature inventory shows Google nudge when scribe is enabled without creds."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(False, False, 0),
+            ),
+            patch(
+                "summon_claude.cli.config.get_google_credentials_dir",
+                return_value=tmp_path / "nonexistent-creds",
+            ),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SCRIBE_ENABLED": "true"})
+
+        out = capsys.readouterr().out
+        assert "Scribe enabled but Google not configured" in out
+
 
 class TestIncludeGlobalToken:
     """Tests for the INCLUDE_GLOBAL_TOKEN."""
@@ -417,3 +508,96 @@ class TestIncludeGlobalToken:
         from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 
         assert INCLUDE_GLOBAL_TOKEN == "$INCLUDE_GLOBAL"
+
+
+class TestValidateFunctions:
+    """Direct unit tests for _validate_* functions used by ConfigOption.validate_fn."""
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("1", None),
+            ("60", None),
+            ("0", "Must be at least 1"),
+            ("-1", "Must be at least 1"),
+            ("abc", "Must be an integer"),
+            ("", "Must be an integer"),
+        ],
+    )
+    def test_validate_scribe_scan_interval(self, value, expected):
+        from summon_claude.config import _validate_scribe_scan_interval
+
+        assert _validate_scribe_scan_interval(value) == expected
+
+    @pytest.mark.parametrize(
+        "value,expected_none",
+        [
+            ("summon", True),
+            ("my-team", True),
+            ("a1_b2", True),
+            ("1abc", True),  # starts with digit — valid per Slack rules
+            ("", False),  # empty
+            ("UPPER", False),  # uppercase
+            ("has space", False),  # spaces
+            ("-start", False),  # starts with hyphen
+        ],
+    )
+    def test_validate_channel_prefix(self, value, expected_none):
+        from summon_claude.config import _validate_channel_prefix
+
+        result = _validate_channel_prefix(value)
+        if expected_none:
+            assert result is None, f"Expected valid for {value!r}, got {result!r}"
+        else:
+            assert result is not None, f"Expected error for {value!r}"
+
+    @pytest.mark.parametrize(
+        "value,expected_none",
+        [
+            ("", True),  # empty = no quiet hours
+            ("22:00-07:00", True),
+            ("00:00-23:59", True),
+            ("23:00", False),  # missing second part
+            ("abc-def", False),
+            ("25:00-07:00", False),  # invalid hour
+        ],
+    )
+    def test_validate_quiet_hours(self, value, expected_none):
+        from summon_claude.config import _validate_quiet_hours
+
+        result = _validate_quiet_hours(value)
+        if expected_none:
+            assert result is None, f"Expected valid for {value!r}, got {result!r}"
+        else:
+            assert result is not None, f"Expected error for {value!r}"
+
+    @pytest.mark.parametrize(
+        "value,expected_none",
+        [
+            ("", True),
+            ("gmail", True),
+            ("gmail,calendar,drive", True),
+            ("gmail,unknown_svc", False),
+            ("bogus", False),
+        ],
+    )
+    def test_validate_google_services(self, value, expected_none):
+        from summon_claude.config import _validate_google_services
+
+        result = _validate_google_services(value)
+        if expected_none:
+            assert result is None, f"Expected valid for {value!r}, got {result!r}"
+        else:
+            assert result is not None, f"Expected error for {value!r}"
+
+
+class TestBoolTrueConstant:
+    """Guard: _BOOL_TRUE must cover all values accepted by config_set normalization."""
+
+    def test_bool_true_includes_on(self):
+        from summon_claude.config import _BOOL_TRUE
+
+        assert "on" in _BOOL_TRUE
+        assert "true" in _BOOL_TRUE
+        assert "1" in _BOOL_TRUE
+        assert "yes" in _BOOL_TRUE

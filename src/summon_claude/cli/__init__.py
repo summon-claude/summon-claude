@@ -550,7 +550,7 @@ def workflow_clear(project_name: str | None) -> None:
 def cmd_init(ctx: click.Context) -> None:
     """Interactive setup wizard for summon-claude configuration."""
     from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
-    from summon_claude.config import CONFIG_OPTIONS, get_config_default  # noqa: PLC0415
+    from summon_claude.config import CONFIG_OPTIONS, _is_truthy, get_config_default  # noqa: PLC0415
 
     # Preflight check
     cli_status = check_claude_cli()
@@ -568,13 +568,10 @@ def cmd_init(ctx: click.Context) -> None:
     config_file = pathlib.Path(config_path_override) if config_path_override else get_config_file()
 
     # Load existing config values for pre-filling
-    existing: dict[str, str] = {}
-    if config_file.exists():
-        for raw_line in config_file.read_text().splitlines():
-            stripped = raw_line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                k, _, v = stripped.partition("=")
-                existing[k.strip()] = v.strip()
+    from summon_claude.cli.config import parse_env_file  # noqa: PLC0415
+
+    existing = parse_env_file(config_file)
+    if existing:
         click.echo(f"  Existing config found at {config_file}")
         click.echo("  Press Enter to keep current values.\n")
 
@@ -650,9 +647,12 @@ def cmd_init(ctx: click.Context) -> None:
                         err = opt.validate_fn(value)
 
         elif opt.input_type == "choice":
-            choices = list(opt.choices) if opt.choices else []
             if opt.choices_fn:
                 choices = opt.choices_fn()
+            elif opt.choices:
+                choices = list(opt.choices)
+            else:
+                choices = []
             prompt_default = current_value or (str(default) if default is not None else "")
             value = click.prompt(
                 f"    {opt.label}",
@@ -664,7 +664,7 @@ def cmd_init(ctx: click.Context) -> None:
         elif opt.input_type == "flag":
             current_bool = False
             if current_value:
-                current_bool = current_value.lower() in ("true", "1", "yes")
+                current_bool = _is_truthy(current_value)
             elif default is not None:
                 current_bool = bool(default)
             value = "true" if click.confirm(f"    {opt.label}?", default=current_bool) else "false"

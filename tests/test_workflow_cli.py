@@ -120,7 +120,18 @@ class TestWorkflowShow:
             asyncio.run(async_workflow_show("myapp"))
         out = capsys.readouterr().out
         assert "using global defaults" in out
-        assert "Global defaults." in out
+
+    def test_show_project_fallback_empty_global(self, capsys):
+        """Project with NULL workflow AND empty global → 'No workflow instructions configured.'"""
+        mock_ctx, _reg = _mock_registry(
+            projects=[_PROJECT],
+            project_wf=None,
+            global_wf="",
+        )
+        with patch("summon_claude.cli.project.SessionRegistry", return_value=mock_ctx):
+            asyncio.run(async_workflow_show("myapp"))
+        out = capsys.readouterr().out
+        assert "No workflow instructions configured." in out
 
     def test_show_project_explicitly_cleared(self, capsys):
         mock_ctx, _reg = _mock_registry(

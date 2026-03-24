@@ -350,6 +350,30 @@ class TestConfigSet:
         assert "SUMMON_CHANNEL_PREFIX=test" not in content
 
 
+class TestConfigSetNewlineStripping:
+    def test_config_set_strips_newlines(self, tmp_path):
+        """config set strips \\n and \\r to prevent .env injection."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            # Use DEFAULT_MODEL (text type, no validate_fn) to test the stripping
+            config_set("SUMMON_DEFAULT_MODEL", "model-a\nSUMMON_SLACK_BOT_TOKEN=injected")
+        content = config_file.read_text()
+        lines = content.strip().splitlines()
+        assert len(lines) == 1, f"Expected 1 line, got {len(lines)}: {lines}"
+        assert "SUMMON_DEFAULT_MODEL=model-aSUMMON_SLACK_BOT_TOKEN=injected" in content
+
+    def test_config_set_strips_carriage_return(self, tmp_path):
+        """config set strips \\r from values."""
+        config_file = tmp_path / "config.env"
+        config_file.write_text("")
+        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+            config_set("SUMMON_DEFAULT_MODEL", "abc\r\ndef")
+        content = config_file.read_text()
+        assert "\r" not in content
+        assert "\n" not in content.split("=", 1)[1].strip()
+
+
 class TestConfigSetValidation:
     def test_config_set_rejects_unknown_key(self, tmp_path):
         """config set should reject keys not in CONFIG_OPTIONS."""

@@ -391,6 +391,102 @@ class TestConfigCheck:
             assert result.exit_code == 0
             assert "DB" in result.output
 
+    def test_config_check_schema_version_ahead(self, tmp_path):
+        """Test config check warns when DB schema is ahead of current release."""
+        from summon_claude.cli.preflight import CliStatus
+
+        runner = CliRunner()
+        config_file = tmp_path / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
+        )
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch(
+                "summon_claude.cli.config._check_db",
+                return_value=(999, "ok", 0, 0),
+            ),
+        ):
+            result = runner.invoke(cli, ["config", "check"])
+            assert "WARN" in result.output
+            assert "ahead" in result.output
+            # Schema ahead is a warning, not a failure — exit code should be 0
+            assert result.exit_code == 0
+
+    def test_config_check_slack_scope_missing(self, tmp_path):
+        """Test config check reports missing Slack bot scopes."""
+        from unittest.mock import MagicMock
+
+        from summon_claude.cli.preflight import CliStatus
+
+        runner = CliRunner()
+        config_file = tmp_path / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.__getitem__ = MagicMock(side_effect=lambda k: True if k == "ok" else None)
+        mock_resp.get = MagicMock(side_effect=lambda k, d=None: "TestTeam" if k == "team" else d)
+        mock_resp.headers = {"x-oauth-scopes": "chat:write,channels:read"}
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch("slack_sdk.WebClient") as mock_web_client,
+        ):
+            mock_web_client.return_value.auth_test.return_value = mock_resp
+            result = runner.invoke(cli, ["config", "check"])
+            assert "FAIL" in result.output
+            assert "missing scopes" in result.output
+
+    def test_config_check_slack_scope_all_granted(self, tmp_path):
+        """Test config check passes when all Slack scopes are granted."""
+        from unittest.mock import MagicMock
+
+        from summon_claude.cli.config import _REQUIRED_SLACK_SCOPES
+        from summon_claude.cli.preflight import CliStatus
+
+        runner = CliRunner()
+        config_file = tmp_path / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-valid-token\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-valid-token\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abcd1234\n"
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.__getitem__ = MagicMock(side_effect=lambda k: True if k == "ok" else None)
+        mock_resp.get = MagicMock(side_effect=lambda k, d=None: "TestTeam" if k == "team" else d)
+        mock_resp.headers = {"x-oauth-scopes": ",".join(_REQUIRED_SLACK_SCOPES)}
+
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch("slack_sdk.WebClient") as mock_web_client,
+        ):
+            mock_web_client.return_value.auth_test.return_value = mock_resp
+            result = runner.invoke(cli, ["config", "check"])
+            assert "required scopes granted" in result.output
+
 
 # ---------------------------------------------------------------------------
 # Integration Tests

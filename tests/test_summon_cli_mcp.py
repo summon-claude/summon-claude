@@ -1146,3 +1146,13 @@ class TestSessionStatusUpdate:
         assert "<@U12345>" not in text
         assert "<!here>" not in text
         assert "<!subteam" not in text
+
+    async def test_session_status_update_chat_update_failure(self, populated_registry):
+        """session_status_update returns is_error when chat_update raises."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(side_effect=Exception("Slack down"))
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        result = await tools["session_status_update"].handler({"summary": "Status update"})
+        assert result.get("is_error") is True
+        assert "Error updating status" in result["content"][0]["text"]

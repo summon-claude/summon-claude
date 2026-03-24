@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,8 @@ from pathlib import Path
 import click
 
 from summon_claude.config import (
+    _BOOL_FALSE,
+    _BOOL_TRUE,
     CONFIG_OPTIONS,
     find_workspace_mcp_bin,
     get_config_file,
@@ -50,6 +53,21 @@ _REQUIRED_SLACK_SCOPES: frozenset[str] = frozenset(
 )
 
 
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a .env-style config file into a dict. Returns {} if the file does not exist."""
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            k, _, v = stripped.partition("=")
+            values[k.strip()] = v.strip()
+    return values
+
+
 def _require_config_file(override: str | None = None):
     """Return the config file Path if it exists, else print a hint and return None."""
     config_file = get_config_file(override)
@@ -69,26 +87,18 @@ def config_show(override: str | None = None, *, color: bool = True) -> None:
     from summon_claude.config import get_config_default  # noqa: PLC0415
 
     config_file = get_config_file(override)
-
-    # Parse config file into dict (works even if no file exists)
-    values: dict[str, str] = {}
+    values = parse_env_file(config_file)
     if not config_file.exists():
         click.echo(f"No config file found at {config_file}")
         click.echo("Run `summon init` to create one.\n")
-    else:
-        for raw_line in config_file.read_text().splitlines():
-            stripped = raw_line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" in stripped:
-                k, _, v = stripped.partition("=")
-                values[k.strip()] = v.strip()
 
     current_group = ""
     for opt in CONFIG_OPTIONS:
         # Evaluate visibility predicate
         if opt.visible is not None and not opt.visible(values):
-            # Show dim hint for hidden groups (only once per group)
+            # Show dim hint for hidden groups (only once per group).
+            # Uses current_group so groups with at least one visible item
+            # don't also print a "disabled" hint for their hidden items.
             if opt.group != current_group:
                 current_group = opt.group
                 hint = (
@@ -172,7 +182,7 @@ def config_edit(override: str | None = None) -> None:
 
     editor = os.environ.get("EDITOR", "vi")
     try:
-        subprocess.run([editor, str(config_file)], check=False)  # noqa: S603
+        subprocess.run([*shlex.split(editor), str(config_file)], check=False)  # noqa: S603
     except FileNotFoundError:
         click.echo(f"Editor '{editor}' not found. Set $EDITOR to your preferred editor.", err=True)
         sys.exit(1)
@@ -190,23 +200,25 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
     option = next((opt for opt in CONFIG_OPTIONS if opt.env_key == key), None)
     if option and option.input_type == "flag":
         lower = value.lower()
-        if lower in ("true", "1", "yes", "on"):
+        if lower in _BOOL_TRUE:
             value = "true"
-        elif lower in ("false", "0", "no", "off"):
+        elif lower in _BOOL_FALSE:
             value = "false"
         else:
             click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
             sys.exit(1)
 
-    # Validate choices for choice-type options (static choices or dynamic choices_fn)
+    # Validate choices for choice-type options (choices_fn takes precedence over static choices)
     if option and value:
-        choices = list(option.choices) if option.choices else []
+        choices: list[str] = []
         if option.choices_fn:
             try:
                 choices = option.choices_fn()
             except Exception as e:
                 click.echo(f"Error resolving choices for {key}: {e}", err=True)
                 sys.exit(1)
+        elif option.choices:
+            choices = list(option.choices)
         if choices and value not in choices:
             click.echo(
                 f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(choices)}",
@@ -385,6 +397,8 @@ def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
     import urllib.error  # noqa: PLC0415
     import urllib.request  # noqa: PLC0415
 
+    # Strip CRLF to prevent header injection from hand-edited config or env vars.
+    pat = pat.replace("\r", "").replace("\n", "")
     req = urllib.request.Request(
         "https://api.github.com/user",
         headers={"Authorization": f"Bearer {pat}", "Accept": "application/vnd.github+json"},
@@ -409,7 +423,9 @@ def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
         return True  # network issue, not a token problem
 
 
-def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
+def _check_google_status(
+    *, prefix: str = "", quiet: bool = False, google_services: str = ""
+) -> bool | None:
     """Check Google Workspace authentication status.
 
     Returns True if valid, False if credentials exist but are broken,
@@ -438,16 +454,10 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
         return None
 
     # Read configured services once, outside the per-user loop.
-    services = ["gmail", "calendar", "drive"]  # fallback
-    config_file = get_config_file()
-    if config_file.exists():
-        for _line in config_file.read_text().splitlines():
-            _s = _line.strip()
-            if _s.startswith("SUMMON_SCRIBE_GOOGLE_SERVICES="):
-                svc_str = _s.split("=", 1)[1].strip()
-                if svc_str:
-                    services = [s.strip() for s in svc_str.split(",") if s.strip()]
-                break
+    if google_services:
+        services = [s.strip() for s in google_services.split(",") if s.strip()]
+    else:
+        services = ["gmail", "calendar", "drive"]
     required = set(get_scopes_for_tools(services))
 
     all_ok = True
@@ -484,7 +494,44 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
 
 def google_status() -> None:
     """Check Google Workspace authentication status (CLI entry point)."""
-    _check_google_status()
+    values = parse_env_file(get_config_file())
+    _check_google_status(google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", ""))
+
+
+async def _check_db(db_path: Path) -> tuple[int, str, int, int]:
+    """Query DB for schema version, integrity, and row counts."""
+    version = 0
+    integrity = "unknown"
+    sessions = 0
+    audit = 0
+    reg = SessionRegistry(db_path=db_path)
+    async with reg:
+        db = reg.db
+        version = await get_schema_version(db)
+        async with db.execute("PRAGMA integrity_check") as cursor:
+            row = await cursor.fetchone()
+            integrity = row[0] if row else "unknown"
+        async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
+            row = await cur.fetchone()
+            sessions = row[0] if row else 0
+        async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
+            row = await cur.fetchone()
+            audit = row[0] if row else 0
+    return version, integrity, sessions, audit
+
+
+async def _check_features(db_path: Path) -> tuple[bool, bool, int]:
+    """Query DB for workflow, hooks, and project count."""
+    reg = SessionRegistry(db_path=db_path)
+    async with reg:
+        has_workflow = bool(await reg.get_workflow_defaults())
+        raw_hooks = await reg.get_raw_hooks_json(project_id=None)
+        has_hooks = raw_hooks is not None
+        db = reg.db
+        async with db.execute("SELECT COUNT(*) FROM projects") as cur:
+            row = await cur.fetchone()
+            project_count = row[0] if row else 0
+    return has_workflow, has_hooks, project_count
 
 
 def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
@@ -505,15 +552,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         all_pass = False
 
     # Parse the config file into a dict
-    values: dict[str, str] = {}
-    if config_file.exists():
-        for raw_line in config_file.read_text().splitlines():
-            stripped = raw_line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" in stripped:
-                k, _, v = stripped.partition("=")
-                values[k.strip()] = v.strip()
+    values = parse_env_file(config_file)
 
     # Required keys
     required_keys = [opt.env_key for opt in CONFIG_OPTIONS if opt.required]
@@ -557,7 +596,10 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
     # Pydantic validation — catches @field_validator rules (effort, quiet_hours,
     # google_services, channel_prefix, etc.) that individual key checks above miss.
-    if values:
+    # Skip when required keys are missing — those failures are already reported above
+    # and model_validate would just produce a duplicate cryptic error.
+    required_missing = [key for key in required_keys if not bool(values.get(key))]
+    if values and not required_missing:
         from summon_claude.config import SummonConfig  # noqa: PLC0415
 
         try:
@@ -591,28 +633,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
     # Schema version, integrity, and row counts
     try:
-
-        async def _check_db() -> tuple[int, str, int, int]:
-            version = 0
-            integrity = "unknown"
-            sessions = 0
-            audit = 0
-            reg = SessionRegistry(db_path=db_path)
-            async with reg:
-                db = reg.db
-                version = await get_schema_version(db)
-                async with db.execute("PRAGMA integrity_check") as cursor:
-                    row = await cursor.fetchone()
-                    integrity = row[0] if row else "unknown"
-                async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
-                    row = await cur.fetchone()
-                    sessions = row[0] if row else 0
-                async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
-                    row = await cur.fetchone()
-                    audit = row[0] if row else 0
-            return version, integrity, sessions, audit
-
-        version, integrity, sessions_count, audit_count = asyncio.run(_check_db())
+        version, integrity, sessions_count, audit_count = asyncio.run(_check_db(db_path))
 
         # Schema version
         if version == CURRENT_SCHEMA_VERSION:
@@ -696,7 +717,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         )
 
     # Google Workspace (optional, only if credentials exist)
-    google_result = _check_google_status(prefix="  ", quiet=quiet)
+    google_result = _check_google_status(
+        prefix="  ", quiet=quiet, google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", "")
+    )
     if google_result is not None:
         # Credentials exist — report pass/fail
         if google_result:
@@ -712,12 +735,12 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     if not quiet:
         from summon_claude.config import is_extra_installed  # noqa: PLC0415
 
-        extras = {
-            "workspace-mcp (Google)": "workspace_mcp",
-            "playwright (Slack browser)": "playwright",
-        }
-        for label, pkg in extras.items():
-            status = "installed" if is_extra_installed(pkg) else "not installed"
+        extras = [
+            ("workspace-mcp (Google)", find_workspace_mcp_bin().exists()),
+            ("playwright (Slack browser)", is_extra_installed("playwright")),
+        ]
+        for label, installed in extras:
+            status = "installed" if installed else "not installed"
             click.echo(f"  [INFO] {label}: {status}")
 
     # Feature inventory — surface external flows so users know they exist
@@ -732,27 +755,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> None:
     """Print discoverable status of external setup flows."""
     project_count: int | None = None
-    has_workflow = False
 
     try:
-
-        async def _check_features() -> tuple[bool, bool, int]:
-            _has_workflow = False
-            _has_hooks = False
-            _project_count = 0
-            reg = SessionRegistry(db_path=db_path)
-            async with reg:
-                wf = await reg.get_workflow_defaults()
-                _has_workflow = bool(wf)
-                raw_hooks = await reg.get_raw_hooks_json(project_id=None)
-                _has_hooks = raw_hooks is not None
-                db = reg.db
-                async with db.execute("SELECT COUNT(*) FROM projects") as cur:
-                    row = await cur.fetchone()
-                    _project_count = row[0] if row else 0
-            return _has_workflow, _has_hooks, _project_count
-
-        has_workflow, has_hooks, project_count = asyncio.run(_check_features())
+        has_workflow, has_hooks, project_count = asyncio.run(_check_features(db_path))
 
         # Projects — the primary workflow
         if project_count:
@@ -791,7 +796,7 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         logging.getLogger(__name__).debug("Hook bridge check error", exc_info=True)
 
     # Scribe → Google auth nudge
-    scribe_on = config_values.get("SUMMON_SCRIBE_ENABLED", "").lower() in ("true", "1", "yes")
+    scribe_on = config_values.get("SUMMON_SCRIBE_ENABLED", "").lower() in _BOOL_TRUE
     if scribe_on:
         try:
             google_dir = get_google_credentials_dir()

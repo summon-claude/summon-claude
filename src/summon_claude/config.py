@@ -521,14 +521,27 @@ def is_extra_installed(package: str) -> bool:
         return False
 
 
+_BOOL_TRUE: frozenset[str] = frozenset({"true", "1", "yes", "on"})
+_BOOL_FALSE: frozenset[str] = frozenset({"false", "0", "no", "off"})
+
+
+def _is_truthy(value: str) -> bool:
+    return value.lower() in _BOOL_TRUE
+
+
+def _workspace_mcp_installed() -> bool:
+    """Check if workspace-mcp binary is available (not importable as a Python package)."""
+    return find_workspace_mcp_bin().exists()
+
+
 def _scribe_enabled(cfg: dict[str, str]) -> bool:
-    return cfg.get("SUMMON_SCRIBE_ENABLED", "").lower() in ("true", "1", "yes")
+    return _is_truthy(cfg.get("SUMMON_SCRIBE_ENABLED", ""))
 
 
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
     return (
         _scribe_enabled(cfg)
-        and cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", "").lower() in ("true", "1", "yes")
+        and _is_truthy(cfg.get("SUMMON_SCRIBE_SLACK_ENABLED", ""))
         and is_extra_installed("playwright")
     )
 
@@ -705,7 +718,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Google Services",
         help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
         input_type="text",
-        visible=lambda cfg: _scribe_enabled(cfg) and is_extra_installed("workspace_mcp"),
+        visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
         validate_fn=_validate_google_services,
     ),
     # Scribe Slack

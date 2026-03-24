@@ -1758,26 +1758,42 @@ class SummonSession:
         # Regular sessions: own channel only.
         # Project PMs: own channel + channels of child sessions they spawned.
         # Global PM (no project_id): own channel + all active user channels.
+        # PM resolvers use a short TTL cache to avoid a DB query per MCP tool call.
         _own_cid = rt.client.channel_id
         _reg = rt.registry
         _sid = self._session_id
         _owner = self._authenticated_user_id
+        _channel_scope_ttl = 5.0  # seconds
+        _cached_channels: set[str] | None = None
+        _channels_cached_at: float = 0.0
 
         if is_pm and not self._project_id:
             # Global PM: access all active channels for this user
             async def _global_pm_channel_scope() -> set[str]:
+                nonlocal _cached_channels, _channels_cached_at
+                now = asyncio.get_running_loop().time()
+                if _cached_channels is not None and now - _channels_cached_at < _channel_scope_ttl:
+                    return _cached_channels
                 channels = {_own_cid}
                 if _owner:
                     channels |= await _reg.get_all_active_channels(_owner)
+                _cached_channels = channels
+                _channels_cached_at = now
                 return channels
 
             channel_scope = _global_pm_channel_scope
         elif is_pm:
             # Project PM: own channel + child session channels
             async def _pm_channel_scope() -> set[str]:
+                nonlocal _cached_channels, _channels_cached_at
+                now = asyncio.get_running_loop().time()
+                if _cached_channels is not None and now - _channels_cached_at < _channel_scope_ttl:
+                    return _cached_channels
                 channels = {_own_cid}
                 if _owner:
                     channels |= await _reg.get_child_channels(_sid, _owner)
+                _cached_channels = channels
+                _channels_cached_at = now
                 return channels
 
             channel_scope = _pm_channel_scope
