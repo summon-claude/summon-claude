@@ -547,6 +547,14 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
     return _is_truthy(cfg.get("SUMMON_SCRIBE_ENABLED", ""))
 
 
+def _scribe_google_enabled(cfg: dict[str, str]) -> bool:
+    return (
+        _scribe_enabled(cfg)
+        and _is_truthy(cfg.get("SUMMON_SCRIBE_GOOGLE_ENABLED", ""))
+        and _workspace_mcp_installed()
+    )
+
+
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
     return (
         _scribe_enabled(cfg)
@@ -736,7 +744,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Google Services",
         help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
         input_type="text",
-        visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
+        visible=_scribe_google_enabled,
         validate_fn=_validate_google_services,
     ),
     # Scribe Slack
