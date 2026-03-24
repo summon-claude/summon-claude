@@ -49,9 +49,9 @@ class TestScribeConfigDefaults:
         cfg = _make_config()
         assert cfg.scribe_quiet_hours == ""
 
-    def test_google_enabled_default_true(self):
+    def test_google_enabled_default_false(self):
         cfg = _make_config()
-        assert cfg.scribe_google_enabled is True
+        assert cfg.scribe_google_enabled is False
 
     def test_google_services_default(self):
         cfg = _make_config()
@@ -565,3 +565,99 @@ class TestGoogleOptionalDep:
         assert "google" in optional_deps
         google_deps = optional_deps["google"]
         assert any("workspace-mcp" in dep for dep in google_deps)
+
+
+# ---------------------------------------------------------------------------
+# slack_status and slack_remove CLI commands
+# ---------------------------------------------------------------------------
+
+
+class TestSlackStatusCommand:
+    def test_slack_status_no_config(self, tmp_path):
+        """slack-status shows 'not configured' when no workspace config exists."""
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with patch(
+            "summon_claude.cli.config.get_workspace_config_path",
+            return_value=tmp_path / "missing.json",
+        ):
+            result = runner.invoke(cmd_config, ["slack-status"])
+
+        assert result.exit_code == 0
+        assert "No external Slack workspace configured" in result.output
+
+    def test_slack_status_with_config(self, tmp_path):
+        """slack-status shows workspace URL and user ID from config."""
+        import json
+
+        config_file = tmp_path / "ws.json"
+        auth_state = tmp_path / "auth.json"
+        auth_state.write_text("{}")
+        config_file.write_text(
+            json.dumps(
+                {
+                    "url": "https://myteam.slack.com",
+                    "user_id": "U_EXT_123",
+                    "auth_state_path": str(auth_state),
+                }
+            )
+        )
+
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with patch("summon_claude.cli.config.get_workspace_config_path", return_value=config_file):
+            result = runner.invoke(cmd_config, ["slack-status"])
+
+        assert result.exit_code == 0
+        assert "myteam.slack.com" in result.output
+        assert "U_EXT_123" in result.output
+
+
+class TestSlackRemoveCommand:
+    def test_slack_remove_no_config(self, tmp_path):
+        """slack-remove shows 'not configured' when no workspace config exists."""
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with patch(
+            "summon_claude.cli.config.get_workspace_config_path",
+            return_value=tmp_path / "missing.json",
+        ):
+            result = runner.invoke(cmd_config, ["slack-remove"])
+
+        assert result.exit_code == 0
+        assert "No external Slack workspace configured" in result.output
+
+    def test_slack_remove_confirmed(self, tmp_path):
+        """slack-remove deletes auth state and config when confirmed."""
+        import json
+
+        browser_auth = tmp_path / "browser_auth"
+        browser_auth.mkdir()
+        auth_state = browser_auth / "slack_test.json"
+        auth_state.write_text("{}")
+        config_file = tmp_path / "ws.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "url": "https://myteam.slack.com",
+                    "auth_state_path": str(auth_state),
+                }
+            )
+        )
+
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with (
+            patch("summon_claude.cli.config.get_workspace_config_path", return_value=config_file),
+            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+        ):
+            result = runner.invoke(cmd_config, ["slack-remove"], input="y\n")
+
+        assert result.exit_code == 0
+        assert "removed" in result.output.lower()
+        assert not config_file.exists()
+        assert not auth_state.exists()

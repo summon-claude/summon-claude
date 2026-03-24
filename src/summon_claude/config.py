@@ -276,6 +276,14 @@ VALID_GOOGLE_SERVICES = frozenset(
 )
 
 
+_SLACK_WORKSPACE_FILE = "slack_workspace.json"
+
+
+def get_workspace_config_path() -> Path:
+    """Path to the external Slack workspace config file."""
+    return get_data_dir() / _SLACK_WORKSPACE_FILE
+
+
 def find_workspace_mcp_bin() -> Path:
     """Locate the ``workspace-mcp`` console-script in the same Python environment.
 
@@ -342,7 +350,7 @@ class SummonConfig(BaseSettings):
     scribe_quiet_hours: str = ""  # "22:00-07:00" — only level-5 alerts during this window
 
     # Google Workspace data collector (requires workspace-mcp optional dep)
-    scribe_google_enabled: bool = True
+    scribe_google_enabled: bool = False
     scribe_google_services: str = "gmail,calendar,drive"  # comma-separated service list
 
     # External Slack data collector

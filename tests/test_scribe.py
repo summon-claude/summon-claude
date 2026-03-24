@@ -41,6 +41,24 @@ def make_scribe_prompt(**overrides) -> dict:
     return build_scribe_system_prompt(**defaults)
 
 
+def make_manager(*, scribe_enabled: bool = False, **config_overrides):
+    """Create a SessionManager stub for testing _start_scribe_if_enabled."""
+    from summon_claude.sessions.manager import SessionManager
+
+    config = make_config(scribe_enabled=scribe_enabled, **config_overrides)
+    manager = SessionManager.__new__(SessionManager)
+    manager._config = config
+    manager._sessions = {}
+    manager._tasks = {}
+    manager._web_client = AsyncMock()
+    manager._dispatcher = MagicMock()
+    manager._bot_user_id = "B001"
+    manager._ipc_resume = AsyncMock()
+    manager.create_session_with_spawn_token = AsyncMock()
+    manager._grace_timer = None
+    return manager
+
+
 # ---------------------------------------------------------------------------
 # C12 Phase 1: SessionOptions defaults
 # ---------------------------------------------------------------------------
@@ -85,15 +103,32 @@ class TestScribeSystemPromptSecurity:
 
 
 class TestScribeChannelName:
-    def test_scribe_channel_name(self):
-        """Scribe channel name is hard-coded to 0-summon-scribe."""
-        # Verify by inspecting the source constant used in _get_or_create_scribe_channel
-        import inspect
-
-        from summon_claude.sessions import session as session_mod
-
-        source = inspect.getsource(session_mod.SummonSession._get_or_create_scribe_channel)
-        assert "0-summon-scribe" in source
+    @pytest.mark.asyncio
+    async def test_scribe_channel_name(self):
+        """Scribe channel creates/joins '0-summon-scribe' (behavioral)."""
+        config = make_config()
+        opts = SessionOptions(cwd="/tmp", name="scribe", scribe_profile=True)
+        sess = SummonSession(
+            config=config,
+            options=opts,
+            auth=None,
+            session_id="test-ch-name",
+            web_client=None,
+            dispatcher=MagicMock(),
+            bot_user_id="B001",
+            ipc_spawn=AsyncMock(),
+            ipc_resume=AsyncMock(),
+        )
+        web_client = AsyncMock()
+        web_client.conversations_list.return_value = {
+            "channels": [],
+            "response_metadata": {"next_cursor": ""},
+        }
+        web_client.conversations_create.return_value = {
+            "channel": {"id": "C_NEW", "name": "0-summon-scribe"}
+        }
+        _, name = await sess._get_or_create_scribe_channel(web_client)
+        assert name == "0-summon-scribe"
 
 
 class TestScribeIsScribeProperty:
@@ -131,6 +166,11 @@ class TestScribeIsScribeProperty:
 
 
 class TestScribeScanTimerNonce:
+    """Structural guards — nonce wiring is deep inside _run_session_tasks
+    and cannot be tested behaviorally without full SDK/Slack integration.
+    Source inspection verifies the security constant is present.
+    """
+
     def test_scribe_scan_timer_uses_nonce(self):
         """SUMMON-INTERNAL- prefix is used in scribe scan prompt."""
         import inspect
@@ -152,6 +192,10 @@ class TestScribeScanTimerNonce:
 
 
 class TestScribeNoGitHubMCP:
+    """Structural guard — GitHub MCP exclusion is deep inside _run_session_tasks.
+    Behavioral testing would require mocking the full SDK session lifecycle.
+    """
+
     def test_scribe_no_github_mcp(self):
         """GitHub MCP is gated by 'if not is_scribe' guard."""
         import inspect
@@ -159,11 +203,14 @@ class TestScribeNoGitHubMCP:
         from summon_claude.sessions import session as session_mod
 
         source = inspect.getsource(session_mod.SummonSession._run_session_tasks)
-        # The guard must exist: not wired for scribe
         assert "not is_scribe" in source or "if not is_scribe" in source
 
 
 class TestScribeSettingSources:
+    """Structural guard — setting_sources assignment is deep inside _run_session_tasks.
+    Behavioral testing would require mocking the full SDK session lifecycle.
+    """
+
     def test_scribe_setting_sources_user_only(self):
         """setting_sources is ['user'] for scribe sessions (not ['user', 'project'])."""
         import inspect
@@ -171,7 +218,6 @@ class TestScribeSettingSources:
         from summon_claude.sessions import session as session_mod
 
         source = inspect.getsource(session_mod.SummonSession._run_session_tasks)
-        # The line that sets setting_sources uses (is_pm or is_scribe) condition
         assert "is_scribe" in source
         assert '"user", "project"' in source or '["user", "project"]' in source
 
@@ -182,25 +228,9 @@ class TestScribeSettingSources:
 
 
 class TestStartScribeIfEnabled:
-    def _make_manager(self, **config_overrides):
-        from summon_claude.sessions.manager import SessionManager
-
-        config = make_config(**config_overrides)
-        manager = SessionManager.__new__(SessionManager)
-        manager._config = config
-        manager._sessions = {}
-        manager._tasks = {}
-        manager._web_client = AsyncMock()
-        manager._dispatcher = MagicMock()
-        manager._bot_user_id = "B001"
-        manager._ipc_resume = AsyncMock()
-        manager.create_session_with_spawn_token = AsyncMock()
-        manager._grace_timer = None
-        return manager
-
     def test_start_scribe_if_enabled_skips_when_disabled(self):
         """When scribe_enabled=False, no session is created."""
-        manager = self._make_manager(scribe_enabled=False)
+        manager = make_manager(scribe_enabled=False)
 
         with patch("summon_claude.sessions.manager.SummonSession") as mock_session_cls:
             manager._start_scribe_if_enabled("U123")
@@ -209,7 +239,7 @@ class TestStartScribeIfEnabled:
 
     def test_start_scribe_if_enabled_skips_when_running(self):
         """When a scribe session is already running, skip spawning another."""
-        manager = self._make_manager(scribe_enabled=True)
+        manager = make_manager(scribe_enabled=True)
 
         # Inject a stub scribe session
         stub = MagicMock()
@@ -241,6 +271,10 @@ class TestScribeImportanceKeywordsInPrompt:
 
 
 class TestScribePromptQuietHoursContext:
+    """Structural guard — quiet hours config is embedded in the scan prompt
+    inside _run_session_tasks. Behavioral testing requires full SDK lifecycle.
+    """
+
     def test_scribe_scan_includes_quiet_hours_config(self):
         """Quiet hours config is included in scan prompt for dynamic evaluation."""
         import inspect
@@ -260,22 +294,6 @@ class TestScribePromptQuietHoursContext:
 class TestStartScribeSpawnsSession:
     """test_start_scribe_spawns_session — happy path creates a SummonSession."""
 
-    def _make_manager(self, **config_overrides):
-        from summon_claude.sessions.manager import SessionManager
-
-        config = make_config(scribe_enabled=True, **config_overrides)
-        manager = SessionManager.__new__(SessionManager)
-        manager._config = config
-        manager._sessions = {}
-        manager._tasks = {}
-        manager._web_client = AsyncMock()
-        manager._dispatcher = MagicMock()
-        manager._bot_user_id = "B001"
-        manager._ipc_resume = AsyncMock()
-        manager.create_session_with_spawn_token = AsyncMock()
-        manager._grace_timer = None
-        return manager
-
     def test_start_scribe_spawns_session(self):
         """With scribe_enabled=True and no existing scribe, a session is registered.
 
@@ -284,7 +302,9 @@ class TestStartScribeSpawnsSession:
         needing a running event loop.
         """
         # Bypass google preflight: empty services string and slack disabled
-        manager = self._make_manager(scribe_google_services="", scribe_slack_enabled=False)
+        manager = make_manager(
+            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+        )
 
         with (
             patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
@@ -389,7 +409,10 @@ class TestStartSlackMonitors:
         """No slack_workspace.json → monitors list stays empty."""
         sess = self._make_session()
 
-        with patch("summon_claude.sessions.session.get_data_dir", return_value=tmp_path):
+        with patch(
+            "summon_claude.sessions.session.get_workspace_config_path",
+            return_value=tmp_path / "nonexistent.json",
+        ):
             await sess._start_slack_monitors()
 
         assert sess._slack_monitors == []
@@ -411,7 +434,10 @@ class TestStartSlackMonitors:
             )
         )
 
-        with patch("summon_claude.sessions.session.get_data_dir", return_value=tmp_path):
+        with patch(
+            "summon_claude.sessions.session.get_workspace_config_path",
+            return_value=config_path,
+        ):
             await sess._start_slack_monitors()
 
         assert sess._slack_monitors == []
@@ -438,54 +464,111 @@ class TestExternalSlackMcp:
             ipc_resume=AsyncMock(),
         )
 
-    def _build_monitor_with_messages(self, messages):
-        """Return a mock monitor whose drain() returns the given messages."""
+    def _extract_tool_fn(self, sess):
+        """Call _create_external_slack_mcp and capture the inner tool function."""
+        captured = {}
+
+        def mock_tool(name, desc, schema):
+            def decorator(fn):
+                captured["fn"] = fn
+                return fn
+
+            return decorator
+
+        with (
+            patch("claude_agent_sdk.create_sdk_mcp_server", return_value={}),
+            patch("claude_agent_sdk.tool", side_effect=mock_tool),
+        ):
+            sess._create_external_slack_mcp()
+        return captured["fn"]
+
+    @pytest.mark.asyncio
+    async def test_external_slack_check_spotlighting(self):
+        """Messages are wrapped in UNTRUSTED delimiters with a nonce."""
         from summon_claude.slack_browser import SlackMessage
 
-        mock_monitor = AsyncMock()
-        mock_monitor._queue = MagicMock()
-        mock_monitor._queue.qsize.return_value = 0
-        mock_monitor.drain = AsyncMock(return_value=messages)
-        return mock_monitor
+        sess = self._make_session()
+        monitor = AsyncMock()
+        monitor._queue = MagicMock()
+        monitor._queue.qsize.return_value = 0
+        monitor.drain = AsyncMock(
+            return_value=[
+                SlackMessage(channel="C001", user="U123", text="Hello", ts="1.0", workspace="test"),
+            ]
+        )
+        sess._slack_monitors = [monitor]
 
-    def test_external_slack_check_spotlighting(self):
-        """Messages are wrapped in UNTRUSTED delimiters containing a nonce.
+        tool_fn = self._extract_tool_fn(sess)
+        result = await tool_fn({})
+        text = result["content"][0]["text"]
 
-        [SEC-001] Spotlighting with [SEC-R-005] per-session nonce — verified
-        via source inspection since create_sdk_mcp_server is a local import.
-        """
-        import inspect as inspect_mod
-
-        from summon_claude.sessions import session as session_mod
-
-        source = inspect_mod.getsource(session_mod.SummonSession._create_external_slack_mcp)
-        assert "BEGIN UNTRUSTED" in source
-        assert "END UNTRUSTED" in source
-        # Nonce is generated per session and embedded in delimiter
-        assert "delimiter_nonce" in source
+        assert "BEGIN UNTRUSTED" in text
+        assert "END UNTRUSTED" in text
+        assert "Hello" in text
 
     @pytest.mark.asyncio
     async def test_external_slack_check_truncation(self):
         """Messages over 2000 chars are truncated and marked [truncated]."""
-        import inspect as inspect_mod
+        from summon_claude.slack_browser import SlackMessage
 
-        from summon_claude.sessions import session as session_mod
+        sess = self._make_session()
+        long_text = "x" * 3000
+        monitor = AsyncMock()
+        monitor._queue = MagicMock()
+        monitor._queue.qsize.return_value = 0
+        monitor.drain = AsyncMock(
+            return_value=[
+                SlackMessage(
+                    channel="C001", user="U123", text=long_text, ts="1.0", workspace="test"
+                ),
+            ]
+        )
+        sess._slack_monitors = [monitor]
 
-        source = inspect_mod.getsource(session_mod.SummonSession._create_external_slack_mcp)
-        assert "max_text_len" in source or "2000" in source
-        assert "[truncated]" in source
+        tool_fn = self._extract_tool_fn(sess)
+        result = await tool_fn({})
+        text = result["content"][0]["text"]
+
+        assert "[truncated]" in text
+        # Original 3000 chars should be cut to 2000
+        assert "x" * 2001 not in text
 
     @pytest.mark.asyncio
     async def test_external_slack_check_drain_cap(self):
-        """drain() is called with limit=50 (max 50 messages per drain)."""
-        import inspect as inspect_mod
+        """drain() is called with limit=50."""
+        from summon_claude.slack_browser import SlackMessage
 
-        from summon_claude.sessions import session as session_mod
+        sess = self._make_session()
+        monitor = AsyncMock()
+        monitor._queue = MagicMock()
+        monitor._queue.qsize.return_value = 0
+        monitor.drain = AsyncMock(
+            return_value=[
+                SlackMessage(channel="C001", user="U123", text="msg", ts="1.0", workspace="test"),
+            ]
+        )
+        sess._slack_monitors = [monitor]
 
-        source = inspect_mod.getsource(session_mod.SummonSession._create_external_slack_mcp)
-        assert "max_per_drain" in source or "50" in source
-        # drain is called with the limit keyword
-        assert "drain(limit=" in source or "drain(limit=max_per_drain)" in source
+        tool_fn = self._extract_tool_fn(sess)
+        await tool_fn({})
+
+        monitor.drain.assert_called_once_with(limit=50)
+
+    @pytest.mark.asyncio
+    async def test_external_slack_check_no_messages(self):
+        """No messages returns '(no new messages)'."""
+        sess = self._make_session()
+        monitor = AsyncMock()
+        monitor._queue = MagicMock()
+        monitor._queue.qsize.return_value = 0
+        monitor.drain = AsyncMock(return_value=[])
+        sess._slack_monitors = [monitor]
+
+        tool_fn = self._extract_tool_fn(sess)
+        result = await tool_fn({})
+        text = result["content"][0]["text"]
+
+        assert "(no new messages)" in text
 
 
 # ---------------------------------------------------------------------------
@@ -494,12 +577,12 @@ class TestExternalSlackMcp:
 
 
 class TestScribeTopicFormat:
-    def test_scribe_topic_format(self):
-        """Topic for scribe sessions contains 'Scribe | Monitoring' and the interval.
+    """Structural guard — topic is set inside _run_session during channel setup.
+    Behavioral testing requires mocking the full Slack channel creation flow.
+    """
 
-        The topic string is set inside _run_session (not start), where channel
-        creation and topic configuration happen.
-        """
+    def test_scribe_topic_format(self):
+        """Topic string for scribe sessions contains 'Scribe | Monitoring'."""
         import inspect
 
         from summon_claude.sessions import session as session_mod
@@ -535,15 +618,40 @@ class TestScribeCanvasTemplate:
 
 
 class TestScribeShutdownStopsMonitors:
-    def test_scribe_shutdown_stops_monitors(self):
+    @pytest.mark.asyncio
+    async def test_scribe_shutdown_stops_monitors(self):
         """_shutdown() calls stop() on each monitor in _slack_monitors."""
-        import inspect
+        config = make_config()
+        opts = SessionOptions(cwd="/tmp", name="scribe", scribe_profile=True)
+        sess = SummonSession(
+            config=config,
+            options=opts,
+            auth=None,
+            session_id="test-shutdown-mon",
+            web_client=None,
+            dispatcher=MagicMock(),
+            bot_user_id="B001",
+            ipc_spawn=AsyncMock(),
+            ipc_resume=AsyncMock(),
+        )
 
-        from summon_claude.sessions import session as session_mod
+        monitor1 = AsyncMock()
+        monitor1.stop = AsyncMock()
+        monitor2 = AsyncMock()
+        monitor2.stop = AsyncMock()
+        sess._slack_monitors = [monitor1, monitor2]
 
-        source = inspect.getsource(session_mod.SummonSession._shutdown)
-        assert "slack_monitors" in source
-        assert "monitor.stop()" in source or ".stop()" in source
+        # _shutdown expects a RunTimeState — mock it minimally
+        rt = MagicMock()
+        rt.client = MagicMock()
+        rt.client.post = AsyncMock()
+        rt.registry = AsyncMock()
+
+        await sess._shutdown(rt)
+
+        monitor1.stop.assert_called_once()
+        monitor2.stop.assert_called_once()
+        assert sess._slack_monitors == []
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +712,16 @@ class TestSlackAuthValidatesUrl:
         result = runner.invoke(cmd_config, ["slack-auth", "http://myteam.slack.com"])
         assert result.exit_code != 0
 
+    def test_slack_auth_rejects_slack_substring_in_query(self):
+        """slack_auth rejects URLs with 'slack.com' in query string (not domain)."""
+        from click.testing import CliRunner
+
+        from summon_claude.cli.__init__ import cmd_config
+
+        runner = CliRunner()
+        result = runner.invoke(cmd_config, ["slack-auth", "https://evil.com?ref=slack.com"])
+        assert result.exit_code != 0
+
 
 # ---------------------------------------------------------------------------
 # project down stops scribe
@@ -650,6 +768,31 @@ class TestProjectDownStopsScribe:
 
         assert "scribe-sess-001" in stopped
 
+    @pytest.mark.asyncio
+    async def test_project_down_with_name_leaves_scribe(self):
+        """stop_project_managers(name='myproject') does NOT stop the scribe session."""
+        from summon_claude.cli.project import stop_project_managers
+
+        mock_reg = AsyncMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.list_projects.return_value = [{"project_id": "proj-001", "name": "myproject"}]
+        mock_reg.get_project_sessions.return_value = []
+
+        with (
+            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
+            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_reg),
+            patch("summon_claude.cli.project.daemon_client") as mock_daemon,
+            patch("summon_claude.cli.project._run_project_hooks", return_value=None),
+        ):
+            mock_daemon.stop_session = AsyncMock(return_value=True)
+
+            stopped = await stop_project_managers(name="myproject")
+
+        # Scribe was NOT stopped because name filter was provided
+        assert stopped == []
+        mock_daemon.stop_session.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # _start_scribe_if_enabled pre-flight checks
@@ -657,29 +800,11 @@ class TestProjectDownStopsScribe:
 
 
 class TestScribePreflight:
-    def _make_manager(self, **config_overrides):
-        from summon_claude.sessions.manager import SessionManager
-
-        config = make_config(scribe_enabled=True, **config_overrides)
-        manager = SessionManager.__new__(SessionManager)
-        manager._config = config
-        manager._sessions = {}
-        manager._tasks = {}
-        manager._web_client = AsyncMock()
-        manager._dispatcher = MagicMock()
-        manager._bot_user_id = "B001"
-        manager._ipc_resume = AsyncMock()
-        manager.create_session_with_spawn_token = AsyncMock()
-        manager._grace_timer = None
-        return manager
-
     def test_scribe_preflight_missing_google(self):
-        """_start_scribe_if_enabled returns early when workspace-mcp binary missing.
-
-        find_workspace_mcp_bin is a local import inside the method, so we patch
-        it at its definition site (summon_claude.config).
-        """
-        manager = self._make_manager(scribe_google_services="gmail")
+        """_start_scribe_if_enabled returns early when workspace-mcp binary missing."""
+        manager = make_manager(
+            scribe_enabled=True, scribe_google_enabled=True, scribe_google_services="gmail"
+        )
 
         missing_bin = MagicMock()
         missing_bin.exists.return_value = False
@@ -692,13 +817,45 @@ class TestScribePreflight:
 
         mock_cls.assert_not_called()
 
-    def test_scribe_preflight_missing_playwright(self, tmp_path):
-        """_start_scribe_if_enabled returns early when playwright not installed."""
-        manager = self._make_manager(scribe_slack_enabled=True)
+    def test_scribe_preflight_missing_google_creds(self, tmp_path):
+        """_start_scribe_if_enabled returns early when Google creds directory has no .json files."""
+        manager = make_manager(
+            scribe_enabled=True, scribe_google_enabled=True, scribe_google_services="gmail"
+        )
+
+        present_bin = MagicMock()
+        present_bin.exists.return_value = True
+
+        # Create an empty creds directory (no .json files)
+        creds_dir = tmp_path / "google-creds"
+        creds_dir.mkdir()
 
         with (
             patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
-            patch("summon_claude.sessions.manager.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.config.find_workspace_mcp_bin", return_value=present_bin),
+            patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
+        ):
+            manager._start_scribe_if_enabled("U123")
+
+        mock_cls.assert_not_called()
+
+    def test_scribe_preflight_missing_playwright(self, tmp_path):
+        """_start_scribe_if_enabled returns early when playwright not installed.
+
+        Bypass the Google preflight by disabling Google, isolating the Playwright check.
+        """
+        manager = make_manager(
+            scribe_enabled=True,
+            scribe_google_enabled=False,
+            scribe_slack_enabled=True,
+        )
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
+            patch(
+                "summon_claude.config.get_workspace_config_path",
+                return_value=tmp_path / "ws.json",
+            ),
             patch("importlib.util.find_spec", return_value=None),
         ):
             manager._start_scribe_if_enabled("U123")

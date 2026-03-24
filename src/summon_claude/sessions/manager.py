@@ -1064,7 +1064,7 @@ class SessionManager:
             from summon_claude.config import get_google_credentials_dir  # noqa: PLC0415
 
             creds_dir = get_google_credentials_dir()
-            if not any(creds_dir.glob("*.json")) if creds_dir.is_dir() else True:
+            if not creds_dir.is_dir() or not any(creds_dir.glob("*.json")):
                 logger.error("Run 'summon config google-auth' before starting scribe")
                 return
 
@@ -1077,7 +1077,9 @@ class SessionManager:
                 )
                 return
             # Check for Slack auth state
-            ws_config = get_data_dir() / "slack_workspace.json"
+            from summon_claude.config import get_workspace_config_path  # noqa: PLC0415
+
+            ws_config = get_workspace_config_path()
             if not ws_config.is_file():
                 logger.error("Run 'summon config slack-auth' before enabling scribe Slack")
                 return

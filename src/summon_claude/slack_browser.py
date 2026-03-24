@@ -175,18 +175,26 @@ class SlackBrowserMonitor:
             is_mention=is_mention,
         )
 
-        # Thread-safe enqueue via the captured event loop
+        # Thread-safe enqueue via the captured event loop.
+        # put_nowait is scheduled as a callback — QueueFull fires inside
+        # the loop, not here. Wrap in a helper so overflow is logged.
         if self._loop is not None and not self._loop.is_closed():
-            try:
-                self._loop.call_soon_threadsafe(self._queue.put_nowait, msg)
-            except asyncio.QueueFull:
-                logger.warning(
-                    "SlackBrowserMonitor queue full for workspace %s — dropping message",
-                    self._workspace_id,
-                )
-            except RuntimeError:
-                # Loop was closed between the check and the call
-                pass
+            with contextlib.suppress(RuntimeError):
+                self._loop.call_soon_threadsafe(self._safe_enqueue, msg)
+
+    def _safe_enqueue(self, msg: SlackMessage) -> None:
+        """Enqueue a message, dropping with a warning if the queue is full.
+
+        Called via ``call_soon_threadsafe`` so the QueueFull exception is
+        caught in the event loop thread where it actually fires.
+        """
+        try:
+            self._queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            logger.warning(
+                "SlackBrowserMonitor queue full for workspace %s — dropping message",
+                self._workspace_id,
+            )
 
     async def drain(self, limit: int = 0) -> list[SlackMessage]:
         """Drain queued messages and return them.

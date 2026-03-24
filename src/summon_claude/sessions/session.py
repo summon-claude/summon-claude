@@ -42,6 +42,7 @@ from summon_claude.config import (
     discover_plugin_skills,
     find_workspace_mcp_bin,
     get_data_dir,
+    get_workspace_config_path,
     google_mcp_env,
 )
 from summon_claude.sessions.auth import SessionAuth, generate_spawn_token
@@ -83,6 +84,7 @@ from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
 
 if TYPE_CHECKING:
     from summon_claude.event_dispatcher import EventDispatcher
+    from summon_claude.slack_browser import SlackBrowserMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -1058,6 +1060,7 @@ class SummonSession:
         self._changed_files: dict[str, FileChange] = {}
         self._pm_status_ts: str | None = None
         self._slack_monitors: list[Any] = []  # SlackBrowserMonitor instances
+        self._scribe_welcomed: bool = False
 
     # ------------------------------------------------------------------
     # Public API (called by SessionManager / BoltRouter)
@@ -1442,8 +1445,9 @@ class SummonSession:
         if self._pm_profile:
             await self._post_pm_welcome(client, web_client)
 
-        # Scribe welcome message (first run only — check channel history)
-        if self._scribe_profile and not self._channel_id_option:
+        # Scribe welcome message (first run only — flag survives restarts)
+        if self._scribe_profile and not self._scribe_welcomed:
+            self._scribe_welcomed = True
             try:
                 interval_min = max(1, self._scan_interval_s // 60)
                 await client.post(
@@ -1828,7 +1832,7 @@ class SummonSession:
 
         from summon_claude.slack_browser import SlackBrowserMonitor, _slugify  # noqa: PLC0415
 
-        config_path = get_data_dir() / "slack_workspace.json"
+        config_path = get_workspace_config_path()
         if not config_path.is_file():
             logger.info("Scribe: no external Slack workspace configured — skipping monitors")
             return
@@ -2036,8 +2040,12 @@ class SummonSession:
         elif is_scribe:
             _own_cid = rt.client.channel_id
             _reg = rt.registry
+            _scribe_channels_cache: set[str] | None = None
 
             async def _scribe_channel_scope() -> set[str]:
+                nonlocal _scribe_channels_cache
+                if _scribe_channels_cache is not None:
+                    return _scribe_channels_cache
                 channels = {_own_cid}
                 # Include Global PM channel if it exists (GPM not yet in M4 — handle missing).
                 try:
@@ -2051,6 +2059,10 @@ class SummonSession:
                             break
                 except Exception as e:
                     logger.debug("Scribe: GPM channel lookup failed (non-fatal): %s", e)
+                # Only cache once GPM is found — if it starts later we need
+                # to keep querying until it appears.
+                if len(channels) > 1:
+                    _scribe_channels_cache = channels
                 return channels
 
             channel_scope = _scribe_channel_scope
@@ -2258,8 +2270,7 @@ class SummonSession:
                     "Periodic scan. Check current time. "
                     "Query all configured data sources for new items since your last scan. "
                     "Check calendar for events in the next 60 minutes. "
-                    "Triage all items by importance and post alerts to your channel."
-                    f"{quiet_config}"
+                    "Triage all items by importance and post alerts to your channel." + quiet_config
                 )
                 await scheduler.create(
                     cron_expr=_build_scan_cron(self._scan_interval_s),

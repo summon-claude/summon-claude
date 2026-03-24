@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -257,6 +258,22 @@ class TestMonitorDrain:
         assert second == []
 
     @pytest.mark.asyncio
+    async def test_monitor_drain_with_limit(self):
+        """drain(limit=N) stops after N messages and leaves the rest."""
+        monitor = make_monitor(monitored_channels=["C001"])
+        monitor._loop = asyncio.get_running_loop()
+
+        for i in range(5):
+            frame = make_frame(channel="C001", ts=f"123456789{i}.000001")
+            monitor._on_frame(frame)
+
+        await asyncio.sleep(0)
+
+        first = await monitor.drain(limit=3)
+        assert len(first) == 3
+        assert monitor._queue.qsize() == 2
+
+    @pytest.mark.asyncio
     async def test_monitor_queue_full_drops_without_crash(self):
         """Overflow beyond _QUEUE_MAX does not raise — drops with a warning."""
         from summon_claude.slack_browser import _QUEUE_MAX
@@ -281,5 +298,101 @@ class TestMonitorDrain:
 
         await asyncio.sleep(0)
 
-        # Queue is still at max capacity (overflow was dropped silently)
+        # Queue is still at max capacity (overflow was dropped)
         assert monitor._queue.qsize() == _QUEUE_MAX
+
+    @pytest.mark.asyncio
+    async def test_monitor_skips_message_deleted(self):
+        """message_deleted subtype is discarded."""
+        monitor = make_monitor(monitored_channels=["C001"])
+        monitor._loop = asyncio.get_running_loop()
+
+        frame = make_frame(channel="C001", subtype="message_deleted")
+        monitor._on_frame(frame)
+
+        await asyncio.sleep(0)
+
+        with pytest.raises(asyncio.QueueEmpty):
+            monitor._queue.get_nowait()
+
+    @pytest.mark.asyncio
+    async def test_monitor_on_frame_without_loop(self):
+        """Frames arriving before start() (loop=None) are silently dropped."""
+        monitor = make_monitor(monitored_channels=["C001"])
+        # Do NOT set monitor._loop — it defaults to None
+
+        frame = make_frame(channel="C001")
+        monitor._on_frame(frame)
+
+        assert monitor._queue.qsize() == 0
+
+
+# ---------------------------------------------------------------------------
+# C14: stop() symlink guard
+# ---------------------------------------------------------------------------
+
+
+class TestMonitorStop:
+    @pytest.mark.asyncio
+    async def test_stop_refuses_symlink_state_file(self, tmp_path):
+        """stop() refuses to save auth state if state_file is a symlink (SEC-R-002)."""
+        real_file = tmp_path / "real_state.json"
+        real_file.write_text("{}")
+        symlink = tmp_path / "symlinked_state.json"
+        symlink.symlink_to(real_file)
+
+        monitor = make_monitor()
+        monitor._state_file = symlink
+        monitor._context = AsyncMock()
+        monitor._browser = AsyncMock()
+        monitor._playwright = AsyncMock()
+
+        await monitor.stop()
+
+        # storage_state should NOT have been called (symlink refused)
+        monitor._context.storage_state.assert_not_called()
+        # But cleanup should still run
+        monitor._context.close.assert_called_once()
+        monitor._browser.close.assert_called_once()
+        monitor._playwright.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_stop_saves_state_for_normal_file(self, tmp_path):
+        """stop() saves auth state for a normal (non-symlink) file."""
+        state_file = tmp_path / "state.json"
+        state_file.write_text("{}")
+
+        monitor = make_monitor()
+        monitor._state_file = state_file
+        monitor._context = AsyncMock()
+        monitor._browser = AsyncMock()
+        monitor._playwright = AsyncMock()
+
+        await monitor.stop()
+
+        monitor._context.storage_state.assert_called_once_with(path=str(state_file))
+
+
+# ---------------------------------------------------------------------------
+# interactive_slack_auth symlink guard
+# ---------------------------------------------------------------------------
+
+
+class TestInteractiveSlackAuth:
+    @pytest.mark.asyncio
+    async def test_interactive_slack_auth_rejects_symlinked_dir(self, tmp_path):
+        """interactive_slack_auth raises RuntimeError if browser_auth/ is a symlink."""
+        from summon_claude.slack_browser import interactive_slack_auth
+
+        real_dir = tmp_path / "real_auth"
+        real_dir.mkdir()
+        symlinked_dir = tmp_path / "browser_auth"
+        symlinked_dir.symlink_to(real_dir)
+
+        from unittest.mock import patch as _patch
+
+        with (
+            _patch("summon_claude.slack_browser.get_data_dir", return_value=tmp_path),
+            pytest.raises(RuntimeError, match="symlink"),
+        ):
+            await interactive_slack_auth("https://test.slack.com")

@@ -204,6 +204,7 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
         click.echo(f"Suspended {', '.join(parts)}.")
 
+
     # Run project_down hooks for all projects in the filter (even those with no
     # active sessions — their services/environment still need teardown).
     target_project_ids = [p["project_id"] for p in projects]

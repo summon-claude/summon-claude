@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import re
@@ -11,6 +12,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import click
 
@@ -22,6 +24,7 @@ from summon_claude.config import (
     get_config_file,
     get_data_dir,
     get_google_credentials_dir,
+    get_workspace_config_path,
     google_mcp_env,
 )
 from summon_claude.sessions.migrations import CURRENT_SCHEMA_VERSION, get_schema_version
@@ -826,13 +829,6 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
 # External Slack workspace commands (C9)
 # ---------------------------------------------------------------------------
 
-_SLACK_WORKSPACE_FILE = "slack_workspace.json"
-
-
-def _get_workspace_config_path() -> Path:
-    """Path to the external Slack workspace config."""
-    return get_data_dir() / _SLACK_WORKSPACE_FILE
-
 
 def slack_auth(workspace_url: str) -> None:
     """Interactive Slack workspace authentication via Playwright.
@@ -840,7 +836,10 @@ def slack_auth(workspace_url: str) -> None:
     Opens a real browser window for the user to log in. Saves auth state
     to ``get_data_dir() / browser_auth/``.
     """
-    if not workspace_url.startswith("https://") or "slack.com" not in workspace_url:
+    parsed = urlparse(workspace_url)
+    if parsed.scheme != "https" or not (
+        parsed.netloc.endswith(".slack.com") or parsed.netloc == "slack.com"
+    ):
         click.echo(
             "Expected a Slack workspace URL like https://myteam.slack.com",
             err=True,
@@ -863,8 +862,6 @@ def slack_auth(workspace_url: str) -> None:
     click.echo("Complete the login in the browser window (timeout: 5 minutes)")
     click.echo("WARNING: Auth state contains session cookies — treat stored files as secrets.")
 
-    import json  # noqa: PLC0415
-
     state_file = asyncio.run(interactive_slack_auth(workspace_url, browser_type))
 
     click.echo(f"Slack auth saved to {state_file}")
@@ -881,7 +878,7 @@ def slack_auth(workspace_url: str) -> None:
     }
     if user_id:
         workspace_config["user_id"] = user_id
-    config_path = _get_workspace_config_path()
+    config_path = get_workspace_config_path()
     config_path.write_text(json.dumps(workspace_config, indent=2))
     config_path.chmod(0o600)
 
@@ -896,9 +893,7 @@ def slack_auth(workspace_url: str) -> None:
 
 def slack_status() -> None:
     """Show external Slack workspace configuration and auth status."""
-    import json  # noqa: PLC0415
-
-    config_path = _get_workspace_config_path()
+    config_path = get_workspace_config_path()
     if not config_path.exists():
         click.echo("No external Slack workspace configured.")
         click.echo("Run: summon config slack-auth <workspace-url>")
@@ -932,9 +927,7 @@ def slack_status() -> None:
 
 def slack_remove() -> None:
     """Remove external Slack workspace auth state."""
-    import json  # noqa: PLC0415
-
-    config_path = _get_workspace_config_path()
+    config_path = get_workspace_config_path()
     if not config_path.exists():
         click.echo("No external Slack workspace configured.")
         return
@@ -945,8 +938,17 @@ def slack_remove() -> None:
     workspace = json.loads(config_path.read_text())
     state_path = Path(workspace.get("auth_state_path", ""))
 
-    with contextlib.suppress(FileNotFoundError):
-        state_path.unlink()
+    # [SEC] Validate path is within expected directory before unlinking
+    expected_dir = get_data_dir() / "browser_auth"
+    if state_path.name and (not state_path.resolve().is_relative_to(expected_dir.resolve())):
+        click.echo(
+            f"Auth state path {state_path} is outside expected directory — skipping removal.",
+            err=True,
+        )
+    else:
+        with contextlib.suppress(FileNotFoundError):
+            state_path.unlink()
+
     with contextlib.suppress(FileNotFoundError):
         config_path.unlink()
 
