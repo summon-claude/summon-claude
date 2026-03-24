@@ -721,6 +721,15 @@ CONFIG_OPTIONS: list[ConfigOption] = [
     ),
     # Scribe Google
     ConfigOption(
+        field_name="scribe_google_enabled",
+        env_key="SUMMON_SCRIBE_GOOGLE_ENABLED",
+        group="Scribe Google",
+        label="Enable Google Collector",
+        help_text="Enable the Google Workspace data collector for scribe",
+        input_type="flag",
+        visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
+    ),
+    ConfigOption(
         field_name="scribe_google_services",
         env_key="SUMMON_SCRIBE_GOOGLE_SERVICES",
         group="Scribe Google",

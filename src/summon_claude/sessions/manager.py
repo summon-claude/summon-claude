@@ -857,7 +857,6 @@ class SessionManager:
             # Note (M4): scribe spawns only via project_up. Standalone start deferred to M5.
             self._start_scribe_if_enabled(user_id)
 
-
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:

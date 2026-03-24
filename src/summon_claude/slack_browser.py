@@ -274,8 +274,6 @@ async def interactive_slack_auth(
 
     Returns the path to the saved state file.
     """
-    from playwright.async_api import async_playwright  # noqa: PLC0415
-
     workspace_id = _slugify(workspace_url)
     browser_auth_dir = get_data_dir() / "browser_auth"
 
@@ -285,6 +283,8 @@ async def interactive_slack_auth(
             f"Security error: browser_auth directory {browser_auth_dir} is a symlink. "
             "Refusing to write auth state to a symlinked directory."
         )
+
+    from playwright.async_api import async_playwright  # noqa: PLC0415
 
     # Create directory with 0o700 permissions ([SEC-005])
     browser_auth_dir.mkdir(parents=True, exist_ok=True)

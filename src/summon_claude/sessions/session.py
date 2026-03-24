@@ -84,7 +84,6 @@ from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
 
 if TYPE_CHECKING:
     from summon_claude.event_dispatcher import EventDispatcher
-    from summon_claude.slack_browser import SlackBrowserMonitor
 
 logger = logging.getLogger(__name__)
 
