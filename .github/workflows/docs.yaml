@@ -46,9 +46,6 @@ jobs:
       - name: Deploy with mike
         run: uv run mike deploy latest --push --update-aliases --strict
 
-      - name: Set default version
-        run: uv run mike set-default latest --push
-
   preview-build:
     name: Build preview (PR)
     if: github.event_name == 'pull_request' && github.event.action != 'closed'
@@ -101,25 +98,10 @@ jobs:
           path: site-pr/
 
       - name: Checkout gh-pages branch
-        id: checkout-ghpages
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        continue-on-error: true
         with:
           ref: gh-pages
           path: gh-pages-dir
-
-      - name: Bootstrap gh-pages if missing
-        if: steps.checkout-ghpages.outcome == 'failure'
-        run: |
-          mkdir -p gh-pages-dir
-          cd gh-pages-dir
-          git init
-          git remote add origin "https://github.com/${{ github.repository }}.git"
-          git config "http.https://github.com/.extraheader" "AUTHORIZATION: basic $(echo -n 'x-access-token:${{ github.token }}' | base64)"
-          git checkout --orphan gh-pages
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit --allow-empty -m "docs: initialize gh-pages branch"
 
       - name: Copy preview to gh-pages
         run: |

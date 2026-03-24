@@ -255,9 +255,11 @@ class TestWorkflowFiles:
     def test_docs_yaml_deploy_has_concurrency_guard(self) -> None:
         """Verify docs.yaml deploy job uses cancel-in-progress: false."""
         path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
-        content = path.read_text()
-        assert "cancel-in-progress: false" in content, (
-            "docs.yaml missing 'cancel-in-progress: false' on gh-pages-deploy group"
+        data = yaml.safe_load(path.read_text())
+        deploy = data["jobs"]["deploy"]
+        assert "concurrency" in deploy, "deploy job missing concurrency block"
+        assert deploy["concurrency"].get("cancel-in-progress") is False, (
+            "deploy job concurrency must have cancel-in-progress: false"
         )
 
     def test_docs_yaml_preview_blocks_forks(self) -> None:

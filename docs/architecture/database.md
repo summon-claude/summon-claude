@@ -219,7 +219,7 @@ CREATE TABLE schema_version (
 | 6 → 7 | Added `context_pct` to sessions |
 | 7 → 8 | Created `projects` table, added `project_id` to sessions |
 | 8 → 9 | Added unique index on `channel_prefix` in projects |
-| 9 → 10 | Created `channels` table, added `effort` to sessions, migrated canvas data |
+| 9 → 10 | Created `channels` table, added `effort` to sessions, migrated and dropped `canvas_id`/`canvas_markdown` from sessions |
 | 10 → 11 | Created `session_tasks` table |
 | 11 → 12 | Added `hooks` column to `workflow_defaults` and `projects` |
 

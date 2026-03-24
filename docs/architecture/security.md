@@ -35,7 +35,7 @@ When a spawn token is consumed, the daemon logs a `spawn_token_consumed` audit e
 
 ## Permission Handling
 
-Every tool call from Claude goes through `PermissionHandler.handle()` before execution. The decision logic has four layers, evaluated in order:
+Every tool call from Claude goes through `PermissionHandler.handle()` before execution. The decision logic has six layers, evaluated in order:
 
 ### 1. AskUserQuestion (intercept first)
 

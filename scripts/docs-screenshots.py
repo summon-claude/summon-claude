@@ -20,6 +20,10 @@ Environment variables:
   SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery, cleanup, and team ID
   SUMMON_TEST_SLACK_COOKIE         Browser session cookie (`d` cookie, `xoxd-` prefix)
 
+Security: Both variables are privileged credentials. Set them in your shell session
+  (not in .env files or shell profiles that could be committed). The cookie grants
+  full Slack web UI access as your user account.
+
 Usage:
   uv run python scripts/docs-screenshots.py [OPTIONS]
 """
@@ -167,7 +171,7 @@ def _dismiss_overlays(page) -> None:
             close_btn.first.click(timeout=3_000)
             click.echo("  Dismissed overlay")
             page.wait_for_timeout(1_000)
-    except Exception:  # noqa: S110
+    except Exception:
         pass  # Overlay may not be present — safe to skip
 
 
@@ -258,7 +262,7 @@ def wait_for_claude_response(bot_token: str, channel_id: str, timeout: int = 120
         time.sleep(5)
         resp = client.conversations_history(channel=channel_id, limit=50)
         messages = resp.get("messages", [])
-        if len(messages) > baseline_count + 1:
+        if len(messages) > baseline_count:
             # Look for a message that looks like a turn completion (has the checkered_flag footer)
             for msg in messages:
                 if ":checkered_flag:" in msg.get("text", ""):
@@ -495,7 +499,6 @@ class CaptureSpec:
     capture_fn: Callable[[], str] | None = None  # custom capture (overrides command)
     post_process: Callable[[str], str] | None = None  # transform captured output
     extra_md: str = ""  # markdown appended after code fence, before closing marker
-    show_command: bool = False  # prepend "$ command" line to output
 
 
 # -- Post-processors -------------------------------------------------------
@@ -528,8 +531,7 @@ def _capture_summon_start_banner() -> str:
     Starts a real session, reads stdout until the closing ``====`` border,
     then terminates and cleans up.
     """
-    env = os.environ.copy()
-    env.pop("CLAUDECODE", None)
+    env = _make_env()
 
     click.echo("    Starting summon session for banner capture...")
     proc = subprocess.Popen(
@@ -580,7 +582,7 @@ def _capture_summon_start_banner() -> str:
                 timeout=15,
                 env=env,
             )
-        except Exception:  # noqa: S110
+        except Exception:
             pass
 
     if len(lines) < 3:
@@ -776,8 +778,6 @@ def run_terminal_section(dry_run: bool = False) -> bool:
 
         if spec.post_process:
             output = spec.post_process(output)
-        if spec.show_command and spec.command:
-            output = f"$ {' '.join(spec.command)}\n{output}"
 
         # Validate content won't corrupt the markdown
         error = _validate_content(output, spec.marker)
