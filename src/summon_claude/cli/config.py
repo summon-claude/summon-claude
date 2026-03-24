@@ -7,6 +7,7 @@ import contextlib
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -14,6 +15,9 @@ from pathlib import Path
 import click
 
 from summon_claude.config import (
+    _BOOL_FALSE,
+    _BOOL_TRUE,
+    CONFIG_OPTIONS,
     find_workspace_mcp_bin,
     get_config_file,
     get_data_dir,
@@ -25,29 +29,43 @@ from summon_claude.sessions.registry import SessionRegistry
 
 logger = logging.getLogger(__name__)
 
-_SETTABLE_KEYS = frozenset(
+# Required Slack bot scopes — must match slack-app-manifest.yaml.
+# Guard test test_required_scopes_match_manifest pins this set.
+_REQUIRED_SLACK_SCOPES: frozenset[str] = frozenset(
     {
-        "SUMMON_SLACK_BOT_TOKEN",
-        "SUMMON_SLACK_APP_TOKEN",
-        "SUMMON_SLACK_SIGNING_SECRET",
-        "SUMMON_DEFAULT_MODEL",
-        "SUMMON_DEFAULT_EFFORT",
-        "SUMMON_CHANNEL_PREFIX",
-        "SUMMON_PERMISSION_DEBOUNCE_MS",
-        "SUMMON_MAX_INLINE_CHARS",
-        # Scribe agent
-        "SUMMON_SCRIBE_ENABLED",
-        "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES",
-        "SUMMON_SCRIBE_CWD",
-        "SUMMON_SCRIBE_MODEL",
-        "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
-        "SUMMON_SCRIBE_QUIET_HOURS",
-        "SUMMON_SCRIBE_GOOGLE_SERVICES",
-        "SUMMON_SCRIBE_SLACK_ENABLED",
-        "SUMMON_SCRIBE_SLACK_BROWSER",
-        "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS",
+        "canvases:read",
+        "canvases:write",
+        "channels:history",
+        "channels:join",
+        "channels:manage",
+        "channels:read",
+        "chat:write",
+        "commands",
+        "files:read",
+        "files:write",
+        "groups:history",
+        "groups:read",
+        "groups:write",
+        "reactions:read",
+        "reactions:write",
+        "users:read",
     }
 )
+
+
+def parse_env_file(path: Path) -> dict[str, str]:
+    """Parse a .env-style config file into a dict. Returns {} if the file does not exist."""
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text().splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" in stripped:
+            k, _, v = stripped.partition("=")
+            values[k.strip()] = v.strip()
+    return values
 
 
 def _require_config_file(override: str | None = None):
@@ -64,31 +82,97 @@ def config_path(override: str | None = None) -> None:
     click.echo(str(get_config_file(override)))
 
 
-def config_show(override: str | None = None) -> None:
-    config_file = _require_config_file(override)
-    if config_file is None:
-        return
+def config_show(override: str | None = None, *, color: bool = True) -> None:
+    """Show all config options with grouped display and source indicators."""
+    from summon_claude.config import get_config_default  # noqa: PLC0415
 
-    secret_keys = {
-        "SUMMON_SLACK_BOT_TOKEN",
-        "SUMMON_SLACK_APP_TOKEN",
-        "SUMMON_SLACK_SIGNING_SECRET",
-    }
+    config_file = get_config_file(override)
+    values = parse_env_file(config_file)
+    if not config_file.exists():
+        click.echo(f"No config file found at {config_file}")
+        click.echo("Run `summon init` to create one.\n")
 
-    for raw_line in config_file.read_text().splitlines():
-        stripped = raw_line.strip()
-        if not stripped or stripped.startswith("#"):
+    current_group = ""
+    for opt in CONFIG_OPTIONS:
+        # Evaluate visibility predicate
+        if opt.visible is not None and not opt.visible(values):
+            # Show dim hint for hidden groups (only once per group).
+            # Uses current_group so groups with at least one visible item
+            # don't also print a "disabled" hint for their hidden items.
+            if opt.group != current_group:
+                current_group = opt.group
+                hint = (
+                    click.style(f"\n  {opt.group}: disabled", dim=True)
+                    if color
+                    else f"\n  {opt.group}: disabled"
+                )
+                click.echo(hint)
             continue
-        if "=" in stripped:
-            k, _, v = stripped.partition("=")
-            k = k.strip()
-            v = v.strip()
-            if k in secret_keys:
-                click.echo(f"{k}={'configured' if v else 'missing'}")
+
+        # Print group header on group change
+        if opt.group != current_group:
+            current_group = opt.group
+            if color:
+                click.echo(click.style(f"\n  {opt.group}", bold=True))
             else:
-                click.echo(f"{k}={v}")
+                click.echo(f"\n  {opt.group}")
+
+        # Determine value and source
+        file_value = values.get(opt.env_key)
+        default = get_config_default(opt)
+
+        if opt.input_type == "secret":
+            if file_value:
+                display_value = "configured"
+                source = "set"
+            elif opt.required:
+                display_value = ""
+                source = "not set"
+            else:
+                display_value = ""
+                source = "optional"
+        elif file_value is not None:
+            display_value = file_value
+            if isinstance(default, bool):
+                default_str = str(default).lower()
+            else:
+                default_str = str(default) if default is not None else ""
+            source = "default" if file_value == default_str else "set"
+        elif opt.required:
+            display_value = ""
+            source = "not set"
         else:
-            click.echo(raw_line)
+            if isinstance(default, bool):
+                display_value = str(default).lower()
+            else:
+                display_value = str(default) if default is not None else ""
+            source = "default"
+
+        # Truncate long values to keep columns aligned
+        val_col = 30
+        if display_value and len(display_value) > val_col:
+            display_value = display_value[: val_col - 1] + "\u2026"
+
+        # Format output with color
+        if color:
+            if source == "set":
+                source_label = click.style("(set)", fg="green")
+            elif source == "not set":
+                source_label = click.style("(not set)", fg="yellow")
+            elif source == "optional":
+                source_label = click.style("(optional)", dim=True)
+            else:
+                source_label = click.style("(default)", dim=True)
+            # Pad before styling to avoid ANSI escape codes breaking alignment
+            if display_value:
+                val_display = f"{display_value:<{val_col}}"
+            else:
+                val_display = click.style(f"{'—':<{val_col}}", dim=True)
+        else:
+            source_label = f"({source})"
+            val_display = f"{(display_value if display_value else '—'):<{val_col}}"
+
+        click.echo(f"    {opt.env_key:<40} {val_display} {source_label}")
 
 
 def config_edit(override: str | None = None) -> None:
@@ -98,7 +182,7 @@ def config_edit(override: str | None = None) -> None:
 
     editor = os.environ.get("EDITOR", "vi")
     try:
-        subprocess.run([editor, str(config_file)], check=False)  # noqa: S603
+        subprocess.run([*shlex.split(editor), str(config_file)], check=False)  # noqa: S603
     except FileNotFoundError:
         click.echo(f"Editor '{editor}' not found. Set $EDITOR to your preferred editor.", err=True)
         sys.exit(1)
@@ -106,10 +190,48 @@ def config_edit(override: str | None = None) -> None:
 
 def config_set(key: str, value: str, override: str | None = None) -> None:
     key = key.strip().upper()
-    if key not in _SETTABLE_KEYS:
+    valid_keys = {opt.env_key for opt in CONFIG_OPTIONS}
+    if key not in valid_keys:
         click.echo(f"Unknown config key: {key!r}", err=True)
-        click.echo(f"Valid keys: {', '.join(sorted(_SETTABLE_KEYS))}", err=True)
+        click.echo(f"Valid keys: {', '.join(sorted(valid_keys))}", err=True)
         sys.exit(1)
+
+    # Bool normalization for flag-type options
+    option = next((opt for opt in CONFIG_OPTIONS if opt.env_key == key), None)
+    if option and option.input_type == "flag":
+        lower = value.lower()
+        if lower in _BOOL_TRUE:
+            value = "true"
+        elif lower in _BOOL_FALSE:
+            value = "false"
+        else:
+            click.echo(f"Invalid boolean value: {value!r}. Use true/false/yes/no/1/0.", err=True)
+            sys.exit(1)
+
+    # Validate choices for choice-type options (choices_fn takes precedence over static choices)
+    if option and value:
+        choices: list[str] = []
+        if option.choices_fn:
+            try:
+                choices = option.choices_fn()
+            except Exception as e:
+                click.echo(f"Error resolving choices for {key}: {e}", err=True)
+                sys.exit(1)
+        elif option.choices:
+            choices = list(option.choices)
+        if choices and value not in choices:
+            click.echo(
+                f"Invalid value for {key}: {value!r}. Must be one of: {', '.join(choices)}",
+                err=True,
+            )
+            sys.exit(1)
+
+    # Run option validator if present
+    if option and option.validate_fn and value:
+        err = option.validate_fn(value)
+        if err:
+            click.echo(f"Invalid value for {key}: {err}", err=True)
+            sys.exit(1)
 
     # Strip newlines to prevent injection into the .env format
     value = value.replace("\n", "").replace("\r", "")
@@ -266,7 +388,44 @@ def google_auth() -> None:
         sys.exit(1)
 
 
-def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
+def _check_github_pat(pat: str, *, quiet: bool = False) -> bool:
+    """Check GitHub PAT by calling the /user endpoint.
+
+    Returns True if valid, False if the token is rejected.
+    """
+    import json  # noqa: PLC0415
+    import urllib.error  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    # Strip CRLF to prevent header injection from hand-edited config or env vars.
+    pat = pat.replace("\r", "").replace("\n", "")
+    req = urllib.request.Request(
+        "https://api.github.com/user",
+        headers={"Authorization": f"Bearer {pat}", "Accept": "application/vnd.github+json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            data = json.loads(resp.read(65536))
+            login = re.sub(r"[^a-zA-Z0-9\-]", "", data.get("login", "unknown")) or "unknown"
+            if not quiet:
+                click.echo(f"  [PASS] GitHub PAT: valid (user: {login})")
+            return True
+    except urllib.error.HTTPError as e:
+        if e.code == 401:
+            click.echo(
+                "  [FAIL] GitHub PAT: invalid or expired (summon config set SUMMON_GITHUB_PAT)"
+            )
+            return False
+        click.echo(f"  [WARN] GitHub PAT: API returned {e.code}")
+        return True  # non-auth HTTP error, don't fail the check
+    except Exception as e:
+        click.echo(f"  [WARN] GitHub PAT: check skipped ({e})")
+        return True  # network issue, not a token problem
+
+
+def _check_google_status(
+    *, prefix: str = "", quiet: bool = False, google_services: str = ""
+) -> bool | None:
     """Check Google Workspace authentication status.
 
     Returns True if valid, False if credentials exist but are broken,
@@ -294,6 +453,13 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
             click.echo(f"{prefix}Google: no credentials found")
         return None
 
+    # Read configured services once, outside the per-user loop.
+    if google_services:
+        services = [s.strip() for s in google_services.split(",") if s.strip()]
+    else:
+        services = ["gmail", "calendar", "drive"]
+    required = set(get_scopes_for_tools(services))
+
     all_ok = True
     for user in users:
         cred = store.get_credential(user)
@@ -311,9 +477,8 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
             all_ok = False
             continue
 
-        # Scope validation: check granted scopes against configured services
+        # Scope validation against configured services.
         granted = set(cred.scopes or [])
-        required = set(get_scopes_for_tools(["gmail", "calendar", "drive"]))
         if granted and not has_required_scopes(granted, required):
             missing = required - granted
             click.echo(f"{prefix}Google: {status} but missing scopes ({user})")
@@ -329,34 +494,72 @@ def _check_google_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
 
 def google_status() -> None:
     """Check Google Workspace authentication status (CLI entry point)."""
-    _check_google_status()
+    values = parse_env_file(get_config_file())
+    _check_google_status(google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", ""))
 
 
-_REQUIRED_KEYS = (
-    "SUMMON_SLACK_BOT_TOKEN",
-    "SUMMON_SLACK_APP_TOKEN",
-    "SUMMON_SLACK_SIGNING_SECRET",
-)
+async def _check_db(db_path: Path) -> tuple[int, str, int, int]:
+    """Query DB for schema version, integrity, and row counts."""
+    version = 0
+    integrity = "unknown"
+    sessions = 0
+    audit = 0
+    reg = SessionRegistry(db_path=db_path)
+    async with reg:
+        db = reg.db
+        version = await get_schema_version(db)
+        async with db.execute("PRAGMA integrity_check") as cursor:
+            row = await cursor.fetchone()
+            integrity = row[0] if row else "unknown"
+        async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
+            row = await cur.fetchone()
+            sessions = row[0] if row else 0
+        async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
+            row = await cur.fetchone()
+            audit = row[0] if row else 0
+    return version, integrity, sessions, audit
+
+
+async def _check_features(db_path: Path) -> tuple[bool, bool, int]:
+    """Query DB for workflow, hooks, and project count."""
+    has_workflow = False
+    has_hooks = False
+    project_count = 0
+    reg = SessionRegistry(db_path=db_path)
+    async with reg:
+        has_workflow = bool(await reg.get_workflow_defaults())
+        raw_hooks = await reg.get_raw_hooks_json(project_id=None)
+        has_hooks = raw_hooks is not None
+        db = reg.db
+        async with db.execute("SELECT COUNT(*) FROM projects") as cur:
+            row = await cur.fetchone()
+            project_count = row[0] if row else 0
+    return has_workflow, has_hooks, project_count
 
 
 def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     """Check config validity. Returns True if all checks pass."""
+    from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
+
     config_file = get_config_file(config_path)
     all_pass = True
 
+    # Claude CLI preflight
+    cli_status = check_claude_cli()
+    if cli_status.found:
+        if not quiet:
+            version_str = f" ({cli_status.version})" if cli_status.version else ""
+            click.echo(f"  [PASS] Claude CLI found{version_str}")
+    else:
+        click.echo("  [FAIL] Claude CLI not found — install from https://claude.ai/code")
+        all_pass = False
+
     # Parse the config file into a dict
-    values: dict[str, str] = {}
-    if config_file.exists():
-        for raw_line in config_file.read_text().splitlines():
-            stripped = raw_line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            if "=" in stripped:
-                k, _, v = stripped.partition("=")
-                values[k.strip()] = v.strip()
+    values = parse_env_file(config_file)
 
     # Required keys
-    for key in _REQUIRED_KEYS:
+    required_keys = [opt.env_key for opt in CONFIG_OPTIONS if opt.required]
+    for key in required_keys:
         present = bool(values.get(key))
         if present:
             if not quiet:
@@ -394,6 +597,28 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Signing secret should be a hex string")
             all_pass = False
 
+    # Pydantic validation — catches @field_validator rules (effort, quiet_hours,
+    # google_services, channel_prefix, etc.) that individual key checks above miss.
+    # Skip when required keys are missing — those failures are already reported above
+    # and model_validate would just produce a duplicate cryptic error.
+    required_missing = [key for key in required_keys if not bool(values.get(key))]
+    if values and not required_missing:
+        from summon_claude.config import SummonConfig  # noqa: PLC0415
+
+        try:
+            SummonConfig.model_validate(
+                {
+                    opt.field_name: values[opt.env_key]
+                    for opt in CONFIG_OPTIONS
+                    if opt.env_key in values
+                }
+            )
+            if not quiet:
+                click.echo("  [PASS] Config values pass validation")
+        except Exception as e:
+            click.echo(f"  [FAIL] Config validation: {e}")
+            all_pass = False
+
     # DB writable
     db_path = get_data_dir() / "registry.db"
     try:
@@ -411,28 +636,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
     # Schema version, integrity, and row counts
     try:
-
-        async def _check_db() -> tuple[int, str, int, int]:
-            version = 0
-            integrity = "unknown"
-            sessions = 0
-            audit = 0
-            reg = SessionRegistry(db_path=db_path)
-            async with reg:
-                db = reg.db
-                version = await get_schema_version(db)
-                async with db.execute("PRAGMA integrity_check") as cursor:
-                    row = await cursor.fetchone()
-                    integrity = row[0] if row else "unknown"
-                async with db.execute("SELECT COUNT(*) FROM sessions") as cur:
-                    row = await cur.fetchone()
-                    sessions = row[0] if row else 0
-                async with db.execute("SELECT COUNT(*) FROM audit_log") as cur:
-                    row = await cur.fetchone()
-                    audit = row[0] if row else 0
-            return version, integrity, sessions, audit
-
-        version, integrity, sessions_count, audit_count = asyncio.run(_check_db())
+        version, integrity, sessions_count, audit_count = asyncio.run(_check_db(db_path))
 
         # Schema version
         if version == CURRENT_SCHEMA_VERSION:
@@ -465,7 +669,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo("  [FAIL] Database validation error")
         all_pass = False
 
-    # Slack API reachable (optional, best-effort)
+    # Slack API reachable + scope verification (optional, best-effort)
     if bot_token.startswith("xoxb-"):
         try:
             from slack_sdk import WebClient  # noqa: PLC0415
@@ -475,14 +679,50 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             if resp["ok"]:
                 if not quiet:
                     click.echo(f"  [PASS] Slack API reachable (team: {resp.get('team')})")
+                # Check bot scopes via x-oauth-scopes response header.
+                # Header name casing varies by HTTP library, so do a
+                # case-insensitive lookup.
+                headers_lower = {k.lower(): v for k, v in resp.headers.items()}
+                granted_str = headers_lower.get("x-oauth-scopes", "")
+                if granted_str:
+                    granted = {s.strip() for s in granted_str.split(",") if s.strip()}
+                    missing = _REQUIRED_SLACK_SCOPES - granted
+                    if missing:
+                        click.echo(
+                            f"  [FAIL] Slack bot missing scopes: {', '.join(sorted(missing))}"
+                        )
+                        click.echo(
+                            "  Update at: api.slack.com/apps → your app"
+                            " → OAuth & Permissions → Scopes"
+                        )
+                        all_pass = False
+                    elif not quiet:
+                        click.echo(
+                            f"  [PASS] Slack bot scopes:"
+                            f" all {len(_REQUIRED_SLACK_SCOPES)} required scopes granted"
+                        )
             else:
                 click.echo(f"  [FAIL] Slack API auth.test failed: {resp.get('error')}")
                 all_pass = False
         except Exception as e:
             click.echo(f"  [WARN] Slack API check skipped: {e}")
 
+    # GitHub PAT (optional, with connectivity check)
+    github_pat = values.get("SUMMON_GITHUB_PAT", "")
+    if github_pat:
+        gh_status = _check_github_pat(github_pat, quiet=quiet)
+        if gh_status is False:
+            all_pass = False
+    elif not quiet:
+        click.echo(
+            "  [INFO] GitHub PAT: not set — sessions won't have GitHub tools"
+            " (summon config set SUMMON_GITHUB_PAT <token>)"
+        )
+
     # Google Workspace (optional, only if credentials exist)
-    google_result = _check_google_status(prefix="  ", quiet=quiet)
+    google_result = _check_google_status(
+        prefix="  ", quiet=quiet, google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", "")
+    )
     if google_result is not None:
         # Credentials exist — report pass/fail
         if google_result:
@@ -492,6 +732,91 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Google Workspace credentials have issues")
             all_pass = False
     elif not quiet:
-        click.echo("  [INFO] Google Workspace: not configured (optional)")
+        click.echo("  [INFO] Google Workspace: not configured (summon config google-auth)")
+
+    # Optional extras availability (informational)
+    if not quiet:
+        from summon_claude.config import is_extra_installed  # noqa: PLC0415
+
+        extras = [
+            ("workspace-mcp (Google)", find_workspace_mcp_bin().exists()),
+            ("playwright (Slack browser)", is_extra_installed("playwright")),
+        ]
+        for label, installed in extras:
+            status = "installed" if installed else "not installed"
+            click.echo(f"  [INFO] {label}: {status}")
+
+    # Feature inventory — surface external flows so users know they exist
+    if not quiet:
+        click.echo()
+        click.echo(click.style("Features:", bold=True))
+        _print_feature_inventory(db_path, values)
 
     return all_pass
+
+
+def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> None:
+    """Print discoverable status of external setup flows."""
+    project_count: int | None = None
+
+    try:
+        has_workflow, has_hooks, project_count = asyncio.run(_check_features(db_path))
+
+        # Projects — the primary workflow
+        if project_count:
+            click.echo(f"  [PASS] Projects: {project_count} registered")
+        else:
+            click.echo("  [INFO] Projects: none registered (summon project add)")
+
+        if has_workflow:
+            click.echo("  [PASS] Workflow instructions: configured")
+        else:
+            click.echo("  [INFO] Workflow instructions: not set (summon project workflow set)")
+
+        if has_hooks:
+            click.echo("  [PASS] Lifecycle hooks: configured")
+        else:
+            click.echo("  [INFO] Lifecycle hooks: not set (summon hooks set)")
+
+    except Exception:
+        logging.getLogger(__name__).debug("Feature inventory DB error", exc_info=True)
+
+    # Hook bridge — check settings.json for summon-owned entries
+    has_bridge = False
+    try:
+        from summon_claude.cli.hooks import read_settings  # noqa: PLC0415
+
+        settings = read_settings()
+        hooks_list = settings.get("hooks", [])
+        has_bridge = any(
+            "summon-pre-worktree" in str(h) or "summon-post-worktree" in str(h) for h in hooks_list
+        )
+        if has_bridge:
+            click.echo("  [PASS] Hook bridge: installed")
+        else:
+            click.echo("  [INFO] Hook bridge: not installed (summon hooks install)")
+    except Exception:
+        logging.getLogger(__name__).debug("Hook bridge check error", exc_info=True)
+
+    # Scribe → Google auth nudge
+    scribe_on = config_values.get("SUMMON_SCRIBE_ENABLED", "").lower() in _BOOL_TRUE
+    if scribe_on:
+        try:
+            google_dir = get_google_credentials_dir()
+            has_creds = google_dir.exists() and any(google_dir.iterdir())
+        except OSError:
+            has_creds = False
+        if not has_creds:
+            click.echo(
+                "  [INFO] Scribe enabled but Google not configured (summon config google-auth)"
+            )
+
+    # Getting started nudge (only when count is confirmed 0, not on DB failure)
+    if project_count == 0:
+        click.echo()
+        click.echo(click.style("Getting started:", bold=True))
+        click.echo("  summon project add <path>           Register a project directory")
+        click.echo("  summon project workflow set          Set workflow instructions")
+        if not has_bridge:
+            click.echo("  summon hooks install                Install Claude Code hook bridge")
+        click.echo("  summon project up                   Start PM agents for all projects")

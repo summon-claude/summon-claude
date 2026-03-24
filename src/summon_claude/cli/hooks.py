@@ -86,7 +86,7 @@ _PRE_MARKER = "summon-pre-worktree"
 _POST_MARKER = "summon-post-worktree"
 
 
-def _read_settings() -> dict[str, Any]:
+def read_settings() -> dict[str, Any]:
     """Read ~/.claude/settings.json, returning an empty dict if missing."""
     if not _SETTINGS_PATH.exists():
         return {}
@@ -184,7 +184,7 @@ def install_hooks() -> None:
         script.chmod(0o700)
 
     # Update ~/.claude/settings.json.
-    settings = _read_settings()
+    settings = read_settings()
     settings.setdefault("hooks", {})
 
     pre_command = str(_PRE_SCRIPT)
@@ -210,7 +210,7 @@ def uninstall_hooks() -> None:
 
     Only removes entries it owns — never touches other hooks.
     """
-    settings = _read_settings()
+    settings = read_settings()
     hooks_section: dict[str, Any] = settings.get("hooks", {})
     changed = False
 

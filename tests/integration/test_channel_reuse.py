@@ -503,7 +503,7 @@ class TestResumeValidation:
             {
                 "slack_bot_token": "xoxb-fake",
                 "slack_app_token": "xapp-fake",
-                "slack_signing_secret": "fake-secret",
+                "slack_signing_secret": "abc123def456",
                 "default_model": "claude-sonnet-4-20250514",
                 "channel_prefix": "test",
                 "permission_debounce_ms": 10,
@@ -1011,7 +1011,7 @@ class TestMessageInjection:
             {
                 "slack_bot_token": "xoxb-fake",
                 "slack_app_token": "xapp-fake",
-                "slack_signing_secret": "fake-secret",
+                "slack_signing_secret": "abc123def456",
                 "default_model": "claude-sonnet-4-20250514",
                 "channel_prefix": "test",
                 "permission_debounce_ms": 10,

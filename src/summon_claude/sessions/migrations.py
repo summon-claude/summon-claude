@@ -16,7 +16,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 14
 
 
 # ---------------------------------------------------------------------------
@@ -207,6 +207,55 @@ async def _migrate_12_to_13(db: aiosqlite.Connection) -> None:
     )
 
 
+async def _migrate_13_to_14(db: aiosqlite.Connection) -> None:
+    """Make projects.workflow_instructions nullable (NULL = use global, '' = explicit clear).
+
+    SQLite cannot change column constraints with ALTER TABLE, so we use the
+    copy-drop-rename pattern. sessions.project_id references projects but has
+    no REFERENCES constraint, so PRAGMA foreign_keys does not fire.
+    """
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS projects_new (
+            project_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            directory TEXT NOT NULL,
+            channel_prefix TEXT NOT NULL,
+            pm_channel_id TEXT,
+            workflow_instructions TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            hooks TEXT DEFAULT NULL
+        )
+        """
+    )
+    # Copy existing rows; convert empty-string workflow to NULL so existing
+    # projects without explicit instructions fall back to global defaults.
+    await db.execute(
+        """
+        INSERT INTO projects_new
+            (project_id, name, directory, channel_prefix, pm_channel_id,
+             workflow_instructions, created_at, hooks)
+        SELECT project_id, name, directory, channel_prefix, pm_channel_id,
+               NULLIF(workflow_instructions, ''),
+               created_at, hooks
+        FROM projects
+        """
+    )
+    await db.execute("DROP TABLE projects")
+    await db.execute("ALTER TABLE projects_new RENAME TO projects")
+    # Recreate indexes that existed on the old table.
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_channel_prefix ON projects (channel_prefix)"
+    )
+    # Also create the parent_status index here (not only in 12→13) so that
+    # databases already at version 13 from PR #65's original migration still
+    # get this index.  IF NOT EXISTS makes it safe if 12→13 already created it.
+    await db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_parent_status "
+        "ON sessions (parent_session_id, status)"
+    )
+
+
 # Mapping from version N to the coroutine that migrates N → N+1.
 # Migration 0→1 is a no-op: the baseline DDL in _connect() produces schema v1.
 _MIGRATIONS: dict[int, Any] = {
@@ -223,6 +272,7 @@ _MIGRATIONS: dict[int, Any] = {
     10: _migrate_10_to_11,
     11: _migrate_11_to_12,
     12: _migrate_12_to_13,
+    13: _migrate_13_to_14,
 }
 
 

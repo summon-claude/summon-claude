@@ -47,10 +47,11 @@ class TestProjectAdd:
         with pytest.raises(ValueError, match=r"(already exists|conflicts)"):
             await registry.add_project("dup-proj", str(tmp_path))
 
-    async def test_add_project_default_empty_workflow(self, registry, tmp_path):
+    async def test_add_project_default_workflow_is_null(self, registry, tmp_path):
+        """New projects have NULL workflow_instructions (falls back to global defaults)."""
         project_id = await registry.add_project("wf-proj", str(tmp_path))
         project = await registry.get_project(project_id)
-        assert project["workflow_instructions"] == ""
+        assert project["workflow_instructions"] is None
 
     async def test_add_project_no_pm_channel_initially(self, registry, tmp_path):
         project_id = await registry.add_project("ch-proj", str(tmp_path))

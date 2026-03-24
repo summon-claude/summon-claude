@@ -708,9 +708,8 @@ class SessionRegistry:
                 await db.execute(
                     """
                     INSERT INTO projects
-                        (project_id, name, directory, channel_prefix,
-                         workflow_instructions, created_at)
-                    VALUES (?, ?, ?, ?, '', ?)
+                        (project_id, name, directory, channel_prefix, created_at)
+                    VALUES (?, ?, ?, ?, ?)
                     """,
                     (project_id, name, directory, channel_prefix, _now()),
                 )
@@ -1147,15 +1146,22 @@ class SessionRegistry:
             )
             await db.commit()
 
-    async def get_project_workflow(self, project_id: str) -> str:
-        """Return per-project workflow instructions, or empty string if unset."""
+    async def get_project_workflow(self, project_id: str) -> str | None:
+        """Return per-project workflow instructions.
+
+        Returns ``None`` if the project has no override (falls back to global).
+        Returns an empty string if explicitly cleared (no instructions).
+        Returns the instructions string if set.
+        """
         db = self._check_connected()
         async with db.execute(
             "SELECT workflow_instructions FROM projects WHERE project_id = ?",
             (project_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else ""
+            if not row:
+                return None
+            return row[0]  # May be None (no override) or str (set or explicitly cleared)
 
     async def set_project_workflow(self, project_id: str, instructions: str) -> None:
         """Set per-project workflow instructions.
@@ -1173,32 +1179,52 @@ class SessionRegistry:
                 raise KeyError(f"No project with id {project_id!r}")
 
     async def clear_project_workflow(self, project_id: str) -> None:
-        """Reset per-project workflow instructions to empty string.
+        """Reset per-project workflow instructions to NULL (fall back to global defaults).
 
         No-op if the project does not exist.
         """
-        try:
-            await self.set_project_workflow(project_id, "")
-        except KeyError:
-            pass
+        db = self._check_connected()
+        async with self._lock:
+            await db.execute(
+                "UPDATE projects SET workflow_instructions = NULL WHERE project_id = ?",
+                (project_id,),
+            )
+            await db.commit()
 
     async def get_effective_workflow(self, project_id: str) -> str:
         """Return effective workflow instructions for a project.
 
-        Returns per-project override if non-empty, otherwise global defaults.
+        Logic:
+        - If project has a non-NULL ``workflow_instructions``, use it (even if empty).
+          - If it contains ``$INCLUDE_GLOBAL``, replace the token with global defaults.
+        - If project ``workflow_instructions`` IS NULL, fall back to global defaults.
+
+        Uses a single query to fetch both project and global workflow in one
+        round-trip instead of two sequential queries.
         """
         db = self._check_connected()
         async with db.execute(
-            "SELECT COALESCE("
-            "  NULLIF((SELECT workflow_instructions FROM projects"
-            "          WHERE project_id = ?), ''),"
-            "  (SELECT instructions FROM workflow_defaults WHERE id = 1),"
-            "  ''"
-            ")",
+            "SELECT p.workflow_instructions,"
+            "  (SELECT instructions FROM workflow_defaults WHERE id = 1)"
+            " FROM projects p WHERE p.project_id = ?",
             (project_id,),
         ) as cursor:
             row = await cursor.fetchone()
-            return row[0] if row else ""
+
+        if not row:
+            # Project not found — fall back to global defaults
+            return await self.get_workflow_defaults()
+
+        project_wf, global_wf = row[0], row[1] or ""
+
+        if project_wf is None:
+            return global_wf
+
+        # Project has an explicit value (may be empty string = "no instructions").
+        if INCLUDE_GLOBAL_TOKEN in project_wf:
+            return project_wf.replace(INCLUDE_GLOBAL_TOKEN, global_wf)
+
+        return project_wf
 
     # --- Lifecycle hook methods ---
 

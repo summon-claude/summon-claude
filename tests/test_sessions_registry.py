@@ -789,9 +789,9 @@ class TestWorkflowDefaults:
 
 class TestProjectWorkflow:
     async def test_get_project_workflow_missing_project(self, registry):
-        """Returns empty string when project_id not in table."""
+        """Returns None when project_id not in table (no row found)."""
         result = await registry.get_project_workflow("no-such")
-        assert result == ""
+        assert result is None
 
     async def test_get_project_workflow_returns_instructions(self, registry):
         """Returns stored instructions when project exists."""
@@ -813,13 +813,13 @@ class TestProjectWorkflow:
         with pytest.raises(KeyError, match="proj-missing"):
             await registry.set_project_workflow("proj-missing", "instructions")
 
-    async def test_clear_project_workflow_resets_to_empty(self, registry):
-        """Clears instructions by setting to empty string."""
+    async def test_clear_project_workflow_resets_to_null(self, registry):
+        """Clears instructions by setting to NULL (falls back to global defaults)."""
         project_id = await registry.add_project("wflow-clear", "/tmp/wflow-clear")
         await registry.set_project_workflow(project_id, "Some instructions.")
         await registry.clear_project_workflow(project_id)
         result = await registry.get_project_workflow(project_id)
-        assert result == ""
+        assert result is None
 
     async def test_clear_project_workflow_noop_for_missing_project(self, registry):
         """Clearing a non-existent project is a silent no-op."""
@@ -851,13 +851,21 @@ class TestEffectiveWorkflow:
         result = await registry.get_effective_workflow(project_id)
         assert result == "Project-level."
 
-    async def test_effective_workflow_empty_project_falls_through(self, registry):
-        """Empty per-project instructions fall through to global defaults."""
+    async def test_effective_workflow_null_project_falls_through(self, registry):
+        """NULL per-project instructions fall through to global defaults."""
         project_id = await registry.add_project("eff-empty", "/tmp/eff-empty")
-        # workflow_instructions defaults to '' on project creation
+        # workflow_instructions defaults to NULL on project creation
         await registry.set_workflow_defaults("Global fallback.")
         result = await registry.get_effective_workflow(project_id)
         assert result == "Global fallback."
+
+    async def test_effective_workflow_explicit_empty_suppresses_global(self, registry):
+        """Explicitly empty per-project instructions suppress global defaults."""
+        project_id = await registry.add_project("eff-suppress", "/tmp/eff-suppress")
+        await registry.set_project_workflow(project_id, "")
+        await registry.set_workflow_defaults("Global fallback.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == ""
 
     async def test_effective_workflow_missing_project_falls_through(self, registry):
         """Project not in table falls through to global defaults."""
@@ -869,6 +877,244 @@ class TestEffectiveWorkflow:
         """Returns empty when projects table exists but nothing is configured."""
         result = await registry.get_effective_workflow("proj-1")
         assert result == ""
+
+    async def test_effective_workflow_global_workflow_token_expansion(self, registry):
+        """$INCLUDE_GLOBAL token in project instructions is replaced with global defaults."""
+        project_id = await registry.add_project("eff-token", "/tmp/eff-token")
+        await registry.set_workflow_defaults("Global rules here.")
+        await registry.set_project_workflow(project_id, "Before.\n$INCLUDE_GLOBAL\nAfter.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Before.\nGlobal rules here.\nAfter."
+
+    async def test_effective_workflow_global_token_empty_global(self, registry):
+        """$INCLUDE_GLOBAL expands to empty string when global is not set."""
+        project_id = await registry.add_project("eff-token-empty", "/tmp/eff-token-empty")
+        await registry.set_project_workflow(project_id, "Before.\n$INCLUDE_GLOBAL\nAfter.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Before.\n\nAfter."
+
+    async def test_effective_workflow_global_token_multiple(self, registry):
+        """Multiple $INCLUDE_GLOBAL tokens all expand."""
+        project_id = await registry.add_project("eff-multi", "/tmp/eff-multi")
+        await registry.set_workflow_defaults("G")
+        await registry.set_project_workflow(project_id, "$INCLUDE_GLOBAL-$INCLUDE_GLOBAL")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "G-G"
+
+    async def test_effective_workflow_no_token_no_expansion(self, registry):
+        """Project instructions without $INCLUDE_GLOBAL are returned as-is."""
+        project_id = await registry.add_project("eff-no-token", "/tmp/eff-no-token")
+        await registry.set_workflow_defaults("Should not appear.")
+        await registry.set_project_workflow(project_id, "Only project content.")
+        result = await registry.get_effective_workflow(project_id)
+        assert result == "Only project content."
+
+
+class TestMigration12To13DataPreservation:
+    async def test_empty_string_workflow_becomes_null(self, tmp_path):
+        """Migration 13→14 NULLIF converts empty-string workflow_instructions to NULL."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_13_to_14
+
+        db_path = tmp_path / "migrate_test.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            # Create a v12-style projects table (workflow_instructions NOT NULL DEFAULT '')
+            await db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL,
+                    pm_channel_id TEXT,
+                    workflow_instructions TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    hooks TEXT DEFAULT NULL
+                )
+                """
+            )
+            await db.execute(
+                "CREATE UNIQUE INDEX idx_projects_channel_prefix ON projects (channel_prefix)"
+            )
+            # Migration 13→14 also creates idx_sessions_parent_status, so we
+            # need a sessions table for that CREATE INDEX to succeed.
+            await db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
+                " parent_session_id TEXT, status TEXT)"
+            )
+            # Insert rows: one with empty string, one with real content
+            cols = "project_id, name, directory, channel_prefix, workflow_instructions"
+            await db.execute(
+                f"INSERT INTO projects ({cols})"  # noqa: S608
+                " VALUES ('p-empty', 'empty-wf', '/tmp/e', 'pfx-e', '')"
+            )
+            await db.execute(
+                f"INSERT INTO projects ({cols})"  # noqa: S608
+                " VALUES ('p-set', 'set-wf', '/tmp/s', 'pfx-s', 'Real instructions')"
+            )
+            await db.commit()
+
+            # Run the migration
+            await _migrate_13_to_14(db)
+            await db.commit()
+
+            # Verify: empty string became NULL
+            async with db.execute(
+                "SELECT workflow_instructions FROM projects WHERE project_id = 'p-empty'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row[0] is None, f"Expected NULL, got {row[0]!r}"
+
+            # Verify: real content preserved
+            async with db.execute(
+                "SELECT workflow_instructions FROM projects WHERE project_id = 'p-set'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row[0] == "Real instructions"
+
+
+class TestReleasedMigrationsImmutable:
+    """Guard: released migration functions must never be modified.
+
+    Once a migration is on upstream/main, databases may have already executed it.
+    Modifying the function body changes behavior for fresh installs but not for
+    existing databases, creating silent schema drift.  Add new schema changes as
+    NEW migration functions only.
+
+    When adding a new migration:
+    1. Compute its hash (see test_all_migrations_have_hashes error for instructions)
+    2. Add the hash to _RELEASED_HASHES below
+    The test_all_migrations_have_hashes test will FAIL if you forget step 2.
+    """
+
+    # SHA-256 prefix (16 hex chars) of inspect.getsource() for each migration.
+    # Every migration in _MIGRATIONS (except the v0 no-op) must have an entry.
+    _RELEASED_HASHES: dict[str, str] = {
+        "_migrate_1_to_2": "7270f30345c4b3f1",
+        "_migrate_2_to_3": "c96ee8025ac3846b",
+        "_migrate_3_to_4": "10a286e7d653934a",
+        "_migrate_4_to_5": "ccc306a3dc45b0a8",
+        "_migrate_5_to_6": "08fd446bd22ad223",
+        "_migrate_6_to_7": "abe35cbacabc9cd8",
+        "_migrate_7_to_8": "d5bfa086a2475a9b",
+        "_migrate_8_to_9": "064f77e3de2068ee",
+        "_migrate_9_to_10": "854c3f575d475d8b",
+        "_migrate_10_to_11": "503ed98064bd1138",
+        "_migrate_11_to_12": "bfc95f1b44faef79",
+        "_migrate_12_to_13": "4dd835d5b9aefb63",
+        "_migrate_13_to_14": "cc893dd5f5eacae0",
+    }
+
+    def test_released_migrations_unchanged(self):
+        """Fail if any released migration function's source has been modified."""
+        import hashlib
+        import inspect
+
+        from summon_claude.sessions import migrations
+
+        for fn_name, expected_hash in self._RELEASED_HASHES.items():
+            fn = getattr(migrations, fn_name)
+            src = inspect.getsource(fn)
+            actual_hash = hashlib.sha256(src.encode()).hexdigest()[:16]
+            assert actual_hash == expected_hash, (
+                f"{fn_name} source has changed (hash {actual_hash} != {expected_hash}). "
+                f"Released migrations are IMMUTABLE — add a new migration function instead."
+            )
+
+    def test_all_migrations_have_hashes(self):
+        """Fail if a migration function exists in _MIGRATIONS without a hash."""
+        import hashlib
+        import inspect
+
+        from summon_claude.sessions.migrations import _MIGRATIONS
+
+        for version, fn in _MIGRATIONS.items():
+            if fn is None:
+                continue  # v0 no-op
+            if fn.__name__ not in self._RELEASED_HASHES:
+                src = inspect.getsource(fn)
+                computed = hashlib.sha256(src.encode()).hexdigest()[:16]
+                pytest.fail(
+                    f"{fn.__name__} (version {version}→{version + 1}) is in _MIGRATIONS "
+                    f"but has no entry in _RELEASED_HASHES. Add this line:\n\n"
+                    f'        "{fn.__name__}": "{computed}",\n'
+                )
+
+
+class TestMigration13To14CreatesParentStatusIndex:
+    """Databases already at v13 (from PR #65) must get idx_sessions_parent_status via 13→14."""
+
+    async def test_parent_status_index_created_by_migrate_13_to_14(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_13_to_14
+
+        db_path = tmp_path / "v13_db.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            # Simulate a v13 DB that ran the OLD migration 12→13 (only auth_user_status index)
+            await db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
+                " parent_session_id TEXT, status TEXT,"
+                " authenticated_user_id TEXT, slack_channel_id TEXT)"
+            )
+            await db.execute(
+                "CREATE INDEX idx_sessions_auth_user_status "
+                "ON sessions (authenticated_user_id, status, slack_channel_id)"
+            )
+            await db.execute(
+                "CREATE TABLE projects ("
+                " project_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+                " directory TEXT NOT NULL, channel_prefix TEXT NOT NULL,"
+                " pm_channel_id TEXT, workflow_instructions TEXT NOT NULL DEFAULT '',"
+                " created_at TEXT NOT NULL DEFAULT (datetime('now')),"
+                " hooks TEXT DEFAULT NULL)"
+            )
+            await db.execute(
+                "CREATE UNIQUE INDEX idx_projects_channel_prefix ON projects (channel_prefix)"
+            )
+            await db.commit()
+
+            # Run only 13→14 (as would happen for a DB already at v13)
+            await _migrate_13_to_14(db)
+            await db.commit()
+
+            # The parent_status index must exist — created by 13→14
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_parent_status'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row is not None, (
+                    "idx_sessions_parent_status not created by migration 13→14 — "
+                    "databases at v13 from PR #65 would be missing this index"
+                )
+
+
+class TestMigration12To13IndexCreation:
+    async def test_auth_user_status_index_exists(self, tmp_path):
+        """Migration 12→13 creates idx_sessions_auth_user_status."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_12_to_13
+
+        db_path = tmp_path / "index_test.db"
+        async with aiosqlite.connect(str(db_path)) as db:
+            await db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY,"
+                " authenticated_user_id TEXT, status TEXT, slack_channel_id TEXT,"
+                " parent_session_id TEXT)"
+            )
+            await db.commit()
+            await _migrate_12_to_13(db)
+            await db.commit()
+
+            async with db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_auth_user_status'"
+            ) as cursor:
+                row = await cursor.fetchone()
+                assert row is not None, "idx_sessions_auth_user_status not created"
 
 
 class TestWorkflowDefaultsTable:

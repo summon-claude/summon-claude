@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import re
 from typing import Any
 
 import click
 
 from summon_claude.cli import daemon_client
 from summon_claude.daemon import is_daemon_running
+from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
 
@@ -206,3 +208,183 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     await _run_project_hooks("project_down", project_ids=target_project_ids)
 
     return stopped + suspended
+
+
+# ---------------------------------------------------------------------------
+# Workflow instruction helpers
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_project(registry: SessionRegistry, name_or_id: str) -> dict[str, Any]:
+    """Resolve a project by name or ID prefix. Raises ClickException if not found."""
+    projects = await registry.list_projects()
+    project = next(
+        (p for p in projects if p["name"] == name_or_id or p["project_id"].startswith(name_or_id)),
+        None,
+    )
+    if not project:
+        raise click.ClickException(f"Project not found: {name_or_id!r}")
+    return project
+
+
+def _strip_comment_lines(text: str) -> str:
+    """Strip lines that are pure comments (# followed by space or end of line)."""
+    stripped_lines = [
+        line
+        for line in text.splitlines()
+        if not re.match(r"^#\s", line) and not re.match(r"^#$", line)
+    ]
+    return "\n".join(stripped_lines).strip()
+
+
+async def async_workflow_show(project_name: str | None = None, *, raw: bool = False) -> None:  # noqa: PLR0912
+    """Show workflow instructions with source label."""
+    async with SessionRegistry() as registry:
+        if project_name:
+            project = await _resolve_project(registry, project_name)
+            project_id = project["project_id"]
+            project_wf = await registry.get_project_workflow(project_id)
+            global_wf = await registry.get_workflow_defaults()
+
+            if project_wf is None:
+                # Falls back to global
+                if global_wf:
+                    click.echo(f"Workflow for '{project['name']}' (using global defaults):")
+                    click.echo(global_wf)
+                else:
+                    click.echo("No workflow instructions configured.")
+            elif not project_wf:
+                # Explicitly cleared (empty string)
+                click.echo(
+                    f"Workflow for '{project['name']}' (explicitly cleared — no instructions):"
+                )
+            else:
+                has_token = INCLUDE_GLOBAL_TOKEN in project_wf
+                if raw:
+                    label = f"Workflow for '{project['name']}' (project-specific, raw):"
+                    click.echo(label)
+                    click.echo(project_wf)
+                else:
+                    if has_token:
+                        label = (
+                            f"Workflow for '{project['name']}'"
+                            f" (project-specific, includes global via {INCLUDE_GLOBAL_TOKEN}):"
+                        )
+                    else:
+                        label = f"Workflow for '{project['name']}' (project-specific):"
+                    click.echo(label)
+                    effective = project_wf.replace(INCLUDE_GLOBAL_TOKEN, global_wf)
+                    click.echo(effective)
+        else:
+            global_wf = await registry.get_workflow_defaults()
+            if global_wf:
+                click.echo("Global workflow defaults:")
+                click.echo(global_wf)
+            else:
+                click.echo("No workflow instructions configured.")
+
+
+async def async_workflow_set(project_name: str | None = None) -> None:
+    """Set workflow instructions via $EDITOR."""
+    async with SessionRegistry() as registry:
+        if project_name:
+            await _workflow_set_project(registry, project_name)
+        else:
+            await _workflow_set_global(registry)
+
+
+async def _workflow_set_global(registry: SessionRegistry) -> None:
+    """Set global workflow defaults via $EDITOR."""
+    current = await registry.get_workflow_defaults()
+    template = (
+        "# Global workflow defaults — applied to all projects without overrides.\n"
+        "# Lines starting with # are stripped on save.\n\n"
+    )
+    prefill = template + (current or "")
+
+    edited = click.edit(text=prefill)
+    if edited is None:
+        click.echo("No changes made.")
+        return
+
+    content = _strip_comment_lines(edited)
+    if not content:
+        click.echo("No content entered — no changes made.")
+        return
+
+    await registry.set_workflow_defaults(content)
+    click.echo("Global workflow defaults updated.")
+
+
+async def _workflow_set_project(registry: SessionRegistry, project_name: str) -> None:
+    """Set per-project workflow instructions via $EDITOR."""
+    project = await _resolve_project(registry, project_name)
+    pid = project["project_id"]
+    pname = project["name"]
+    current = await registry.get_project_workflow(pid)
+    global_wf = await registry.get_workflow_defaults()
+
+    lines = [
+        f"# Workflow instructions for project '{pname}'",
+        "# Lines starting with # are stripped on save.",
+        "#",
+    ]
+    if global_wf:
+        glines = global_wf.splitlines()
+        lines.append("# Current global defaults (for reference):")
+        lines.append("# " + "\u2500" * 40)
+        for gline in glines[:5]:
+            lines.append(f"# {gline}")
+        if len(glines) > 5:
+            lines.append("# ...")
+        lines.append("#")
+    lines.append(f"# Use {INCLUDE_GLOBAL_TOKEN} anywhere to include the global defaults inline.")
+    lines.append(
+        f"# Without {INCLUDE_GLOBAL_TOKEN}, these instructions fully replace the global defaults."
+    )
+    lines.append("")
+    template = "\n".join(lines)
+    prefill = template + (current or "")
+
+    edited = click.edit(text=prefill)
+    if edited is None:
+        click.echo("No changes made.")
+        return
+
+    content = _strip_comment_lines(edited)
+    if not content:
+        click.echo("No content entered — no changes made.")
+        return
+
+    await registry.set_project_workflow(pid, content)
+    if INCLUDE_GLOBAL_TOKEN in content:
+        click.echo(
+            f"Workflow updated for project '{pname}'"
+            f" (includes global defaults via {INCLUDE_GLOBAL_TOKEN})."
+        )
+    else:
+        click.echo(f"Workflow updated for project '{pname}'.")
+
+
+async def async_workflow_clear(project_name: str | None = None) -> None:
+    """Clear workflow instructions (with confirmation)."""
+    async with SessionRegistry() as registry:
+        if project_name:
+            project = await _resolve_project(registry, project_name)
+            if not click.confirm(
+                f"Clear project-specific workflow for '{project['name']}'?"
+                " Global defaults will apply."
+            ):
+                click.echo("Cancelled.")
+                return
+            await registry.clear_project_workflow(project["project_id"])
+            click.echo(f"Cleared. Project '{project['name']}' now uses global defaults.")
+        else:
+            if not click.confirm(
+                "Clear global workflow defaults?"
+                " Projects without overrides will have no instructions."
+            ):
+                click.echo("Cancelled.")
+                return
+            await registry.clear_workflow_defaults()
+            click.echo("Global workflow defaults cleared.")

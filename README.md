@@ -47,10 +47,15 @@ export SUMMON_NO_UPDATE_CHECK=1
 ```bash
 # 1. Set up your Slack app (see Slack App Setup below)
 
-# 2. Run the interactive setup wizard
+# 2. Run the interactive setup wizard (auto-validates connectivity)
 summon init
 
-# 3. Start a session
+# 3. Register a project and start the PM agent
+summon project add my-project ~/code/my-project
+summon project workflow set     # set global workflow instructions
+summon project up               # start PM agents for all projects
+
+# Or start an ad-hoc session directly
 summon start
 ```
 
@@ -95,26 +100,39 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 |---------|-------------|
 | `summon --version` | Show CLI version |
 | `summon version` | Show version and environment info (Python, platform, paths) |
-| `summon init` | Interactive setup wizard — creates config file with your tokens |
+| `summon init` | Interactive setup wizard — core options first, advanced on request, auto-runs `config check` |
 | `summon start` | Start a new session (prints auth code, waits for `/summon` in Slack) |
 | `summon session list` | Show active sessions (use `--all` for all recent, `--name` to filter) |
 | `summon session info SESSION` | Show detailed view of one session (by name or ID) |
 | `summon stop SESSION` | Stop a session (by name or ID), or `--all` to stop all |
 | `summon session logs [SESSION]` | View session logs (by name or ID, or list available); use `--tail N` / `-n N` to limit to the last N lines |
 | `summon session cleanup` | Mark sessions with dead processes as errored |
-| `summon config show` | Show current config file (tokens masked) |
-| `summon config set KEY VALUE` | Set a single config value |
+| `summon config show` | Show all config options grouped by section with source indicators (set/default/not set) |
+| `summon config set KEY VALUE` | Set a config value (validates key against registry, normalizes booleans) |
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
-| `summon config check` | Validate config file (keys, token format, DB writability, schema version, integrity, Slack API connectivity) |
+| `summon config check` | Validate config, test connectivity (Slack, GitHub, Google), and show feature inventory |
 | `summon config google-auth` | Authenticate with Google Workspace for scribe monitoring |
 | `summon config google-status` | Check Google Workspace authentication status |
 | `summon db status` | Show schema version, integrity, and row counts (migrations apply automatically on connect) |
 | `summon db reset --yes` | Delete and recreate the registry database |
 | `summon db vacuum` | Compact the database and check integrity |
 | `summon db purge [--older-than N] --yes` | Purge completed/errored sessions, audit logs, and expired tokens older than N days (default: 30) |
+| `summon project add NAME [DIR]` | Register a project directory for PM agent management |
+| `summon project remove NAME` | Remove a registered project |
+| `summon project list` | List all registered projects |
+| `summon project up` | Start PM agents for registered projects |
+| `summon project down [NAME]` | Stop PM sessions (all or by project name) |
+| `summon project workflow show [NAME]` | Show workflow instructions (global or per-project) |
+| `summon project workflow set [NAME]` | Set workflow instructions via `$EDITOR` |
+| `summon project workflow clear [NAME]` | Clear workflow instructions (restores global fallback) |
+| `summon hooks show` | Show configured lifecycle hooks (global and per-project) |
+| `summon hooks set` | Set lifecycle hooks via `$EDITOR` or JSON string |
+| `summon hooks clear` | Clear lifecycle hooks (restores global fallback) |
+| `summon hooks install` | Install Claude Code hook bridge (settings.json + shell wrappers) |
+| `summon hooks uninstall` | Remove summon entries from Claude Code settings.json |
 
-> **Alias:** `summon s` is shorthand for `summon session` (e.g., `summon s list`).
+> **Aliases:** `summon s` is shorthand for `summon session`, `summon p` for `summon project`.
 
 ### `summon start` flags
 
@@ -196,7 +214,8 @@ Use `summon config path` to see which path is active. Use `summon init` to creat
 | `SUMMON_CHANNEL_PREFIX` | `summon` | Prefix for created session channels |
 | `SUMMON_PERMISSION_DEBOUNCE_MS` | `500` | Debounce window for batching permission requests (ms) |
 | `SUMMON_MAX_INLINE_CHARS` | `2500` | Threshold for inline vs file upload display |
-| `SUMMON_NO_UPDATE_CHECK` | (unset) | Set to `1` to disable update notifications on `summon start` |
+| `SUMMON_NO_UPDATE_CHECK` | `false` | Disable update notifications on `summon start` |
+| `SUMMON_GITHUB_PAT` | (unset) | GitHub PAT for the remote MCP server (classic `ghp_` or fine-grained `github_pat_`) |
 | `SUMMON_ENABLE_THINKING` | `true` | Enable adaptive thinking tokens in Claude responses |
 | `SUMMON_SHOW_THINKING` | `false` | Post thinking content to turn threads in Slack |
 | `SUMMON_SCRIBE_ENABLED` | `false` | Enable scribe monitoring agent (PM agent system — preview) |
