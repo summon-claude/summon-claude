@@ -317,6 +317,7 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
     "security-review": CommandDef(description="Run security review"),
     "debug": CommandDef(description="Debug session issues"),
     "claude-developer-platform": CommandDef(description="Claude developer platform info"),
+    "simplify": CommandDef(description="Simplify and refine code"),
     # --- Blocked with specific reasons ---
     "insights": CommandDef(
         description="Generates a local HTML report",

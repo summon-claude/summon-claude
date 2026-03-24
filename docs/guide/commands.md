@@ -147,6 +147,7 @@ These commands are forwarded directly to the Claude Code CLI subprocess. They tr
 | `!init` | Initialize project configuration |
 | `!pr-comments` | Review PR comments |
 | `!security-review` | Run a security review |
+| `!simplify` | Simplify and refine code |
 | `!debug` | Debug session issues |
 | `!claude-developer-platform` | Claude developer platform information |
 
