@@ -173,18 +173,7 @@ async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
                 channel_id = session.get("slack_channel_id")
                 channel_name = session.get("slack_channel_name", "")
                 if channel_id:
-                    try:
-                        await web_client.chat_postMessage(
-                            channel=channel_id,
-                            text=(
-                                ":warning: *Session disconnected* (daemon restarted)\n"
-                                "Channel renamed with `zzz-` prefix — review the "
-                                "conversation history anytime."
-                            ),
-                        )
-                    except Exception as e:
-                        logger.debug("Could not post disconnect to channel %s: %s", channel_id, e)
-                    # Rename with zzz- prefix to signal session is inactive
+                    # Rename with zzz- prefix BEFORE posting message
                     if channel_name and not channel_name.startswith(ZZZ_PREFIX):
                         zzz_name = make_zzz_name(channel_name)
                         try:
@@ -196,6 +185,17 @@ async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
                             )
                         except Exception as e:
                             logger.debug("Could not zzz-rename channel %s: %s", channel_id, e)
+                    try:
+                        await web_client.chat_postMessage(
+                            channel=channel_id,
+                            text=(
+                                ":warning: *Session disconnected* (daemon restarted)\n"
+                                "Channel preserved — review the "
+                                "conversation history anytime."
+                            ),
+                        )
+                    except Exception as e:
+                        logger.debug("Could not post disconnect to channel %s: %s", channel_id, e)
             if cleaned:
                 logger.info("Cleaned up %d orphaned session(s) from previous daemon", len(cleaned))
     except Exception as e:

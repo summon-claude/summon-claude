@@ -657,6 +657,26 @@ class TestSessionCleanup:
         assert result.exit_code == 0
         mock_web.conversations_rename.assert_not_called()
 
+    def test_cleanup_archive_takes_priority_over_zzz(self):
+        """--archive archives the channel instead of zzz-renaming it."""
+        stale = [{**_ACTIVE_SESSION, "status": "active", "slack_channel_name": "myproj-abc"}]
+        mock_ctx = _mock_registry(stale=stale)
+        mock_config = MagicMock()
+        mock_config.slack_bot_token = "xoxb-test"
+        mock_web = AsyncMock()
+        mock_web.conversations_archive = AsyncMock()
+        mock_web.conversations_rename = AsyncMock()
+        with (
+            patch("summon_claude.cli.session.SessionRegistry", return_value=mock_ctx),
+            patch("summon_claude.cli.session.SummonConfig.from_file", return_value=mock_config),
+            patch("summon_claude.cli.session.AsyncWebClient", return_value=mock_web),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["session", "cleanup", "--archive"])
+        assert result.exit_code == 0
+        mock_web.conversations_archive.assert_called_once()
+        mock_web.conversations_rename.assert_not_called()
+
     def test_cleanup_removes_orphan_log_files(self, tmp_path):
         """Log files with no matching session in registry are deleted."""
         import os

@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import pathlib
 import re
 from typing import Any
 
 import click
-from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.cli import daemon_client
-from summon_claude.config import SummonConfig
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 logger = logging.getLogger(__name__)
 
@@ -138,10 +134,11 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     If *name* is given, only stop sessions for that project.
     Otherwise stop all registered projects.
 
-    PM sessions are stopped normally. Child sessions are marked ``suspended``
-    so ``project up`` can deterministically restart them.
+    All sessions (PM and children) are marked ``suspended`` so
+    ``project up`` can resume them with full transcript continuity.
+    Channel zzz-rename is handled by each session's ``_shutdown()`` path.
 
-    Returns a list of session_ids that were stopped.
+    Returns a list of suspended session_ids.
     """
     if not is_daemon_running():
         click.echo("Daemon is not running. No PM sessions to stop.")
@@ -158,11 +155,9 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             await _run_project_hooks("project_down")
         return []
 
-    stopped: list[str] = []
+    pm_count = 0
     suspended: list[str] = []
     projects: list[dict[str, Any]] = []
-    # Track child sessions eligible for zzz-rename: (channel_id, channel_name)
-    child_channels_to_rename: list[tuple[str, str]] = []
     async with SessionRegistry() as registry:
         projects = await registry.list_projects()
         if not projects:
@@ -190,51 +185,24 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                     await registry.update_status(sid, "suspended")
                     suspended.append(sid)
                     if is_pm:
-                        stopped.append(sid)
+                        pm_count += 1
                         click.echo(f"  Suspended PM for {pname!r} ({sid[:8]}...)")
                     else:
                         label = sname or sid[:8]
                         click.echo(f"  Suspended {label!r} for {pname!r}")
-                        # Collect child channel info for zzz-rename below
-                        channel_id = session.get("slack_channel_id")
-                        channel_name = session.get("slack_channel_name", "")
-                        if channel_id and channel_name and not channel_name.startswith(ZZZ_PREFIX):
-                            child_channels_to_rename.append((channel_id, channel_name))
                 except Exception as e:
                     click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
     if not suspended:
         click.echo("No active project sessions found.")
     else:
-        n_pm = len(stopped)
-        n_child = len(suspended) - n_pm
+        n_child = len(suspended) - pm_count
         parts: list[str] = []
-        if n_pm:
-            parts.append(f"{n_pm} PM{'s' if n_pm != 1 else ''}")
+        if pm_count:
+            parts.append(f"{pm_count} PM{'s' if pm_count != 1 else ''}")
         if n_child:
             parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
         click.echo(f"Suspended {', '.join(parts)}.")
-
-    # Rename child session channels with zzz- prefix.
-    # PM channels are renamed via their session's own _shutdown() path (daemon-side).
-    if child_channels_to_rename:
-        try:
-            config = SummonConfig.from_file(None)
-            web_client = AsyncWebClient(token=config.slack_bot_token)
-
-            async def _rename_one(cid: str, cname: str) -> None:
-                zzz_name = make_zzz_name(cname)
-                try:
-                    await web_client.conversations_rename(channel=cid, name=zzz_name)
-                    logger.info("zzz-rename: #%s → #%s", cname, zzz_name)
-                except Exception as e:
-                    logger.warning("zzz-rename: failed to rename #%s: %s", cname, e)
-
-            await asyncio.gather(
-                *[_rename_one(cid, cname) for cid, cname in child_channels_to_rename]
-            )
-        except Exception as e:
-            logger.debug("zzz-rename: could not init Slack client: %s", e)
 
     # Run project_down hooks for all projects in the filter (even those with no
     # active sessions — their services/environment still need teardown).

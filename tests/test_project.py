@@ -1056,8 +1056,6 @@ class TestStopProjectManagersOutput:
             patch("summon_claude.cli.project.is_daemon_running", return_value=True),
             patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
             patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.SummonConfig") as mock_cfg_cls,
-            patch("summon_claude.cli.project.AsyncWebClient"),
         ):
             reg = AsyncMock()
             reg.list_projects = AsyncMock(return_value=projects)
@@ -1066,15 +1064,12 @@ class TestStopProjectManagersOutput:
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_dc.stop_session = AsyncMock(return_value=True)
-            mock_cfg_cls.from_file = MagicMock(return_value=MagicMock(slack_bot_token="xoxb-test"))
 
             result = await stop_project_managers()
 
         assert "pm-sid" in result
         assert "child-sid" in result
         # Both PM and child sessions should be marked suspended for cascade restart
-        from unittest.mock import call
-
         reg.update_status.assert_any_call("pm-sid", "suspended")
         reg.update_status.assert_any_call("child-sid", "suspended")
 
@@ -1103,8 +1098,6 @@ class TestStopProjectManagersOutput:
             patch("summon_claude.cli.project.is_daemon_running", return_value=True),
             patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
             patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.SummonConfig") as mock_cfg_cls,
-            patch("summon_claude.cli.project.AsyncWebClient"),
         ):
             reg = AsyncMock()
             reg.list_projects = AsyncMock(return_value=projects)
@@ -1113,7 +1106,6 @@ class TestStopProjectManagersOutput:
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_dc.stop_session = AsyncMock(return_value=True)
-            mock_cfg_cls.from_file = MagicMock(return_value=MagicMock(slack_bot_token="xoxb-test"))
 
             result = await stop_project_managers()
 
@@ -1168,8 +1160,6 @@ class TestStopProjectManagersOutput:
             patch("summon_claude.cli.project.is_daemon_running", return_value=True),
             patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
             patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.SummonConfig") as mock_cfg_cls,
-            patch("summon_claude.cli.project.AsyncWebClient"),
         ):
             reg = AsyncMock()
             reg.list_projects = AsyncMock(return_value=projects)
@@ -1178,15 +1168,12 @@ class TestStopProjectManagersOutput:
             mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
             mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             mock_dc.stop_session = AsyncMock(return_value=True)
-            mock_cfg_cls.from_file = MagicMock(return_value=MagicMock(slack_bot_token="xoxb-test"))
 
             result = await stop_project_managers(name="alpha")
 
         assert "pm-alpha" in result
         assert "child-alpha" in result
         # Both PM and child sessions must be marked suspended for cascade restart
-        from unittest.mock import call
-
         reg.update_status.assert_any_call("pm-alpha", "suspended")
         reg.update_status.assert_any_call("child-alpha", "suspended")
 
@@ -1378,130 +1365,3 @@ class TestStopPMAwareness:
 
         session = {"session_id": "s1", "session_name": "test"}
         await _notify_pm_of_child_stop(session)  # should not raise
-
-
-# ---------------------------------------------------------------------------
-# project down: zzz-rename child channels
-# ---------------------------------------------------------------------------
-
-
-class TestProjectDownZzzRename:
-    """project down renames child session channels with zzz- prefix."""
-
-    async def test_project_down_zzz_child_sessions(self):
-        """Child session channels get zzz- prefix after project down."""
-        from summon_claude.cli.project import stop_project_managers
-
-        projects = [{"project_id": "p1", "name": "myproj", "channel_prefix": "myproj"}]
-        sessions = [
-            {
-                "session_id": "pm-sid",
-                "session_name": "myproj-pm-abc123",
-                "status": "active",
-                "slack_channel_id": None,
-                "slack_channel_name": "",
-            },
-            {
-                "session_id": "child-sid",
-                "session_name": "myproj-def456",
-                "status": "active",
-                "slack_channel_id": "C_CHILD",
-                "slack_channel_name": "myproj-def456",
-            },
-        ]
-
-        mock_web_client = AsyncMock()
-        mock_web_client.conversations_rename = AsyncMock(
-            return_value={"channel": {"name": "zzz-myproj-def456"}}
-        )
-
-        with (
-            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
-            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
-            patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.SummonConfig") as mock_cfg_cls,
-            patch(
-                "summon_claude.cli.project.AsyncWebClient",
-                return_value=mock_web_client,
-            ),
-        ):
-            reg = AsyncMock()
-            reg.list_projects = AsyncMock(return_value=projects)
-            reg.get_project_sessions = AsyncMock(return_value=sessions)
-            reg.update_status = AsyncMock()
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_dc.stop_session = AsyncMock(return_value=True)
-            mock_cfg_cls.from_file = MagicMock(return_value=MagicMock(slack_bot_token="xoxb-test"))
-
-            result = await stop_project_managers()
-
-        assert "child-sid" in result
-        # Child channel should be renamed with zzz- prefix
-        mock_web_client.conversations_rename.assert_awaited_once()
-        call_kwargs = mock_web_client.conversations_rename.call_args.kwargs
-        assert call_kwargs["channel"] == "C_CHILD"
-        assert call_kwargs["name"].startswith("zzz-")
-        assert "myproj-def456" in call_kwargs["name"]
-
-    async def test_project_down_zzz_rename_failure_continues(self):
-        """zzz-rename failure for one child channel does not block project down."""
-        from summon_claude.cli.project import stop_project_managers
-
-        projects = [{"project_id": "p1", "name": "myproj", "channel_prefix": "myproj"}]
-        sessions = [
-            {
-                "session_id": "child1",
-                "session_name": "myproj-aaa",
-                "status": "active",
-                "slack_channel_id": "C_FAIL",
-                "slack_channel_name": "myproj-aaa",
-            },
-            {
-                "session_id": "child2",
-                "session_name": "myproj-bbb",
-                "status": "active",
-                "slack_channel_id": "C_OK",
-                "slack_channel_name": "myproj-bbb",
-            },
-        ]
-
-        call_count = 0
-
-        async def rename_side_effect(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if kwargs.get("channel") == "C_FAIL":
-                raise Exception("channel_not_found")
-            return {"channel": {"name": "zzz-myproj-bbb"}}
-
-        mock_web_client = AsyncMock()
-        mock_web_client.conversations_rename = AsyncMock(side_effect=rename_side_effect)
-
-        with (
-            patch("summon_claude.cli.project.is_daemon_running", return_value=True),
-            patch("summon_claude.cli.project.SessionRegistry") as mock_reg_cls,
-            patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.SummonConfig") as mock_cfg_cls,
-            patch(
-                "summon_claude.cli.project.AsyncWebClient",
-                return_value=mock_web_client,
-            ),
-        ):
-            reg = AsyncMock()
-            reg.list_projects = AsyncMock(return_value=projects)
-            reg.get_project_sessions = AsyncMock(return_value=sessions)
-            reg.update_status = AsyncMock()
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_dc.stop_session = AsyncMock(return_value=True)
-            mock_cfg_cls.from_file = MagicMock(return_value=MagicMock(slack_bot_token="xoxb-test"))
-
-            # Must not raise despite rename failure
-            result = await stop_project_managers()
-
-        # Both child sessions suspended despite rename failure
-        assert "child1" in result
-        assert "child2" in result
-        # Both renames were attempted
-        assert call_count == 2

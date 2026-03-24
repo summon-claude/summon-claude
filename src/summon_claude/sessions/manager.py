@@ -648,18 +648,14 @@ class SessionManager:
         finally:
             self._resuming_channels.discard(channel_id)
 
-    async def _validate_resume_target(
-        self, old_session_id: str, *, allow_suspended: bool = False
-    ) -> dict[str, Any]:
+    async def _validate_resume_target(self, old_session_id: str) -> dict[str, Any]:
         """Validate and extract resume parameters from an old session.
 
         Returns a dict with resume params on success.
 
-        Args:
-            old_session_id: The session to resume from.
-            allow_suspended: When True, suspended sessions pass validation
-                (used by project up cascade restart). When False (default),
-                suspended sessions raise ValueError.
+        Note: ``_restart_suspended_sessions`` bypasses this method and builds
+        resume params inline from its already-open registry connection.  Keep
+        validation logic here in sync with that path.
 
         Raises:
             ValueError: On validation failure (session not found, wrong status, etc.).
@@ -669,9 +665,9 @@ class SessionManager:
             if not old_session:
                 raise ValueError(f"Session {old_session_id} not found")
             status = old_session["status"]
-            if status == "suspended" and not allow_suspended:
+            if status == "suspended":
                 raise ValueError("Session is suspended — use project up to restart it")
-            if status not in ("completed", "errored", "suspended"):
+            if status not in ("completed", "errored"):
                 raise ValueError(f"Session is {status} — use session_message instead")
             channel_id = old_session.get("slack_channel_id")
             if not channel_id:

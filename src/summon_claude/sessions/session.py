@@ -2500,14 +2500,14 @@ class SummonSession:
             except Exception:
                 logger.debug("Change summary at shutdown failed", exc_info=True)
 
-        # Post disconnect message (channel is preserved, not archived)
-        await self._post_disconnect_message(rt)
-
         # Rename channel with zzz- prefix to signal session is inactive
         try:
             await self._rename_channel_disconnected(rt.client, rt.registry)
         except Exception as e:
             logger.debug("zzz-rename in _shutdown failed: %s", e)
+
+        # Post disconnect message (channel is preserved, not archived)
+        await self._post_disconnect_message(rt)
 
         # Update registry — don't overwrite "suspended" (set by project down)
         try:
@@ -2541,7 +2541,7 @@ class SummonSession:
         text = (
             ":wave: *Claude session ended*\n"
             f"Turns: {self._total_turns} | Cost: ${self._total_cost:.4f}\n"
-            "Channel renamed with `zzz-` prefix — review the conversation history anytime."
+            "Channel preserved — review the conversation history anytime."
         )
 
         blocks = [
@@ -2569,33 +2569,34 @@ class SummonSession:
         On failure, posts a warning to the channel.
         """
         try:
-
-            async def _do_rename() -> None:
-                # Prefer channels table (canonical name), fall back to sessions table
-                channel_name: str | None = None
-                if self._channel_id:
-                    channel = await registry.get_channel(self._channel_id)
-                    if channel:
-                        channel_name = channel.get("channel_name")
-                if not channel_name:
-                    session = await registry.get_session(self._session_id)
-                    if session:
-                        channel_name = session.get("slack_channel_name")
-                if not channel_name:
-                    logger.debug("zzz-rename: no channel name found for %s", self._session_id[:8])
-                    return
-                if channel_name.startswith(ZZZ_PREFIX):
-                    logger.debug("zzz-rename: channel already prefixed (%s)", channel_name)
-                    return
-                new_name = make_zzz_name(channel_name)
-                result = await client.rename_channel(new_name)
-                if result is None:
-                    try:
-                        await client.post(f":warning: Could not rename channel to `{new_name}`.")
-                    except Exception as exc:
-                        logger.debug("zzz-rename warning post failed: %s", exc)
-
-            await asyncio.wait_for(_do_rename(), timeout=_CLEANUP_TIMEOUT_S)
+            # Prefer channels table (canonical name), fall back to sessions table
+            channel_name: str | None = None
+            if self._channel_id:
+                channel = await registry.get_channel(self._channel_id)
+                if channel:
+                    channel_name = channel.get("channel_name")
+            if not channel_name:
+                session = await registry.get_session(self._session_id)
+                if session:
+                    channel_name = session.get("slack_channel_name")
+            if not channel_name:
+                logger.debug("zzz-rename: no channel name found for %s", self._session_id[:8])
+                return
+            if channel_name.startswith(ZZZ_PREFIX):
+                logger.debug("zzz-rename: channel already prefixed (%s)", channel_name)
+                return
+            new_name = make_zzz_name(channel_name)
+            result = await asyncio.wait_for(
+                client.rename_channel(new_name), timeout=_CLEANUP_TIMEOUT_S
+            )
+            if result is None:
+                try:
+                    await asyncio.wait_for(
+                        client.post(f":warning: Could not rename channel to `{new_name}`."),
+                        timeout=_CLEANUP_TIMEOUT_S,
+                    )
+                except Exception as exc:
+                    logger.debug("zzz-rename warning post failed: %s", exc)
         except Exception as e:
             logger.debug("zzz-rename in _rename_channel_disconnected failed: %s", e)
 

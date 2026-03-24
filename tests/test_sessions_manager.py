@@ -2062,40 +2062,15 @@ class TestResolveChannelResume:
 
 
 # ---------------------------------------------------------------------------
-# Tests: _validate_resume_target allow_suspended parameter
+# Tests: _validate_resume_target suspended rejection
 # ---------------------------------------------------------------------------
 
 
-class TestValidateResumeTargetAllowSuspended:
-    """Tests for _validate_resume_target's allow_suspended parameter."""
+class TestValidateResumeTargetSuspended:
+    """Tests for _validate_resume_target's suspended session handling."""
 
-    async def test_validate_resume_target_allows_suspended(self):
-        """allow_suspended=True returns resume params for suspended sessions."""
-        manager, _, _ = _make_manager()
-        suspended_session = {
-            "status": "suspended",
-            "slack_channel_id": "C123",
-            "cwd": "/tmp/test",
-            "session_name": "test-session",
-            "model": "claude-opus-4-6",
-            "effort": "high",
-            "authenticated_user_id": "U001",
-            "parent_session_id": None,
-            "claude_session_id": "claude-abc",
-        }
-        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
-            mock_reg = AsyncMock()
-            mock_reg.get_session = AsyncMock(return_value=suspended_session)
-            mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-abc"})
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await manager._validate_resume_target("suspended-sess", allow_suspended=True)
-        assert result["channel_id"] == "C123"
-        assert result["claude_session_id"] == "claude-abc"
-        assert result["cwd"] == "/tmp/test"
-
-    async def test_validate_resume_target_rejects_suspended_default(self):
-        """allow_suspended=False (default) raises for suspended sessions."""
+    async def test_validate_resume_target_rejects_suspended(self):
+        """Suspended sessions are rejected with guidance to use project up."""
         manager, _, _ = _make_manager()
         with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
             mock_reg = AsyncMock()
@@ -2242,22 +2217,173 @@ class TestRestartSuspendedSessionsResume:
         )
 
 
-class TestValidateResumeTargetEdgeCases:
-    """Edge case tests for _validate_resume_target identified during QG."""
+class TestCreateResumedSessionPmTopic:
+    """create_resumed_session calls _update_pm_topic for non-PM project sessions."""
 
-    async def test_zzz_validate_resume_suspended_no_channel(self):
-        """allow_suspended=True still raises if session has no channel_id."""
+    async def test_resumed_session_updates_pm_topic(self):
+        """Non-PM resumed session with project_id triggers _update_pm_topic."""
         manager, _, _ = _make_manager()
-        suspended_no_channel = {
-            "session_id": "s-no-chan",
+        manager._project_up_in_flight = True
+
+        stub = _StubSession()
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch.object(manager, "_update_pm_topic", new=AsyncMock()) as mock_topic,
+        ):
+            options = SessionOptions(
+                cwd="/tmp/test",
+                name="proj-abc",
+                project_id="p1",
+                pm_profile=False,
+                channel_id="C1",
+            )
+            await manager.create_resumed_session(options, authenticated_user_id="U001")
+
+        mock_topic.assert_awaited_once_with("p1")
+
+    async def test_resumed_pm_session_skips_pm_topic(self):
+        """PM resumed session does NOT trigger _update_pm_topic."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        stub = _StubSession()
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", return_value=stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch.object(manager, "_update_pm_topic", new=AsyncMock()) as mock_topic,
+        ):
+            options = SessionOptions(
+                cwd="/tmp/test",
+                name="proj-pm-abc",
+                project_id="p1",
+                pm_profile=True,
+                channel_id="C1",
+            )
+            await manager.create_resumed_session(options, authenticated_user_id="U001")
+
+        mock_topic.assert_not_awaited()
+
+
+class TestMultiProjectPmResume:
+    """pm_resumed set accumulates across multiple projects."""
+
+    async def test_two_projects_each_with_suspended_pm(self):
+        """Two projects with suspended PMs produce zero fresh PM starts."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        auth_stub = _StubSession()
+        auth_stub.authenticate("U001")
+
+        pm1 = {
+            "session_id": "pm-old-1",
+            "session_name": "proj1-pm-aaa",
+            "cwd": "/tmp/proj1",
+            "model": "claude-opus-4-6",
             "status": "suspended",
+            "slack_channel_id": "C_PM1",
+            "slack_channel_name": "zzz-proj1-pm",
+            "claude_session_id": "cl-pm1",
+            "authenticated_user_id": "U001",
+        }
+        pm2 = {
+            "session_id": "pm-old-2",
+            "session_name": "proj2-pm-bbb",
+            "cwd": "/tmp/proj2",
+            "model": "claude-opus-4-6",
+            "status": "suspended",
+            "slack_channel_id": "C_PM2",
+            "slack_channel_name": "zzz-proj2-pm",
+            "claude_session_id": "cl-pm2",
+            "authenticated_user_id": "U001",
+        }
+
+        captured_options: list = []
+
+        def make_stub(*args, **kwargs):
+            captured_options.append(kwargs)
+            return _StubSession()
+
+        mock_reg = AsyncMock()
+
+        def get_sessions(pid):
+            if pid == "p1":
+                return [pm1]
+            return [pm2]
+
+        mock_reg.get_project_sessions = AsyncMock(side_effect=get_sessions)
+        mock_reg.get_session = AsyncMock(side_effect=lambda sid: pm1 if sid == "pm-old-1" else pm2)
+        mock_reg.get_channel = AsyncMock(
+            side_effect=lambda cid: (
+                {"claude_session_id": "cl-pm1"}
+                if cid == "C_PM1"
+                else {"claude_session_id": "cl-pm2"}
+            )
+        )
+        mock_reg.update_status = AsyncMock()
+
+        projects = [
+            {
+                "project_id": "p1",
+                "name": "proj1",
+                "directory": "/tmp/proj1",
+                "channel_prefix": "proj1",
+            },
+            {
+                "project_id": "p2",
+                "name": "proj2",
+                "directory": "/tmp/proj2",
+                "channel_prefix": "proj2",
+            },
+        ]
+
+        with (
+            patch("summon_claude.sessions.manager.SummonSession", side_effect=make_stub),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await asyncio.wait_for(
+                manager._project_up_orchestrator(auth_stub, projects),
+                timeout=5,
+            )
+
+        # Both PMs resumed, no fresh PMs started → exactly 2 SummonSession calls
+        assert len(captured_options) == 2
+        # Both should have pm_profile=True
+        for opts_dict in captured_options:
+            opts = opts_dict.get("options")
+            assert opts is not None
+            assert opts.pm_profile is True
+
+        for t in list(manager._background_tasks):
+            t.cancel()
+        await asyncio.gather(
+            *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
+        )
+
+
+class TestValidateResumeTargetEdgeCases:
+    """Edge case tests for _validate_resume_target."""
+
+    async def test_validate_resume_no_channel(self):
+        """Sessions with no channel_id are rejected."""
+        manager, _, _ = _make_manager()
+        no_channel = {
+            "session_id": "s-no-chan",
+            "status": "completed",
             "slack_channel_id": None,
             "cwd": "/tmp/test",
         }
         with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
             mock_reg = AsyncMock()
-            mock_reg.get_session = AsyncMock(return_value=suspended_no_channel)
+            mock_reg.get_session = AsyncMock(return_value=no_channel)
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with pytest.raises(ValueError, match="no associated channel"):
-                await manager._validate_resume_target("s-no-chan", allow_suspended=True)
+                await manager._validate_resume_target("s-no-chan")

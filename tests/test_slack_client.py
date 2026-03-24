@@ -510,3 +510,20 @@ class TestZzzRenameChannel:
         await client.rename_channel("zzz-x")
         call_kwargs = web.conversations_rename.call_args.kwargs
         assert call_kwargs["channel"] == "C999"
+
+
+class TestZzzMakeZzzNameIdempotency:
+    def test_zzz_make_zzz_name_already_prefixed(self):
+        """make_zzz_name is idempotent — already-prefixed names are not double-prefixed."""
+        from summon_claude.slack.client import make_zzz_name
+
+        assert make_zzz_name("zzz-myproj-abc") == "zzz-myproj-abc"
+
+    def test_zzz_make_zzz_name_already_prefixed_long(self):
+        """make_zzz_name truncates already-prefixed names to 80 chars."""
+        from summon_claude.slack.client import make_zzz_name
+
+        long_name = "zzz-" + "a" * 80
+        result = make_zzz_name(long_name)
+        assert len(result) == 80
+        assert result.startswith("zzz-")

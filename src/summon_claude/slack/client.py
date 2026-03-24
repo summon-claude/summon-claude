@@ -20,7 +20,12 @@ _SLACK_CHANNEL_NAME_MAX = 80
 
 
 def make_zzz_name(channel_name: str) -> str:
-    """Return channel_name with zzz- prefix, truncated to Slack's 80-char limit."""
+    """Return channel_name with zzz- prefix, truncated to Slack's 80-char limit.
+
+    Idempotent: already-prefixed names are returned truncated but not double-prefixed.
+    """
+    if channel_name.startswith(ZZZ_PREFIX):
+        return channel_name[:_SLACK_CHANNEL_NAME_MAX]
     return ZZZ_PREFIX + channel_name[: _SLACK_CHANNEL_NAME_MAX - len(ZZZ_PREFIX)]
 
 
