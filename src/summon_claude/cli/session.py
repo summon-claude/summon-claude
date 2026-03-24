@@ -31,6 +31,7 @@ from summon_claude.cli.interactive import (
 from summon_claude.config import SummonConfig, get_data_dir
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 logger = logging.getLogger(__name__)
 
@@ -209,19 +210,19 @@ async def async_session_cleanup(ctx: click.Context, *, archive: bool = False) ->
             stale = [s for i, s in enumerate(stale) if i in selected_indices]
 
         if stale:
-            # Best-effort Slack client for archiving channels
+            # Best-effort Slack client for archiving/zzz-renaming channels
             slack_client = None
-            if archive:
-                try:
-                    config_path: str | None = ctx.obj.get("config_path") if ctx.obj else None
-                    config = SummonConfig.from_file(config_path)
-                    slack_client = AsyncWebClient(token=config.slack_bot_token)
-                except Exception as e:
-                    logger.debug("Could not initialize Slack client for cleanup: %s", e)
+            try:
+                config_path: str | None = ctx.obj.get("config_path") if ctx.obj else None
+                config = SummonConfig.from_file(config_path)
+                slack_client = AsyncWebClient(token=config.slack_bot_token)
+            except Exception as e:
+                logger.debug("Could not initialize Slack client for cleanup: %s", e)
 
             for session in stale:
                 session_id = session["session_id"]
                 channel_id = session.get("slack_channel_id")
+                channel_name = session.get("slack_channel_name", "")
 
                 if session_id in pid_stale_ids:
                     reason = f"Owner process (pid {session['pid']}) no longer running"
@@ -239,6 +240,24 @@ async def async_session_cleanup(ctx: click.Context, *, archive: bool = False) ->
                         )
                     except Exception as e:
                         logger.debug("Could not archive channel %s: %s", channel_id, e)
+                elif (
+                    slack_client
+                    and channel_id
+                    and channel_name
+                    and not channel_name.startswith(ZZZ_PREFIX)
+                ):
+                    # Rename stale channel with zzz- prefix
+                    zzz_name = make_zzz_name(channel_name)
+                    try:
+                        await slack_client.conversations_rename(channel=channel_id, name=zzz_name)
+                        logger.info(
+                            "zzz-rename: #%s → #%s for stale session %s",
+                            channel_name,
+                            zzz_name,
+                            session_id[:8],
+                        )
+                    except Exception as e:
+                        logger.debug("Could not zzz-rename channel %s: %s", channel_id, e)
 
                 await registry.mark_stale(session_id, reason)
 

@@ -1029,7 +1029,7 @@ class TestSchedulerIntegration:
 
 class TestStopProjectManagersOutput:
     async def test_stop_pm_and_child_sessions(self):
-        """project down stops PMs normally and marks children as suspended."""
+        """project down marks both PMs and children as suspended for cascade restart."""
         from summon_claude.cli.project import stop_project_managers
 
         projects = [
@@ -1069,8 +1069,9 @@ class TestStopProjectManagersOutput:
 
         assert "pm-sid" in result
         assert "child-sid" in result
-        # Child session should be marked suspended
-        reg.update_status.assert_called_once_with("child-sid", "suspended")
+        # Both PM and child sessions should be marked suspended for cascade restart
+        reg.update_status.assert_any_call("pm-sid", "suspended")
+        reg.update_status.assert_any_call("child-sid", "suspended")
 
     async def test_stop_daemon_not_running(self):
         """project down returns empty when daemon is not running."""
@@ -1081,7 +1082,7 @@ class TestStopProjectManagersOutput:
         assert result == []
 
     async def test_stop_only_pm_sessions(self):
-        """When no child sessions exist, only PMs are stopped (no suspended)."""
+        """When only PM sessions exist, they are marked suspended for cascade restart."""
         from summon_claude.cli.project import stop_project_managers
 
         projects = [{"project_id": "p1", "name": "proj"}]
@@ -1109,7 +1110,7 @@ class TestStopProjectManagersOutput:
             result = await stop_project_managers()
 
         assert result == ["pm-only"]
-        reg.update_status.assert_not_called()
+        reg.update_status.assert_called_once_with("pm-only", "suspended")
 
     async def test_stop_by_project_name(self):
         """project down <name> stops only that project's sessions."""
@@ -1143,7 +1144,7 @@ class TestStopProjectManagersOutput:
         reg.get_project_sessions.assert_called_once_with("p1")
 
     async def test_stop_by_name_suspends_child_sessions(self):
-        """project down <name> suspends child sessions for cascade restart."""
+        """project down <name> suspends both PM and child sessions for cascade restart."""
         from summon_claude.cli.project import stop_project_managers
 
         projects = [
@@ -1172,8 +1173,9 @@ class TestStopProjectManagersOutput:
 
         assert "pm-alpha" in result
         assert "child-alpha" in result
-        # Child session must be marked suspended for cascade restart
-        reg.update_status.assert_called_once_with("child-alpha", "suspended")
+        # Both PM and child sessions must be marked suspended for cascade restart
+        reg.update_status.assert_any_call("pm-alpha", "suspended")
+        reg.update_status.assert_any_call("child-alpha", "suspended")
 
     async def test_stop_by_name_unknown_project_raises(self):
         """project down <name> raises when project not found."""

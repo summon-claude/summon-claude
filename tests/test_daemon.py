@@ -353,6 +353,82 @@ class TestCleanupOrphanedSessions:
         # No messages posted
         mock_client.chat_postMessage.assert_not_called()
 
+    async def test_zzz_orphan_cleanup_renames_channel(self, temp_db_path):
+        """_cleanup_orphaned_sessions renames orphaned session channels with zzz- prefix."""
+        from summon_claude.daemon import _cleanup_orphaned_sessions
+
+        async with SessionRegistry(db_path=temp_db_path) as reg:
+            await reg.register("orphan-zzz", 9999, "/tmp", "old-session")
+            await reg.update_status(
+                "orphan-zzz",
+                "active",
+                slack_channel_id="C_ZZZ",
+                slack_channel_name="myproj-abc",
+            )
+
+        mock_client = AsyncMock()
+        mock_client.conversations_rename = AsyncMock()
+        with patch(
+            "summon_claude.daemon.SessionRegistry",
+            lambda: SessionRegistry(db_path=temp_db_path),
+        ):
+            await _cleanup_orphaned_sessions(mock_client)
+
+        mock_client.conversations_rename.assert_awaited_once()
+        call_kwargs = mock_client.conversations_rename.call_args.kwargs
+        assert call_kwargs["channel"] == "C_ZZZ"
+        assert call_kwargs["name"].startswith("zzz-")
+        assert "myproj-abc" in call_kwargs["name"]
+
+    async def test_zzz_orphan_cleanup_skips_already_prefixed(self, temp_db_path):
+        """_cleanup_orphaned_sessions skips rename when channel already zzz-prefixed."""
+        from summon_claude.daemon import _cleanup_orphaned_sessions
+
+        async with SessionRegistry(db_path=temp_db_path) as reg:
+            await reg.register("orphan-pre", 9999, "/tmp", "old-session")
+            await reg.update_status(
+                "orphan-pre",
+                "active",
+                slack_channel_id="C_PRE",
+                slack_channel_name="zzz-already-done",
+            )
+
+        mock_client = AsyncMock()
+        mock_client.conversations_rename = AsyncMock()
+        with patch(
+            "summon_claude.daemon.SessionRegistry",
+            lambda: SessionRegistry(db_path=temp_db_path),
+        ):
+            await _cleanup_orphaned_sessions(mock_client)
+
+        mock_client.conversations_rename.assert_not_awaited()
+
+    async def test_zzz_orphan_cleanup_rename_failure_continues(self, temp_db_path):
+        """_cleanup_orphaned_sessions continues if rename raises — session still errored."""
+        from summon_claude.daemon import _cleanup_orphaned_sessions
+
+        async with SessionRegistry(db_path=temp_db_path) as reg:
+            await reg.register("orphan-fail", 9999, "/tmp", "old-session")
+            await reg.update_status(
+                "orphan-fail",
+                "active",
+                slack_channel_id="C_FAIL",
+                slack_channel_name="myproj-fail",
+            )
+
+        mock_client = AsyncMock()
+        mock_client.conversations_rename = AsyncMock(side_effect=Exception("channel_not_found"))
+        with patch(
+            "summon_claude.daemon.SessionRegistry",
+            lambda: SessionRegistry(db_path=temp_db_path),
+        ):
+            await _cleanup_orphaned_sessions(mock_client)
+
+        # Session should still be marked errored despite rename failure
+        async with SessionRegistry(db_path=temp_db_path) as reg:
+            s = await reg.get_session("orphan-fail")
+            assert s["status"] == "errored"
+
 
 # ---------------------------------------------------------------------------
 # IPC framing protocol tests (absorbed from test_ipc.py)

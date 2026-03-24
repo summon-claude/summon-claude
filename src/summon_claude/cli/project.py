@@ -134,10 +134,11 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     If *name* is given, only stop sessions for that project.
     Otherwise stop all registered projects.
 
-    PM sessions are stopped normally. Child sessions are marked ``suspended``
-    so ``project up`` can deterministically restart them.
+    All sessions (PM and children) are marked ``suspended`` so
+    ``project up`` can resume them with full transcript continuity.
+    Channel zzz-rename is handled by each session's ``_shutdown()`` path.
 
-    Returns a list of session_ids that were stopped.
+    Returns a list of suspended session_ids.
     """
     if not is_daemon_running():
         click.echo("Daemon is not running. No PM sessions to stop.")
@@ -154,7 +155,7 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             await _run_project_hooks("project_down")
         return []
 
-    stopped: list[str] = []
+    pm_count = 0
     suspended: list[str] = []
     projects: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
@@ -180,34 +181,35 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                     found = await daemon_client.stop_session(sid)
                     if not found:
                         continue
+                    # Mark both PM and child sessions as suspended for cascade restart
+                    await registry.update_status(sid, "suspended")
+                    suspended.append(sid)
                     if is_pm:
-                        stopped.append(sid)
-                        click.echo(f"  Stopped PM for {pname!r} ({sid[:8]}...)")
+                        pm_count += 1
+                        click.echo(f"  Suspended PM for {pname!r} ({sid[:8]}...)")
                     else:
-                        # Mark child session as suspended for cascade restart
-                        await registry.update_status(sid, "suspended")
-                        suspended.append(sid)
                         label = sname or sid[:8]
                         click.echo(f"  Suspended {label!r} for {pname!r}")
                 except Exception as e:
                     click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
-    if not stopped and not suspended:
+    if not suspended:
         click.echo("No active project sessions found.")
     else:
+        n_child = len(suspended) - pm_count
         parts: list[str] = []
-        if stopped:
-            parts.append(f"{len(stopped)} PM")
-        if suspended:
-            parts.append(f"{len(suspended)} subsession{'s' if len(suspended) != 1 else ''}")
-        click.echo(f"Stopped {', '.join(parts)}.")
+        if pm_count:
+            parts.append(f"{pm_count} PM{'s' if pm_count != 1 else ''}")
+        if n_child:
+            parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
+        click.echo(f"Suspended {', '.join(parts)}.")
 
     # Run project_down hooks for all projects in the filter (even those with no
     # active sessions — their services/environment still need teardown).
     target_project_ids = [p["project_id"] for p in projects]
     await _run_project_hooks("project_down", project_ids=target_project_ids)
 
-    return stopped + suspended
+    return suspended
 
 
 # ---------------------------------------------------------------------------

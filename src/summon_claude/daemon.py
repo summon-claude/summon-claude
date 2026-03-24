@@ -33,6 +33,7 @@ from summon_claude.event_dispatcher import EventDispatcher
 from summon_claude.sessions.manager import SessionManager
 from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.slack.bolt import BoltRouter
+from summon_claude.slack.client import ZZZ_PREFIX, make_zzz_name
 
 if TYPE_CHECKING:
     from slack_sdk.web.async_client import AsyncWebClient
@@ -170,13 +171,27 @@ async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
             cleaned = await registry.cleanup_active("Orphaned by daemon restart")
             for session in cleaned:
                 channel_id = session.get("slack_channel_id")
+                channel_name = session.get("slack_channel_name", "")
                 if channel_id:
+                    # Rename with zzz- prefix BEFORE posting message
+                    if channel_name and not channel_name.startswith(ZZZ_PREFIX):
+                        zzz_name = make_zzz_name(channel_name)
+                        try:
+                            await web_client.conversations_rename(channel=channel_id, name=zzz_name)
+                            logger.info(
+                                "zzz-rename: #%s → #%s for orphaned session",
+                                channel_name,
+                                zzz_name,
+                            )
+                        except Exception as e:
+                            logger.debug("Could not zzz-rename channel %s: %s", channel_id, e)
                     try:
                         await web_client.chat_postMessage(
                             channel=channel_id,
                             text=(
                                 ":warning: *Session disconnected* (daemon restarted)\n"
-                                "Channel preserved — you can review the conversation history."
+                                "Channel preserved — review the "
+                                "conversation history anytime."
                             ),
                         )
                     except Exception as e:
