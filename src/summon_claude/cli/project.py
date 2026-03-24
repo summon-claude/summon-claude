@@ -156,6 +156,7 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
         return []
 
     pm_count = 0
+    scribe_suspended = False
     suspended: list[str] = []
     projects: list[dict[str, Any]] = []
     async with SessionRegistry() as registry:
@@ -193,30 +194,11 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                 except Exception as e:
                     click.echo(f"  Failed to stop session {sid[:8]}...: {e}", err=True)
 
-    if not suspended:
-        click.echo("No active project sessions found.")
-    else:
-        n_child = len(suspended) - pm_count
-        parts: list[str] = []
-        if pm_count:
-            parts.append(f"{pm_count} PM{'s' if pm_count != 1 else ''}")
-        if n_child:
-            parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
-        click.echo(f"Suspended {', '.join(parts)}.")
-
-    # Run project_down hooks for all projects in the filter (even those with no
-    # active sessions — their services/environment still need teardown).
-    target_project_ids = [p["project_id"] for p in projects]
-    await _run_project_hooks("project_down", project_ids=target_project_ids)
-
-    # Stop global scribe if running (no project_id, name="scribe")
-    if not name:  # only on "stop all"
-        async with SessionRegistry() as registry:
+        # Stop global scribe if running (no project_id, name="scribe")
+        if not name:
             all_active = await registry.list_active()
             for sess in all_active:
                 sname = sess.get("session_name", "")
-                # Scribe is identified by name convention (no project_id, name="scribe").
-                # Same pattern as PM detection ("-pm-" in sname) — both are string conventions.
                 if sname == "scribe" and sess.get("project_id") is None:
                     sid = sess["session_id"]
                     try:
@@ -224,9 +206,28 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
                         if found:
                             await registry.update_status(sid, "suspended")
                             suspended.append(sid)
+                            scribe_suspended = True
                             click.echo(f"  Suspended scribe ({sid[:8]}...)")
                     except Exception as e:
                         click.echo(f"  Failed to stop scribe: {e}", err=True)
+
+    if not suspended:
+        click.echo("No active project sessions found.")
+    else:
+        n_child = len(suspended) - pm_count - (1 if scribe_suspended else 0)
+        parts: list[str] = []
+        if pm_count:
+            parts.append(f"{pm_count} PM{'s' if pm_count != 1 else ''}")
+        if n_child:
+            parts.append(f"{n_child} subsession{'s' if n_child != 1 else ''}")
+        if scribe_suspended:
+            parts.append("scribe")
+        click.echo(f"Suspended {', '.join(parts)}.")
+
+    # Run project_down hooks for all projects in the filter (even those with no
+    # active sessions — their services/environment still need teardown).
+    target_project_ids = [p["project_id"] for p in projects]
+    await _run_project_hooks("project_down", project_ids=target_project_ids)
 
     return suspended
 

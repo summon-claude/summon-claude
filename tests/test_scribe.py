@@ -56,6 +56,7 @@ def make_manager(*, scribe_enabled: bool = False, **config_overrides):
     manager._ipc_resume = AsyncMock()
     manager.create_session_with_spawn_token = AsyncMock()
     manager._grace_timer = None
+    manager._resuming_channels = set()
     return manager
 
 
@@ -731,12 +732,7 @@ class TestSlackAuthValidatesUrl:
 class TestProjectDownStopsScribe:
     @pytest.mark.asyncio
     async def test_project_down_stops_scribe(self):
-        """stop_project_managers (no name filter) finds and stops the scribe session.
-
-        The function uses two separate ``async with SessionRegistry()`` blocks:
-        the first lists projects (returns [] here), the second lists active sessions
-        and finds the scribe. Both calls share the same mock registry instance.
-        """
+        """stop_project_managers (no name filter) finds and suspends the scribe session."""
         from summon_claude.cli.project import stop_project_managers
 
         scribe_session = {
@@ -870,6 +866,24 @@ class TestScribePreflight:
 # ---------------------------------------------------------------------------
 
 
+def _mock_registry_with_suspended_scribe(scribe_row: dict | None):
+    """Build a mock SessionRegistry whose db.execute returns *scribe_row*."""
+    mock_reg = AsyncMock()
+    mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+    mock_reg.__aexit__ = AsyncMock(return_value=False)
+
+    # mock_reg.db.execute(...) is used as an async context manager whose
+    # __aenter__ returns a cursor with fetchone().
+    mock_cursor = AsyncMock()
+    mock_cursor.fetchone = AsyncMock(return_value=scribe_row)
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_cursor)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    mock_reg.db.execute = MagicMock(return_value=mock_ctx)
+    mock_reg.get_channel = AsyncMock(return_value=None)
+    return mock_reg
+
+
 class TestResumeOrStartScribe:
     @pytest.mark.asyncio
     async def test_resumes_suspended_scribe(self):
@@ -887,17 +901,17 @@ class TestResumeOrStartScribe:
             "model": "sonnet",
         }
 
-        mock_reg = AsyncMock()
-        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
-        mock_reg.__aexit__ = AsyncMock(return_value=False)
-        mock_reg.list_all.return_value = [suspended_scribe]
+        mock_reg = _mock_registry_with_suspended_scribe(suspended_scribe)
         mock_reg.get_channel.return_value = {
             "claude_session_id": "claude-sid-old",
         }
 
         manager.create_resumed_session = AsyncMock(return_value="scribe-new-001")
 
-        with patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg):
+        with (
+            patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg),
+            patch("summon_claude.sessions.manager.pathlib.Path"),
+        ):
             await manager._resume_or_start_scribe("U123")
 
         # Resumed via create_resumed_session, not _start_scribe_if_enabled
@@ -907,9 +921,42 @@ class TestResumeOrStartScribe:
         assert opts.name == "scribe"
         assert opts.resume == "claude-sid-old"
         assert opts.channel_id == "C_SCRIBE"
+        assert manager.create_resumed_session.call_args.kwargs["authenticated_user_id"] == "U123"
 
         # Old suspended record marked completed
         mock_reg.update_status.assert_any_call("scribe-old-001", "completed")
+
+    @pytest.mark.asyncio
+    async def test_resumes_with_channel_but_no_channel_record(self):
+        """Falls back to session claude_session_id when get_channel returns None."""
+        manager = make_manager(scribe_enabled=True)
+
+        suspended_scribe = {
+            "session_id": "scribe-old-003",
+            "session_name": "scribe",
+            "status": "suspended",
+            "project_id": None,
+            "cwd": "/tmp/scribe",
+            "slack_channel_id": "C_GONE",
+            "claude_session_id": "claude-sid-fallback",
+        }
+
+        mock_reg = _mock_registry_with_suspended_scribe(suspended_scribe)
+        # get_channel returns None (channel record was deleted/missing)
+
+        manager.create_resumed_session = AsyncMock(return_value="scribe-new-003")
+
+        with (
+            patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg),
+            patch("summon_claude.sessions.manager.pathlib.Path"),
+        ):
+            await manager._resume_or_start_scribe("U123")
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        # Falls back to suspended_scribe's claude_session_id
+        assert opts.resume == "claude-sid-fallback"
+        assert opts.channel_id == "C_GONE"
 
     @pytest.mark.asyncio
     async def test_falls_through_to_fresh_start(self):
@@ -918,10 +965,7 @@ class TestResumeOrStartScribe:
             scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
         )
 
-        mock_reg = AsyncMock()
-        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
-        mock_reg.__aexit__ = AsyncMock(return_value=False)
-        mock_reg.list_all.return_value = []  # no suspended scribe
+        mock_reg = _mock_registry_with_suspended_scribe(None)  # no suspended scribe
 
         with (
             patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_reg),
@@ -976,10 +1020,7 @@ class TestResumeOrStartScribe:
             "slack_channel_id": None,
         }
 
-        mock_reg = AsyncMock()
-        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
-        mock_reg.__aexit__ = AsyncMock(return_value=False)
-        mock_reg.list_all.return_value = [suspended_scribe]
+        mock_reg = _mock_registry_with_suspended_scribe(suspended_scribe)
 
         manager.create_resumed_session = AsyncMock(side_effect=RuntimeError("boom"))
 

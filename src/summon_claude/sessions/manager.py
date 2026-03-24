@@ -1058,17 +1058,15 @@ class SessionManager:
 
         # Look for a suspended scribe session to resume
         async with SessionRegistry() as registry:
-            all_sessions = await registry.list_all(limit=50)
-            suspended_scribe = next(
-                (
-                    s
-                    for s in all_sessions
-                    if s.get("status") == "suspended"
-                    and s.get("session_name") == "scribe"
-                    and s.get("project_id") is None
-                ),
-                None,
-            )
+            async with registry.db.execute(
+                "SELECT * FROM sessions"
+                " WHERE status = 'suspended'"
+                "   AND session_name = 'scribe'"
+                "   AND project_id IS NULL"
+                " ORDER BY started_at DESC LIMIT 1",
+            ) as cursor:
+                row = await cursor.fetchone()
+            suspended_scribe = dict(row) if row else None
             if suspended_scribe is not None:
                 sess_id = suspended_scribe["session_id"]
                 channel_id = suspended_scribe.get("slack_channel_id")
@@ -1080,8 +1078,14 @@ class SessionManager:
                         if channel and channel.get("claude_session_id")
                         else suspended_scribe.get("claude_session_id")
                     )
+                scribe_cwd = (
+                    suspended_scribe.get("cwd")
+                    or self._config.scribe_cwd
+                    or str(get_data_dir() / "scribe")
+                )
+                pathlib.Path(scribe_cwd).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
                 options = SessionOptions(
-                    cwd=suspended_scribe.get("cwd", ""),
+                    cwd=scribe_cwd,
                     name="scribe",
                     model=self._config.scribe_model,
                     scribe_profile=True,
@@ -1090,6 +1094,8 @@ class SessionManager:
                     channel_id=channel_id,
                 )
                 try:
+                    if channel_id:
+                        self._check_channel_available(channel_id)
                     await self.create_resumed_session(
                         options,
                         authenticated_user_id=user_id,
