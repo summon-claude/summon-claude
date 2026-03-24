@@ -522,6 +522,9 @@ async def _check_db(db_path: Path) -> tuple[int, str, int, int]:
 
 async def _check_features(db_path: Path) -> tuple[bool, bool, int]:
     """Query DB for workflow, hooks, and project count."""
+    has_workflow = False
+    has_hooks = False
+    project_count = 0
     reg = SessionRegistry(db_path=db_path)
     async with reg:
         has_workflow = bool(await reg.get_workflow_defaults())
