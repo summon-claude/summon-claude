@@ -481,10 +481,9 @@ class TestSlackCheck:
 
     async def test_slack_timeout(self, check: SlackCheck) -> None:
         config = SummonConfig.for_test()
-        with patch(
-            "asyncio.wait_for",
-            side_effect=TimeoutError,
-        ):
+        mock_client = MagicMock()
+        mock_client.auth_test.side_effect = TimeoutError
+        with patch("slack_sdk.WebClient", return_value=mock_client):
             result = await check.run(config)
         assert result.status == "fail"
         assert "timed out" in result.message.lower()
@@ -653,7 +652,6 @@ class TestGitHubMcpCheck:
         config = SummonConfig.for_test(github_pat="ghp_test123")
 
         def _fake_urlopen(req, *, timeout=None):
-            import io
             import json
 
             resp = MagicMock()
@@ -704,7 +702,7 @@ class TestGitHubMcpCheck:
 
     async def test_pat_timeout(self, check: GitHubMcpCheck) -> None:
         config = SummonConfig.for_test(github_pat="ghp_test123")
-        with patch("asyncio.wait_for", side_effect=TimeoutError):
+        with patch("urllib.request.urlopen", side_effect=TimeoutError):
             result = await check.run(config)
         assert result.status == "warn"
         assert "timed out" in result.message.lower()
