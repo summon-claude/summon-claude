@@ -146,12 +146,13 @@ def _print_results(
 ) -> None:
     """Print interactive check results."""
     for result in results:
-        redacted = _redact_result(result)
-        status_str = _format_status(redacted.status, color=use_color)
-        subsystem = redacted.subsystem.replace("_", " ").title()
-        click.echo(f"{status_str} {subsystem}: {redacted.message}")
+        # Always redact the summary line; full redaction (incl. collected_logs) only when verbose
+        status_str = _format_status(result.status, color=use_color)
+        subsystem = result.subsystem.replace("_", " ").title()
+        click.echo(f"{status_str} {subsystem}: {redactor.redact(result.message)}")
 
         if verbose:
+            redacted = _redact_result(result)
             for detail in redacted.details:
                 click.echo(f"    {detail}")
             if redacted.suggestion:

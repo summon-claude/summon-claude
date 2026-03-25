@@ -302,6 +302,21 @@ class TestDaemonCheck:
         assert result.status == "warn"
         assert any("could not read" in d.lower() for d in result.details)
 
+    async def test_pid_permission_error(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=True, pid_exists=True, pid_text="12345")
+        # Override the kill patch to raise PermissionError (process exists, no permission)
+        mocks["kill"] = patch("summon_claude.diagnostics.os.kill", side_effect=PermissionError)
+        with (
+            mocks["running"],
+            mocks["socket"],
+            mocks["pid"],
+            mocks["registry"],
+            mocks["kill"],
+        ):
+            result = await check.run(None)
+        assert result.status == "pass"
+        assert any("no kill permission" in d.lower() for d in result.details)
+
 
 # ---------------------------------------------------------------------------
 # DatabaseCheck tests
@@ -412,6 +427,43 @@ class TestDatabaseCheck:
             result = await check.run(None)
         assert result.status == "fail"
         assert "failed to open" in result.message.lower()
+
+    async def test_db_integrity_failure(self, check: DatabaseCheck, tmp_path: Path) -> None:
+        from summon_claude.sessions.migrations import CURRENT_SCHEMA_VERSION
+
+        db_file = tmp_path / "registry.db"
+        db_file.write_bytes(b"")
+
+        mock_db = MagicMock()
+
+        def _mock_execute(sql, *_args):
+            ctx = MagicMock()
+            if "PRAGMA integrity_check" in sql:
+                ctx.fetchone = AsyncMock(return_value=("data corruption on page 42",))
+            elif "SELECT COUNT" in sql:
+                ctx.fetchone = AsyncMock(return_value=(0,))
+            ctx.__aenter__ = AsyncMock(return_value=ctx)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            return ctx
+
+        mock_db.execute = _mock_execute
+
+        mock_reg = MagicMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.db = mock_db
+
+        with (
+            patch("summon_claude.config.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.sessions.registry.SessionRegistry", return_value=mock_reg),
+            patch(
+                "summon_claude.sessions.migrations.get_schema_version",
+                return_value=CURRENT_SCHEMA_VERSION,
+            ),
+        ):
+            result = await check.run(None)
+        assert result.status == "fail"
+        assert "integrity" in result.message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -852,11 +904,7 @@ class TestDoctorCli:
             async def run(self, config):
                 raise RuntimeError("kaboom")
 
-        original_registry = dict(DIAGNOSTIC_REGISTRY)
-        try:
-            DIAGNOSTIC_REGISTRY.clear()
-            DIAGNOSTIC_REGISTRY["crasher"] = CrashingCheck()  # type: ignore[assignment]
-
+        with patch.dict(DIAGNOSTIC_REGISTRY, {"crasher": CrashingCheck()}, clear=True):  # type: ignore[dict-item]
             results: list[CheckResult] = []
             await _run_checks(results, None)
 
@@ -865,9 +913,6 @@ class TestDoctorCli:
             assert "crashed" in results[0].message.lower()
             assert results[0].suggestion is not None
             assert "bug" in results[0].suggestion.lower()
-        finally:
-            DIAGNOSTIC_REGISTRY.clear()
-            DIAGNOSTIC_REGISTRY.update(original_registry)
 
 
 # ---------------------------------------------------------------------------

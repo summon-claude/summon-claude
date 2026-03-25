@@ -566,8 +566,9 @@ class LogsCheck:
         if session_logs:
             latest = session_logs[0]
             try:
-                age_hours = (now - latest.stat().st_mtime) / 3600
-                size_str = _human_size(latest.stat().st_size)
+                latest_st = latest.stat()
+                age_hours = (now - latest_st.st_mtime) / 3600
+                size_str = _human_size(latest_st.st_size)
                 details.append(f"{latest.name}: {size_str}, {age_hours:.1f}h old")
             except OSError:
                 details.append(f"{latest.name}: could not stat")
