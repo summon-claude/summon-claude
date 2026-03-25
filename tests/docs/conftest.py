@@ -16,7 +16,7 @@ from dotenv import dotenv_values
 # ---------------------------------------------------------------------------
 
 _ENV_VAR_RE = re.compile(r"`(SUMMON_[A-Z_]+)`")
-_CLI_CMD_BACKTICK_RE = re.compile(r"`summon\s+((?:[a-z][\w-]*\s*)+)`")
+_CLI_CMD_BACKTICK_RE = re.compile(r"`summon\s+([^`]+)`")
 _CLI_CMD_CODEBLOCK_RE = re.compile(r"^\$?\s*summon\s+((?:[a-z][\w-]*\s*)+)", re.MULTILINE)
 _MCP_TOOL_RE = re.compile(r"^#{3,4}\s+`([\w]+)`", re.MULTILINE)
 

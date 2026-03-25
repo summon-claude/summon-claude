@@ -15,24 +15,12 @@ pytestmark = pytest.mark.docs
 # Env vars that appear in docs but are NOT SummonConfig fields
 # ---------------------------------------------------------------------------
 
-NON_CONFIG_VARS: frozenset[str] = frozenset(
-    {
-        # Standard Unix / ecosystem vars documented under "Standard Variables"
-        "NO_COLOR",
-        "EDITOR",
-        "XDG_CONFIG_HOME",
-        "XDG_DATA_HOME",
-        # Internal / process-level vars not in SummonConfig
-        "CLAUDECODE",
-        "CLAUDE_CONFIG_DIR",
-    }
-)
-
 _SUMMON_TEST_PREFIX = "SUMMON_TEST_"
 
 
 def _is_non_config(var: str) -> bool:
-    return var in NON_CONFIG_VARS or var.startswith(_SUMMON_TEST_PREFIX)
+    """Filter out SUMMON_TEST_* vars (test fixtures, not real config)."""
+    return var.startswith(_SUMMON_TEST_PREFIX)
 
 
 # ---------------------------------------------------------------------------
