@@ -35,7 +35,7 @@ from summon_claude.cli.config import (
     google_auth,
     google_status,
 )
-from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
+from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
 from summon_claude.cli.hooks import (
     async_clear_hooks,
@@ -55,6 +55,7 @@ from summon_claude.cli.project import (
     launch_project_managers,
     stop_project_managers,
 )
+from summon_claude.cli.reset import async_reset_config, async_reset_data
 from summon_claude.cli.session import (
     async_session_cleanup,
     async_session_list,
@@ -840,27 +841,6 @@ def db_status(ctx: click.Context) -> None:
     asyncio.run(async_db_status(ctx))
 
 
-@cmd_db.command("reset")
-@click.option("--yes", "-y", is_flag=True, default=False, help="Skip confirmation prompt")
-@click.pass_context
-def db_reset(ctx: click.Context, yes: bool) -> None:
-    """Delete and recreate the registry database."""
-    db_path = _registry.default_db_path()
-
-    if not yes:
-        click.confirm(
-            f"This will permanently delete all session history and recreate an empty database"
-            f" at {db_path.name}. Continue?",
-            abort=True,
-        )
-
-    # Delete existing DB and WAL/SHM files
-    for suffix in ("", "-wal", "-shm"):
-        (db_path.parent / (db_path.name + suffix)).unlink(missing_ok=True)
-
-    asyncio.run(async_db_reset(db_path, ctx))
-
-
 @cmd_db.command("vacuum")
 @click.pass_context
 def db_vacuum(ctx: click.Context) -> None:
@@ -894,6 +874,30 @@ def db_purge(ctx: click.Context, older_than: int, yes: bool) -> None:
         msg = f"Purge all completed/errored records older than {older_than} days?"
         click.confirm(msg, abort=True)
     asyncio.run(async_db_purge(older_than, ctx))
+
+
+# ---------------------------------------------------------------------------
+# reset command group
+# ---------------------------------------------------------------------------
+
+
+@cli.group("reset")
+def cmd_reset() -> None:
+    """Reset summon data or configuration to a clean state."""
+
+
+@cmd_reset.command("data")
+@click.pass_context
+def reset_data(ctx: click.Context) -> None:
+    """Delete all runtime data and start fresh."""
+    asyncio.run(async_reset_data(ctx))
+
+
+@cmd_reset.command("config")
+@click.pass_context
+def reset_config(ctx: click.Context) -> None:
+    """Delete all configuration (Slack tokens, Google OAuth credentials)."""
+    asyncio.run(async_reset_config(ctx))
 
 
 # ---------------------------------------------------------------------------

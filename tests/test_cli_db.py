@@ -62,37 +62,6 @@ class TestDbStatus:
         assert "Migrated schema from version 0" in result.output
 
 
-class TestDbReset:
-    def test_db_reset_with_yes_recreates(self, tmp_path):
-        """'db reset --yes' should recreate the database."""
-        runner = CliRunner()
-        # Create an initial DB so reset has something to delete
-        db_path = tmp_path / "registry.db"
-        asyncio.run(_create_db(db_path))
-        assert db_path.exists()
-
-        with patch(
-            "summon_claude.sessions.registry.default_db_path",
-            return_value=db_path,
-        ):
-            result = runner.invoke(cli, ["db", "reset", "--yes"])
-        assert result.exit_code == 0
-        assert "Database recreated" in result.output
-        assert "Schema version:" in result.output
-
-    def test_db_reset_without_yes_aborts(self, tmp_path):
-        """'db reset' without --yes should prompt and abort if not confirmed."""
-        runner = CliRunner()
-        db_path = tmp_path / "registry.db"
-        with patch(
-            "summon_claude.sessions.registry.default_db_path",
-            return_value=db_path,
-        ):
-            result = runner.invoke(cli, ["db", "reset"], input="n\n")
-        assert result.exit_code != 0
-        assert "Aborted" in result.output
-
-
 class TestDbVacuum:
     def test_db_vacuum_runs(self, tmp_path):
         """'db vacuum' should report integrity status and size."""

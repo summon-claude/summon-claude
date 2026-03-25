@@ -44,13 +44,6 @@ async def async_db_status(ctx: click.Context) -> None:
     echo(f"Sessions: {sessions_count}, Audit log: {audit_count}, Spawn tokens: {spawn_count}", ctx)
 
 
-async def async_db_reset(db_path: pathlib.Path, ctx: click.Context) -> None:
-    async with SessionRegistry(db_path=db_path):
-        pass
-    echo(f"Database recreated at {db_path}", ctx)
-    echo(f"Schema version: {CURRENT_SCHEMA_VERSION}", ctx)
-
-
 async def async_db_vacuum(db_path: pathlib.Path, ctx: click.Context) -> None:
     integrity = "unknown"
     async with SessionRegistry(db_path=db_path) as reg:
