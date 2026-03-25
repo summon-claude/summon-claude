@@ -328,11 +328,11 @@ src/summon_claude/
 │   ├── config.py          # Config subcommands (show, set, path, edit, check, google-auth)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
 │   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
-│   ├── reset.py           # Reset command implementations (data, config)
 │   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
 │   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
+│   ├── reset.py           # Reset command implementations (data, config)
 │   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
 │   ├── slack_auth.py      # External Slack workspace auth (slack-auth, slack-channels, slack-status)
 │   ├── start.py           # async_start() implementation

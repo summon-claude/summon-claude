@@ -14,7 +14,8 @@ class TestResetBare:
         """'summon reset' with no subcommand shows usage."""
         runner = CliRunner()
         result = runner.invoke(cli, ["reset"])
-        assert "data" in result.output or "Usage" in result.output
+        assert "data" in result.output
+        assert "config" in result.output
 
 
 class TestResetData:
@@ -66,6 +67,24 @@ class TestResetData:
             result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "summon stop --all" in result.output
+
+    def test_reset_data_refuses_project_sessions_only(self):
+        """'reset data' should show only project guidance when only PM sessions exist."""
+        runner = CliRunner()
+        mock_sessions = [{"session_id": "abc", "session_name": "myproj-pm-agent"}]
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new_callable=AsyncMock,
+                return_value=mock_sessions,
+            ),
+        ):
+            result = runner.invoke(cli, ["reset", "data"])
+        assert result.exit_code != 0
+        assert "summon project down" in result.output
+        assert "summon stop --all" not in result.output
 
     def test_reset_data_refuses_mixed_sessions(self):
         """'reset data' should show both messages when ad-hoc and project sessions exist."""
