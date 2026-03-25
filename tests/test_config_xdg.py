@@ -519,6 +519,25 @@ class TestFindProjectRootHardening:
         with patch("summon_claude.config.Path.home", return_value=fake_home):
             assert _find_project_root() is None
 
+    def test_stops_at_filesystem_root(self, tmp_path, monkeypatch):
+        """Walk-up stops at filesystem root for CWD outside home tree."""
+        # Simulate CWD outside home tree by patching home to a disjoint path
+        fake_home = tmp_path / "fakehome" / "user"
+        fake_home.mkdir(parents=True)
+        # CWD is outside fake_home's tree entirely
+        outside = tmp_path / "outside" / "project"
+        outside.mkdir(parents=True)
+        monkeypatch.chdir(outside)
+
+        from unittest.mock import patch
+
+        from summon_claude.config import _find_project_root
+
+        _find_project_root.cache_clear()
+        with patch("summon_claude.config.Path.home", return_value=fake_home):
+            # No pyproject.toml anywhere, walk should reach / and stop
+            assert _find_project_root() is None
+
 
 class TestDefaultDbPathMigrationGuard:
     """Tests for default_db_path() local-mode migration suppression.

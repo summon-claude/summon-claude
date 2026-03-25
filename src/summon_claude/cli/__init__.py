@@ -715,7 +715,9 @@ def cmd_init(ctx: click.Context) -> None:
     click.echo(f"Configuration saved to {config_file}")
     if is_local_install():
         # Defense-in-depth: write .gitignore inside .summon/ to prevent accidental commits
-        gitignore = config_file.parent / ".gitignore"
+        summon_dir = get_data_dir()
+        summon_dir.mkdir(parents=True, exist_ok=True)
+        gitignore = summon_dir / ".gitignore"
         if not gitignore.exists():
             with contextlib.suppress(OSError):
                 gitignore.write_text("*\n")
