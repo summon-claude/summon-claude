@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -17,7 +18,7 @@ from dotenv import dotenv_values
 
 _ENV_VAR_RE = re.compile(r"`(SUMMON_[A-Z_]+)`")
 _CLI_CMD_BACKTICK_RE = re.compile(r"`summon\s+([^`]+)`")
-_CLI_CMD_CODEBLOCK_RE = re.compile(r"^\$?\s*summon\s+((?:[a-z][\w-]*\s*)+)", re.MULTILINE)
+_CLI_CMD_CODEBLOCK_RE = re.compile(r"^\$?\s*summon\s+((?:[a-z][\w-]*[ \t]*)+)", re.MULTILINE)
 _MCP_TOOL_RE = re.compile(r"^#{3,4}\s+`([\w]+)`", re.MULTILINE)
 
 
@@ -182,7 +183,9 @@ async def _async_collect_mcp_tools() -> list:
     tools = []
 
     # summon-cli tools — needs a real (temp) registry for introspection
-    tmp = Path(__file__).parent / ".test_doc_registry.db"
+    fd, tmp_str = tempfile.mkstemp(suffix=".db", prefix="summon_doc_test_")
+    os.close(fd)
+    tmp = Path(tmp_str)
     reg = SessionRegistry(db_path=tmp)
     async with reg:
         cli_tools = create_summon_cli_mcp_tools(
