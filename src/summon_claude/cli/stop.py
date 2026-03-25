@@ -82,6 +82,9 @@ async def _notify_pm_of_child_stop(session: dict[str, Any]) -> None:
 async def async_stop(ctx: click.Context, session: str | None, stop_all: bool) -> None:
     if not is_daemon_running():
         click.echo("Daemon is not running.")
+        from summon_claude.cli.helpers import print_local_daemon_hint  # noqa: PLC0415
+
+        print_local_daemon_hint()
         return
 
     try:

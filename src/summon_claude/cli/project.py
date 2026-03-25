@@ -142,6 +142,9 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
     """
     if not is_daemon_running():
         click.echo("Daemon is not running. No PM sessions to stop.")
+        from summon_claude.cli.helpers import print_local_daemon_hint  # noqa: PLC0415
+
+        print_local_daemon_hint()
         if name:
             # Filter by name even without daemon — look up project IDs from DB.
             matched_ids: list[str] = []

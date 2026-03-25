@@ -9,6 +9,15 @@ from summon_claude.cli.interactive import format_session_option, interactive_sel
 from summon_claude.sessions.registry import SessionRegistry
 
 
+def print_local_daemon_hint() -> None:
+    """Print a hint if a local-mode daemon socket exists nearby in global mode."""
+    from summon_claude.config import find_local_daemon_hint  # noqa: PLC0415
+
+    hint = find_local_daemon_hint()
+    if hint:
+        click.echo(hint, err=True)
+
+
 async def resolve_session(identifier: str) -> tuple[dict | None, list[dict]]:  # pyright: ignore[reportReturnType]
     """Look up a session by ID prefix, name, or channel name (async registry query)."""
     async with SessionRegistry() as registry:

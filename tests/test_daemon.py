@@ -615,6 +615,7 @@ class TestValidateSocketPath:
         with pytest.raises(SocketPathTooLongError) as exc_info:
             _validate_socket_path(sock)
         msg = str(exc_info.value)
+        # Autouse fixture forces global mode — hint shows XDG_DATA_HOME
         assert "XDG_DATA_HOME" in msg
         assert "daemon.sock" in msg
 

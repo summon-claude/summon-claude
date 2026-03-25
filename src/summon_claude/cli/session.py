@@ -57,6 +57,9 @@ async def async_session_list(
                 click.echo(f"Daemon: running (status unavailable: {e})")
         else:
             click.echo("Daemon: not running")
+            from summon_claude.cli.helpers import print_local_daemon_hint  # noqa: PLC0415
+
+            print_local_daemon_hint()
 
     async with SessionRegistry() as registry:
         if show_all:
