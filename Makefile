@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-serve docs-build docs-check docs-screenshots docs-terminal
+.PHONY: docs-serve docs-build docs-check docs-screenshots docs-terminal docs-test docs-test-full
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -51,9 +51,9 @@ py-typecheck: ## Run pyright type checking
 	@echo "Running pyright..."
 	uv run pyright
 
-py-test: ## Run full Python test suite (excludes Slack integration)
+py-test: ## Run full Python test suite (excludes Slack integration and doc validation)
 	@echo "Running pytest..."
-	uv run pytest tests/ -v -m "not slack"
+	uv run pytest tests/ -v -m "not slack and not docs"
 
 py-test-slack: ## Run Slack integration tests (requires credentials)
 	@echo "Running Slack integration tests..."
@@ -61,7 +61,7 @@ py-test-slack: ## Run Slack integration tests (requires credentials)
 
 py-test-quick: ## Run quick Python tests (exclude slow, fail-fast)
 	@echo "Running quick pytest..."
-	uv run pytest --maxfail=1 -q -m "not slow and not slack"
+	uv run pytest --maxfail=1 -q -m "not slow and not slack and not docs"
 
 py-build: ## Build sdist and wheel
 	uv build
@@ -89,6 +89,12 @@ docs-screenshots: ## Generate documentation screenshots (all sections)
 
 docs-terminal: ## Capture terminal output and inject into docs
 	uv run python scripts/docs-screenshots.py --section terminal
+
+docs-test: ## Run doc validation tests (guard tests, no bash, no credentials)
+	uv run pytest tests/docs/ -v -m docs -n0
+
+docs-test-full: ## Run all doc tests including bash CLI execution (needs credentials)
+	uv run pytest tests/docs/ -v -m docs -n0
 
 # ============================================================================
 # REPO HOOKS

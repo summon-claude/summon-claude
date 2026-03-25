@@ -67,6 +67,8 @@ dev = [
     "pyyaml==6.0.3",
     "ruff==0.15.5",
     "workspace-mcp==1.14.2",
+    "pytest-markdown-docs>=0.9.2",
+    "python-dotenv>=1.0",
 ]
 docs = [
     "mkdocs-material>=9.7,<10",
@@ -214,5 +216,6 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "slack: marks tests requiring real Slack workspace credentials (deselect with '-m \"not slack\"')",
     "xdist_group: groups tests to run on the same worker (pytest-xdist)",
+    "docs: documentation validation tests",
 ]
 norecursedirs = [".cache", ".git"]

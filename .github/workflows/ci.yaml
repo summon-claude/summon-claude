@@ -37,6 +37,9 @@ jobs:
       - name: Test
         run: make py-test
 
+      - name: Doc validation tests
+        run: make docs-test
+
   docs:
     name: Docs build check
     runs-on: ubuntu-latest
@@ -74,3 +77,11 @@ jobs:
           SUMMON_TEST_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
           SUMMON_TEST_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
           SUMMON_TEST_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}
+
+      - name: Doc bash tests
+        if: hashFiles('tests/docs/test_bash_codeblocks.py') != ''
+        run: uv run pytest tests/docs/test_bash_codeblocks.py -v -m docs -n0
+        env:
+          SUMMON_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
+          SUMMON_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
+          SUMMON_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}
