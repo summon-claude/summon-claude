@@ -332,6 +332,7 @@ src/summon_claude/
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
 │   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
 │   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
+│   ├── slack_auth.py      # External Slack workspace auth (slack-auth, slack-channels, slack-status)
 │   ├── start.py           # async_start() implementation
 │   ├── stop.py            # async_stop() implementation
 │   └── update_check.py    # PyPI update checker with 24h cache

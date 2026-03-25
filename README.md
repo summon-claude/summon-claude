@@ -316,6 +316,7 @@ Slack input flows through `BoltRouter` (a single shared Bolt app per daemon), wh
 | `summon_cli_mcp.py` | MCP tools exposing session lifecycle management to Claude agents |
 | `cli/__init__.py` | CLI entry point: global flags, subcommands, daemon interaction |
 | `cli/config.py` | Config subcommand handlers: show, path, edit, set, check, google-auth |
+| `cli/slack_auth.py` | External Slack workspace auth: slack-auth, slack-channels, slack-status, slack-remove |
 | `cli/daemon_client.py` | Typed async client for daemon Unix socket control API |
 | `cli/db.py` | Database maintenance command logic (status, reset, vacuum, purge) |
 | `cli/formatting.py` | Formatting helpers for CLI output (echo, format_json, session tables) |
