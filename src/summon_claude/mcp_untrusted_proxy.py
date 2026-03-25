@@ -23,6 +23,10 @@ from summon_claude.security import mark_untrusted
 
 logger = logging.getLogger(__name__)
 
+# Maximum text length per content item. Prevents a single tool result
+# (e.g., a large Google Doc) from bloating the session context.
+_MAX_CONTENT_CHARS = 100_000
+
 
 def _mark_tool_result(message: dict[str, Any], source: str) -> dict[str, Any]:
     """Wrap tool result content with untrusted data markers.
@@ -44,12 +48,17 @@ def _mark_tool_result(message: dict[str, Any], source: str) -> dict[str, Any]:
             continue
         item_type = item.get("type")
         if item_type == "text":
-            original = item.get("text", "")
-            item["text"] = mark_untrusted(str(original), source)
+            original = str(item.get("text", ""))
+            if len(original) > _MAX_CONTENT_CHARS:
+                original = original[:_MAX_CONTENT_CHARS] + "\n[truncated by security proxy]"
+            item["text"] = mark_untrusted(original, source)
         elif item_type == "resource":
             resource = item.get("resource", {})
             if isinstance(resource, dict) and "text" in resource:
-                resource["text"] = mark_untrusted(str(resource["text"]), source)
+                text = str(resource["text"])
+                if len(text) > _MAX_CONTENT_CHARS:
+                    text = text[:_MAX_CONTENT_CHARS] + "\n[truncated by security proxy]"
+                resource["text"] = mark_untrusted(text, source)
         elif item_type not in ("image",):
             logger.warning("Unmarked MCP content type: %s", item_type)
 

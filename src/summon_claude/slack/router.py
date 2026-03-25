@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from summon_claude.security import validate_agent_output
 from summon_claude.slack.client import MessageRef, SlackClient
 from summon_claude.slack.formatting import markdown_to_mrkdwn
 
@@ -112,6 +113,9 @@ class ThreadRouter:
         The ``text`` fallback is the raw markdown — readable in notifications
         even without rendering.
         """
+        # Sanitize BEFORE constructing blocks — client.post() validates
+        # the text param but blocks are passed through _redact_blocks only.
+        markdown, _ = validate_agent_output(markdown)
         blocks = [{"type": "markdown", "text": markdown}]
         return await self._post_raw(markdown, blocks=blocks, thread_ts=thread_ts)
 

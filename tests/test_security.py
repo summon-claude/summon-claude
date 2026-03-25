@@ -112,3 +112,11 @@ class TestValidateAgentOutput:
         sanitized, warnings = validate_agent_output(text)
         assert "<IMG" not in sanitized
         assert "<Img" not in sanitized
+
+    def test_strips_untrusted_delimiters(self):
+        """Delimiter nonces must not leak in Slack output."""
+        text = f"Result: {UNTRUSTED_BEGIN} some content {UNTRUSTED_END}"
+        sanitized, warnings = validate_agent_output(text)
+        assert "UNTRUSTED_EXTERNAL_DATA" not in sanitized
+        assert len(warnings) >= 1
+        assert "delimiter" in warnings[0].lower() or "nonce" in warnings[0].lower()

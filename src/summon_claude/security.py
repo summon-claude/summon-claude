@@ -45,6 +45,10 @@ _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 # HTML img tags (case-insensitive)
 _HTML_IMG_RE = re.compile(r"<img\s[^>]*>", re.IGNORECASE)
 
+# Untrusted delimiter patterns — strip from output to prevent nonce leakage.
+# Matches both BEGIN and END variants with any hex nonce.
+_DELIMITER_RE = re.compile(r"<<?/?\s*UNTRUSTED_EXTERNAL_DATA_[a-f0-9]+\s*>>")
+
 # Suspicious URL patterns — data exfiltration via URL parameters
 _EXFIL_URL_RE = re.compile(
     r"https?://[^\s]+\?"  # URL with query string
@@ -68,6 +72,13 @@ def validate_agent_output(text: str) -> tuple[str, list[str]]:
         Warnings describe what was removed/flagged.
     """
     warnings: list[str] = []
+
+    # Strip untrusted delimiter markers — prevents nonce leakage via Slack output
+    text, delim_count = _DELIMITER_RE.subn("", text)
+    if delim_count:
+        warnings.append(
+            f"Stripped {delim_count} untrusted delimiter marker(s) — prevents nonce leakage"
+        )
 
     # Strip markdown images — primary exfiltration vector
     text, md_count = _MARKDOWN_IMAGE_RE.subn("[image removed by security filter]", text)
