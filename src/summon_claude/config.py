@@ -376,7 +376,7 @@ _SLACK_WORKSPACE_FILE = "slack_workspace.json"
 
 def get_workspace_config_path() -> Path:
     """Path to the external Slack workspace config file."""
-    return get_data_dir() / _SLACK_WORKSPACE_FILE
+    return get_config_dir() / _SLACK_WORKSPACE_FILE
 
 
 def find_workspace_mcp_bin() -> Path:

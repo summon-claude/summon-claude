@@ -54,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **`summon db reset`** — Subcommand removed; replaced by `summon reset data`
+- **`summon db reset`** — Subcommand removed; replaced by `summon reset data` (interactive-only — the `--yes` flag for non-interactive use is intentionally not carried forward)
 
 ### Fixed
 

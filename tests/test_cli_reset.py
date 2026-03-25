@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
+from summon_claude.config import get_config_dir, get_google_credentials_dir
 
 
 class TestResetBare:
@@ -30,6 +31,7 @@ class TestResetData:
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
         ):
             result = runner.invoke(cli, ["reset", "data"], input="y\n")
         assert result.exit_code == 0
@@ -50,6 +52,7 @@ class TestResetData:
             result = runner.invoke(cli, ["reset", "data"], input="n\n")
         assert result.exit_code != 0
         assert data_dir.exists()
+        assert "Continue?" in result.output
 
     def test_reset_data_refuses_if_sessions_running(self):
         """'reset data' should refuse when daemon has active sessions."""
@@ -72,6 +75,26 @@ class TestResetData:
         """'reset data' should show only project guidance when only PM sessions exist."""
         runner = CliRunner()
         mock_sessions = [{"session_id": "abc", "session_name": "myproj-pm-agent"}]
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new_callable=AsyncMock,
+                return_value=mock_sessions,
+            ),
+        ):
+            result = runner.invoke(cli, ["reset", "data"])
+        assert result.exit_code != 0
+        assert "summon project down" in result.output
+        assert "summon stop --all" not in result.output
+
+    def test_reset_data_classifies_project_children_correctly(self):
+        """Project child sessions (with project_id but no -pm-) should be classified as project."""
+        runner = CliRunner()
+        mock_sessions = [
+            {"session_id": "abc", "session_name": "myproj-abc123", "project_id": "proj1"},
+        ]
         with (
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=True),
@@ -133,6 +156,7 @@ class TestResetData:
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
             patch(
                 "summon_claude.cli.reset.shutil.rmtree",
                 side_effect=OSError("Permission denied"),
@@ -204,6 +228,23 @@ class TestResetData:
         assert "interactive mode" in result.output
         assert data_dir.exists()
 
+    def test_reset_data_refuses_path_outside_home(self, tmp_path):
+        """'reset data' should refuse when directory resolves outside $HOME."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path / "fakehome"),
+        ):
+            result = runner.invoke(cli, ["reset", "data"], input="y\n")
+        assert result.exit_code != 0
+        assert "outside home" in result.output
+        assert data_dir.exists()
+
 
 class TestResetConfig:
     def test_reset_config_deletes_config_dir(self, tmp_path):
@@ -217,6 +258,7 @@ class TestResetConfig:
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_config_dir", return_value=config_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
         ):
             result = runner.invoke(cli, ["reset", "config"], input="y\n")
         assert result.exit_code == 0
@@ -238,6 +280,7 @@ class TestResetConfig:
             result = runner.invoke(cli, ["reset", "config"], input="n\n")
         assert result.exit_code != 0
         assert config_dir.exists()
+        assert "Continue?" in result.output
 
     def test_reset_config_refuses_adhoc_sessions(self):
         """'reset config' should refuse when daemon has ad-hoc sessions."""
@@ -256,7 +299,7 @@ class TestResetConfig:
         assert result.exit_code != 0
         assert "summon stop --all" in result.output
 
-    def test_reset_config_refuses_if_sessions_running(self):
+    def test_reset_config_refuses_project_sessions(self):
         """'reset config' should refuse when daemon has project sessions."""
         runner = CliRunner()
         mock_sessions = [{"session_id": "abc", "session_name": "my-pm-agent"}]
@@ -289,6 +332,22 @@ class TestResetConfig:
         assert result.exit_code != 0
         assert "Could not determine session status" in result.output
 
+    def test_reset_config_refuses_idle_daemon(self):
+        """'reset config' should refuse when daemon is running with no sessions."""
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+        ):
+            result = runner.invoke(cli, ["reset", "config"])
+        assert result.exit_code != 0
+        assert "daemon is still running" in result.output
+
     def test_reset_config_noop_if_dir_missing(self, tmp_path):
         """'reset config' should no-op when config directory does not exist."""
         missing_dir = tmp_path / "nonexistent"
@@ -303,6 +362,44 @@ class TestResetConfig:
         assert result.exit_code == 0
         assert "Nothing to reset" in result.output
 
+    def test_reset_config_refuses_symlink(self, tmp_path):
+        """'reset config' should refuse when config directory is a symlink."""
+        target = tmp_path / "real"
+        target.mkdir()
+        symlink = tmp_path / "config"
+        symlink.symlink_to(target)
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_config_dir", return_value=symlink),
+        ):
+            result = runner.invoke(cli, ["reset", "config"], input="y\n")
+        assert result.exit_code != 0
+        assert "symlink" in result.output
+        assert target.exists()
+
+    def test_reset_config_rmtree_failure(self, tmp_path):
+        """'reset config' should show friendly error if rmtree fails."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_config_dir", return_value=config_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
+            patch(
+                "summon_claude.cli.reset.shutil.rmtree",
+                side_effect=OSError("Permission denied"),
+            ),
+        ):
+            result = runner.invoke(cli, ["reset", "config"], input="y\n")
+        assert result.exit_code != 0
+        assert "Failed to delete" in result.output
+
     def test_reset_config_refuses_non_interactive(self, tmp_path):
         """'reset config' should refuse in non-interactive mode."""
         config_dir = tmp_path / "config"
@@ -316,3 +413,9 @@ class TestResetConfig:
         assert result.exit_code != 0
         assert "interactive mode" in result.output
         assert config_dir.exists()
+
+
+class TestGoogleCredentialsDir:
+    def test_google_credentials_dir_is_under_config_dir(self):
+        """get_google_credentials_dir() must return a path under config dir, not data dir."""
+        assert get_google_credentials_dir() == get_config_dir() / "google-credentials"
