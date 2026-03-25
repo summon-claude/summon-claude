@@ -164,6 +164,29 @@ class TestCrossChannelPosting:
         tool_names = [t.name for t in tools]
         assert "slack_post_to_channel" in tool_names
 
+    @pytest.mark.asyncio
+    async def test_post_to_channel_adds_attribution_prefix(self):
+        """[SEC-004] Cross-channel posts must be prefixed with [Global PM]."""
+        from summon_claude.slack.mcp import create_summon_mcp_tools
+
+        mock_client = MagicMock()
+        mock_client.post_to_channel = AsyncMock(
+            return_value=MagicMock(channel_id="C999", ts="1234.5678")
+        )
+        mock_client.channel_id = "C001"
+
+        async def _allow_all() -> set[str]:
+            return {"C001", "C999"}
+
+        tools = create_summon_mcp_tools(mock_client, allowed_channels=_allow_all, is_pm=True)
+        post_tool = next(t for t in tools if t.name == "slack_post_to_channel")
+        result = await post_tool.handler({"channel_id": "C999", "text": "Fix session X"})
+        assert not result.get("is_error")
+        # Verify the text passed to post_to_channel has the [Global PM] prefix
+        call_text = mock_client.post_to_channel.call_args[0][1]
+        assert call_text.startswith("[Global PM] ")
+        assert "Fix session X" in call_text
+
 
 # ---------------------------------------------------------------------------
 # C3: System prompt tests
@@ -286,6 +309,7 @@ class TestGlobalPMProfile:
         )
         tool_names = [t.name for t in tools]
         assert "session_start" in tool_names
+        assert "session_message" in tool_names
 
 
 # ---------------------------------------------------------------------------

@@ -105,7 +105,7 @@ def _setup_logging(verbose: bool = False) -> None:
 class AliasedGroup(click.Group):
     """Click group with command alias support."""
 
-    _ALIASES: dict[str, str] = {"s": "session", "p": "project"}
+    _ALIASES: dict[str, str] = {"s": "session", "p": "project", "g": "global"}
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         rv = click.Group.get_command(self, ctx, cmd_name)
