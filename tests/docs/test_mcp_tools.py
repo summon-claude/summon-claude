@@ -14,7 +14,7 @@ pytestmark = pytest.mark.docs
 _MCP_TOOLS_DOC = "reference/mcp-tools.md"
 
 # Regex matching ### or #### heading with a backtick-wrapped tool name
-_TOOL_HEADING_RE = re.compile(r"^#{3,4}\s+`([\w]+)`", re.MULTILINE)
+_TOOL_HEADING_RE = re.compile(r"^#{3,4}\s+`([a-zA-Z][a-zA-Z0-9_]+)`", re.MULTILINE)
 
 # Regex for a param table row — handles both 4-column and 5-column (with Default) tables.
 # Columns: | `param` | type | Required | [Default |] Description |

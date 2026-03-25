@@ -19,7 +19,7 @@ from dotenv import dotenv_values
 _ENV_VAR_RE = re.compile(r"`(SUMMON_[A-Z_]+)`")
 _CLI_CMD_BACKTICK_RE = re.compile(r"`summon\s+([^`]+)`")
 _CLI_CMD_CODEBLOCK_RE = re.compile(r"^\$?\s*summon\s+((?:[a-z][\w-]*[ \t]*)+)", re.MULTILINE)
-_MCP_TOOL_RE = re.compile(r"^#{3,4}\s+`([\w]+)`", re.MULTILINE)
+_MCP_TOOL_RE = re.compile(r"^#{3,4}\s+`([a-zA-Z][a-zA-Z0-9_]+)`", re.MULTILINE)
 
 
 def parse_env_var_refs(content: str) -> set[str]:
@@ -173,12 +173,11 @@ def click_all_options() -> set[str]:
 
 async def _async_collect_mcp_tools() -> list:
     """Collect all MCP tool objects from the three servers."""
-    from conftest import make_scheduler
-
     from summon_claude.canvas_mcp import create_canvas_mcp_tools
     from summon_claude.sessions.registry import SessionRegistry
     from summon_claude.slack.mcp import create_summon_mcp_tools
     from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+    from tests.conftest import make_scheduler
 
     tools = []
 

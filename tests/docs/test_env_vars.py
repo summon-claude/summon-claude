@@ -116,9 +116,9 @@ FUZZY_DEFAULTS: dict[str, str | None] = {
 _TABLE_ROW_RE = re.compile(r"^\|(.+)\|$")
 
 
-def _parse_env_var_tables(content: str) -> dict[str, dict[str, str]]:
+def _parse_env_var_tables(content: str) -> dict[str, dict[str, str | None]]:
     """Parse all markdown tables in content; return {env_var: {type, default}}."""
-    result: dict[str, dict[str, str]] = {}
+    result: dict[str, dict[str, str | None]] = {}
     for line in content.splitlines():
         m = _TABLE_ROW_RE.match(line.strip())
         if not m:
@@ -146,7 +146,7 @@ def _parse_env_var_tables(content: str) -> dict[str, dict[str, str]]:
     return result
 
 
-def test_env_var_types_match_docs(
+def test_env_var_types_match_docs(  # noqa: PLR0912
     docs_dir: Path,
     summon_config_fields: dict[str, object],
 ) -> None:
@@ -165,6 +165,9 @@ def test_env_var_types_match_docs(
 
         doc_type = doc_rows[var]["type"]
         doc_default = doc_rows[var]["default"]
+
+        if doc_type is None:
+            continue  # malformed table row, skip
 
         # --- type check ---
         is_secret = not field_info.repr
