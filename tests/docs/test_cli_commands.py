@@ -68,50 +68,6 @@ def _is_excluded(path: Path) -> bool:
     return False
 
 
-def _build_all_valid_names() -> set[str]:
-    """
-    Return the set of all valid 'summon X [Y ...]' paths: leaf commands, groups,
-    and top-level aliases. Used to distinguish real command references from prose.
-    """
-    import click
-
-    from summon_claude.cli import cli
-
-    valid: set[str] = set()
-
-    def _walk(group: click.BaseCommand, prefix: str = "") -> None:
-        if isinstance(group, click.Group):
-            ctx = click.Context(group, info_name=prefix.strip() or "summon")
-            # Groups themselves are valid references (e.g. "summon project")
-            if prefix.strip():
-                valid.add(prefix.strip())
-            for name in group.list_commands(ctx):
-                cmd = group.get_command(ctx, name)
-                if cmd is None:
-                    continue
-                full = (prefix + name).strip()
-                _walk(cmd, full + " ")
-        elif prefix.strip():
-            valid.add(prefix.strip())
-
-    _walk(cli)
-
-    # Add top-level aliases (e.g. "p" -> project, "s" -> session)
-    top_ctx = click.Context(cli, info_name="summon")
-    # Click resolves abbreviated names; check documented single-letter aliases
-    for alias in ("p", "s"):
-        cmd = cli.get_command(top_ctx, alias)
-        if cmd is not None:
-            valid.add(alias)
-            # Also add alias + subcommands (e.g. "s list")
-            if isinstance(cmd, click.Group):
-                sub_ctx = click.Context(cmd, info_name=alias)
-                for sub_name in cmd.list_commands(sub_ctx):
-                    valid.add(f"{alias} {sub_name}")
-
-    return valid
-
-
 def _command_prefix_of(ref: str, valid_names: set[str]) -> str | None:
     """
     Return the longest valid command name that is a word-prefix of ref, or None.
@@ -177,7 +133,6 @@ def _is_prose_artifact(ref: str) -> bool:
 
 def test_documented_commands_exist(click_commands: set[str]) -> None:
     """Every 'summon <cmd>' reference in docs (non-auto-generated) must be a real command."""
-    valid_names = _build_all_valid_names()
     fabricated: list[tuple[str, Path]] = []
 
     all_md = sorted(_DOCS_DIR.rglob("*.md"))
@@ -191,7 +146,7 @@ def test_documented_commands_exist(click_commands: set[str]) -> None:
                 continue
             # Accept if any prefix of the ref words is a valid command/group/alias.
             # This handles "project remove my-api" -> "project remove".
-            if _command_prefix_of(ref, valid_names) is None:
+            if _command_prefix_of(ref, click_commands) is None:
                 fabricated.append((ref, md_file))
 
     if fabricated:

@@ -22,7 +22,6 @@ _TOOL_HEADING_RE = re.compile(r"^#{3,4}\s+`([\w]+)`", re.MULTILINE)
 _PARAM_ROW_RE = re.compile(r"^\|\s*`([\w]+)`\s*\|[^|]*\|\s*(Yes|No)\s*\|", re.MULTILINE)
 
 # Server prefixes for count-mapping
-_SENTINEL = object()  # marks "required info unavailable"
 
 
 def _normalize_schema(raw: dict) -> tuple[set[str], set[str] | None]:
@@ -180,7 +179,7 @@ def test_mcp_tool_parameters_match(docs_dir: Path, mcp_tool_schemas: dict[str, d
             if required_mismatch:
                 lines.append(
                     f"    required mismatch — docs says required={sorted(doc_required)}, "
-                    f"source says required={sorted(source_required)}"
+                    f"source says required={sorted(source_required or [])}"
                 )
             mismatches.extend(lines)
 

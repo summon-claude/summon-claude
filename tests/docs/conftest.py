@@ -111,7 +111,7 @@ def click_commands() -> set[str]:
     commands: set[str] = set()
 
     def _walk(group: click.BaseCommand, prefix: str = "") -> None:
-        if isinstance(group, (click.MultiCommand, click.Group)):
+        if isinstance(group, click.Group):
             # Include the group path itself (e.g., "db", "project workflow")
             if prefix.strip():
                 commands.add(prefix.strip())
@@ -121,7 +121,7 @@ def click_commands() -> set[str]:
                 if cmd is None:
                     continue
                 full = f"{prefix}{name}".strip()
-                if isinstance(cmd, (click.MultiCommand, click.Group)):
+                if isinstance(cmd, click.Group):
                     _walk(cmd, full + " ")
                 else:
                     commands.add(full)
@@ -159,7 +159,7 @@ def click_all_options() -> set[str]:
             if isinstance(param, click.Option):
                 options.update(param.opts)
                 options.update(param.secondary_opts)
-        if isinstance(group, click.MultiCommand):
+        if isinstance(group, click.Group):
             ctx = click.Context(group, info_name="summon")
             for name in group.list_commands(ctx):
                 cmd = group.get_command(ctx, name)
@@ -228,7 +228,11 @@ _CACHED_TOOLS: list | None = None
 def _get_mcp_tools() -> list:
     global _CACHED_TOOLS  # noqa: PLW0603
     if _CACHED_TOOLS is None:
-        _CACHED_TOOLS = asyncio.get_event_loop().run_until_complete(_async_collect_mcp_tools())
+        loop = asyncio.new_event_loop()
+        try:
+            _CACHED_TOOLS = loop.run_until_complete(_async_collect_mcp_tools())
+        finally:
+            loop.close()
     return _CACHED_TOOLS
 
 
