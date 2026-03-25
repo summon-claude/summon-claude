@@ -734,10 +734,10 @@ class TestCheckExistingSlackAuth:
 
     def test_returns_none_when_no_workspace_config(self, tmp_path, monkeypatch):
         """Returns None when workspace config file doesn't exist."""
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: tmp_path / "nonexistent.json",
         )
         assert _check_existing_slack_auth() is None
@@ -746,7 +746,7 @@ class TestCheckExistingSlackAuth:
         """Returns None when workspace config exists but state file doesn't."""
         import json
 
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         ws_config = tmp_path / "workspace.json"
         ws_config.write_text(
@@ -758,7 +758,7 @@ class TestCheckExistingSlackAuth:
             )
         )
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: ws_config,
         )
         assert _check_existing_slack_auth() is None
@@ -768,7 +768,7 @@ class TestCheckExistingSlackAuth:
         import json
         import time
 
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         state_file = tmp_path / "state.json"
         state_file.write_text(
@@ -790,7 +790,7 @@ class TestCheckExistingSlackAuth:
             )
         )
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: ws_config,
         )
         assert _check_existing_slack_auth() is None
@@ -800,7 +800,7 @@ class TestCheckExistingSlackAuth:
         import json
         import time
 
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         state_file = tmp_path / "state.json"
         state_file.write_text(
@@ -825,7 +825,7 @@ class TestCheckExistingSlackAuth:
             )
         )
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: ws_config,
         )
 
@@ -840,7 +840,7 @@ class TestCheckExistingSlackAuth:
         """Session cookies (expires=-1) are treated as valid."""
         import json
 
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         state_file = tmp_path / "state.json"
         state_file.write_text(
@@ -862,7 +862,7 @@ class TestCheckExistingSlackAuth:
             )
         )
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: ws_config,
         )
 
@@ -873,7 +873,7 @@ class TestCheckExistingSlackAuth:
         """Returns None when state file has no cookies."""
         import json
 
-        from summon_claude.cli.config import _check_existing_slack_auth
+        from summon_claude.cli.slack_auth import _check_existing_slack_auth
 
         state_file = tmp_path / "state.json"
         state_file.write_text(json.dumps({"cookies": [], "origins": []}))
@@ -888,7 +888,7 @@ class TestCheckExistingSlackAuth:
             )
         )
         monkeypatch.setattr(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             lambda: ws_config,
         )
         assert _check_existing_slack_auth() is None

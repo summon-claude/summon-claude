@@ -33,10 +33,6 @@ from summon_claude.cli.config import (
     config_show,
     google_auth,
     google_status,
-    slack_auth,
-    slack_channels,
-    slack_remove,
-    slack_status,
 )
 from summon_claude.cli.db import async_db_purge, async_db_reset, async_db_status, async_db_vacuum
 from summon_claude.cli.formatting import echo
@@ -795,18 +791,24 @@ def config_slack_auth_cmd(workspace: str) -> None:
     WORKSPACE can be a name (myteam), enterprise (acme.enterprise),
     or full URL (https://myteam.slack.com).
     """
+    from summon_claude.cli.slack_auth import slack_auth  # noqa: PLC0415
+
     slack_auth(workspace)
 
 
 @cmd_config.command("slack-status")
 def config_slack_status_cmd() -> None:
     """Show external Slack workspace auth status."""
+    from summon_claude.cli.slack_auth import slack_status  # noqa: PLC0415
+
     slack_status()
 
 
 @cmd_config.command("slack-remove")
 def config_slack_remove_cmd() -> None:
     """Remove external Slack workspace auth state."""
+    from summon_claude.cli.slack_auth import slack_remove  # noqa: PLC0415
+
     slack_remove()
 
 
@@ -814,6 +816,8 @@ def config_slack_remove_cmd() -> None:
 @click.option("--refresh", is_flag=True, help="Re-fetch channels from Slack")
 def config_slack_channels_cmd(refresh: bool) -> None:
     """Update monitored channel selection (no re-auth needed)."""
+    from summon_claude.cli.slack_auth import slack_channels  # noqa: PLC0415
+
     slack_channels(refresh=refresh)
 
 

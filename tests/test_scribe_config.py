@@ -571,7 +571,7 @@ class TestSlackStatusCommand:
         from summon_claude.cli.__init__ import cmd_config
 
         with patch(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             return_value=tmp_path / "missing.json",
         ):
             result = runner.invoke(cmd_config, ["slack-status"])
@@ -599,7 +599,8 @@ class TestSlackStatusCommand:
         runner = CliRunner()
         from summon_claude.cli.__init__ import cmd_config
 
-        with patch("summon_claude.cli.config.get_workspace_config_path", return_value=config_file):
+        target = "summon_claude.cli.slack_auth.get_workspace_config_path"
+        with patch(target, return_value=config_file):
             result = runner.invoke(cmd_config, ["slack-status"])
 
         assert result.exit_code == 0
@@ -614,7 +615,7 @@ class TestSlackRemoveCommand:
         from summon_claude.cli.__init__ import cmd_config
 
         with patch(
-            "summon_claude.cli.config.get_workspace_config_path",
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
             return_value=tmp_path / "missing.json",
         ):
             result = runner.invoke(cmd_config, ["slack-remove"])
@@ -643,9 +644,10 @@ class TestSlackRemoveCommand:
         runner = CliRunner()
         from summon_claude.cli.__init__ import cmd_config
 
+        mod = "summon_claude.cli.slack_auth"
         with (
-            patch("summon_claude.cli.config.get_workspace_config_path", return_value=config_file),
-            patch("summon_claude.cli.config.get_data_dir", return_value=tmp_path),
+            patch(f"{mod}.get_workspace_config_path", return_value=config_file),
+            patch(f"{mod}.get_data_dir", return_value=tmp_path),
         ):
             result = runner.invoke(cmd_config, ["slack-remove"], input="y\n")
 
