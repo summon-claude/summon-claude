@@ -725,6 +725,176 @@ class TestSlackAuthValidatesUrl:
 
 
 # ---------------------------------------------------------------------------
+# _check_existing_slack_auth
+# ---------------------------------------------------------------------------
+
+
+class TestCheckExistingSlackAuth:
+    """Tests for _check_existing_slack_auth credential detection."""
+
+    def test_returns_none_when_no_workspace_config(self, tmp_path, monkeypatch):
+        """Returns None when workspace config file doesn't exist."""
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: tmp_path / "nonexistent.json",
+        )
+        assert _check_existing_slack_auth() is None
+
+    def test_returns_none_when_state_file_missing(self, tmp_path, monkeypatch):
+        """Returns None when workspace config exists but state file doesn't."""
+        import json
+
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        ws_config = tmp_path / "workspace.json"
+        ws_config.write_text(
+            json.dumps(
+                {
+                    "url": "https://test.slack.com",
+                    "auth_state_path": str(tmp_path / "missing_state.json"),
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: ws_config,
+        )
+        assert _check_existing_slack_auth() is None
+
+    def test_returns_none_when_d_cookie_expired(self, tmp_path, monkeypatch):
+        """Returns None when the primary 'd' cookie is expired."""
+        import json
+        import time
+
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        state_file = tmp_path / "state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "cookies": [{"name": "d", "value": "xoxd-test", "expires": time.time() - 3600}],
+                    "origins": [],
+                }
+            )
+        )
+
+        ws_config = tmp_path / "workspace.json"
+        ws_config.write_text(
+            json.dumps(
+                {
+                    "url": "https://test.slack.com",
+                    "auth_state_path": str(state_file),
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: ws_config,
+        )
+        assert _check_existing_slack_auth() is None
+
+    def test_returns_info_when_d_cookie_valid(self, tmp_path, monkeypatch):
+        """Returns status dict when 'd' cookie is present and not expired."""
+        import json
+        import time
+
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        state_file = tmp_path / "state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "cookies": [
+                        {"name": "d", "value": "xoxd-test", "expires": time.time() + 86400}
+                    ],
+                    "origins": [],
+                }
+            )
+        )
+
+        ws_config = tmp_path / "workspace.json"
+        ws_config.write_text(
+            json.dumps(
+                {
+                    "url": "https://test.slack.com",
+                    "auth_state_path": str(state_file),
+                    "user_id": "U12345",
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: ws_config,
+        )
+
+        result = _check_existing_slack_auth()
+        assert result is not None
+        assert result["url"] == "https://test.slack.com"
+        assert result["user_id"] == "U12345"
+        assert "saved" in result
+        assert "age" in result
+
+    def test_returns_info_when_d_cookie_is_session_cookie(self, tmp_path, monkeypatch):
+        """Session cookies (expires=-1) are treated as valid."""
+        import json
+
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        state_file = tmp_path / "state.json"
+        state_file.write_text(
+            json.dumps(
+                {
+                    "cookies": [{"name": "d", "value": "xoxd-test", "expires": -1}],
+                    "origins": [],
+                }
+            )
+        )
+
+        ws_config = tmp_path / "workspace.json"
+        ws_config.write_text(
+            json.dumps(
+                {
+                    "url": "https://test.slack.com",
+                    "auth_state_path": str(state_file),
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: ws_config,
+        )
+
+        result = _check_existing_slack_auth()
+        assert result is not None
+
+    def test_returns_none_when_no_cookies(self, tmp_path, monkeypatch):
+        """Returns None when state file has no cookies."""
+        import json
+
+        from summon_claude.cli.config import _check_existing_slack_auth
+
+        state_file = tmp_path / "state.json"
+        state_file.write_text(json.dumps({"cookies": [], "origins": []}))
+
+        ws_config = tmp_path / "workspace.json"
+        ws_config.write_text(
+            json.dumps(
+                {
+                    "url": "https://test.slack.com",
+                    "auth_state_path": str(state_file),
+                }
+            )
+        )
+        monkeypatch.setattr(
+            "summon_claude.cli.config.get_workspace_config_path",
+            lambda: ws_config,
+        )
+        assert _check_existing_slack_auth() is None
+
+
+# ---------------------------------------------------------------------------
 # project down stops scribe
 # ---------------------------------------------------------------------------
 

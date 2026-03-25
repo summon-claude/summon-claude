@@ -205,6 +205,29 @@ class TestMonitorOnFrame:
         assert msg.is_mention is True
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "broadcast,text_pattern",
+        [
+            ("here", "<!here>"),
+            ("channel", "<!channel>"),
+            ("everyone", "<!everyone>"),
+        ],
+    )
+    async def test_monitor_captures_broadcast_mentions(self, broadcast, text_pattern):
+        """@here, @channel, @everyone in non-monitored channels are captured."""
+        monitor = make_monitor(monitored_channels=[], user_id="U999")
+        monitor._loop = asyncio.get_running_loop()
+
+        frame = make_frame(channel="C999", text=f"hey {text_pattern} check this out")
+        monitor._on_frame(frame)
+
+        await asyncio.sleep(0)
+
+        msg = monitor._queue.get_nowait()
+        assert msg.is_mention is True
+        assert msg.channel == "C999"
+
+    @pytest.mark.asyncio
     async def test_monitor_skips_non_json(self):
         """Non-JSON payloads are silently discarded."""
         monitor = make_monitor(monitored_channels=["C001"])
