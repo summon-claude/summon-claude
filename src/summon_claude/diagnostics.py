@@ -197,14 +197,11 @@ class EnvironmentCheck:
 async def _get_version(cmd: str, *args: str, max_wait: float = 5) -> str | None:
     """Run a command and return first line of stdout, or None on error/timeout."""
     try:
-        proc = await asyncio.wait_for(
-            asyncio.create_subprocess_exec(
-                cmd,
-                *args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            ),
-            timeout=max_wait,
+        proc = await asyncio.create_subprocess_exec(
+            cmd,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=max_wait)
         line = stdout.decode(errors="replace").splitlines()[0].strip() if stdout else ""
@@ -413,11 +410,12 @@ class DatabaseCheck:
 
 def _human_size(size_bytes: int) -> str:
     """Convert bytes to a human-readable string."""
+    value = float(size_bytes)
     for unit in ("B", "KB", "MB", "GB"):
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes //= 1024
-    return f"{size_bytes:.1f} TB"
+        if value < 1024:
+            return f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TB"
 
 
 DIAGNOSTIC_REGISTRY["database"] = DatabaseCheck()
@@ -447,7 +445,7 @@ class SlackCheck:
         try:
             client = WebClient(token=config.slack_bot_token)
             # Run sync call in executor to avoid blocking event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, client.auth_test),
                 timeout=10,
@@ -781,7 +779,7 @@ class GitHubMcpCheck:
             headers={"Authorization": f"Bearer {pat}", "User-Agent": "summon-claude/doctor"},
         )
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             response = await asyncio.wait_for(
                 loop.run_in_executor(None, urllib.request.urlopen, req),
                 timeout=10,
