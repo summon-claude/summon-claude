@@ -30,6 +30,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 
 # recv_msg/send_msg imported lazily in handle_client to avoid circular import
 # (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
+from summon_claude.config import get_data_dir
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -852,6 +853,10 @@ class SessionManager:
                         e,
                     )
 
+            # Resume suspended scribe or start fresh.
+            # Note (M4): scribe spawns only via project_up. Standalone start deferred to M5.
+            await self._resume_or_start_scribe(user_id)
+
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
@@ -1033,6 +1038,162 @@ class SessionManager:
             new_session_id,
             project["name"],
         )
+
+    async def _resume_or_start_scribe(self, user_id: str) -> None:
+        """Resume a suspended scribe or start fresh.
+
+        Follows the same suspend/resume pattern as PM and child sessions:
+        ``project down`` marks scribe as ``suspended``; ``project up``
+        resumes it with transcript continuity via ``create_resumed_session``.
+        Falls back to ``_start_scribe_if_enabled`` if no suspended scribe exists.
+        """
+        if not self._config.scribe_enabled:
+            return
+
+        # Check for already-running scribe
+        for sess in self._sessions.values():
+            if sess.is_scribe:
+                logger.info("SessionManager: scribe already running — skipping")
+                return
+
+        # Look for a suspended scribe session to resume
+        async with SessionRegistry() as registry:
+            async with registry.db.execute(
+                "SELECT * FROM sessions"
+                " WHERE status = 'suspended'"
+                "   AND session_name = 'scribe'"
+                "   AND project_id IS NULL"
+                " ORDER BY started_at DESC LIMIT 1",
+            ) as cursor:
+                row = await cursor.fetchone()
+            suspended_scribe = dict(row) if row else None
+            if suspended_scribe is not None:
+                sess_id = suspended_scribe["session_id"]
+                channel_id = suspended_scribe.get("slack_channel_id")
+                claude_sid: str | None = None
+                if channel_id:
+                    channel = await registry.get_channel(channel_id)
+                    claude_sid = (
+                        channel["claude_session_id"]
+                        if channel and channel.get("claude_session_id")
+                        else suspended_scribe.get("claude_session_id")
+                    )
+                scribe_cwd = (
+                    suspended_scribe.get("cwd")
+                    or self._config.scribe_cwd
+                    or str(get_data_dir() / "scribe")
+                )
+                pathlib.Path(scribe_cwd).mkdir(parents=True, exist_ok=True)  # noqa: ASYNC240
+                options = SessionOptions(
+                    cwd=scribe_cwd,
+                    name="scribe",
+                    model=self._config.scribe_model,
+                    scribe_profile=True,
+                    scan_interval_s=max(60, self._config.scribe_scan_interval_minutes * 60),
+                    resume=claude_sid,
+                    channel_id=channel_id,
+                )
+                try:
+                    if channel_id:
+                        self._check_channel_available(channel_id)
+                    await self.create_resumed_session(
+                        options,
+                        authenticated_user_id=user_id,
+                    )
+                    await registry.update_status(sess_id, "completed")
+                    logger.info("SessionManager: resumed suspended scribe %s", sess_id[:8])
+                    return
+                except Exception as e:
+                    logger.error("SessionManager: failed to resume scribe %s: %s", sess_id[:8], e)
+                    with contextlib.suppress(Exception):
+                        await registry.update_status(
+                            sess_id,
+                            "errored",
+                            error_message=f"Resume failed: {e}",
+                        )
+
+        # No suspended scribe found — start fresh
+        self._start_scribe_if_enabled(user_id)
+
+    def _start_scribe_if_enabled(self, user_id: str) -> None:
+        """Spawn the global Scribe session if configured and not already running."""
+        if not self._config.scribe_enabled:
+            return
+
+        # Check for already-running scribe
+        for sess in self._sessions.values():
+            if sess.is_scribe:
+                logger.info("SessionManager: scribe already running — skipping")
+                return
+
+        # Pre-flight: validate dependencies before spawning.
+        # workspace-mcp uses bare top-level modules (not a 'workspace_mcp' package),
+        # so find_spec('workspace_mcp') always returns None. Use the binary check.
+        if self._config.scribe_google_enabled and self._config.scribe_google_services:
+            from summon_claude.config import find_workspace_mcp_bin  # noqa: PLC0415
+
+            if not find_workspace_mcp_bin().exists():
+                logger.error("Scribe requires Google support: pip install summon-claude[google]")
+                return
+            # Check for OAuth credentials
+            from summon_claude.config import get_google_credentials_dir  # noqa: PLC0415
+
+            creds_dir = get_google_credentials_dir()
+            if not creds_dir.is_dir() or not any(creds_dir.glob("*.json")):
+                logger.error("Run 'summon config google-auth' before starting scribe")
+                return
+
+        if self._config.scribe_slack_enabled:
+            import importlib.util  # noqa: PLC0415
+
+            if importlib.util.find_spec("playwright") is None:
+                logger.error(
+                    "Scribe Slack support requires: pip install summon-claude[slack-browser]"
+                )
+                return
+            # Check for Slack auth state
+            from summon_claude.config import get_workspace_config_path  # noqa: PLC0415
+
+            ws_config = get_workspace_config_path()
+            if not ws_config.is_file():
+                logger.error("Run 'summon config slack-auth' before enabling scribe Slack")
+                return
+
+        # Resolve CWD
+        scribe_cwd = self._config.scribe_cwd or str(get_data_dir() / "scribe")
+        pathlib.Path(scribe_cwd).mkdir(parents=True, exist_ok=True)
+
+        new_session_id = str(uuid.uuid4())
+        scribe_options = SessionOptions(
+            cwd=scribe_cwd,
+            name="scribe",
+            model=self._config.scribe_model,
+            scribe_profile=True,
+            scan_interval_s=max(60, self._config.scribe_scan_interval_minutes * 60),
+        )
+        new_session = SummonSession(
+            config=self._config,
+            options=scribe_options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
+        )
+        new_session.authenticate(user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-scribe-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info("SessionManager: started scribe session %s", new_session_id)
 
     async def _alert_channel(self, session: SummonSession, message: str) -> None:
         """Best-effort Slack notification to a session's channel."""

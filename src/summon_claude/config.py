@@ -276,6 +276,14 @@ VALID_GOOGLE_SERVICES = frozenset(
 )
 
 
+_SLACK_WORKSPACE_FILE = "slack_workspace.json"
+
+
+def get_workspace_config_path() -> Path:
+    """Path to the external Slack workspace config file."""
+    return get_data_dir() / _SLACK_WORKSPACE_FILE
+
+
 def find_workspace_mcp_bin() -> Path:
     """Locate the ``workspace-mcp`` console-script in the same Python environment.
 
@@ -342,12 +350,38 @@ class SummonConfig(BaseSettings):
     scribe_quiet_hours: str = ""  # "22:00-07:00" — only level-5 alerts during this window
 
     # Google Workspace data collector (requires workspace-mcp optional dep)
+    scribe_google_enabled: bool = False
     scribe_google_services: str = "gmail,calendar,drive"  # comma-separated service list
 
     # External Slack data collector
     scribe_slack_enabled: bool = False
     scribe_slack_browser: str = "chrome"  # "chrome", "firefox", or "webkit"
-    scribe_slack_monitored_channels: str = ""  # comma-separated channel names
+    scribe_slack_monitored_channels: str = ""  # comma-separated channel IDs (e.g. "C01ABC,C02DEF")
+
+    @classmethod
+    def for_test(cls, **overrides: object) -> SummonConfig:
+        """Create a config instance isolated from env vars and .env files.
+
+        Use in tests instead of ``SummonConfig(...)`` or ``model_validate()``.
+        Provides sensible defaults for required fields; override any field
+        via keyword arguments.
+        """
+        import os  # noqa: PLC0415
+
+        defaults: dict[str, object] = {
+            "slack_bot_token": "xoxb-test-token",
+            "slack_app_token": "xapp-test-token",
+            "slack_signing_secret": "abc123def456",
+        }
+        defaults.update(overrides)
+        # Temporarily clear all SUMMON_ env vars so pydantic-settings
+        # doesn't read them. patch.dict isn't available here, so stash
+        # and restore manually.
+        stashed = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("SUMMON_")}
+        try:
+            return cls(_env_file=None, **defaults)  # type: ignore[call-arg]
+        finally:
+            os.environ.update(stashed)
 
     @field_validator("default_effort")
     @classmethod
@@ -538,6 +572,14 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
     return _is_truthy(cfg.get("SUMMON_SCRIBE_ENABLED", ""))
 
 
+def _scribe_google_enabled(cfg: dict[str, str]) -> bool:
+    return (
+        _scribe_enabled(cfg)
+        and _is_truthy(cfg.get("SUMMON_SCRIBE_GOOGLE_ENABLED", ""))
+        and _workspace_mcp_installed()
+    )
+
+
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
     return (
         _scribe_enabled(cfg)
@@ -712,13 +754,22 @@ CONFIG_OPTIONS: list[ConfigOption] = [
     ),
     # Scribe Google
     ConfigOption(
+        field_name="scribe_google_enabled",
+        env_key="SUMMON_SCRIBE_GOOGLE_ENABLED",
+        group="Scribe Google",
+        label="Enable Google Collector",
+        help_text="Enable the Google Workspace data collector for scribe",
+        input_type="flag",
+        visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
+    ),
+    ConfigOption(
         field_name="scribe_google_services",
         env_key="SUMMON_SCRIBE_GOOGLE_SERVICES",
         group="Scribe Google",
         label="Google Services",
         help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
         input_type="text",
-        visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
+        visible=_scribe_google_enabled,
         validate_fn=_validate_google_services,
     ),
     # Scribe Slack

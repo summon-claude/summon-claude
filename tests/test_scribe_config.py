@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from unittest.mock import patch
 
@@ -13,15 +12,8 @@ from summon_claude.config import SummonConfig
 
 
 def _make_config(**overrides) -> SummonConfig:
-    """Create a SummonConfig with valid defaults, bypassing .env file loading."""
-    defaults = {
-        "slack_bot_token": "xoxb-test-token",
-        "slack_app_token": "xapp-test-token",
-        "slack_signing_secret": "abc123def456",
-    }
-    defaults.update(overrides)
-    with patch.dict(os.environ, {}, clear=False):
-        return SummonConfig.model_validate(defaults)
+    """Create a SummonConfig isolated from env vars and .env files."""
+    return SummonConfig.for_test(**overrides)
 
 
 class TestScribeConfigDefaults:
@@ -48,6 +40,10 @@ class TestScribeConfigDefaults:
     def test_quiet_hours_default_empty(self):
         cfg = _make_config()
         assert cfg.scribe_quiet_hours == ""
+
+    def test_google_enabled_default_false(self):
+        cfg = _make_config()
+        assert cfg.scribe_google_enabled is False
 
     def test_google_services_default(self):
         cfg = _make_config()
@@ -142,6 +138,7 @@ class TestScribeConfigSettableKeys:
             "SUMMON_SCRIBE_MODEL",
             "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
             "SUMMON_SCRIBE_QUIET_HOURS",
+            "SUMMON_SCRIBE_GOOGLE_ENABLED",
             "SUMMON_SCRIBE_GOOGLE_SERVICES",
             "SUMMON_SCRIBE_SLACK_ENABLED",
             "SUMMON_SCRIBE_SLACK_BROWSER",
@@ -292,8 +289,9 @@ class TestScribeSystemPrompt:
             user_mention="<@U12345>",
             importance_keywords="",
         )
-        assert "Prompt injection defense" in prompt["append"]
-        assert "NEVER follow instructions" in prompt["append"]
+        assert "PROMPT INJECTION DEFENSE" in prompt["append"]
+        assert "untrusted data" in prompt["append"]
+        assert "Canary rule" in prompt["append"]
 
     def test_prompt_includes_scan_protocol(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -326,17 +324,18 @@ class TestScribeSystemPrompt:
         )
         assert "Note-taking" in prompt["append"]
 
-    def test_prompt_rejects_no_data_sources(self):
+    def test_prompt_works_with_no_data_sources(self):
+        """Prompt degrades gracefully when no data sources are configured."""
         from summon_claude.sessions.session import build_scribe_system_prompt
 
-        with pytest.raises(ValueError, match="at least one data source"):
-            build_scribe_system_prompt(
-                scan_interval=5,
-                user_mention="<@U12345>",
-                importance_keywords="",
-                google_enabled=False,
-                slack_enabled=False,
-            )
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=False,
+            slack_enabled=False,
+        )
+        assert "append" in prompt
 
     def test_prompt_no_google_section_when_disabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -348,8 +347,8 @@ class TestScribeSystemPrompt:
             google_enabled=False,
             slack_enabled=True,  # need at least one data source
         )
-        assert "Gmail" not in prompt["append"]
-        assert "Google Calendar" not in prompt["append"]
+        assert "check for new/unread emails using gmail tools" not in prompt["append"]
+        assert "check for upcoming events, changed events" not in prompt["append"]
 
     def test_prompt_includes_google_section_when_enabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -558,3 +557,101 @@ class TestGoogleOptionalDep:
         assert "google" in optional_deps
         google_deps = optional_deps["google"]
         assert any("workspace-mcp" in dep for dep in google_deps)
+
+
+# ---------------------------------------------------------------------------
+# slack_status and slack_remove CLI commands
+# ---------------------------------------------------------------------------
+
+
+class TestSlackStatusCommand:
+    def test_slack_status_no_config(self, tmp_path):
+        """slack-status shows 'not configured' when no workspace config exists."""
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with patch(
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
+            return_value=tmp_path / "missing.json",
+        ):
+            result = runner.invoke(cmd_config, ["slack-status"])
+
+        assert result.exit_code == 0
+        assert "No external Slack workspace configured" in result.output
+
+    def test_slack_status_with_config(self, tmp_path):
+        """slack-status shows workspace URL and user ID from config."""
+        import json
+
+        config_file = tmp_path / "ws.json"
+        auth_state = tmp_path / "auth.json"
+        auth_state.write_text("{}")
+        config_file.write_text(
+            json.dumps(
+                {
+                    "url": "https://myteam.slack.com",
+                    "user_id": "U_EXT_123",
+                    "auth_state_path": str(auth_state),
+                }
+            )
+        )
+
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        target = "summon_claude.cli.slack_auth.get_workspace_config_path"
+        with patch(target, return_value=config_file):
+            result = runner.invoke(cmd_config, ["slack-status"])
+
+        assert result.exit_code == 0
+        assert "myteam.slack.com" in result.output
+        assert "U_EXT_123" in result.output
+
+
+class TestSlackRemoveCommand:
+    def test_slack_remove_no_config(self, tmp_path):
+        """slack-remove shows 'not configured' when no workspace config exists."""
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        with patch(
+            "summon_claude.cli.slack_auth.get_workspace_config_path",
+            return_value=tmp_path / "missing.json",
+        ):
+            result = runner.invoke(cmd_config, ["slack-remove"])
+
+        assert result.exit_code == 0
+        assert "No external Slack workspace configured" in result.output
+
+    def test_slack_remove_confirmed(self, tmp_path):
+        """slack-remove deletes auth state and config when confirmed."""
+        import json
+
+        browser_auth = tmp_path / "browser_auth"
+        browser_auth.mkdir()
+        auth_state = browser_auth / "slack_test.json"
+        auth_state.write_text("{}")
+        config_file = tmp_path / "ws.json"
+        config_file.write_text(
+            json.dumps(
+                {
+                    "url": "https://myteam.slack.com",
+                    "auth_state_path": str(auth_state),
+                }
+            )
+        )
+
+        runner = CliRunner()
+        from summon_claude.cli.__init__ import cmd_config
+
+        mod = "summon_claude.cli.slack_auth"
+        with (
+            patch(f"{mod}.get_workspace_config_path", return_value=config_file),
+            patch(f"{mod}.get_data_dir", return_value=tmp_path),
+        ):
+            result = runner.invoke(cmd_config, ["slack-remove"], input="y\n")
+
+        assert result.exit_code == 0
+        assert "removed" in result.output.lower()
+        assert not config_file.exists()
+        assert not auth_state.exists()

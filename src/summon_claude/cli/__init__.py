@@ -25,6 +25,7 @@ import threading
 import click
 
 from summon_claude import __version__
+from summon_claude.cli import slack_auth as slack_auth_cmds
 from summon_claude.cli.config import (
     config_check,
     config_edit,
@@ -781,6 +782,36 @@ def config_google_auth_cmd() -> None:
 def config_google_status_cmd() -> None:
     """Check Google Workspace authentication status."""
     google_status()
+
+
+@cmd_config.command("slack-auth")
+@click.argument("workspace")
+def config_slack_auth_cmd(workspace: str) -> None:
+    """Authenticate with an external Slack workspace for scribe monitoring.
+
+    WORKSPACE can be a name (myteam), enterprise (acme.enterprise),
+    or full URL (https://myteam.slack.com).
+    """
+    slack_auth_cmds.slack_auth(workspace)
+
+
+@cmd_config.command("slack-status")
+def config_slack_status_cmd() -> None:
+    """Show external Slack workspace auth status."""
+    slack_auth_cmds.slack_status()
+
+
+@cmd_config.command("slack-remove")
+def config_slack_remove_cmd() -> None:
+    """Remove external Slack workspace auth state."""
+    slack_auth_cmds.slack_remove()
+
+
+@cmd_config.command("slack-channels")
+@click.option("--refresh", is_flag=True, help="Re-fetch channels from Slack")
+def config_slack_channels_cmd(refresh: bool) -> None:
+    """Update monitored channel selection (no re-auth needed)."""
+    slack_auth_cmds.slack_channels(refresh=refresh)
 
 
 # ---------------------------------------------------------------------------

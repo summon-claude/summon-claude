@@ -182,6 +182,20 @@ class TestVisibilityGracefulDegradation:
         with patch("summon_claude.config._workspace_mcp_installed", return_value=False):
             assert not google_opt.visible(cfg)
 
+    def test_scribe_google_services_hidden_without_google_enabled(self):
+        """scribe_google_services hidden when SCRIBE_GOOGLE_ENABLED is false."""
+        cfg = {"SUMMON_SCRIBE_ENABLED": "true"}  # GOOGLE_ENABLED not set
+        google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
+        with patch("summon_claude.config._workspace_mcp_installed", return_value=True):
+            assert not google_opt.visible(cfg)
+
+    def test_scribe_google_services_visible_when_all_enabled(self):
+        """scribe_google_services visible when scribe + google enabled + workspace-mcp installed."""
+        cfg = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_GOOGLE_ENABLED": "true"}
+        google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
+        with patch("summon_claude.config._workspace_mcp_installed", return_value=True):
+            assert google_opt.visible(cfg)
+
     def test_scribe_slack_browser_hidden_without_playwright(self):
         """scribe_slack_browser hidden when playwright not importable."""
         cfg = {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_SLACK_ENABLED": "true"}
