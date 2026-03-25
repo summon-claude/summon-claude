@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from unittest.mock import patch
 
@@ -13,19 +12,8 @@ from summon_claude.config import SummonConfig
 
 
 def _make_config(**overrides) -> SummonConfig:
-    """Create a SummonConfig with valid defaults, bypassing .env file loading."""
-    defaults: dict[str, object] = {
-        "slack_bot_token": "xoxb-test-token",
-        "slack_app_token": "xapp-test-token",
-        "slack_signing_secret": "abc123def456",
-        "scribe_slack_monitored_channels": "",
-    }
-    defaults.update(overrides)
-    # Clear scribe env vars that may leak from the local .env config file
-    scribe_env_keys = [k for k in os.environ if k.startswith("SUMMON_SCRIBE_")]
-    clean_env = dict.fromkeys(scribe_env_keys, "")
-    with patch.dict(os.environ, clean_env):
-        return SummonConfig.model_validate(defaults)
+    """Create a SummonConfig isolated from env vars and .env files."""
+    return SummonConfig.for_test(**overrides)
 
 
 class TestScribeConfigDefaults:

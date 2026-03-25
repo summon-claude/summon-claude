@@ -1231,11 +1231,6 @@ async def _run_probe(cfg: _ProbeConfig) -> AuthProbeResult:
 
         final_url, title, has_login, team_count = await _gather_page_diagnostics(page)
 
-        # If headed mode, try to hide window before closing
-        if not cfg.headless:
-            with contextlib.suppress(Exception):
-                await page.evaluate("window.resizeTo(1, 1); window.moveTo(-10000, -10000)")
-
         await browser.close()
 
     return AuthProbeResult(
@@ -1284,9 +1279,8 @@ def _print_mode_conclusions(
     headless_all: AuthProbeResult,
     headless_no_x: AuthProbeResult,
     headless_d: AuthProbeResult,
-    headed_all: AuthProbeResult,
 ) -> None:
-    """Print conclusions about which browser mode and cookie combos work."""
+    """Print conclusions about which cookie combos work in headless mode."""
     if headless_all.success:
         print("  [OK] Headless mode works with all cookies")
         status_no_x = "[OK] NOT required" if headless_no_x.success else "[!!] IS required"
@@ -1297,16 +1291,10 @@ def _print_mode_conclusions(
         return
 
     print("  [!!] Headless mode FAILS with all cookies")
-    if headed_all.success:
-        print("  [OK] Headed mode works — headless detection by Slack/SSO")
-        print("  ACTION: Use headed mode (minimized) instead of headless")
-    else:
-        print("  [!!] Headed mode ALSO fails — cookies likely expired")
-        print("  ACTION: Re-run summon config slack-auth")
+    print("  ACTION: Re-run summon config slack-auth")
 
-    # Diagnose WHY headless failed
     if headless_all.has_login_form:
-        print("  [!!] Login form visible — SSO cookies expired or headless blocks SSO")
+        print("  [!!] Login form visible — SSO cookies expired")
     elif headless_all.redirects:
         _check_sso_redirects(headless_all.redirects)
     else:
@@ -1352,13 +1340,12 @@ def _print_x_cookie_status(probe: AuthProbeResult) -> None:
 
 @pytest.mark.skipif(_real_slack_cfg is None, reason=_real_slack_skip_reason)
 class TestSlackAuthDiagnostics:
-    """Systematic diagnostics for Slack browser auth behavior.
+    """Systematic diagnostics for Slack browser auth behavior (headless only).
 
     Determines:
-    1. Whether headless mode works at all for this workspace (Enterprise Grid SSO)
+    1. Whether headless mode works for this workspace (Enterprise Grid SSO)
     2. Which cookies are required (d alone? d+x? all?)
-    3. Whether headed mode works when headless fails
-    4. What redirect chains look like in each scenario
+    3. Whether app.slack.com/client/TEAM_ID bypasses the workspace picker
 
     Run with ``-s`` flag to see full diagnostic output:
         pytest tests/integration/test_browser_monitor.py::TestSlackAuthDiagnostics -v -n0 -s
@@ -1377,61 +1364,32 @@ class TestSlackAuthDiagnostics:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "policy,headless",
-        [
-            # Phase 1: headless with different cookie subsets
-            ("all", True),
-            ("all-except-x", True),
-            ("d-only", True),
-            ("d+d-s", True),
-            ("d+d-s+b+lc", True),
-            # Phase 2: headed mode (confirms if headless detection is the issue)
-            ("all", False),
-            ("d-only", False),
-        ],
-        ids=[
-            "headless/all-cookies",
-            "headless/all-except-x",
-            "headless/d-only",
-            "headless/d+d-s",
-            "headless/d+d-s+b+lc",
-            "headed/all-cookies",
-            "headed/d-only",
-        ],
+        "policy",
+        ["all", "all-except-x", "d-only", "d+d-s", "d+d-s+b+lc"],
     )
     async def test_auth_probe(
         self,
         auth_state: dict,
         workspace_url: str,
         policy: str,
-        headless: bool,
     ):
-        """Probe Slack auth with a specific cookie subset and browser mode.
+        """Probe Slack auth with a specific cookie subset (headless only).
 
         Each parametrized variant is an independent experiment. The test
         always passes (it's diagnostic) — check the output for results.
-        Real pass/fail is determined by the summary test below.
         """
         result = await _probe_slack_auth(
             workspace_url,
             auth_state,
             policy=policy,
-            headless=headless,
+            headless=True,
             timeout_s=20.0,
         )
-        # Print diagnostics (visible with -s flag)
         report = _format_probe_result(result)
         print(f"\n{'=' * 60}")
-        print(f"DIAGNOSTIC: {policy} / {'headless' if headless else 'HEADED'}")
+        print(f"DIAGNOSTIC: {policy}")
         print(f"{'=' * 60}")
         print(report)
-
-        # The test itself doesn't fail — we're gathering data.
-        # But we DO record the result for the summary test.
-        # Store on the class for the summary to pick up.
-        if not hasattr(TestSlackAuthDiagnostics, "_results"):
-            TestSlackAuthDiagnostics._results = []
-        TestSlackAuthDiagnostics._results.append(result)
 
     @pytest.mark.asyncio
     async def test_cookie_state_inventory(self, auth_state: dict):
@@ -1532,30 +1490,24 @@ class TestSlackAuthDiagnostics:
         """Run key probes and print a summary with actionable conclusions."""
         sep = "=" * 60
 
-        # Phase 1: workspace URL probes
-        workspace_probes = [
-            ("all", True),
-            ("all-except-x", True),
-            ("d-only", True),
-            ("all", False),
-        ]
+        # Phase 1: headless workspace URL probes (cookie subsets)
+        policies = ["all", "all-except-x", "d-only"]
 
         ws_results: list[AuthProbeResult] = []
-        for policy, headless in workspace_probes:
+        for policy in policies:
             r = await _probe_slack_auth(
                 workspace_url,
                 auth_state,
                 policy=policy,
-                headless=headless,
+                headless=True,
                 timeout_s=20.0,
             )
             ws_results.append(r)
             print(f"\n{_format_probe_result(r)}")
 
-        headless_all = next(r for r in ws_results if r.policy == "all" and r.headless)
-        headless_no_x = next(r for r in ws_results if r.policy == "all-except-x" and r.headless)
-        headless_d = next(r for r in ws_results if r.policy == "d-only" and r.headless)
-        headed_all = next(r for r in ws_results if r.policy == "all" and not r.headless)
+        headless_all = next(r for r in ws_results if r.policy == "all")
+        headless_no_x = next(r for r in ws_results if r.policy == "all-except-x")
+        headless_d = next(r for r in ws_results if r.policy == "d-only")
 
         # Phase 2: app.slack.com/client/TEAM_ID probe
         team_ids = _extract_team_ids(auth_state)
@@ -1577,7 +1529,7 @@ class TestSlackAuthDiagnostics:
         print("CONCLUSIONS")
         print(sep)
 
-        _print_mode_conclusions(headless_all, headless_no_x, headless_d, headed_all)
+        _print_mode_conclusions(headless_all, headless_no_x, headless_d)
         _print_x_cookie_status(headless_all)
 
         if app_result:

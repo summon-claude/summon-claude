@@ -358,6 +358,31 @@ class SummonConfig(BaseSettings):
     scribe_slack_browser: str = "chrome"  # "chrome", "firefox", or "webkit"
     scribe_slack_monitored_channels: str = ""  # comma-separated channel IDs (e.g. "C01ABC,C02DEF")
 
+    @classmethod
+    def for_test(cls, **overrides: object) -> SummonConfig:
+        """Create a config instance isolated from env vars and .env files.
+
+        Use in tests instead of ``SummonConfig(...)`` or ``model_validate()``.
+        Provides sensible defaults for required fields; override any field
+        via keyword arguments.
+        """
+        import os  # noqa: PLC0415
+
+        defaults: dict[str, object] = {
+            "slack_bot_token": "xoxb-test-token",
+            "slack_app_token": "xapp-test-token",
+            "slack_signing_secret": "abc123def456",
+        }
+        defaults.update(overrides)
+        # Temporarily clear all SUMMON_ env vars so pydantic-settings
+        # doesn't read them. patch.dict isn't available here, so stash
+        # and restore manually.
+        stashed = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("SUMMON_")}
+        try:
+            return cls(_env_file=None, **defaults)  # type: ignore[call-arg]
+        finally:
+            os.environ.update(stashed)
+
     @field_validator("default_effort")
     @classmethod
     def validate_effort_level(cls, v: str) -> str:
