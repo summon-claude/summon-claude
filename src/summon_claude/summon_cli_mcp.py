@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import create_sdk_mcp_server, tool
 
+from summon_claude.security import validate_agent_output
 from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN_PM, MAX_SPAWN_DEPTH, SessionRegistry
 from summon_claude.sessions.scheduler import (
     SessionScheduler,
@@ -644,6 +645,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 safe_sender = re.sub(r"<@(U\w+)>", r"user:\1", safe_sender)
                 safe_sender = re.sub(r"<!subteam\^[^>]+>", "group", safe_sender)
                 attribution = redact_secrets(f"_Message from {safe_sender}:_\n{safe_text}")
+                attribution, _ = validate_agent_output(attribution)
                 try:
                     await _web_client.chat_postMessage(channel=target_channel_id, text=attribution)
                 except Exception:
