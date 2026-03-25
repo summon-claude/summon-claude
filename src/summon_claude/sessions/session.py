@@ -567,6 +567,10 @@ def _build_scan_cron(interval_s: int) -> str:
 def _build_google_workspace_mcp(services: str) -> dict:
     """Build MCP server config for Google Workspace (workspace-mcp).
 
+    Direct (non-proxied) version — retained for non-Scribe sessions that
+    may use workspace-mcp in the future without spotlighting overhead.
+    Scribe sessions use ``_build_google_workspace_mcp_untrusted`` instead.
+
     The ``--tools`` flag expects space-separated service names, so we
     split the comma-separated config value into individual args.
     Includes ``env`` overrides so the MCP server subprocess stores
