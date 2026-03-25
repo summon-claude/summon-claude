@@ -107,6 +107,15 @@ class TestRedactor:
         assert "12345678-abcd-1234-abcd-1234567890ab" not in result
         assert "12345678..." in result
 
+    def test_redact_data_dir(self) -> None:
+        from summon_claude.diagnostics import _DATA_DIR
+
+        if str(Path.home()) != _DATA_DIR:
+            text = f"opened {_DATA_DIR}/registry.db"
+            result = redactor.redact(text)
+            assert _DATA_DIR not in result
+            assert "[data_dir]" in result
+
     def test_redact_no_sensitive_data(self) -> None:
         text = "all is well"
         assert redactor.redact(text) == "all is well"
@@ -296,7 +305,11 @@ class TestDaemonCheck:
         assert any("orphan" in d.lower() for d in result.details)
 
     async def test_unreadable_pid_file(self, check: DaemonCheck) -> None:
-        mocks = _make_daemon_mocks(running=False, pid_exists=True, pid_text="not-a-number")
+        # pid_alive=False: os.kill is never reached (ValueError on int() first),
+        # so don't create an unused kill patch
+        mocks = _make_daemon_mocks(
+            running=False, pid_exists=True, pid_text="not-a-number", pid_alive=False
+        )
         with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
             result = await check.run(None)
         assert result.status == "warn"

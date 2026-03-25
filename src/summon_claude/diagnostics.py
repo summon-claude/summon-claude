@@ -596,8 +596,8 @@ class LogsCheck:
                 pass
         details.append(f"Total log size: {_human_size(total_size)}")
 
-        # Staleness check
-        all_log_files = [f for f in log_dir.glob("*.log") if f.exists()]
+        # Staleness check — reuse session_logs from above instead of re-globbing
+        all_log_files = ([daemon_log] if daemon_log.exists() else []) + session_logs
         mtimes = []
         for f in all_log_files:
             with contextlib.suppress(OSError):
