@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import stat
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,21 +43,26 @@ def _xdg_dir(env_var: str, default_subdir: str, xdg_subdir: str) -> Path:
     return Path.home() / ".summon"
 
 
+@functools.lru_cache(maxsize=1)
 def _find_project_root() -> Path | None:
     """Walk up from CWD looking for pyproject.toml. Return containing dir or None.
 
-    Stops at the user's home directory parent to avoid picking up stray
-    ``pyproject.toml`` files in system directories.  Rejects symlink
-    sentinels to prevent mode-switching via crafted directory trees.
+    Stops at the user's home directory parent (or filesystem root) to avoid
+    picking up stray ``pyproject.toml`` files in system directories.  Uses a
+    single ``lstat`` call per candidate to atomically reject symlinks.
     """
     current = Path.cwd().resolve()
     home_parent = Path.home().resolve().parent
     for parent in [current, *current.parents]:
-        if parent == home_parent:
+        if parent in (home_parent, parent.parent):
             break
         sentinel = parent / "pyproject.toml"
-        if sentinel.exists() and not sentinel.is_symlink():
-            return parent
+        try:
+            st = sentinel.lstat()
+            if stat.S_ISREG(st.st_mode):
+                return parent
+        except OSError:
+            pass
     return None
 
 
@@ -82,8 +88,8 @@ def _detect_install_mode() -> tuple[str, Path | None]:
     # Auto-detect: VIRTUAL_ENV under project root
     venv_str = os.environ.get("VIRTUAL_ENV", "").strip()
     if venv_str and project_root is not None:
-        venv_path = Path(venv_str).resolve()
-        if venv_path.is_relative_to(project_root.resolve()):
+        venv_path = Path(venv_str)
+        if venv_path.is_absolute() and venv_path.resolve().is_relative_to(project_root.resolve()):
             return ("local", project_root)
 
     return ("global", None)
@@ -135,7 +141,7 @@ def get_claude_config_dir() -> Path:
 
 
 def get_config_dir() -> Path:
-    """XDG_CONFIG_HOME/summon -> ~/.config/summon -> ~/.summon (fallback)."""
+    """XDG config path, or project_root/.summon in local mode."""
     root = get_local_root()
     if root is not None:
         return root / ".summon"
@@ -143,7 +149,7 @@ def get_config_dir() -> Path:
 
 
 def get_data_dir() -> Path:
-    """XDG_DATA_HOME/summon -> ~/.local/share/summon -> ~/.summon (fallback)."""
+    """XDG data path, or project_root/.summon in local mode."""
     root = get_local_root()
     if root is not None:
         return root / ".summon"

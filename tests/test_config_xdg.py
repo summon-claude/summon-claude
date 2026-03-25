@@ -269,6 +269,19 @@ class TestLocalInstallDetection:
         isolated.mkdir()
         monkeypatch.chdir(isolated)
         monkeypatch.setenv("SUMMON_LOCAL", "1")
+        monkeypatch.setattr("summon_claude.config._find_project_root", lambda: None)
+
+        from summon_claude.config import _detect_install_mode
+
+        _detect_install_mode.cache_clear()
+        assert _detect_install_mode() == ("global", None)
+
+    def test_relative_virtual_env_rejected(self, tmp_path, monkeypatch):
+        """Relative VIRTUAL_ENV is rejected even if it resolves under project root."""
+        (tmp_path / "pyproject.toml").touch()
+        (tmp_path / ".venv").mkdir()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("VIRTUAL_ENV", ".venv")
 
         from summon_claude.config import _detect_install_mode
 
@@ -379,6 +392,18 @@ class TestFindLocalDaemonHint:
         _detect_install_mode.cache_clear()
         assert find_local_daemon_hint() is None
 
+    def test_returns_none_when_root_found_but_no_socket(self, tmp_path, monkeypatch):
+        """Global mode + pyproject.toml found but no daemon.sock -> no hint."""
+        (tmp_path / "pyproject.toml").touch()
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+        monkeypatch.delenv("SUMMON_LOCAL", raising=False)
+
+        from summon_claude.config import _detect_install_mode, find_local_daemon_hint
+
+        _detect_install_mode.cache_clear()
+        assert find_local_daemon_hint() is None
+
 
 class TestPublicApiWrappers:
     """Direct tests for is_local_install() and get_local_root()."""
@@ -480,10 +505,77 @@ class TestFindProjectRootHardening:
 
     def test_stops_at_home_parent(self, tmp_path, monkeypatch):
         """Walk-up does not ascend above home directory parent."""
-        isolated = tmp_path / "deep" / "nested"
-        isolated.mkdir(parents=True)
-        monkeypatch.chdir(isolated)
+        # Simulate a home directory inside tmp_path so home_parent is testable
+        fake_home = tmp_path / "home" / "user"
+        fake_home.mkdir(parents=True)
+        # Place pyproject.toml at home_parent level — should NOT be found
+        (tmp_path / "home" / "pyproject.toml").touch()
+        monkeypatch.chdir(fake_home)
+
+        from unittest.mock import patch
 
         from summon_claude.config import _find_project_root
 
-        assert _find_project_root() is None
+        with patch("summon_claude.config.Path.home", return_value=fake_home):
+            assert _find_project_root() is None
+
+
+class TestDefaultDbPathMigrationGuard:
+    """Tests for default_db_path() local-mode migration suppression.
+
+    The conftest patches ``default_db_path`` at session scope, so we reload
+    the module to get the real function and patch its dependencies directly.
+    """
+
+    @staticmethod
+    def _get_real_default_db_path():
+        import importlib
+
+        import summon_claude.sessions.registry as reg_mod
+
+        importlib.reload(reg_mod)
+        return reg_mod, reg_mod.default_db_path
+
+    def test_global_mode_migrates_old_path(self, tmp_path):
+        """Global mode: old ~/.summon/registry.db migrates to new XDG path."""
+        fake_home = tmp_path / "fakehome"
+        old_db = fake_home / ".summon" / "registry.db"
+        old_db.parent.mkdir(parents=True)
+        old_db.write_text("test")
+
+        new_dir = tmp_path / "new"
+        new_path = new_dir / "registry.db"
+
+        reg_mod, real_fn = self._get_real_default_db_path()
+        with (
+            patch.object(reg_mod, "is_local_install", return_value=False),
+            patch.object(reg_mod, "get_data_dir", return_value=new_dir),
+            patch("pathlib.Path.home", return_value=fake_home),
+        ):
+            result = real_fn()
+
+        assert result == new_path
+        assert not old_db.exists()
+        assert new_path.exists()
+
+    def test_local_mode_skips_migration(self, tmp_path):
+        """Local mode: old ~/.summon/registry.db is NOT migrated."""
+        fake_home = tmp_path / "fakehome"
+        old_db = fake_home / ".summon" / "registry.db"
+        old_db.parent.mkdir(parents=True)
+        old_db.write_text("test")
+
+        local_dir = tmp_path / "project" / ".summon"
+        local_path = local_dir / "registry.db"
+
+        reg_mod, real_fn = self._get_real_default_db_path()
+        with (
+            patch.object(reg_mod, "is_local_install", return_value=True),
+            patch.object(reg_mod, "get_data_dir", return_value=local_dir),
+            patch("pathlib.Path.home", return_value=fake_home),
+        ):
+            result = real_fn()
+
+        # Old DB should still exist — migration was skipped
+        assert old_db.exists()
+        assert result == local_path
