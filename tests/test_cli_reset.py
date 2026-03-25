@@ -8,6 +8,7 @@ from click.testing import CliRunner
 
 from summon_claude.cli import cli
 from summon_claude.config import (
+    get_browser_auth_dir,
     get_config_dir,
     get_google_credentials_dir,
     get_workspace_config_path,
@@ -52,6 +53,7 @@ class TestResetData:
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
         ):
             result = runner.invoke(cli, ["reset", "data"], input="n\n")
         assert result.exit_code != 0
@@ -202,7 +204,7 @@ class TestResetData:
         assert "Nothing to reset" in result.output
 
     def test_reset_data_refuses_symlink(self, tmp_path):
-        """'reset data' should refuse when data directory is a symlink."""
+        """'reset data' should refuse when data directory is a symlink — before prompting."""
         target = tmp_path / "real"
         target.mkdir()
         symlink = tmp_path / "data"
@@ -214,9 +216,10 @@ class TestResetData:
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_data_dir", return_value=symlink),
         ):
-            result = runner.invoke(cli, ["reset", "data"], input="y\n")
+            result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "symlink" in result.output
+        assert "Continue?" not in result.output
         assert target.exists()
 
     def test_reset_data_refuses_non_interactive(self, tmp_path):
@@ -234,7 +237,7 @@ class TestResetData:
         assert data_dir.exists()
 
     def test_reset_data_refuses_path_outside_home(self, tmp_path):
-        """'reset data' should refuse when directory resolves outside $HOME."""
+        """'reset data' should refuse when directory resolves outside $HOME — before prompting."""
         data_dir = tmp_path / "data"
         data_dir.mkdir()
 
@@ -245,9 +248,10 @@ class TestResetData:
             patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
             patch("summon_claude.cli.reset.Path.home", return_value=tmp_path / "fakehome"),
         ):
-            result = runner.invoke(cli, ["reset", "data"], input="y\n")
+            result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "outside home" in result.output
+        assert "Continue?" not in result.output
         assert data_dir.exists()
 
 
@@ -281,6 +285,7 @@ class TestResetConfig:
             patch("summon_claude.cli.reset.is_interactive", return_value=True),
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_config_dir", return_value=config_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
         ):
             result = runner.invoke(cli, ["reset", "config"], input="n\n")
         assert result.exit_code != 0
@@ -369,7 +374,7 @@ class TestResetConfig:
         assert "Nothing to reset" in result.output
 
     def test_reset_config_refuses_symlink(self, tmp_path):
-        """'reset config' should refuse when config directory is a symlink."""
+        """'reset config' should refuse when config directory is a symlink — before prompting."""
         target = tmp_path / "real"
         target.mkdir()
         symlink = tmp_path / "config"
@@ -381,9 +386,10 @@ class TestResetConfig:
             patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
             patch("summon_claude.cli.reset.get_config_dir", return_value=symlink),
         ):
-            result = runner.invoke(cli, ["reset", "config"], input="y\n")
+            result = runner.invoke(cli, ["reset", "config"])
         assert result.exit_code != 0
         assert "symlink" in result.output
+        assert "Continue?" not in result.output
         assert target.exists()
 
     def test_reset_config_rmtree_failure(self, tmp_path):
@@ -429,3 +435,7 @@ class TestConfigPaths:
     def test_workspace_config_path_is_under_config_dir(self):
         """get_workspace_config_path() must return a path under config dir, not data dir."""
         assert get_workspace_config_path().parent == get_config_dir()
+
+    def test_browser_auth_dir_is_under_config_dir(self):
+        """get_browser_auth_dir() must return a path under config dir, not data dir."""
+        assert get_browser_auth_dir() == get_config_dir() / "browser_auth"

@@ -415,7 +415,7 @@ class TestInteractiveSlackAuth:
         from unittest.mock import patch as _patch
 
         with (
-            _patch("summon_claude.slack_browser.get_data_dir", return_value=tmp_path),
+            _patch("summon_claude.slack_browser.get_browser_auth_dir", return_value=symlinked_dir),
             pytest.raises(RuntimeError, match="symlink"),
         ):
             await interactive_slack_auth("https://test.slack.com")

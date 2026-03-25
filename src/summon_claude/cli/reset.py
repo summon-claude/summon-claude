@@ -95,11 +95,7 @@ async def _reset_directory(
         click.echo(f"Nothing to reset — {label} directory does not exist.")
         return
 
-    click.echo(warning.format(path=target))
-    click.confirm("Continue?", default=False, abort=True)
-
-    # Guard against symlinks before resolving — check the original path,
-    # then resolve for the home-dir ancestor constraint.
+    # Safety checks BEFORE prompting — refuse early if the path is unsafe.
     if target.is_symlink():
         click.echo(f"Error: {label} directory is a symlink. Refusing to delete.")
         raise SystemExit(1)
@@ -111,6 +107,9 @@ async def _reset_directory(
             "Refusing to delete."
         )
         raise SystemExit(1)
+
+    click.echo(warning.format(path=resolved))
+    click.confirm("Continue?", default=False, abort=True)
 
     try:
         shutil.rmtree(resolved)
@@ -139,7 +138,7 @@ async def async_reset_config(ctx: click.Context) -> None:
         get_config_dir,
         "config",
         "This will delete all configuration at {path} including "
-        "Slack tokens and Google OAuth credentials.",
+        "Slack tokens, Google OAuth credentials, and external Slack auth state.",
         "Configuration cleared. Run 'summon hooks uninstall' to remove the Claude Code"
         " hook bridge, then 'summon init' to reconfigure.",
     )

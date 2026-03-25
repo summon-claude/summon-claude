@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from summon_claude.config import get_data_dir
+from summon_claude.config import get_browser_auth_dir
 
 logger = logging.getLogger(__name__)
 
@@ -592,14 +592,14 @@ async def interactive_slack_auth(
     """Open a browser for interactive Slack login and persist auth state.
 
     Waits up to 5 minutes for the user to complete login. Auth state is
-    saved to ``get_data_dir() / "browser_auth" / "slack_{workspace_id}.json"``
+    saved to ``get_browser_auth_dir() / "slack_{workspace_id}.json"``
     with 0o600 permissions ([SEC-005]).
 
     Returns a :class:`SlackAuthResult` with the state file path, auto-detected
     user ID, and channel name ↔ ID mappings from the sidebar.
     """
     workspace_id = _slugify(workspace_url)
-    browser_auth_dir = get_data_dir() / "browser_auth"
+    browser_auth_dir = get_browser_auth_dir()
 
     # [SEC-005] Validate that browser_auth/ is not a symlink before writing
     if browser_auth_dir.exists() and browser_auth_dir.is_symlink():

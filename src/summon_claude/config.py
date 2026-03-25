@@ -379,6 +379,11 @@ def get_workspace_config_path() -> Path:
     return get_config_dir() / _SLACK_WORKSPACE_FILE
 
 
+def get_browser_auth_dir() -> Path:
+    """Directory for Playwright browser auth state files (Slack cookies/localStorage)."""
+    return get_config_dir() / "browser_auth"
+
+
 def find_workspace_mcp_bin() -> Path:
     """Locate the ``workspace-mcp`` console-script in the same Python environment.
 

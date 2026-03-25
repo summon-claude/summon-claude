@@ -929,7 +929,7 @@ class TestRapidFireMessages:
 #
 # Everything else is derived automatically:
 #   - Workspace URL: from bot token via auth.test()
-#   - Browser state file: get_data_dir()/browser_auth/slack_{workspace}.json
+#   - Browser state file: get_browser_auth_dir()/slack_{workspace}.json
 #   - Test channel: created and cleaned up automatically (like other integ tests)
 #   - Bot token: from .env (SUMMON_TEST_SLACK_BOT_TOKEN, already used by other tests)
 #
@@ -943,7 +943,7 @@ def _resolve_real_slack_config() -> tuple[dict[str, str] | None, str]:
     Returns (config_dict, skip_reason). config_dict is None if prerequisites
     aren't met; skip_reason explains exactly what to do.
     """
-    from summon_claude.config import get_data_dir
+    from summon_claude.config import get_browser_auth_dir
     from summon_claude.slack_browser import _slugify
 
     bot_token = os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN")
@@ -965,7 +965,7 @@ def _resolve_real_slack_config() -> tuple[dict[str, str] | None, str]:
     # Enterprise Grid workspaces have two URLs (e.g. gtest.enterprise.slack.com
     # and e0ahttsbag1-mqfpielh.slack.com). The user may have authenticated via
     # either. Check the direct match first, then scan all state files.
-    browser_auth_dir = get_data_dir() / "browser_auth"
+    browser_auth_dir = get_browser_auth_dir()
     state_file = browser_auth_dir / f"slack_{_slugify(workspace_url)}.json"
 
     if not state_file.is_file() and browser_auth_dir.is_dir():
