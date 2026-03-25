@@ -886,7 +886,9 @@ def _pick_channels(channels: list[dict[str, str]] | None) -> str:
                 indicator=">",
             )
             selected_ch_indices = [
-                channel_indices[int(s[1])] for s in selected_raw if channel_indices[int(s[1])] >= 0
+                channel_indices[int(s[1])]  # type: ignore[index]
+                for s in selected_raw
+                if channel_indices[int(s[1])] >= 0  # type: ignore[index]
             ]
             if selected_ch_indices:
                 selected = [channels[i] for i in selected_ch_indices]
