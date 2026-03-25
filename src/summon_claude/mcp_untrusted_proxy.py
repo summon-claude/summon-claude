@@ -79,6 +79,7 @@ async def _relay_to_parent(
         line = await child_stdout.readline()
         if not line:
             break
+        parsed: Any = None
         try:
             parsed = json.loads(line)
             marked = _mark_tool_result(parsed, source)
@@ -102,14 +103,17 @@ async def _relay_to_parent(
             )
             sys.stdout.buffer.flush()
         except Exception as exc:
-            # SECURITY: fail-closed — any marking failure wraps raw content
+            # SECURITY: fail-closed — any marking failure wraps raw content.
+            # parsed was assigned by json.loads before marking failed, so
+            # we can extract the request id for proper SDK correlation.
             logger.warning("Failed to process downstream message: %s", exc)
             fallback = mark_untrusted(line.decode(errors="replace"), source)
+            msg_id = parsed.get("id") if isinstance(parsed, dict) else None
             sys.stdout.buffer.write(
                 json.dumps(
                     {
                         "jsonrpc": "2.0",
-                        "id": None,
+                        "id": msg_id,
                         "result": {"content": [{"type": "text", "text": fallback}]},
                     }
                 ).encode()
