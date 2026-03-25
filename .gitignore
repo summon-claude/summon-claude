@@ -54,4 +54,4 @@ _inspect_sdk2.py
 .serena/
 
 # Project memory (cross-session notes, not for version control)
-hack/
+hack
