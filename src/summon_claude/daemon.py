@@ -15,6 +15,7 @@ Public API
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fcntl
 import json
 import logging
@@ -144,11 +145,15 @@ def _daemon_log() -> Path:
     return _data_dir() / "logs" / "daemon.log"
 
 
+def _startup_error_path() -> Path:
+    return _data_dir() / "last-startup-error"
+
+
 # Unix socket path length limit: 104 on macOS, 108 on Linux.
 # We use the lower bound so the daemon works on both platforms.
 _UNIX_SOCKET_PATH_MAX = 104
 
-_SOCKET_WAIT_TIMEOUT_S = 10.0
+_SOCKET_WAIT_TIMEOUT_S = 20.0
 _SOCKET_POLL_INTERVAL_S = 0.1
 
 
@@ -166,6 +171,19 @@ class DaemonAlreadyRunningError(Exception):
 # ---------------------------------------------------------------------------
 # Daemon entry points
 # ---------------------------------------------------------------------------
+
+
+def _write_startup_error(message: str) -> None:
+    """Write a startup error message to the last-startup-error file (mode 0o600)."""
+    import datetime  # noqa: PLC0415
+
+    error_path = _startup_error_path()
+    error_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
+    content = f"[{timestamp}]\n{message}\n"
+    error_path.write_text(content)
+    with contextlib.suppress(OSError):
+        error_path.chmod(0o600)
 
 
 async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
@@ -211,6 +229,45 @@ async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
         logger.warning("Failed to clean up orphaned sessions: %s", e)
 
 
+async def _run_startup_probe(bolt_router: BoltRouter) -> None:
+    """Run a one-time event probe at daemon startup.
+
+    Soft-fails (WARNING + continue) for non-definitive results.
+    Hard-fails (SystemExit) for definitive signals (token_revoked, socket_disabled).
+    """
+    event_probe = bolt_router.event_probe
+    if event_probe is None:
+        logger.debug("Startup event probe: skipped (probe not available)")
+        return
+
+    # Wait for WebSocket event delivery to stabilize after connect_async()
+    await asyncio.sleep(2.0)
+    try:
+        startup_result = await event_probe.run_probe(timeout=5.0)
+    except Exception as e:
+        logger.warning("Startup event probe: exception during probe (%s) — continuing", e)
+        return
+    if startup_result.healthy:
+        _startup_error_path().unlink(missing_ok=True)
+        logger.info("Startup event probe: healthy")
+    elif startup_result.reason in ("events_disabled", "unknown"):
+        logger.warning(
+            "Startup event probe: non-definitive result (%s) — continuing",
+            startup_result.reason,
+        )
+    else:
+        diagnostic_msg = event_probe.format_alert(startup_result)
+        _write_startup_error(diagnostic_msg)
+        logger.critical(
+            "Startup event probe failed: %s — %s",
+            startup_result.reason,
+            startup_result.details,
+        )
+        await bolt_router.stop()
+        _daemon_pid().unlink(missing_ok=True)
+        raise SystemExit(1)
+
+
 async def daemon_main(config: SummonConfig) -> None:
     """Async daemon entry point.
 
@@ -238,6 +295,8 @@ async def daemon_main(config: SummonConfig) -> None:
     # Mark any sessions left active from a previous daemon as errored
     await _cleanup_orphaned_sessions(bolt_router.web_client)
 
+    await _run_startup_probe(bolt_router)
+
     if bolt_router.bot_user_id is None:  # pragma: no cover — start() always sets this
         raise RuntimeError("BoltRouter.start() did not set bot_user_id")
     session_manager = SessionManager(
@@ -245,6 +304,7 @@ async def daemon_main(config: SummonConfig) -> None:
         web_client=bolt_router.web_client,
         bot_user_id=bolt_router.bot_user_id,
         dispatcher=dispatcher,
+        event_probe=bolt_router.event_probe,
     )
     dispatcher.set_command_handler(session_manager.handle_summon_command)
     dispatcher.set_resume_handler(session_manager.resume_from_channel)
@@ -270,6 +330,11 @@ async def daemon_main(config: SummonConfig) -> None:
     # Layer 1: Socket health monitor (BoltRouter-owned)
     # Register shutdown callback so health monitor can trigger daemon shutdown on exhaustion
     bolt_router.shutdown_callback = session_manager.shutdown_event.set
+
+    def _on_event_failure() -> None:
+        session_manager._suspend_on_shutdown = True  # noqa: SLF001
+
+    bolt_router.event_failure_callback = _on_event_failure
     health_task = bolt_router.start_health_monitor()
 
     # Layer 2: Daemon-level event loop watchdog
@@ -516,7 +581,7 @@ def _clear_stale_daemon_files() -> None:
     advisory and tied to the file descriptor, not the file path, so there
     is no risk of a stale lock persisting across daemon restarts.
     """
-    for path in (_daemon_pid(), _daemon_socket()):
+    for path in (_daemon_pid(), _daemon_socket(), _startup_error_path()):
         path.unlink(missing_ok=True)
 
 
@@ -553,6 +618,8 @@ def start_daemon(config: SummonConfig) -> None:
     if pid > 0:
         # Parent: wait for daemon socket to appear
         _wait_for_socket(socket_path)
+        # Clear any stale startup error from a previous failed run
+        _startup_error_path().unlink(missing_ok=True)
         return
 
     # Child: detach from terminal session and run daemon
@@ -589,13 +656,25 @@ def _wait_for_socket(socket_path: Path) -> None:
     """Poll until *socket_path* exists (daemon is ready) or timeout expires.
 
     Raises ``RuntimeError`` if the socket does not appear within
-    ``_SOCKET_WAIT_TIMEOUT_S`` seconds.
+    ``_SOCKET_WAIT_TIMEOUT_S`` seconds.  Includes startup error diagnostic
+    from ``last-startup-error`` file if it exists.
     """
     deadline = time.monotonic() + _SOCKET_WAIT_TIMEOUT_S
     while time.monotonic() < deadline:
         if socket_path.exists():
             return
         time.sleep(_SOCKET_POLL_INTERVAL_S)
+
+    # Socket never appeared — check for startup error diagnostic
+    error_path = _startup_error_path()
+    if error_path.exists():
+        try:
+            error_contents = error_path.read_text().strip()
+            error_path.unlink(missing_ok=True)
+            raise RuntimeError(f"Daemon startup failed:\n{error_contents}")
+        except OSError:
+            pass
+
     raise RuntimeError(
         f"Daemon did not start within {_SOCKET_WAIT_TIMEOUT_S:.0f}s "
         f"(socket {socket_path} never appeared)"

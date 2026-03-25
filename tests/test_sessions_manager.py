@@ -2387,3 +2387,73 @@ class TestValidateResumeTargetEdgeCases:
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             with pytest.raises(ValueError, match="no associated channel"):
                 await manager._validate_resume_target("s-no-chan")
+
+
+# ---------------------------------------------------------------------------
+# Tests: _suspend_on_shutdown in shutdown()
+# ---------------------------------------------------------------------------
+
+
+class TestSuspendOnShutdown:
+    """Verify SessionManager.shutdown() suspends project sessions on health failure."""
+
+    @pytest.mark.asyncio
+    async def test_suspend_marks_project_sessions_suspended(self):
+        """Project sessions marked 'suspended' when _suspend_on_shutdown is set."""
+        manager, _provider, _dispatcher = _make_manager()
+
+        # Create mock sessions with project affiliation
+        mock_project_session = MagicMock()
+        mock_project_session.project_id = "proj-1"
+        mock_project_session.channel_id = "C123"
+        mock_project_session.request_shutdown = MagicMock()
+
+        mock_adhoc_session = MagicMock()
+        mock_adhoc_session.project_id = None
+        mock_adhoc_session.channel_id = "C456"
+        mock_adhoc_session.request_shutdown = MagicMock()
+
+        manager._sessions = {"sid-1": mock_project_session, "sid-2": mock_adhoc_session}
+        manager._tasks = {"sid-1": MagicMock(), "sid-2": MagicMock()}
+        manager._suspend_on_shutdown = True
+
+        mock_reg = MagicMock()
+        mock_reg.update_status = AsyncMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("summon_claude.sessions.manager.SessionRegistry", return_value=mock_ctx):
+            await manager.shutdown()
+
+        # Project session should be suspended
+        mock_reg.update_status.assert_any_call("sid-1", "suspended")
+        # Ad-hoc session should be errored
+        calls = [c for c in mock_reg.update_status.call_args_list if c[0][0] == "sid-2"]
+        assert len(calls) == 1
+        assert calls[0][0][1] == "errored"
+
+    @pytest.mark.asyncio
+    async def test_no_suspend_when_flag_is_false(self):
+        """Normal shutdown should NOT pre-set session statuses."""
+        manager, _provider, _dispatcher = _make_manager()
+
+        mock_session = MagicMock()
+        mock_session.project_id = "proj-1"
+        mock_session.channel_id = "C123"
+        mock_session.request_shutdown = MagicMock()
+
+        manager._sessions = {"sid-1": mock_session}
+        manager._tasks = {"sid-1": MagicMock()}
+        manager._suspend_on_shutdown = False
+
+        mock_reg = MagicMock()
+        mock_reg.update_status = AsyncMock()
+
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_cls:
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await manager.shutdown()
+
+        # update_status should NOT be called for pre-suspend
+        mock_reg.update_status.assert_not_called()
