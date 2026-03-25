@@ -5,6 +5,7 @@ Covers C12 (Phase 1) and C13 (Phase 2) test requirements.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -31,8 +32,8 @@ def make_config(**overrides) -> SummonConfig:
     return SummonConfig.model_validate(defaults)
 
 
-def make_scribe_prompt(**overrides) -> dict:
-    defaults = dict(
+def make_scribe_prompt(**overrides: Any) -> dict:
+    defaults: dict[str, Any] = dict(
         scan_interval=5,
         user_mention="<@U12345>",
         importance_keywords="",
@@ -78,18 +79,22 @@ class TestSessionOptionsScribeProfile:
 
 class TestScribeSystemPromptSecurity:
     def test_scribe_system_prompt_security_at_top(self):
-        """PROMPT INJECTION DEFENSE section appears before scan protocol."""
+        """Security section appears before scan protocol."""
         prompt = make_scribe_prompt()
         text = prompt["append"]
-        injection_pos = text.find("PROMPT INJECTION DEFENSE")
+        injection_pos = text.find("Prompt injection defense")
         scan_pos = text.lower().find("scan protocol")
-        assert injection_pos != -1, "PROMPT INJECTION DEFENSE not found"
+        assert injection_pos != -1, "Prompt injection defense section not found"
         assert scan_pos != -1, "scan protocol not found"
         assert injection_pos < scan_pos
 
-    def test_scribe_system_prompt_canary_phrase(self):
+    def test_scribe_system_prompt_principal_hierarchy(self):
+        """Principal hierarchy with 4 levels appears in security section."""
         prompt = make_scribe_prompt()
-        assert "Canary rule" in prompt["append"]
+        text = prompt["append"]
+        assert "Principal hierarchy" in text
+        assert "LOWEST authority" in text
+        assert "UNTRUSTED_EXTERNAL_DATA" in text
 
     def test_scribe_system_prompt_delivery_format(self):
         """Alert formatting contains rotating_light and Level 5 markers."""
@@ -485,7 +490,7 @@ class TestExternalSlackMcp:
 
     @pytest.mark.asyncio
     async def test_external_slack_check_spotlighting(self):
-        """Messages are wrapped in UNTRUSTED delimiters with a nonce."""
+        """Messages are wrapped with mark_untrusted() delimiters."""
         from summon_claude.slack_browser import SlackMessage
 
         sess = self._make_session()
@@ -503,9 +508,9 @@ class TestExternalSlackMcp:
         result = await tool_fn({})
         text = result["content"][0]["text"]
 
-        assert "BEGIN UNTRUSTED" in text
-        assert "END UNTRUSTED" in text
+        assert "UNTRUSTED_EXTERNAL_DATA" in text
         assert "Hello" in text
+        assert "[Source: External Slack]" in text
 
     @pytest.mark.asyncio
     async def test_external_slack_check_truncation(self):

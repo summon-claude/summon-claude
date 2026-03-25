@@ -13,6 +13,8 @@ from typing import Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.security import validate_agent_output
+
 logger = logging.getLogger(__name__)
 
 ZZZ_PREFIX = "zzz-"
@@ -92,6 +94,10 @@ class SlackClient:
     ) -> MessageRef:
         """Post a message to the channel."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {"channel": self.channel_id, "text": text}
         if blocks:
             kwargs["blocks"] = _redact_blocks(blocks)
@@ -109,6 +115,10 @@ class SlackClient:
     ) -> None:
         """Post an ephemeral message visible only to user_id."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "user": user_id,
@@ -131,6 +141,10 @@ class SlackClient:
     ) -> None:
         """Update an existing message."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Update validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {"channel": channel or self.channel_id, "ts": ts, "text": text}
         if blocks:
             kwargs["blocks"] = _redact_blocks(blocks)

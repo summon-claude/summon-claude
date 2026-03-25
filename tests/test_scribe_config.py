@@ -289,9 +289,10 @@ class TestScribeSystemPrompt:
             user_mention="<@U12345>",
             importance_keywords="",
         )
-        assert "PROMPT INJECTION DEFENSE" in prompt["append"]
-        assert "untrusted data" in prompt["append"]
-        assert "Canary rule" in prompt["append"]
+        assert "Prompt injection defense" in prompt["append"]
+        assert "Principal hierarchy" in prompt["append"]
+        assert "UNTRUSTED_EXTERNAL_DATA" in prompt["append"]
+        assert "ONLY permitted actions" in prompt["append"]
 
     def test_prompt_includes_scan_protocol(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -372,7 +373,7 @@ class TestScribeSystemPrompt:
             importance_keywords="",
             slack_enabled=False,
         )
-        assert "External Slack" not in prompt["append"]
+        assert "external_slack_check" not in prompt["append"]
 
     def test_prompt_includes_slack_section_when_enabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -655,3 +656,63 @@ class TestSlackRemoveCommand:
         assert "removed" in result.output.lower()
         assert not config_file.exists()
         assert not auth_state.exists()
+
+
+class TestScribeDisallowedTools:
+    def test_scribe_disallowed_tools_pinned(self):
+        """Guard: pin the Scribe's disallowed tools set."""
+        from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
+
+        # Write tools must be blocked
+        assert "send_gmail_message" in _SCRIBE_DISALLOWED_TOOLS
+        assert "manage_event" in _SCRIBE_DISALLOWED_TOOLS
+        assert "session_start" in _SCRIBE_DISALLOWED_TOOLS
+        assert "slack_upload_file" in _SCRIBE_DISALLOWED_TOOLS
+        assert "CronCreate" in _SCRIBE_DISALLOWED_TOOLS
+        assert "summon_canvas_write" in _SCRIBE_DISALLOWED_TOOLS
+
+        # Read-only tools must NOT be blocked
+        assert "search_gmail_messages" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "get_gmail_message_content" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "slack_read_history" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "session_list" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "session_info" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "summon_canvas_read" not in _SCRIBE_DISALLOWED_TOOLS
+
+    def test_scribe_disallowed_no_read_tools(self):
+        """Invariant: disallowed set must not include read-only tools."""
+        from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
+
+        read_prefixes = (
+            "search_",
+            "get_",
+            "list_",
+            "slack_read",
+            "slack_fetch",
+            "slack_get",
+            "session_list",
+            "session_info",
+            "summon_canvas_read",
+        )
+        for tool_name in _SCRIBE_DISALLOWED_TOOLS:
+            assert not any(tool_name.startswith(p) for p in read_prefixes), (
+                f"Read-only tool '{tool_name}' must not be in disallowed set"
+            )
+
+    def test_scribe_disallowed_includes_worktree(self):
+        """Scribe disallowed tools union includes worktree restrictions."""
+        from summon_claude.sessions.session import (
+            _SCRIBE_DISALLOWED_TOOLS,
+            _WORKTREE_DISALLOWED_TOOLS,
+        )
+
+        combined = _WORKTREE_DISALLOWED_TOOLS | _SCRIBE_DISALLOWED_TOOLS
+        assert "Bash(git worktree add*)" in combined
+        assert "send_gmail_message" in combined
+
+    def test_pm_prompt_includes_content_handling(self):
+        """PM prompt must include basic content handling rules."""
+        from summon_claude.sessions.session import _PM_SYSTEM_PROMPT_APPEND
+
+        assert "Content handling" in _PM_SYSTEM_PROMPT_APPEND
+        assert "UNTRUSTED_EXTERNAL_DATA" in _PM_SYSTEM_PROMPT_APPEND

