@@ -162,6 +162,11 @@ def get_data_dir() -> Path:
     return _xdg_dir("XDG_DATA_HOME", ".local/share/summon", "summon")
 
 
+def get_reports_dir() -> Path:
+    """Return the directory for Global PM daily reports."""
+    return get_data_dir() / "reports"
+
+
 def get_update_check_path() -> Path:
     """Return path to the update-check cache file."""
     return get_data_dir() / "update-check.json"
@@ -452,6 +457,14 @@ class SummonConfig(BaseSettings):
     scribe_slack_browser: str = "chrome"  # "chrome", "firefox", or "webkit"
     scribe_slack_monitored_channels: str = ""  # comma-separated channel IDs (e.g. "C01ABC,C02DEF")
 
+    # ------------------------------------------------------------------
+    # Global PM settings
+    # ------------------------------------------------------------------
+
+    global_pm_scan_interval_minutes: int = 15
+    global_pm_cwd: str | None = None  # None -> get_data_dir() / "global-pm"
+    global_pm_model: str | None = None  # None -> inherit default_model
+
     @classmethod
     def for_test(cls, **overrides: object) -> SummonConfig:
         """Create a config instance isolated from env vars and .env files.
@@ -529,6 +542,14 @@ class SummonConfig(BaseSettings):
         """Scan interval must be at least 1 minute."""
         if v < 1:
             raise ValueError("SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES must be at least 1")
+        return v
+
+    @field_validator("global_pm_scan_interval_minutes")
+    @classmethod
+    def validate_global_pm_scan_interval(cls, v: int) -> int:
+        """Scan interval must be at least 1 minute."""
+        if v < 1:
+            raise ValueError("SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES must be at least 1")
         return v
 
     @field_validator("scribe_slack_browser")
@@ -722,6 +743,13 @@ def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
 
 
 def _validate_scribe_scan_interval(v: str) -> str | None:
+    try:
+        return None if int(v) >= 1 else "Must be at least 1"
+    except (ValueError, TypeError):
+        return "Must be an integer"
+
+
+def _validate_global_pm_scan_interval(v: str) -> str | None:
     try:
         return None if int(v) >= 1 else "Must be at least 1"
     except (ValueError, TypeError):
@@ -933,6 +961,35 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Comma-separated Slack channel names for the scribe collector",
         input_type="text",
         visible=_scribe_slack_enabled,
+    ),
+    # Global PM (env-var-only — no wizard entries for M5)
+    ConfigOption(
+        field_name="global_pm_scan_interval_minutes",
+        env_key="SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES",
+        group="Global PM",
+        label="Scan Interval (minutes)",
+        help_text="How often the Global PM scans all projects",
+        input_type="int",
+        visible=lambda _c: False,
+        validate_fn=_validate_global_pm_scan_interval,
+    ),
+    ConfigOption(
+        field_name="global_pm_cwd",
+        env_key="SUMMON_GLOBAL_PM_CWD",
+        group="Global PM",
+        label="Global PM Working Directory",
+        help_text="Working directory for the Global PM (default: XDG data dir)",
+        input_type="text",
+        visible=lambda _c: False,
+    ),
+    ConfigOption(
+        field_name="global_pm_model",
+        env_key="SUMMON_GLOBAL_PM_MODEL",
+        group="Global PM",
+        label="Global PM Model",
+        help_text="Claude model for the Global PM (default: inherits default_model)",
+        input_type="text",
+        visible=lambda _c: False,
     ),
     # Advanced options below this point
     # Display

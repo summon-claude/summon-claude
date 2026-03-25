@@ -206,6 +206,8 @@ def create_summon_mcp_tools(  # noqa: PLR0915
     client: SlackClient,
     allowed_channels: Callable[[], Awaitable[set[str]]],
     cwd: str = ".",
+    *,
+    is_pm: bool = False,
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances bound to the given SlackClient.
 
@@ -759,7 +761,46 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                 "is_error": True,
             }
 
-    return [
+    @tool(
+        "slack_post_to_channel",
+        (
+            "Post a message to a specific Slack channel by ID. "
+            "Use for cross-channel communication (e.g., corrective messages to PM channels). "
+            "channel_id: target channel ID (must be in your allowed scope). "
+            "text: message text (max 3000 chars, auto-truncated)."
+        ),
+        {"channel_id": str, "text": str},
+    )
+    async def post_to_channel(args: dict) -> dict:
+        try:
+            channel_id = args.get("channel_id", "")
+            if not channel_id:
+                return {
+                    "content": [{"type": "text", "text": "Error: channel_id is required"}],
+                    "is_error": True,
+                }
+            resolved = await _check_channel(channel_id)
+            text = args.get("text", "")[:_MAX_TEXT_CHARS]
+            if not text:
+                return {
+                    "content": [{"type": "text", "text": "Error: text is required"}],
+                    "is_error": True,
+                }
+            # [SEC-004] Attribution prefix for cross-channel posts
+            text = f"[Global PM] {text}"
+            ref = await client.post_to_channel(resolved, text)
+            return {
+                "content": [{"type": "text", "text": f"Posted to {ref.channel_id} (ts={ref.ts})"}]
+            }
+        except ValueError as e:
+            return {"content": [{"type": "text", "text": f"Error: {e}"}], "is_error": True}
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error posting: {e}"}],
+                "is_error": True,
+            }
+
+    tools = [
         upload_file,
         create_thread,
         react,
@@ -769,13 +810,18 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         fetch_thread,
         get_context,
     ]
+    if is_pm:
+        tools.append(post_to_channel)
+    return tools
 
 
 def create_summon_mcp_server(
     client: SlackClient,
     allowed_channels: Callable[[], Awaitable[set[str]]],
     cwd: str = ".",
+    *,
+    is_pm: bool = False,
 ) -> McpSdkServerConfig:
     """Create an MCP server with Slack tools bound to the current SlackClient."""
-    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels, cwd=cwd)
+    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels, cwd=cwd, is_pm=is_pm)
     return create_sdk_mcp_server(name="summon-slack", version="1.0.0", tools=tools)
