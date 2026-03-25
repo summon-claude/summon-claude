@@ -99,6 +99,18 @@ class TestGlobalPMConfig:
         with pytest.raises(ValueError, match="at least 1"):
             make_config(global_pm_scan_interval_minutes=0)
 
+    def test_cwd_must_be_absolute(self):
+        with pytest.raises(ValueError, match="absolute path"):
+            make_config(global_pm_cwd="relative/path")
+
+    def test_cwd_absolute_accepted(self):
+        config = make_config(global_pm_cwd="/absolute/path")
+        assert config.global_pm_cwd == "/absolute/path"
+
+    def test_cwd_none_accepted(self):
+        config = make_config(global_pm_cwd=None)
+        assert config.global_pm_cwd is None
+
     def test_reports_dir_under_data_dir(self):
         from summon_claude.config import get_data_dir
 

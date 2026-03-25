@@ -552,6 +552,14 @@ class SummonConfig(BaseSettings):
             raise ValueError("SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES must be at least 1")
         return v
 
+    @field_validator("global_pm_cwd")
+    @classmethod
+    def validate_global_pm_cwd(cls, v: str | None) -> str | None:
+        """CWD must be absolute when explicitly set."""
+        if v is not None and not Path(v).is_absolute():
+            raise ValueError("SUMMON_GLOBAL_PM_CWD must be an absolute path")
+        return v
+
     @field_validator("scribe_slack_browser")
     @classmethod
     def validate_scribe_slack_browser(cls, v: str) -> str:
@@ -981,6 +989,9 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Working directory for the Global PM (default: XDG data dir)",
         input_type="text",
         visible=lambda _c: False,
+        validate_fn=lambda v: (
+            None if not v or Path(v).is_absolute() else "Must be an absolute path"
+        ),
     ),
     ConfigOption(
         field_name="global_pm_model",
