@@ -43,7 +43,9 @@ def _format_status(status: str, *, color: bool = True) -> str:
 
 def _redact_result(r: CheckResult) -> CheckResult:
     """Return a new CheckResult with all fields redacted."""
-    redacted_logs = {k: [redactor.redact(line) for line in v] for k, v in r.collected_logs.items()}
+    redacted_logs = {
+        redactor.redact(k): [redactor.redact(ln) for ln in v] for k, v in r.collected_logs.items()
+    }
     return dataclasses.replace(
         r,
         message=redactor.redact(r.message),
@@ -90,12 +92,13 @@ def _load_config(
     results: list[CheckResult],
 ) -> SummonConfig | None:
     """Try loading SummonConfig, append synthetic fail on error."""
+    from summon_claude.config import SummonConfig as _Config  # noqa: PLC0415
     from summon_claude.slack.client import (  # noqa: PLC0415
         redact_secrets as _redact_err,
     )
 
     try:
-        return SummonConfig.from_file(config_path)
+        return _Config.from_file(config_path)
     except Exception as e:
         safe_err = _redact_err(str(e))
         results.append(
@@ -146,9 +149,9 @@ def _print_results(
             if result.suggestion:
                 click.echo(f"    Suggestion: {result.suggestion}")
             for log_name, log_lines in result.collected_logs.items():
-                n = len(log_lines)
-                click.echo(f"    --- {log_name} (last {n} lines) ---")
-                for log_line in log_lines[-20:]:
+                shown = log_lines[-20:]
+                click.echo(f"    --- {log_name} (last {len(shown)} lines) ---")
+                for log_line in shown:
                     click.echo(f"    {log_line}")
 
     # Summary
@@ -290,6 +293,7 @@ def _build_submit_body(results: list[CheckResult]) -> str:
 
 async def _submit_to_github(gh: str, body: str) -> None:
     """Submit the body as a GitHub issue via gh CLI."""
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             gh,
@@ -316,6 +320,8 @@ async def _submit_to_github(gh: str, body: str) -> None:
             err = stderr.decode().strip()
             click.echo(f"Error: gh failed: {err}", err=True)
     except TimeoutError:
+        if proc is not None:
+            proc.kill()
         click.echo(
             "Error: gh issue create timed out after 30s",
             err=True,

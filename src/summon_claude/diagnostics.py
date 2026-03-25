@@ -196,6 +196,7 @@ class EnvironmentCheck:
 
 async def _get_version(cmd: str, *args: str, max_wait: float = 5) -> str | None:
     """Run a command and return first line of stdout, or None on error/timeout."""
+    proc = None
     try:
         proc = await asyncio.create_subprocess_exec(
             cmd,
@@ -206,7 +207,11 @@ async def _get_version(cmd: str, *args: str, max_wait: float = 5) -> str | None:
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=max_wait)
         line = stdout.decode(errors="replace").splitlines()[0].strip() if stdout else ""
         return line or None
-    except (TimeoutError, FileNotFoundError, OSError):
+    except TimeoutError:
+        if proc is not None:
+            proc.kill()
+        return None
+    except (FileNotFoundError, OSError):
         return None
 
 
@@ -287,13 +292,15 @@ class DaemonCheck:
         except Exception as e:
             details.append(f"Could not check active sessions: {e}")
 
-        if status == "pass":
+        if status == "pass" and running:
             message = "Daemon running and healthy"
-        elif not running and not sock_path.exists() and not pid_path.exists():
+        elif status == "warn":
+            message = "Daemon issues detected"
+        elif not running:
             status = "info"
             message = "Daemon not running (start with `summon start`)"
         else:
-            message = "Daemon issues detected"
+            message = "Daemon status checked"
 
         return CheckResult(status=status, subsystem="daemon", message=message, details=details)
 
@@ -508,7 +515,7 @@ class LogsCheck:
     name = "logs"
     description = "Log directory, daemon and session log tails with redaction"
 
-    async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002
+    async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002, PLR0915
         from summon_claude.config import get_data_dir  # noqa: PLC0415
 
         log_dir = get_data_dir() / "logs"
@@ -575,7 +582,11 @@ class LogsCheck:
                 message = f"All logs are older than {_LOG_STALE_DAYS} days (stale)"
                 status: Literal["pass", "fail", "warn", "info", "skip"] = "warn"
             else:
-                message = f"daemon.log and {len(session_logs)} session log(s) found"
+                parts = []
+                if daemon_log.exists():
+                    parts.append("daemon.log")
+                parts.append(f"{len(session_logs)} session log(s)")
+                message = " and ".join(parts) + " found"
                 status = "info"
         else:
             message = "No log files found"
