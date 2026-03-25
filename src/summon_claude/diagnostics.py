@@ -710,7 +710,7 @@ class WorkspaceMcpCheck:
 
             services = [s.strip() for s in config.scribe_google_services.split(",") if s.strip()]
             required = get_scopes_for_tools(services)
-            valid = has_required_scopes(required)
+            valid = has_required_scopes(required)  # type: ignore[call-arg]
             if valid:
                 details.append("Google credentials: valid scopes")
             else:
