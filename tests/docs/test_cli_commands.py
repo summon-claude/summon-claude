@@ -28,6 +28,7 @@ _EXCLUDED_PATHS = {
 _HUMAN_DOCS = [
     *(_DOCS_DIR / "getting-started").glob("*.md"),
     *(_DOCS_DIR / "guide").glob("*.md"),
+    *(_DOCS_DIR / "concepts").glob("*.md"),
     _DOCS_DIR / "troubleshooting.md",
 ]
 
@@ -41,11 +42,7 @@ INTERNAL_COMMANDS: frozenset[str] = frozenset(
         "db",
         "hooks",
         "hooks run",
-        # Admin maintenance (documented in reference/cli.md, not in guides)
-        "db status",
-        "db reset",
-        "db vacuum",
-        "db purge",
+        # Admin maintenance (documented in reference/cli.md, not in human-authored docs)
         "hooks install",
         "hooks uninstall",
         "hooks set",
@@ -57,7 +54,7 @@ INTERNAL_COMMANDS: frozenset[str] = frozenset(
 
 # Alias-derived commands (e.g., "p add", "s list") are not expected
 # in docs — only the canonical names are documented.
-_ALIAS_PREFIXES = ("p ", "p", "s ", "s")
+_ALIAS_PREFIXES = ("p", "s")
 
 
 def _is_excluded(path: Path) -> bool:
@@ -106,13 +103,11 @@ def _is_prose_artifact(ref: str) -> bool:
     """
     Return True if the parsed ref is almost certainly a prose false-positive.
 
-    The conftest _CLI_CMD_RE regex can capture across newlines (the `\\s*`
-    in `(?:[a-z][\\w-]*\\s*)+` matches newline characters), producing strings
-    like "registers the session with the background daemon". We detect this by:
-    - Presence of angle brackets (placeholder like <name>)
+    Filters out:
+    - Angle brackets (placeholder like <name>)
     - All-caps single token (bare argument like ABC123)
-    - Cross-line capture: the word "summon" appears mid-string
-    - First word is not a known top-level command, group, or alias
+    - Mid-string "summon" (cross-line regex artifact)
+    - First word not a known top-level command, group, or alias
     """
     if "<" in ref or ">" in ref:
         return True
@@ -175,7 +170,9 @@ def test_all_commands_are_documented(click_commands: set[str]) -> None:
         if not md_file.exists():
             continue
         content = md_file.read_text(encoding="utf-8")
-        documented_refs |= parse_cli_command_refs(content)
+        documented_refs |= {
+            ref for ref in parse_cli_command_refs(content) if not _is_prose_artifact(ref)
+        }
 
     def _is_documented(cmd: str) -> bool:
         cmd_words = cmd.split()

@@ -96,7 +96,7 @@ _TYPE_MAP: dict[str, str] = {
 }
 
 # Defaults that docs render differently than Python repr
-FUZZY_DEFAULTS: dict[str, str] = {
+FUZZY_DEFAULTS: dict[str, str | None] = {
     # None / missing-value fields rendered as descriptive prose in docs
     "SUMMON_DEFAULT_MODEL": None,
     "SUMMON_SCRIBE_CWD": None,
@@ -106,6 +106,10 @@ FUZZY_DEFAULTS: dict[str, str] = {
     "SUMMON_SLACK_BOT_TOKEN": None,
     "SUMMON_SLACK_APP_TOKEN": None,
     "SUMMON_SLACK_SIGNING_SECRET": None,
+    # Empty-string defaults rendered as _(empty)_ in docs
+    "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS": None,
+    "SUMMON_SCRIBE_QUIET_HOURS": None,
+    "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS": None,
 }
 
 # Matches a markdown table row: | cell | cell | ...
@@ -142,8 +146,7 @@ def _parse_env_var_tables(content: str) -> dict[str, dict[str, str]]:
     return result
 
 
-@pytest.mark.xfail(strict=False, reason="fragile: depends on doc formatting")
-def test_env_var_types_match_docs(  # noqa: PLR0912
+def test_env_var_types_match_docs(
     docs_dir: Path,
     summon_config_fields: dict[str, object],
 ) -> None:
@@ -169,18 +172,19 @@ def test_env_var_types_match_docs(  # noqa: PLR0912
             expected_type_prefix = "secret"
         else:
             ann = field_info.annotation
-            # Handle Optional[X] — strip None union
-            origin = getattr(ann, "__origin__", None)
-            if origin is type(None):
-                py_type = "str"
-            elif hasattr(ann, "__args__"):
+            # Handle Optional[X] / X | None — strip None from union args
+            if hasattr(ann, "__args__"):
                 non_none = [a for a in ann.__args__ if a is not type(None)]
                 py_type = non_none[0].__name__ if non_none else "str"
             else:
                 py_type = getattr(ann, "__name__", str(ann))
             expected_type_prefix = _TYPE_MAP.get(py_type, py_type)
 
-        if not doc_type.startswith(expected_type_prefix):
+        # "choice:" in docs is a valid rendering for str fields with constrained values
+        type_ok = doc_type.startswith(expected_type_prefix) or (
+            expected_type_prefix == "text" and doc_type.startswith("choice")
+        )
+        if not type_ok:
             mismatches.append(
                 f"{var}: expected type prefix '{expected_type_prefix}', got '{doc_type}'"
             )
