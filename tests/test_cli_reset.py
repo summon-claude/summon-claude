@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, patch
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
-from summon_claude.config import get_config_dir, get_google_credentials_dir
+from summon_claude.config import (
+    get_config_dir,
+    get_google_credentials_dir,
+    get_workspace_config_path,
+)
 
 
 class TestResetBare:
@@ -70,6 +74,7 @@ class TestResetData:
             result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "summon stop --all" in result.output
+        assert "summon project down" not in result.output
 
     def test_reset_data_refuses_project_sessions_only(self):
         """'reset data' should show only project guidance when only PM sessions exist."""
@@ -298,6 +303,7 @@ class TestResetConfig:
             result = runner.invoke(cli, ["reset", "config"])
         assert result.exit_code != 0
         assert "summon stop --all" in result.output
+        assert "summon project down" not in result.output
 
     def test_reset_config_refuses_project_sessions(self):
         """'reset config' should refuse when daemon has project sessions."""
@@ -415,7 +421,11 @@ class TestResetConfig:
         assert config_dir.exists()
 
 
-class TestGoogleCredentialsDir:
+class TestConfigPaths:
     def test_google_credentials_dir_is_under_config_dir(self):
         """get_google_credentials_dir() must return a path under config dir, not data dir."""
         assert get_google_credentials_dir() == get_config_dir() / "google-credentials"
+
+    def test_workspace_config_path_is_under_config_dir(self):
+        """get_workspace_config_path() must return a path under config dir, not data dir."""
+        assert get_workspace_config_path().parent == get_config_dir()
