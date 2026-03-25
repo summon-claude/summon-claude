@@ -735,3 +735,32 @@ class TestScribeDisallowedTools:
         assert "--source" in result["args"]
         assert "Google Workspace" in result["args"]
         assert "--" in result["args"]
+
+    def test_scribe_disallowed_workspace_tools_exist(self):
+        """Guard: workspace-mcp write tools in disallowed set must exist in package."""
+        import re
+        import subprocess
+
+        from summon_claude.config import find_workspace_mcp_bin
+        from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
+
+        bin_path = str(find_workspace_mcp_bin())
+        result = subprocess.run(
+            [bin_path, "--tools", "gmail", "calendar", "drive", "--tool-tier", "core", "--cli"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # Parse tool names from --cli output (indented tool names under category headers)
+        tool_names = set(re.findall(r"^\s{4}(\w+)$", result.stdout, re.MULTILINE))
+        if tool_names:
+            # Check that every workspace-mcp tool in disallowed set actually exists
+            ws_prefixes = ("send_", "manage_", "create_", "import_", "get_drive_")
+            workspace_tools_in_disallowed = {
+                t for t in _SCRIBE_DISALLOWED_TOOLS if t in tool_names or t.startswith(ws_prefixes)
+            }
+            for tool in workspace_tools_in_disallowed:
+                assert tool in tool_names, (
+                    f"Disallowed workspace tool '{tool}' not found in workspace-mcp. "
+                    f"Available: {sorted(tool_names)}"
+                )
