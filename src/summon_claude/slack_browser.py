@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 _QUEUE_MAX = 10_000
 # Maximum wait for login confirmation during interactive auth (seconds)
 _AUTH_TIMEOUT_S = 300
+# Slack's SPA client URL prefix — Enterprise Grid workspaces need this
+_APP_SLACK_CLIENT = "https://app.slack.com/client/"
 
 
 def _slugify(url: str) -> str:
@@ -52,6 +54,82 @@ class SlackMessage:
     workspace: str
     is_dm: bool = False
     is_mention: bool = False
+
+
+def _resolve_client_url(workspace_url: str, state_file: Path) -> str:
+    """Resolve the Slack SPA client URL for headless navigation.
+
+    Enterprise Grid workspaces serve a workspace picker at their enterprise
+    URL (e.g. ``gtest.enterprise.slack.com``). The actual SPA lives at
+    ``app.slack.com/client/{TEAM_ID}``. This function extracts the team ID
+    from the saved Playwright state's localStorage and returns the direct
+    client URL.
+
+    Falls back to the original ``workspace_url`` if no team data is found.
+    """
+    if not state_file.is_file():
+        return workspace_url
+
+    try:
+        state = json.loads(state_file.read_text())
+    except (json.JSONDecodeError, OSError):
+        return workspace_url
+
+    # Extract team IDs from localConfig_v2 in app.slack.com localStorage
+    for origin in state.get("origins", []):
+        if "app.slack.com" not in origin.get("origin", ""):
+            continue
+        for item in origin.get("localStorage", []):
+            if item.get("name") != "localConfig_v2":
+                continue
+            try:
+                lc = json.loads(item.get("value", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                break
+            teams = lc.get("teams", {})
+            if not teams:
+                break
+
+            # Prefer the team whose URL matches the workspace
+            norm_ws = workspace_url.rstrip("/").lower()
+            for team_id, info in teams.items():
+                team_url = (info.get("url") or "").rstrip("/").lower()
+                if team_url == norm_ws:
+                    client_url = f"{_APP_SLACK_CLIENT}{team_id}"
+                    logger.debug(
+                        "Resolved Enterprise Grid client URL: %s (matched %s)",
+                        client_url,
+                        workspace_url,
+                    )
+                    return client_url
+
+            # No exact match — use first team with a URL
+            first_id = next(iter(teams))
+            client_url = f"{_APP_SLACK_CLIENT}{first_id}"
+            logger.debug(
+                "Resolved client URL (first team): %s",
+                client_url,
+            )
+            return client_url
+
+    return workspace_url
+
+
+async def _launch_browser(pw, browser_type: str, *, headless: bool = True):  # type: ignore[no-untyped-def]
+    """Launch a Playwright browser by type name."""
+    if browser_type == "chrome":
+        launcher = pw.chromium
+        kwargs: dict = {"channel": "chrome"}
+    elif browser_type == "chromium":
+        launcher = pw.chromium
+        kwargs = {}
+    elif browser_type == "firefox":
+        launcher = pw.firefox
+        kwargs = {}
+    else:
+        launcher = pw.webkit
+        kwargs = {}
+    return await launcher.launch(headless=headless, **kwargs)
 
 
 class SlackBrowserMonitor:
@@ -91,28 +169,18 @@ class SlackBrowserMonitor:
     # ------------------------------------------------------------------
 
     async def start(self, browser_type: str = "chrome") -> None:
-        """Launch Playwright, load Slack, and attach WebSocket listener."""
+        """Launch Playwright, load Slack, and attach WebSocket listener.
+
+        For Enterprise Grid workspaces, resolves the ``app.slack.com/client/``
+        URL from the saved state's localStorage to bypass the workspace picker
+        page. Falls back to the configured workspace URL if no team data is found.
+        """
         from playwright.async_api import async_playwright  # noqa: PLC0415
 
         self._loop = asyncio.get_running_loop()
 
         self._playwright = await async_playwright().start()
-
-        if browser_type == "chrome":
-            browser_launcher = self._playwright.chromium
-            channel = "chrome"
-        elif browser_type == "firefox":
-            browser_launcher = self._playwright.firefox
-            channel = None
-        else:
-            browser_launcher = self._playwright.webkit
-            channel = None
-
-        launch_kwargs: dict = {}
-        if channel:
-            launch_kwargs["channel"] = channel
-
-        self._browser = await browser_launcher.launch(headless=True, **launch_kwargs)
+        self._browser = await _launch_browser(self._playwright, browser_type, headless=True)
 
         context_kwargs: dict = {}
         if self._state_file.is_file():
@@ -122,7 +190,9 @@ class SlackBrowserMonitor:
         self._page = await self._context.new_page()
         self._page.on("websocket", self._on_websocket)
 
-        await self._page.goto(self._workspace_url)
+        # Resolve the actual client URL (handles Enterprise Grid workspace picker)
+        nav_url = _resolve_client_url(self._workspace_url, self._state_file)
+        await self._page.goto(nav_url)
         logger.info("SlackBrowserMonitor started for workspace %s", self._workspace_id)
 
     def _on_websocket(self, ws) -> None:  # type: ignore[no-untyped-def]
@@ -159,7 +229,13 @@ class SlackBrowserMonitor:
 
         # Determine message classification
         is_dm = channel.startswith("D")
-        is_mention = f"<@{self._user_id}>" in text
+        # Direct @user mention OR broadcast mentions (@here, @channel, @everyone)
+        is_mention = (
+            f"<@{self._user_id}>" in text
+            or "<!here>" in text
+            or "<!channel>" in text
+            or "<!everyone>" in text
+        )
 
         # Apply routing filter: only accept DMs, mentions, or monitored channels
         if not (is_dm or is_mention or channel in self._monitored_channel_ids):
@@ -262,17 +338,265 @@ class SlackBrowserMonitor:
         logger.info("SlackBrowserMonitor stopped for workspace %s", self._workspace_id)
 
 
+_USER_ID_JS = """\
+(workspaceUrl) => {
+    try {
+        const lc = JSON.parse(localStorage.getItem('localConfig_v2') || '{}');
+        const teams = lc.teams || {};
+        const entries = Object.values(teams);
+        // Prefer the team whose URL matches the workspace we authenticated against
+        if (workspaceUrl) {
+            const norm = workspaceUrl.replace(/\\/$/, '').toLowerCase();
+            const match = entries.find(t =>
+                t.url && t.url.replace(/\\/$/, '').toLowerCase() === norm
+            );
+            if (match?.user_id) return match.user_id;
+        }
+        // Fallback: first team with a user_id
+        for (const team of entries) {
+            if (team.user_id) return team.user_id;
+        }
+    } catch(e) {}
+    return null;
+}"""
+
+# JS to extract sidebar channels via Slack's internal API.
+# Uses the xoxc- token from localStorage + workspace URL from localConfig_v2
+# to call users.channelSections.list (sidebar structure) and conversations.info
+# (channel names). Returns channels grouped by sidebar section with mute status.
+_CHANNELS_JS = """\
+async (workspaceUrl) => {
+    try {
+        // Get xoxc- token from localStorage
+        let token = null;
+        for (let i = 0; i < localStorage.length; i++) {
+            const val = localStorage.getItem(localStorage.key(i));
+            if (val) {
+                const m = val.match(/xoxc-[a-zA-Z0-9-]+/);
+                if (m) { token = m[0]; break; }
+            }
+        }
+        if (!token) return {error: 'no xoxc token in localStorage'};
+
+        // Resolve workspace API base URL from localConfig_v2
+        let apiBase = workspaceUrl;
+        try {
+            const lc = JSON.parse(localStorage.getItem('localConfig_v2') || '{}');
+            for (const team of Object.values(lc.teams || {})) {
+                const tUrl = (team.url || '').replace(/\\/$/, '').toLowerCase();
+                if (workspaceUrl && tUrl === workspaceUrl.replace(/\\/$/, '').toLowerCase()) {
+                    apiBase = team.url.replace(/\\/$/, '');
+                    break;
+                }
+            }
+        } catch(e) {}
+
+        // Fetch sections + muted prefs in parallel (2 API calls)
+        const headers = {'Content-Type': 'application/x-www-form-urlencoded'};
+        const body = 'token=' + encodeURIComponent(token);
+        const opts = {method: 'POST', headers, body, credentials: 'include'};
+
+        const [sectionsResp, prefsResp] = await Promise.all([
+            fetch(apiBase + '/api/users.channelSections.list', opts),
+            fetch(apiBase + '/api/users.prefs.get', opts),
+        ]);
+
+        const sectionsData = await sectionsResp.json();
+        if (!sectionsData.ok) {
+            return {error: 'channelSections: ' + (sectionsData.error || 'unknown')};
+        }
+
+        let mutedSet = new Set();
+        try {
+            const prefsData = await prefsResp.json();
+            if (prefsData.ok && prefsData.prefs?.muted_channels) {
+                mutedSet = new Set(prefsData.prefs.muted_channels.split(','));
+            }
+        } catch(e) {}
+
+        // Build grouped channel list from sections
+        const sections = sectionsData.channel_sections || [];
+        const channelSectionMap = sectionsData.channel_section_channels || [];
+        const result = [];
+
+        for (const section of sections) {
+            const sectionChannels = channelSectionMap
+                .filter(sc => sc.channel_section_id === section.channel_section_id)
+                .map(sc => sc.channel_id)
+                .filter(id => id && id.startsWith('C'));  // Only channels, not DMs
+
+            if (sectionChannels.length === 0) continue;
+
+            for (const chId of sectionChannels) {
+                if (mutedSet.has(chId)) continue;
+                result.push({
+                    id: chId,
+                    name: chId,  // Resolved below via conversations.list
+                    section: section.name || 'Channels',
+                });
+            }
+        }
+
+        // Resolve channel names from the sidebar DOM (instant, no API calls).
+        // Each sidebar channel has data-qa="channel_sidebar_name_CHANNELNAME".
+        const nameEls = document.querySelectorAll(
+            '[data-qa^="channel_sidebar_name_"]'
+        );
+        const domNames = new Map();
+        for (const el of nameEls) {
+            const name = el.textContent?.trim();
+            if (!name) continue;
+            // Walk up to find the treeitem and extract channel ID from it
+            let item = el.closest('[role="treeitem"]');
+            if (!item) continue;
+            // Check child links/attrs for channel ID
+            for (const child of item.querySelectorAll('[href], [data-qa]')) {
+                const href = child.getAttribute('href') || '';
+                const hm = href.match(/(C[A-Z0-9]{8,})/);
+                if (hm) { domNames.set(hm[1], name); break; }
+                const dqa = child.getAttribute('data-qa') || '';
+                const dm = dqa.match(/(C[A-Z0-9]{8,})/);
+                if (dm) { domNames.set(dm[1], name); break; }
+            }
+        }
+
+        // Merge DOM names into results
+        for (const ch of result) {
+            ch.name = domNames.get(ch.id) || ch.id;
+        }
+
+        return result;
+    } catch(e) {
+        return {error: e.message || String(e)};
+    }
+}"""
+
+# DOM fallback: scrape channel names from the sidebar tree.
+# Less data than the API approach (no sections or mute status) but works
+# even when API calls are blocked by CORS or auth issues.
+_CHANNELS_DOM_FALLBACK_JS = """\
+() => {
+    const channels = [];
+    const seen = new Set();
+    // Sidebar channel items use data-qa="channel-sidebar-channel" or similar
+    const items = document.querySelectorAll('[role="treeitem"]');
+    for (const item of items) {
+        // Get channel name from the visible text
+        const nameEl = item.querySelector('[data-qa^="channel_sidebar_name_"]');
+        const name = nameEl?.textContent?.trim();
+        if (!name) continue;
+
+        // Get channel ID from the item's navigation behavior.
+        // Items are clickable and navigate to /client/TEAM_ID/CHANNEL_ID.
+        // The data-qa attribute encodes the channel name, not ID.
+        // Try to find the channel ID from any link or the item's own attributes.
+        let channelId = null;
+
+        // Check aria attributes and data attributes for channel ID
+        const allEls = [item, ...item.querySelectorAll('*')];
+        for (const el of allEls) {
+            for (const attr of el.attributes) {
+                const m = attr.value.match(/^(C[A-Z0-9]{8,})$/);
+                if (m) { channelId = m[1]; break; }
+            }
+            if (channelId) break;
+            // Check href
+            const href = el.getAttribute('href') || '';
+            const hm = href.match(/\\/(C[A-Z0-9]{8,})/);
+            if (hm) { channelId = hm[1]; break; }
+        }
+
+        if (channelId && !seen.has(channelId)) {
+            seen.add(channelId);
+            channels.push({ id: channelId, name, section: 'Channels' });
+        }
+    }
+    return channels;
+}"""
+
+# Seconds to wait for Slack's SPA boot to populate localStorage
+_USER_ID_POLL_TIMEOUT = 10
+
+
+async def _extract_user_id(page, workspace_url: str = "") -> str | None:  # type: ignore[no-untyped-def]
+    """Extract the logged-in user's Slack ID from the browser page.
+
+    Slack's web client stores team config in ``localConfig_v2`` in localStorage,
+    including ``user_id`` per team. The key is written during SPA boot, which
+    may not have completed when ``wait_for_url`` fires, so we poll with a
+    short timeout rather than reading once.
+
+    When ``workspace_url`` is provided, prefers the team whose URL matches
+    (handles Enterprise Grid orgs with multiple teams).
+    """
+    import time  # noqa: PLC0415
+
+    deadline = time.monotonic() + _USER_ID_POLL_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            result = await page.evaluate(_USER_ID_JS, workspace_url)
+            if result:
+                return result
+        except Exception:
+            return None
+        await asyncio.sleep(0.5)
+    return None
+
+
+@dataclass
+class SlackAuthResult:
+    """Result of interactive Slack authentication."""
+
+    state_file: Path
+    user_id: str | None = None
+    channels: list[dict[str, str]] | None = None  # [{"id": "C...", "name": "..."}]
+    team_id: str | None = None  # Enterprise Grid team/org ID from /client/ URL
+
+
+async def _extract_channels(page, workspace_url: str = "") -> list[dict[str, str]]:  # type: ignore[no-untyped-def]
+    """Extract sidebar channels via Slack's internal API.
+
+    Uses the ``xoxc-`` token from localStorage to call ``users.channelSections.list``
+    (sidebar structure) and ``conversations.list`` (channel names). Filters out
+    muted channels via ``users.prefs.get``.
+
+    Falls back to DOM scraping if the API approach fails.
+
+    Returns list of ``{"id": "C...", "name": "channel-name", "section": "..."}``,
+    grouped by sidebar section order. Returns empty list on failure.
+    """
+    # Try API approach first (structured data with sections + mute filtering)
+    try:
+        result = await page.evaluate(_CHANNELS_JS, workspace_url)
+        if isinstance(result, dict) and "error" in result:
+            logger.info("Channel API extraction error: %s, trying DOM fallback", result["error"])
+        elif isinstance(result, list) and len(result) > 0:
+            return result
+        else:
+            logger.info("Channel API extraction returned empty, trying DOM fallback")
+    except Exception as exc:
+        logger.info("Channel API extraction failed (%s), trying DOM fallback", exc)
+
+    # Fallback: scrape channel names from the sidebar DOM
+    try:
+        result = await page.evaluate(_CHANNELS_DOM_FALLBACK_JS)
+        return result or []
+    except Exception:
+        return []
+
+
 async def interactive_slack_auth(
     workspace_url: str,
     browser_type: str = "chrome",
-) -> Path:
+) -> SlackAuthResult:
     """Open a browser for interactive Slack login and persist auth state.
 
     Waits up to 5 minutes for the user to complete login. Auth state is
     saved to ``get_data_dir() / "browser_auth" / "slack_{workspace_id}.json"``
     with 0o600 permissions ([SEC-005]).
 
-    Returns the path to the saved state file.
+    Returns a :class:`SlackAuthResult` with the state file path, auto-detected
+    user ID, and channel name ↔ ID mappings from the sidebar.
     """
     workspace_id = _slugify(workspace_url)
     browser_auth_dir = get_data_dir() / "browser_auth"
@@ -298,37 +622,71 @@ async def interactive_slack_auth(
     state_file = browser_auth_dir / f"slack_{workspace_id}.json"
 
     async with async_playwright() as p:
-        if browser_type == "chrome":
-            browser_launcher = p.chromium
-            launch_kwargs: dict = {"channel": "chrome"}
-        elif browser_type == "firefox":
-            browser_launcher = p.firefox
-            launch_kwargs = {}
-        else:
-            browser_launcher = p.webkit
-            launch_kwargs = {}
-
-        browser = await browser_launcher.launch(headless=False, **launch_kwargs)
+        browser = await _launch_browser(p, browser_type, headless=False)
         context = await browser.new_context()
         page = await context.new_page()
 
-        await page.goto(workspace_url)
+        await page.goto(workspace_url, wait_until="domcontentloaded")
+
+        # Auto-focus the email input on the login page.
+        # On macOS Apple Silicon, headed-mode Chrome steals focus to the
+        # address bar (playwright#31252). bring_to_front() + click() is
+        # the only combo that reliably transfers OS-level focus.
+        try:
+            await page.bring_to_front()
+            email_input = page.locator(
+                'input[placeholder*="@"], input[type="email"], '
+                'input[name="email"], input[data-qa="signin_email_input"]'
+            ).first
+            await email_input.click(timeout=3000)
+        except Exception as exc:
+            logger.debug("No email input to focus: %s", exc)
 
         logger.info(
-            "Waiting for Slack login at %s (timeout %ds) ...", workspace_url, _AUTH_TIMEOUT_S
+            "Waiting for Slack login at %s (timeout %ds) ...",
+            workspace_url,
+            _AUTH_TIMEOUT_S,
         )
 
-        # Wait for the channel sidebar — confirms successful login
+        # Wait for authenticated state — URL contains /client/ after login.
+        # Use wait_until="commit" — Slack's SPA may never fire "load".
         try:
-            await page.wait_for_selector(
-                '[data-qa="channel_sidebar"]',
+            await page.wait_for_url(
+                "**/client/**",
                 timeout=_AUTH_TIMEOUT_S * 1000,
+                wait_until="commit",
             )
         except Exception as exc:
             await browser.close()
             raise TimeoutError(
                 f"Slack login not completed within {_AUTH_TIMEOUT_S}s for {workspace_url}"
             ) from exc
+
+        logger.info("Authenticated at %s", page.url)
+
+        # Extract team ID from the /client/ URL.
+        # URL format: https://app.slack.com/client/{TEAM_ID}/{CHANNEL_ID}
+        team_id: str | None = None
+        client_match = re.search(r"/client/([A-Z0-9]+)", page.url)
+        if client_match:
+            team_id = client_match.group(1)
+            logger.info("Detected team ID: %s", team_id)
+
+        # Extract user ID and channels in parallel.
+        # User ID polls localStorage; channels wait for sidebar DOM
+        # then call APIs + scrape. No dependency between them.
+        async def _get_channels() -> list[dict[str, str]]:
+            with contextlib.suppress(Exception):
+                await page.wait_for_selector(
+                    '[data-qa^="channel_sidebar_name_"]',
+                    timeout=5000,
+                )
+            return await _extract_channels(page, workspace_url)
+
+        user_id, channels = await asyncio.gather(
+            _extract_user_id(page, workspace_url),
+            _get_channels(),
+        )
 
         # Save auth state with restricted permissions ([SEC-005])
         await context.storage_state(path=str(state_file))
@@ -337,4 +695,9 @@ async def interactive_slack_auth(
         await browser.close()
 
     logger.info("Slack auth state saved to %s", state_file)
-    return state_file
+    return SlackAuthResult(
+        state_file=state_file,
+        user_id=user_id,
+        channels=channels,
+        team_id=team_id,
+    )

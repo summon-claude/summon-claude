@@ -14,13 +14,17 @@ from summon_claude.config import SummonConfig
 
 def _make_config(**overrides) -> SummonConfig:
     """Create a SummonConfig with valid defaults, bypassing .env file loading."""
-    defaults = {
+    defaults: dict[str, object] = {
         "slack_bot_token": "xoxb-test-token",
         "slack_app_token": "xapp-test-token",
         "slack_signing_secret": "abc123def456",
+        "scribe_slack_monitored_channels": "",
     }
     defaults.update(overrides)
-    with patch.dict(os.environ, {}, clear=False):
+    # Clear scribe env vars that may leak from the local .env config file
+    scribe_env_keys = [k for k in os.environ if k.startswith("SUMMON_SCRIBE_")]
+    clean_env = dict.fromkeys(scribe_env_keys, "")
+    with patch.dict(os.environ, clean_env):
         return SummonConfig.model_validate(defaults)
 
 

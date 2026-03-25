@@ -34,6 +34,7 @@ from summon_claude.cli.config import (
     google_auth,
     google_status,
     slack_auth,
+    slack_channels,
     slack_remove,
     slack_status,
 )
@@ -787,10 +788,14 @@ def config_google_status_cmd() -> None:
 
 
 @cmd_config.command("slack-auth")
-@click.argument("workspace_url")
-def config_slack_auth_cmd(workspace_url: str) -> None:
-    """Authenticate with an external Slack workspace for scribe monitoring."""
-    slack_auth(workspace_url)
+@click.argument("workspace")
+def config_slack_auth_cmd(workspace: str) -> None:
+    """Authenticate with an external Slack workspace for scribe monitoring.
+
+    WORKSPACE can be a name (myteam), enterprise (acme.enterprise),
+    or full URL (https://myteam.slack.com).
+    """
+    slack_auth(workspace)
 
 
 @cmd_config.command("slack-status")
@@ -803,6 +808,13 @@ def config_slack_status_cmd() -> None:
 def config_slack_remove_cmd() -> None:
     """Remove external Slack workspace auth state."""
     slack_remove()
+
+
+@cmd_config.command("slack-channels")
+@click.option("--refresh", is_flag=True, help="Re-fetch channels from Slack")
+def config_slack_channels_cmd(refresh: bool) -> None:
+    """Update monitored channel selection (no re-auth needed)."""
+    slack_channels(refresh=refresh)
 
 
 # ---------------------------------------------------------------------------
