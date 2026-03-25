@@ -453,6 +453,7 @@ def _fetch_channels_via_playwright(
         from summon_claude.slack_browser import (  # noqa: PLC0415
             _extract_channels,
             _launch_browser,
+            _resolve_client_url,
         )
     except ImportError:
         click.echo(
@@ -473,7 +474,8 @@ def _fetch_channels_via_playwright(
                 storage_state=str(state_path),
             )
             page = await context.new_page()
-            await page.goto(workspace_url, wait_until="domcontentloaded")
+            nav_url = _resolve_client_url(workspace_url, state_path)
+            await page.goto(nav_url, wait_until="domcontentloaded")
 
             try:
                 await page.wait_for_url(
