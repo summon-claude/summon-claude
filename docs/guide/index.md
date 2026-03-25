@@ -34,7 +34,7 @@ Learn how to use summon-claude effectively.
 
 -   :material-typewriter: **[Scribe](scribe.md)**
 
-    External Slack channel monitoring.
+    Background monitoring agent for Slack and Google Workspace.
 
 -   :material-note-text: **[Canvas](canvas.md)**
 

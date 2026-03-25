@@ -43,6 +43,7 @@ summon-claude bridges Slack to Claude Code sessions through a long-running backg
 ┌──────────────────────────────────────────────────────────────────┐
 │  summon CLI MCP server (summon_cli_mcp.py)                       │
 │  session_list · session_info · session_start · session_stop      │
+│  session_message · session_resume · session_status_update        │
 │  (wired into Claude sessions via SessionManager + Registry)      │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -75,8 +76,10 @@ A message from a Slack user to Claude follows this path:
 ```
 src/summon_claude/
 ├── config.py              # pydantic-settings config, XDG paths, plugin discovery
+├── canvas_mcp.py          # Canvas MCP tools (standalone server)
 ├── daemon.py              # Daemon lifecycle, IPC framing, watchdog layers
 ├── event_dispatcher.py    # Slack event → session routing
+├── slack_browser.py       # External Slack monitoring via Playwright
 ├── summon_cli_mcp.py      # MCP tools for Claude agent session management
 ├── cli/
 │   ├── __init__.py        # CLI entry point, global flags, subcommands
@@ -85,8 +88,12 @@ src/summon_claude/
 │   ├── db.py              # DB maintenance commands (status, reset, vacuum, purge)
 │   ├── formatting.py      # CLI output formatting helpers
 │   ├── helpers.py         # Session resolution, stop helpers
+│   ├── hooks.py           # Lifecycle hooks CLI
 │   ├── interactive.py     # TTY-aware interactive selection
+│   ├── preflight.py       # Claude CLI preflight checks
+│   ├── project.py         # Project subcommand implementations
 │   ├── session.py         # Session subcommand logic (list, info, logs, cleanup)
+│   ├── slack_auth.py      # External Slack workspace auth
 │   ├── start.py           # Start command (auth code flow, daemon delegation)
 │   ├── stop.py            # Stop command logic
 │   └── update_check.py    # PyPI update checker (24h cache)
@@ -96,10 +103,14 @@ src/summon_claude/
 │   ├── registry.py        # SQLite registry, WAL mode, audit log
 │   ├── migrations.py      # Schema versioning, single source of truth
 │   ├── auth.py            # Short-code generation, verification, spawn tokens
-│   ├── permissions.py     # Debounced permission batching, Slack buttons
 │   ├── commands.py        # !-prefixed command dispatch and passthrough
 │   ├── context.py         # Context window tracking via JSONL transcript
-│   └── response.py        # Response streaming, turn threads, emoji lifecycle
+│   ├── hook_types.py      # Hook type constants
+│   ├── hooks.py           # Lifecycle hook execution
+│   ├── permissions.py     # Debounced permission batching, Slack buttons
+│   ├── response.py        # Response streaming, turn threads, emoji lifecycle
+│   ├── scheduler.py       # SessionScheduler for cron jobs
+│   └── types.py           # Session type definitions
 └── slack/
     ├── bolt.py            # Bolt app, rate limiter, health monitor
     ├── client.py          # Channel-bound output client, secret redaction
@@ -107,6 +118,7 @@ src/summon_claude/
     ├── canvas_store.py    # SQLite-backed canvas sync
     ├── canvas_templates.py # Canvas markdown templates
     ├── formatting.py      # Markdown → Slack mrkdwn conversion
+    ├── markdown_split.py  # Markdown splitting for Slack limits
     └── mcp.py             # MCP tools for Claude to interact with Slack
 ```
 

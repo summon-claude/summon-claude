@@ -97,14 +97,14 @@ Stop all sessions associated with a project:
 summon project down my-api
 ```
 
-`down` stops the PM and all child sessions it manages. Child sessions are marked **suspended** rather than completed — this lets `project up` restart them deterministically later (cascade restart).
+`down` stops the PM and all child sessions it manages. All sessions (PM and children) are marked **suspended** rather than completed — this lets `project up` restart them deterministically later (cascade restart). Each session's Slack channel is renamed with a `zzz-` prefix on disconnect (e.g., `my-api-worker-a1b2c3` becomes `zzz-my-api-worker-a1b2c3`), making it easy to visually identify inactive sessions in the Slack sidebar.
 
 ```bash
 # Stop all projects
 summon project down --all
 ```
 
-**Cascade restart:** When you run `summon project up` after a `down`, summon-claude finds all suspended sessions for the project and restarts them with the same `cwd` and model they had before. This lets you pause and resume an entire multi-session workflow without reconfiguring anything.
+**Cascade restart:** When you run `summon project up` after a `down`, summon-claude finds all suspended sessions for the project and resumes them with full transcript continuity. Rather than creating fresh sessions, it creates new summon sessions that bind to the **existing** Slack channels — the `zzz-` prefix is removed, and the original channel name is restored. Canvas content, conversation history, and the Claude Code session transcript all carry over. The resumed sessions keep the same `cwd` and model they had before, so you can pause and resume an entire multi-session workflow without reconfiguring anything or losing context.
 
 ### `summon project remove`
 
@@ -123,7 +123,9 @@ summon project remove proj-a1b2c3
 
 ## Workflow instructions
 
-Workflow instructions are injected into the system prompt of every session created under the project. Use them to encode team conventions, coding standards, or project-specific context:
+Workflow instructions are injected into the system prompt of every session created under the project. Use them to encode team conventions, coding standards, or project-specific context.
+
+You can set initial workflow instructions when adding a project:
 
 ```bash
 summon project add my-api \
@@ -136,7 +138,51 @@ For longer instructions, use a file:
 summon project add my-api --workflow-file ./workflow.md
 ```
 
-Workflow instructions are stored in the registry and can be updated via `summon config set` or by re-running `project add` with the same name.
+### Managing workflow instructions
+
+Use `summon project workflow` to view, edit, and clear workflow instructions after a project is registered:
+
+```bash
+# Show global workflow defaults
+summon project workflow show
+
+# Show workflow for a specific project
+summon project workflow show my-api
+
+# Edit global workflow (opens $EDITOR)
+summon project workflow set
+
+# Edit project-specific workflow (opens $EDITOR)
+summon project workflow set my-api
+
+# Clear project-specific workflow (falls back to global defaults)
+summon project workflow clear my-api
+
+# Clear global workflow defaults
+summon project workflow clear
+```
+
+`summon project workflow set` opens your `$EDITOR` with the current instructions pre-filled. Comment lines (starting with `#`) are stripped on save. If you close the editor without changes, nothing is updated.
+
+### Global vs. project-specific workflow
+
+There are two levels of workflow instructions:
+
+- **Global workflow defaults** — applied to all projects that don't have their own override.
+- **Project-specific workflow** — set per project, fully replaces the global defaults by default.
+
+To include the global defaults inside a project-specific workflow, use the `$INCLUDE_GLOBAL` token. Place it anywhere in the project's workflow text and it will be expanded to the full global defaults at runtime:
+
+```
+# Project-specific rules come first
+Always use TypeScript strict mode.
+Run tests with `npm test` before committing.
+
+# Include the shared global defaults here
+$INCLUDE_GLOBAL
+```
+
+Without `$INCLUDE_GLOBAL`, project-specific instructions fully replace the global defaults. Clearing a project's workflow (`summon project workflow clear my-api`) removes the override so the project falls back to global defaults.
 
 ---
 

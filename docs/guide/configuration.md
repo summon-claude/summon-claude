@@ -40,7 +40,13 @@ The fastest way to create a config is the setup wizard:
 summon init
 ```
 
-This prompts for the three required Slack tokens and writes them to the config file. The file is created with `0600` permissions (owner read/write only).
+This runs a full interactive walkthrough of all configuration options. It starts with **core options** (Slack tokens, default model, effort level, channel prefix), then asks whether you want to configure **advanced settings** (display, behavior, thinking). Conditional sections appear based on your choices:
+
+- **Scribe** options appear only when `scribe_enabled` is set to true
+- **Google Workspace (Scribe)** options appear only when `scribe_google_enabled` is true and workspace-mcp is installed
+- **Slack (Scribe)** options appear only when `scribe_slack_enabled` is true and Playwright is installed
+
+The wizard pre-fills defaults and preserves existing values (press Enter to keep). After saving, it automatically runs `summon config check` to validate connectivity and show a feature inventory. The config file is created with `0600` permissions (owner read/write only).
 
 ---
 
@@ -75,7 +81,7 @@ See [Slack Setup](../getting-started/slack-setup.md) for how to obtain these val
 | `SUMMON_ENABLE_THINKING` | `true` | Enable extended thinking (passed to Claude SDK) |
 | `SUMMON_SHOW_THINKING` | `false` | Post thinking blocks to Slack turn threads |
 | `SUMMON_GITHUB_PAT` | (none) | GitHub PAT for GitHub MCP integration |
-| `SUMMON_NO_UPDATE_CHECK` | (unset) | Set to `1` to disable update checks |
+| `SUMMON_NO_UPDATE_CHECK` | `false` | Disable the background PyPI update check on `summon start` |
 
 ### Channel naming
 
@@ -119,6 +125,7 @@ The Scribe agent monitors external sources (email, calendar, Slack) and surfaces
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SUMMON_SCRIBE_GOOGLE_ENABLED` | `false` | Enable the Google Workspace data collector for scribe. Requires workspace-mcp. |
 | `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated Google services to monitor |
 
 Valid services: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`.
@@ -149,13 +156,31 @@ See [Scribe](scribe.md) for full setup instructions.
 summon config show
 ```
 
-Prints all current configuration values with tokens masked. Useful for verifying what summon is using.
+Displays all configuration options organized by section (Slack Credentials, Session Defaults, Scribe, Scribe Google, Scribe Slack, GitHub, Display, Behavior, Thinking). Each option shows a source indicator:
+
+- **(set)** — explicitly configured in the config file
+- **(default)** — using the built-in default value
+- **(not set)** — a required value that is missing
+- **(optional)** — an optional secret that has not been configured
+
+Disabled sections (e.g., Scribe Google when `scribe_google_enabled` is false) are shown dimmed with a "disabled" label.
 
 <!-- terminal:config-show -->
 ```text
-SUMMON_SLACK_BOT_TOKEN=configured
-SUMMON_SLACK_APP_TOKEN=configured
-SUMMON_SLACK_SIGNING_SECRET=configured
+  Slack Credentials
+    SUMMON_SLACK_BOT_TOKEN                   configured                     (set)
+    SUMMON_SLACK_APP_TOKEN                   configured                     (set)
+    SUMMON_SLACK_SIGNING_SECRET              configured                     (set)
+
+  Session Defaults
+    SUMMON_DEFAULT_MODEL                     claude-opus-4-6                (set)
+    SUMMON_DEFAULT_EFFORT                    high                           (default)
+    SUMMON_CHANNEL_PREFIX                    summon                         (default)
+
+  Scribe: disabled
+
+  GitHub
+    SUMMON_GITHUB_PAT                        configured                     (set)
 ```
 <!-- /terminal:config-show -->
 
@@ -172,9 +197,12 @@ Prints the absolute path to the config file in use.
 ```bash
 summon config set SUMMON_DEFAULT_MODEL claude-opus-4-6
 summon config set SUMMON_CHANNEL_PREFIX my-team
+summon config set SUMMON_SCRIBE_ENABLED true
 ```
 
-Sets a single key in the config file. Creates the file if it does not exist.
+Sets a single key in the config file. Creates the file if it does not exist. The key must be a valid `SUMMON_*` configuration variable — unknown keys are rejected with an error listing all valid options.
+
+Boolean values are normalized: `true`, `false`, `yes`, `no`, `on`, `off`, `1`, and `0` are all accepted and stored as `true` or `false`. Choice-type options (like `SUMMON_DEFAULT_EFFORT`) are validated against their allowed values.
 
 ### summon config edit
 
@@ -190,21 +218,44 @@ Opens the config file in `$EDITOR`. If `$EDITOR` is not set, falls back to commo
 summon config check
 ```
 
-Validates configuration and tests connectivity to Slack. Exits with code 1 if any check fails. Run this after making changes to verify everything is correct.
+Validates configuration and tests connectivity. Exits with code 1 if any check fails. Run this after making changes to verify everything is correct. The check covers:
+
+- **Claude CLI** — verifies the `claude` command is available and reports its version
+- **Required config keys** — ensures Slack tokens and signing secret are set
+- **Token format** — validates `xoxb-`, `xapp-`, and hex prefixes
+- **Config validation** — runs pydantic validation on all values (effort level, channel prefix format, etc.)
+- **Database** — checks writability, schema version, and integrity
+- **Slack API** — tests connectivity and verifies bot scopes
+- **GitHub PAT** — validates token against the GitHub API (if configured)
+- **Google Workspace** — checks credential status and scope coverage (if configured)
+- **Feature inventory** — shows status of projects, workflow instructions, lifecycle hooks, and the hook bridge
 
 <!-- terminal:config-check -->
 ```text
+  [PASS] Claude CLI found (1.0.33)
   [PASS] SUMMON_SLACK_BOT_TOKEN is set
   [PASS] SUMMON_SLACK_APP_TOKEN is set
   [PASS] SUMMON_SLACK_SIGNING_SECRET is set
   [PASS] Bot token format is valid (xoxb-)
   [PASS] App token format is valid (xapp-)
   [PASS] Signing secret format looks valid (hex)
+  [PASS] Config values pass validation
   [PASS] DB path is writable: ~/.local/share/summon/registry.db
-  [PASS] Schema version 12 (current)
+  [PASS] Schema version 14 (current)
   [PASS] Database integrity OK
   [INFO] Sessions: 0, Audit log: 0
   [PASS] Slack API reachable (team: my-workspace)
+  [PASS] Slack bot scopes: all 16 required scopes granted
+  [PASS] GitHub PAT: valid (user: myuser)
+  [INFO] Google Workspace: not configured (summon config google-auth)
+  [INFO] workspace-mcp (Google): installed
+  [INFO] playwright (Slack browser): not installed
+
+Features:
+  [INFO] Projects: none registered (summon project add)
+  [INFO] Workflow instructions: not set (summon project workflow set)
+  [INFO] Lifecycle hooks: not set (summon hooks set)
+  [INFO] Hook bridge: not installed (summon hooks install)
 ```
 <!-- /terminal:config-check -->
 
@@ -223,6 +274,45 @@ summon config google-status
 ```
 
 Shows current Google authentication status: whether credentials exist, which scopes are granted, and whether the token is still valid.
+
+### External Slack workspace commands
+
+These commands manage authentication with an **external** Slack workspace for Scribe's browser-based monitoring. This is separate from the bot's own workspace (which uses the `SUMMON_SLACK_BOT_TOKEN`).
+
+#### summon config slack-auth
+
+```bash
+summon config slack-auth myteam
+summon config slack-auth acme.enterprise
+summon config slack-auth https://myteam.slack.com
+```
+
+Opens a browser window for you to log in to the external Slack workspace. Accepts a workspace name, enterprise name, or full URL. After login, saves auth state and prompts for channel selection. Requires the `slack-browser` extra (`uv pip install summon-claude[slack-browser]`).
+
+#### summon config slack-channels
+
+```bash
+summon config slack-channels
+summon config slack-channels --refresh
+```
+
+Update the set of monitored channels without re-authenticating. Uses the cached channel list by default. Pass `--refresh` to re-fetch the channel list from Slack via Playwright.
+
+#### summon config slack-status
+
+```bash
+summon config slack-status
+```
+
+Shows external Slack workspace auth and channel configuration: workspace URL, user ID, auth state age, and monitored channels.
+
+#### summon config slack-remove
+
+```bash
+summon config slack-remove
+```
+
+Removes the external Slack workspace auth state (browser cookies and workspace config). Prompts for confirmation.
 
 ---
 
@@ -245,7 +335,7 @@ SUMMON_CHANNEL_PREFIX=ai
 SUMMON_GITHUB_PAT=ghp_your-personal-access-token
 
 # Optional: disable update checks
-# SUMMON_NO_UPDATE_CHECK=1
+# SUMMON_NO_UPDATE_CHECK=true
 ```
 
 !!! tip "Secret management"

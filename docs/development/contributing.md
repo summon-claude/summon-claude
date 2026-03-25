@@ -103,6 +103,9 @@ summon-claude follows [Conventional Commits](https://www.conventionalcommits.org
 | `registry` | Session storage and SQLite operations (`sessions/registry.py`) |
 | `db` | Database maintenance CLI (`summon db` group: status, reset, vacuum, purge) |
 | `hooks` | Lifecycle hooks and Claude Code hook bridge (`sessions/hooks.py`, `cli/hooks.py`) |
+| `project` | Project lifecycle and management (`cli/project.py`) |
+| `scribe` | Scribe monitoring agent |
+| `canvas` | Canvas storage and MCP tools (`canvas_mcp.py`, `slack/canvas_store.py`) |
 | `plugin` | Claude Code plugin skill and manifest (`.claude-plugin/`) |
 
 **Infrastructure scopes:**
@@ -347,14 +350,14 @@ Schema migrations run automatically when `SessionRegistry` connects — users ne
 3. Add it to `_MIGRATIONS` keyed by the version it migrates *from*
 
 ```python
-CURRENT_SCHEMA_VERSION = 5  # was 4
+CURRENT_SCHEMA_VERSION = 15  # was 14
 
-async def _migrate_4_to_5(db: aiosqlite.Connection) -> None:
+async def _migrate_14_to_15(db: aiosqlite.Connection) -> None:
     await db.execute("ALTER TABLE sessions ADD COLUMN tags TEXT")
 
 _MIGRATIONS: dict[int, Any] = {
     ...
-    4: _migrate_4_to_5,
+    14: _migrate_14_to_15,
 }
 ```
 
@@ -379,9 +382,11 @@ summon db status   # Shows current schema version and migration state
 
 ```
 src/summon_claude/
+├── canvas_mcp.py          # Canvas MCP server (read, write, update_section tools)
 ├── config.py              # SummonConfig (pydantic-settings) with validation
 ├── daemon.py              # Unix daemon with PID/lock, IPC framing
 ├── event_dispatcher.py    # Routes Slack events to sessions by channel
+├── slack_browser.py       # Playwright-based Slack WebSocket monitor for external workspaces
 ├── summon_cli_mcp.py      # MCP tools for session lifecycle (session_list, _info, _start, _stop)
 ├── cli/
 │   ├── __init__.py        # Click wiring, root group, setup_logging
@@ -392,7 +397,10 @@ src/summon_claude/
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
 │   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
+│   ├── preflight.py       # Claude CLI preflight check (version, path)
+│   ├── project.py         # Project lifecycle (add, remove, up, down, workflow)
 │   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
+│   ├── slack_auth.py      # Slack browser auth CLI (slack-auth, slack-status)
 │   ├── start.py           # async_start() implementation
 │   ├── stop.py            # async_stop() implementation
 │   └── update_check.py    # PyPI update checker with 24h cache
@@ -407,13 +415,16 @@ src/summon_claude/
 │   ├── permissions.py     # Tool permission handling + Slack buttons
 │   ├── registry.py        # SQLite session storage (WAL mode)
 │   ├── response.py        # Response streaming, turn threads, emoji lifecycle, turn summaries
-│   └── session.py         # Session orchestrator (Claude SDK + Slack + pre-send architecture)
+│   ├── scheduler.py       # Session scheduling (cron tasks, timer injection)
+│   ├── session.py         # Session orchestrator (Claude SDK + Slack + pre-send architecture)
+│   └── types.py           # Shared session types and dataclasses
 └── slack/
     ├── bolt.py            # Bolt app, rate limiter, health monitor
     ├── canvas_store.py    # SQLite-backed canvas markdown state with background Slack sync
     ├── canvas_templates.py # Canvas markdown templates for different agent profiles
     ├── client.py          # Channel-bound Slack output client (post, update, react, canvas)
     ├── formatting.py      # Markdown-to-Slack-mrkdwn conversion
+    ├── markdown_split.py  # Markdown-aware message splitting for Slack's length limits
     ├── mcp.py             # MCP tools for Claude to read and interact with Slack
     └── router.py          # Thread-aware message routing (main, turn threads, subagent threads)
 ```

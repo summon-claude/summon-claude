@@ -70,6 +70,7 @@ The scribe is a background monitoring agent that watches external sources and su
 | Variable | Default | Description | Example |
 |----------|---------|-------------|---------|
 | `SUMMON_SCRIBE_ENABLED` | `false` | Enable the scribe agent. | `true` |
+| `SUMMON_SCRIBE_GOOGLE_ENABLED` | `false` | Enable the Google Workspace data collector for scribe. Requires workspace-mcp. | `true` |
 | `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | `5` | How often the scribe scans for new information. Minimum 1. | `15` |
 | `SUMMON_SCRIBE_CWD` | _(data dir)/scribe_ | Working directory for the scribe session. | `/home/user/scribe` |
 | `SUMMON_SCRIBE_MODEL` | _(inherits `SUMMON_DEFAULT_MODEL`)_ | Model override for the scribe session. | `claude-haiku-4-5-20251001` |
@@ -78,7 +79,7 @@ The scribe is a background monitoring agent that watches external sources and su
 | `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated list of Google Workspace services to monitor. Valid values: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`. Requires workspace-mcp. | `gmail,calendar` |
 | `SUMMON_SCRIBE_SLACK_ENABLED` | `false` | Enable the Slack data collector (uses Playwright browser automation). | `true` |
 | `SUMMON_SCRIBE_SLACK_BROWSER` | `chrome` | Browser for Slack monitoring. Must be one of: `chrome`, `firefox`, `webkit`. | `firefox` |
-| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | _(empty)_ | Comma-separated Slack channel names to monitor. | `#general,#engineering` |
+| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | _(empty)_ | Comma-separated Slack channel names to monitor. | `general,engineering` |
 
 See [Scribe](../guide/scribe.md) for full setup and configuration details.
 
@@ -88,7 +89,7 @@ See [Scribe](../guide/scribe.md) for full setup and configuration details.
 
 | Variable | Default | Description | Example |
 |----------|---------|-------------|---------|
-| `SUMMON_NO_UPDATE_CHECK` | _(unset)_ | Set to `1` to disable the background PyPI update check on `summon start`. | `1` |
+| `SUMMON_NO_UPDATE_CHECK` | `false` | Disable the background PyPI update check on `summon start`. | `true` |
 
 ---
 

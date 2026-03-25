@@ -31,7 +31,7 @@ Use `summon config path` or `summon db status` to see the active path. The datab
 
 ## Schema
 
-Current schema version: **12** (`CURRENT_SCHEMA_VERSION` in `sessions/migrations.py`)
+Current schema version: **14** (`CURRENT_SCHEMA_VERSION` in `sessions/migrations.py`)
 
 ### sessions
 
@@ -130,7 +130,7 @@ CREATE TABLE projects (
     directory TEXT NOT NULL,
     channel_prefix TEXT NOT NULL,   -- unique index
     pm_channel_id TEXT,
-    workflow_instructions TEXT NOT NULL DEFAULT '',
+    workflow_instructions TEXT DEFAULT NULL, -- NULL = use global, '' = explicit clear
     hooks TEXT DEFAULT NULL,        -- JSON lifecycle hooks, NULL = use global
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 )
@@ -222,6 +222,8 @@ CREATE TABLE schema_version (
 | 9 → 10 | Created `channels` table, added `effort` to sessions, migrated and dropped `canvas_id`/`canvas_markdown` from sessions |
 | 10 → 11 | Created `session_tasks` table |
 | 11 → 12 | Added `hooks` column to `workflow_defaults` and `projects` |
+| 12 → 13 | Added covering index on `(authenticated_user_id, status, slack_channel_id)` for PM status queries |
+| 13 → 14 | Made `projects.workflow_instructions` nullable (NULL = use global, `''` = explicit clear); recreated `projects` table via copy-drop-rename; added `(parent_session_id, status)` index |
 
 ## Adding a Migration
 
@@ -235,17 +237,17 @@ CREATE TABLE schema_version (
 Example:
 
 ```python
-async def _migrate_12_to_13(db: aiosqlite.Connection) -> None:
+async def _migrate_14_to_15(db: aiosqlite.Connection) -> None:
     """Add my_new_column to sessions table."""
     with contextlib.suppress(sqlite3.OperationalError):
         await db.execute("ALTER TABLE sessions ADD COLUMN my_new_column TEXT")
 
 _MIGRATIONS: dict[int, Any] = {
     # ... existing entries ...
-    12: _migrate_12_to_13,
+    14: _migrate_14_to_15,
 }
 
-CURRENT_SCHEMA_VERSION = 13
+CURRENT_SCHEMA_VERSION = 15
 ```
 
 ## Database Commands

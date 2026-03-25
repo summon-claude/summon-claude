@@ -5,7 +5,7 @@ summon provides three internal MCP servers that Claude uses within sessions. The
 | Server | Available to | Tools |
 |--------|-------------|-------|
 | `summon-slack` | All sessions | 8 tools — Slack actions and reading |
-| `summon-cli` | All sessions (8 tools) + PM sessions (5 additional) | Session lifecycle, scheduling, tasks |
+| `summon-cli` | All sessions (8 tools) + PM sessions (5–6 additional) | Session lifecycle, scheduling, tasks |
 | `summon-canvas` | Sessions with a canvas | 3 tools — canvas read/write |
 
 ---
@@ -253,7 +253,7 @@ List all tasks in this session. PM sessions can also query child session tasks.
 
 ### Additional tools for PM sessions only
 
-PM (project manager) sessions are started with `--pm-profile` or via `summon project up`. They receive these 5 tools in addition to the 8 above.
+PM (project manager) sessions are started with `--pm-profile` or via `summon project up`. They receive 5 additional tools, plus a 6th (`session_status_update`) when a pinned status message exists.
 
 #### `session_start`
 
@@ -331,6 +331,21 @@ Resume a completed or errored session. Creates a new summon session connected to
 **Returns:** The new session ID and the Slack channel link.
 
 **Notes:** Can only resume sessions that the calling session spawned. Target must be `completed` or `errored`. The Slack channel is reused — all resumes continue the same conversation history.
+
+---
+
+#### `session_status_update`
+
+Update the pinned status message in the PM channel. Only available when the PM session has a pinned status message (`pm_status_ts`).
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `summary` | string | Yes | — | Brief status text (max 500 characters) |
+| `details` | string | No | — | Detailed breakdown (max 2000 characters) |
+
+**Returns:** Confirmation that the status message was updated with a preview of the summary.
+
+**Notes:** Updates the existing pinned message in-place using `chat_update`. Mentions (`@channel`, `@here`, `@everyone`, user mentions, group mentions) are sanitized before posting. The message is formatted as `*Project Manager Status*` with a timestamp. Secrets are redacted at the output boundary.
 
 ---
 

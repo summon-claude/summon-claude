@@ -85,7 +85,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     !!! note "The manifest should set this automatically"
         If you created the app from `slack-app-manifest.yaml`, events should be pre-configured. If the toggle is off despite using the manifest, you may need to reinstall the app or re-apply the manifest.
 
-    **How to verify:** Run `summon config check` — if it reports "Slack API reachable" but sessions show 0 turns, event subscriptions are the likely cause.
+    **How to verify:** Run `summon config check` — it validates Claude CLI availability, Slack API connectivity, token formats, database integrity, Google Workspace status, and feature inventory. If it reports "Slack API reachable" but sessions show 0 turns, event subscriptions are the likely cause.
 
 ???+ tip "Socket Mode not enabled"
     **Symptom:** The daemon starts but does not receive Slack events. No messages appear in session channels.
@@ -344,6 +344,102 @@ This page covers common problems and their solutions. Issues are grouped by cate
     summon config show | grep data_dir
     ```
     Ensure the `WORKSPACE_MCP_CREDENTIALS_DIR` environment variable (set automatically by summon) points to the correct path. If credentials are in a different location, re-run `summon config google-auth`.
+
+---
+
+## Scribe
+
+???+ tip "Scribe not starting"
+    **Symptom:** Scribe agent does not appear in `summon session list` after running `summon project up`.
+
+    **Cause:** Scribe is disabled by default and must be explicitly enabled.
+
+    **Fix:**
+    1. Enable scribe in your config:
+    ```bash
+    summon config set SUMMON_SCRIBE_ENABLED true
+    ```
+    2. Scribe auto-starts with `summon project up`. Verify it's running:
+    ```bash
+    summon session list
+    ```
+    Look for a scribe session in the output.
+
+???+ tip "Google Workspace collector not working"
+    **Symptom:** Scribe is running but not collecting Google Workspace data (Gmail, Calendar, Drive).
+
+    **Cause:** The Google collector requires separate enablement and authentication.
+
+    **Fix:**
+    1. Enable the Google collector:
+    ```bash
+    summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
+    ```
+    2. Verify Google authentication status:
+    ```bash
+    summon config google-status
+    ```
+    3. If not authenticated, run the auth flow:
+    ```bash
+    summon config google-auth
+    ```
+    4. Ensure the `workspace-mcp` binary is available. If missing, install the Google extra:
+    ```bash
+    uv tool install "summon-claude[google]"
+    ```
+
+???+ tip "Slack browser monitoring not working"
+    **Symptom:** Scribe is running but not capturing messages from external Slack workspaces.
+
+    **Cause:** The Slack browser monitor requires separate enablement, Playwright, and browser authentication.
+
+    **Fix:**
+    1. Enable the Slack browser monitor:
+    ```bash
+    summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+    ```
+    2. Check Slack browser authentication status:
+    ```bash
+    summon config slack-status
+    ```
+    3. If not authenticated, run the interactive auth flow:
+    ```bash
+    summon config slack-auth
+    ```
+    4. Ensure Playwright is installed:
+    ```bash
+    uv tool install "summon-claude[slack-browser]"
+    ```
+    5. The browser-authenticated user must be a member of the channels you want to monitor. Invite the user to any missing channels in the external workspace.
+
+???+ tip "Enterprise Grid Slack monitoring"
+    **Symptom:** Slack browser monitor fails to load workspace or shows a workspace picker instead of the client.
+
+    **Cause:** Enterprise Grid workspaces serve a workspace picker page at their enterprise domain (e.g., `gtest.enterprise.slack.com`). The actual Slack SPA client lives at `app.slack.com/client/{TEAM_ID}`.
+
+    **Fix:** Use `summon config slack-auth` to authenticate — it handles Enterprise Grid URL resolution automatically. The monitor extracts team IDs from localStorage in the saved browser state and navigates directly to `app.slack.com/client/{TEAM_ID}`, bypassing the workspace picker.
+
+---
+
+## Project Lifecycle
+
+???+ tip "Channels named zzz-..."
+    **Symptom:** Slack channels for your sessions have been renamed with a `zzz-` prefix.
+
+    **Cause:** These are suspended channels from running `summon project down`. The `zzz-` prefix is added to visually sort suspended channels to the bottom of the channel list.
+
+    **Fix:** Run `summon project up` to resume sessions. This removes the `zzz-` prefix and restores the channels to their original names.
+
+???+ tip "Project up doesn't resume sessions"
+    **Symptom:** Running `summon project up` starts new PM sessions but does not resume previously running child sessions.
+
+    **Cause:** Only sessions in `suspended` status are eligible for automatic resume. Sessions that completed normally (`completed`) or failed (`errored`) are not resumed.
+
+    **Fix:** Check the status of your sessions:
+    ```bash
+    summon session list --all
+    ```
+    Sessions must show `suspended` status to be resumed by `project up`. If sessions are `completed` or `errored`, they will not auto-resume — start new sessions instead.
 
 ---
 

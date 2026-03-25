@@ -42,7 +42,7 @@ Once bound to a channel, the PM is ready to receive instructions from you. Send 
 
 ## PM-only MCP tools
 
-The PM agent has access to five MCP tools that are not available to regular sessions. These tools use the daemon's IPC layer to manage sessions directly.
+The PM agent has access to six MCP tools that are not available to regular sessions. These tools use the daemon's IPC layer to manage sessions directly.
 
 ### `session_start`
 
@@ -116,12 +116,40 @@ Write a structured status entry to the audit log (not posted to Slack):
 
 ```
 session_log_status(
-  status="in_progress",
-  note="Reviewing auth module — found 3 issues"
+  status="active",
+  summary="Reviewing auth module — found 3 issues",
+  details="1. Missing CSRF check in /login\n2. Token expiry too long\n3. No rate limiting"
 )
 ```
 
-This is for audit-trail logging and canvas updates. It does not post a message to any Slack channel.
+| Parameter | Description |
+|-----------|-------------|
+| `status` | One of `active`, `idle`, `blocked`, `error` |
+| `summary` | Brief status summary (required, max 500 chars) |
+| `details` | Optional detailed breakdown (max 2000 chars) |
+
+This is for audit-trail logging. It does not post a message to any Slack channel.
+
+### `session_status_update`
+
+Update the pinned status message in the PM's Slack channel:
+
+```
+session_status_update(
+  summary="3 sessions active — auth refactor 80% complete",
+  details="worker-1: JWT middleware (in progress)\nworker-2: OAuth providers (completed)\nworker-3: Rate limiting (starting)"
+)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `summary` | Brief status text (required, max 500 chars) |
+| `details` | Optional detailed breakdown (max 2000 chars) |
+
+The status message is posted when the PM session starts and pinned to the channel. `session_status_update` edits that pinned message in place, keeping the channel topic area clean. The message includes a timestamp showing when it was last updated.
+
+!!! note
+    This tool is only available when the PM channel has a pinned status message (created automatically on PM startup). It updates the existing message rather than posting a new one.
 
 ---
 
@@ -166,6 +194,25 @@ The PM will plan, spawn child sessions, direct them, and report back — all coo
 
 !!! tip "Stop a PM gracefully"
     If you stop a PM session while it has active children, summon-claude warns you that children will be orphaned. Use `summon project down` instead to stop everything together and preserve the suspended state for cascade restart.
+
+---
+
+## Channel scoping
+
+The PM has visibility into the Slack channels belonging to its child sessions. Internally, the PM uses registry methods (`get_child_channels`, `get_all_active_channels`, `count_active_children`) to track which channels are active. These are used for:
+
+- **Channel topic updates** — the PM's channel topic shows the current active child count (e.g., "Project Manager | 3 active sessions | working"). This is updated automatically via heartbeat-driven topic reconciliation.
+- **Message routing** — the PM can only send messages to sessions it spawned (parent-child scope guard).
+
+The child count in the channel topic updates automatically as sessions start and stop. You do not need to manage it manually.
+
+---
+
+## Worktree delegation
+
+summon-claude blocks direct `git worktree add` and `git worktree move` commands in all sessions (both PM and child). This prevents agents from creating untracked worktrees that could interfere with each other.
+
+Instead, agents should use Claude's built-in `EnterWorktree` tool to create and enter worktrees. When the PM wants a child session to work in a separate worktree, it should delegate this to the child — include instructions in the child's `system_prompt` to use `EnterWorktree` rather than running the git command directly.
 
 ---
 

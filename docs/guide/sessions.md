@@ -248,4 +248,14 @@ summon session info myapp -o json | jq '.status'
 | `active` | Claude is running and accepting messages |
 | `completed` | Session ended normally |
 | `errored` | Session crashed or was cleaned up |
-| `suspended` | Session paused by `summon project down` (can be restarted) |
+| `suspended` | Session paused by `summon project down` (can be restarted with `project up`; channel name restored on resume) |
+
+---
+
+## Channel naming on disconnect
+
+When a session disconnects — whether it completes, errors, or is suspended — its Slack channel is renamed with a `zzz-` prefix. For example, `summon-worker-a1b2c3` becomes `zzz-summon-worker-a1b2c3`. This pushes inactive channels to the bottom of the Slack sidebar alphabetically, making it easy to distinguish active sessions from finished ones at a glance.
+
+When a session is resumed (via `summon start --resume`, `summon project up`, or the PM's `session_resume` tool), the `zzz-` prefix is removed and the original channel name is restored.
+
+The rename is idempotent — channels that already have the prefix are not double-prefixed. Channel names are truncated to Slack's 80-character limit if needed.

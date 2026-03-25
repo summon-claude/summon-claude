@@ -95,7 +95,7 @@ summon-claude includes an interactive setup wizard:
 summon init
 ```
 
-The wizard prompts for your Bot Token, App Token, and Signing Secret, then writes them to the config file.
+The wizard prompts for Slack tokens and other configuration options, validates connectivity, then writes them to the config file. It automatically runs `summon config check` at the end to verify everything is working.
 
 ---
 
