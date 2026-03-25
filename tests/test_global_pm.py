@@ -262,6 +262,7 @@ class TestGlobalPMProfile:
         )
         tool_names = [t.name for t in tools]
         assert "session_start" not in tool_names
+        assert "session_message" not in tool_names
         assert "session_stop" in tool_names
         assert "session_resume" in tool_names
 

@@ -1139,12 +1139,13 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         pm_tools: list[SdkMcpTool] = [
             session_stop,
             session_log_status,
-            session_message,
             session_resume,
         ]
-        # GPM is an oversight agent — it must NOT spawn new sessions
+        # GPM: no session_start (oversight, not spawner) or session_message
+        # (requires parent-child relationship GPM doesn't have with PMs)
         if not is_global_pm:
             pm_tools.insert(0, session_start)
+            pm_tools.append(session_message)
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
