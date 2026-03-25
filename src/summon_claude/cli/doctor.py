@@ -101,6 +101,8 @@ def _load_config(
         return _Config.from_file(config_path)
     except Exception as e:
         safe_err = _redact_err(str(e))
+        # Synthetic subsystem — not in KNOWN_SUBSYSTEMS/DIAGNOSTIC_REGISTRY
+        # because it's produced inline, not by a registered check.
         results.append(
             CheckResult(
                 status="fail",

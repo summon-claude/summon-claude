@@ -144,8 +144,7 @@ class EnvironmentCheck:
         claude_path = shutil.which("claude")
         if not claude_path:
             details.append("claude CLI — NOT FOUND (install from https://claude.ai/code)")
-            if status != "fail":
-                status = "fail"
+            status = "fail"
         else:
             claude_version = await _get_version("claude", "--version", max_wait=5)
             if claude_version is None:
@@ -543,8 +542,9 @@ class LogsCheck:
         # Daemon log
         daemon_log = log_dir / "daemon.log"
         if daemon_log.exists():
-            age_hours = (now - daemon_log.stat().st_mtime) / 3600
-            size_str = _human_size(daemon_log.stat().st_size)
+            daemon_st = daemon_log.stat()
+            age_hours = (now - daemon_st.st_mtime) / 3600
+            size_str = _human_size(daemon_st.st_size)
             details.append(f"daemon.log: {size_str}, {age_hours:.1f}h old")
             lines = _tail_file(daemon_log, _LOG_MAX_LINES)
             collected_logs["daemon.log"] = [redactor.redact(ln) for ln in lines]
