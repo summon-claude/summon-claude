@@ -670,6 +670,8 @@ class TestScribeDisallowedTools:
         assert "slack_upload_file" in _SCRIBE_DISALLOWED_TOOLS
         assert "CronCreate" in _SCRIBE_DISALLOWED_TOOLS
         assert "summon_canvas_write" in _SCRIBE_DISALLOWED_TOOLS
+        assert "get_drive_shareable_link" in _SCRIBE_DISALLOWED_TOOLS
+        assert "get_drive_file_download_url" in _SCRIBE_DISALLOWED_TOOLS
 
         # Read-only tools must NOT be blocked
         assert "search_gmail_messages" not in _SCRIBE_DISALLOWED_TOOLS
@@ -683,6 +685,11 @@ class TestScribeDisallowedTools:
         """Invariant: disallowed set must not include read-only tools."""
         from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
 
+        # These "get_" tools have write side-effects despite their names
+        write_action_get_tools = {
+            "get_drive_shareable_link",  # modifies sharing permissions
+            "get_drive_file_download_url",  # writes file to local disk
+        }
         read_prefixes = (
             "search_",
             "get_",
@@ -695,6 +702,8 @@ class TestScribeDisallowedTools:
             "summon_canvas_read",
         )
         for tool_name in _SCRIBE_DISALLOWED_TOOLS:
+            if tool_name in write_action_get_tools:
+                continue
             assert not any(tool_name.startswith(p) for p in read_prefixes), (
                 f"Read-only tool '{tool_name}' must not be in disallowed set"
             )
@@ -716,3 +725,13 @@ class TestScribeDisallowedTools:
 
         assert "Content handling" in _PM_SYSTEM_PROMPT_APPEND
         assert "UNTRUSTED_EXTERNAL_DATA" in _PM_SYSTEM_PROMPT_APPEND
+
+    def test_build_google_workspace_mcp_untrusted_uses_proxy(self):
+        """Scribe's workspace-mcp must be wrapped with untrusted proxy."""
+        from summon_claude.sessions.session import _build_google_workspace_mcp_untrusted
+
+        result = _build_google_workspace_mcp_untrusted("gmail,calendar,drive")
+        assert "summon_claude.mcp_untrusted_proxy" in result["args"]
+        assert "--source" in result["args"]
+        assert "Google Workspace" in result["args"]
+        assert "--" in result["args"]

@@ -196,6 +196,11 @@ _SCRIBE_DISALLOWED_TOOLS: frozenset[str] = frozenset(
         "create_drive_file",
         "create_drive_folder",
         "import_to_google_doc",
+        # These "get_" tools have write side-effects despite their names:
+        # get_drive_shareable_link modifies sharing permissions,
+        # get_drive_file_download_url writes to local disk.
+        "get_drive_shareable_link",
+        "get_drive_file_download_url",
         # Slack MCP write tools (from slack/mcp.py)
         "slack_upload_file",
         "slack_create_thread",
@@ -2432,7 +2437,7 @@ class SummonSession:
                 ),
                 effort=self._effort,
                 disallowed_tools=list(
-                    _WORKTREE_DISALLOWED_TOOLS | _SCRIBE_DISALLOWED_TOOLS
+                    (_WORKTREE_DISALLOWED_TOOLS | _SCRIBE_DISALLOWED_TOOLS)
                     if is_scribe
                     else _WORKTREE_DISALLOWED_TOOLS
                 ),
