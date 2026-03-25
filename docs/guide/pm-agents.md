@@ -1,5 +1,8 @@
 # PM Agents
 
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and [set up a project](projects.md).
+
 A PM (project manager) agent is a long-running Claude session that orchestrates work across multiple child sessions. Instead of running tasks yourself, you describe what needs to be done and the PM spawns, directs, and monitors the sessions that do the work.
 
 ---
@@ -21,13 +24,13 @@ The PM agent has a dedicated Slack channel with a project canvas. The canvas sho
 
 ## Starting a PM
 
-PM agents are started as part of a project:
+PM agents are started with `project up`, which launches PMs for all registered projects:
 
 ```bash
-summon project up my-api
+summon project up
 ```
 
-This starts one PM session per project. You authenticate it in Slack the same way as a regular session:
+Each project gets one PM session. You authenticate it in Slack the same way as a regular session:
 
 ```
 /summon ABC123
@@ -216,7 +219,52 @@ Instead, agents should use Claude's built-in `EnterWorktree` tool to create and 
 
 ---
 
-## What's next
+## Automated monitoring
+
+The PM does not rely solely on your messages to stay informed. Three automatic mechanisms keep it aware of project state without human prompting.
+
+### Scan timer
+
+When a PM session starts, summon-claude creates an internal system cron job that fires on a recurring interval (default: every 15 minutes). Each time the timer fires, the PM receives a scan trigger prompt instructing it to:
+
+1. Check all child session statuses via `session_list`
+2. Identify completed, stuck, or failed sessions
+3. Take corrective actions (stop, restart, or report to you)
+4. Update the project canvas with current task status
+
+The scan timer is a system job — it appears in `CronList` output with `System: Yes` and cannot be deleted by the agent. It runs for the lifetime of the PM session.
+
+!!! tip "Scan interval"
+    The scan interval is configurable at project level. The default of 15 minutes balances responsiveness with context usage. Shorter intervals (e.g., 5 minutes) are useful for fast-moving work; longer intervals (e.g., 30 minutes) conserve context in long-running sessions.
+
+### Cross-session task queries
+
+The PM can query tasks across its child sessions using `TaskList` with the `session_ids` parameter:
+
+```
+TaskList(session_ids="sess-worker-1,sess-worker-2,sess-worker-3")
+```
+
+This returns a unified view of tasks from up to 20 child sessions, grouped by session. Regular sessions can only list their own tasks — the cross-session parameter is PM-only.
+
+During each scan cycle, the PM typically calls `TaskList` with its active children's IDs to get a progress snapshot, then updates the canvas accordingly. This is the primary mechanism for the PM to track distributed work without requiring children to report status manually.
+
+### Channel topic reconciliation
+
+Every 30 seconds, the PM's heartbeat checks the current count of active child sessions and updates the channel topic if the count has changed. The topic follows a deterministic format:
+
+```
+Project Manager | 3 active sessions | working
+Project Manager | 0 active sessions | idle
+```
+
+This gives you an at-a-glance indicator of project activity directly in the Slack sidebar — no need to open the PM channel to check whether work is in progress.
+
+For full details on cron expressions, task tool parameters, and canvas integration, see [Cron & Tasks](cron-tasks.md).
+
+---
+
+## See also
 
 - [Projects](projects.md) — setting up and managing projects
 - [Canvas](canvas.md) — persistent markdown in Slack channel tabs

@@ -1,51 +1,42 @@
-# User Guide
+# Guides
 
-Learn how to use summon-claude effectively.
+Learn how to use summon-claude effectively. Most users work through **projects** — a PM agent coordinates multiple Claude sessions on your behalf. You can also run quick ad-hoc sessions for one-off tasks.
 
 <div class="grid cards" markdown>
 
--   :material-console: **[Sessions](sessions.md)**
-
-    Session lifecycle, naming, and management.
-
--   :material-keyboard: **[Commands](commands.md)**
-
-    In-channel commands for session control.
-
--   :material-cog: **[Configuration](configuration.md)**
-
-    Customize summon-claude behavior.
-
--   :material-shield-check: **[Permissions](permissions.md)**
-
-    Tool approval workflow via Slack.
-
--   :material-message-text: **[Threading](threading.md)**
-
-    How turns and threads are organized.
-
 -   :material-folder-multiple: **[Projects](projects.md)**
 
-    Multi-session project management.
+    Multi-session project management. The primary way to organize work.
 
 -   :material-robot: **[PM Agents](pm-agents.md)**
 
-    Autonomous project manager sessions.
+    Autonomous project manager that spawns, directs, and monitors child sessions.
 
 -   :material-typewriter: **[Scribe](scribe.md)**
 
     Background monitoring agent for Slack and Google Workspace.
 
--   :material-note-text: **[Canvas](canvas.md)**
+-   :octicons-mark-github-16: **[GitHub Integration](github-integration.md)**
 
-    Persistent session documents.
+    PR review and GitHub tools.
 
 -   :material-clock-outline: **[Cron & Tasks](cron-tasks.md)**
 
     Scheduled jobs and task tracking.
 
--   :octicons-mark-github-16: **[GitHub Integration](github-integration.md)**
+-   :material-note-text: **[Canvas](canvas.md)**
 
-    PR review and GitHub tools.
+    Persistent session documents.
+
+-   :material-cog: **[Configuration](configuration.md)**
+
+    Customize summon-claude behavior.
+
+-   :material-console: **[Sessions](sessions.md)**
+
+    Session lifecycle, naming, and management.
 
 </div>
+
+!!! tip "Recommended reading order"
+    New to summon-claude? Start with **[Projects](projects.md)** and **[PM Agents](pm-agents.md)**, then explore the features that interest you.

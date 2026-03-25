@@ -9,10 +9,10 @@ Update available: 1.2.3 → 1.3.0
 Run: uv tool upgrade summon-claude
 ```
 
-The check is non-blocking and does not delay session startup. To disable it permanently, set:
+The check is non-blocking and does not delay session startup. To disable it permanently:
 
 ```bash
-export SUMMON_NO_UPDATE_CHECK=1
+summon config set SUMMON_NO_UPDATE_CHECK true
 ```
 
 ---

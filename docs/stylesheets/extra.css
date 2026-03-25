@@ -1,0 +1,7 @@
+/* Dark mode: improve grid card contrast against page background.
+   Without this, cards have transparent backgrounds and nearly invisible
+   borders (12% opacity) in slate mode, making them blend into the page. */
+[data-md-color-scheme="slate"] .md-typeset .grid.cards > ul > li {
+  background-color: var(--md-code-bg-color);
+  border: 1px solid var(--md-default-fg-color--lighter);
+}

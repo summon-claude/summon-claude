@@ -104,7 +104,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     2. Create or select a token — it must have the `connections:write` scope.
     3. Set it in your config:
     ```bash
-    summon config set slack_app_token xapp-...
+    summon config set SUMMON_SLACK_APP_TOKEN xapp-...
     ```
 
 ???+ tip "Bot not added to channel"
@@ -214,22 +214,19 @@ This page covers common problems and their solutions. Issues are grouped by cate
 ???+ tip "Permission request times out"
     **Symptom:** A pending permission request disappears after a while without being acted on, and Claude proceeds or aborts.
 
-    **Cause:** Permission requests have a configurable timeout. After the timeout, summon defaults to denying the request (fail-safe).
+    **Cause:** Permission requests have a timeout. After the timeout, summon defaults to denying the request (fail-safe).
 
-    **Fix:** Respond to permission requests promptly. To adjust the timeout, check your configuration:
+    **Fix:** Respond to permission requests promptly. The debounce interval can be adjusted via `SUMMON_PERMISSION_DEBOUNCE_MS` (default: 500ms):
     ```bash
-    summon config show
+    summon config set SUMMON_PERMISSION_DEBOUNCE_MS 1000
     ```
-    Look for `permission_timeout_seconds` and adjust as needed.
 
 ???+ tip "Ephemeral permission messages visible to wrong people"
     **Symptom:** Permission request messages are visible only to you, not to other team members who should see them.
 
-    **Cause:** Ephemeral messages in Slack are only visible to the user who triggered them. This is a Slack platform limitation.
+    **Cause:** Permission requests are posted as ephemeral messages in Slack — only visible to the session owner. A separate ping is posted to the main channel to trigger a notification.
 
-    **Behavior:** Permission requests are posted as regular (visible) messages so the whole channel can see and respond to them. If you are seeing ephemeral-only messages, this is a configuration issue.
-
-    **Fix:** Check that `permission_visibility` is not set to `ephemeral` in your config.
+    **Behavior:** This is by design. The ephemeral message contains the Approve/Deny buttons. The main channel ping alerts you to check for it. See [Permissions](reference/permissions.md) for details.
 
 ---
 
@@ -289,7 +286,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```
 
 ???+ tip "Enabling verbose logging for debugging"
-    Pass `-v` (or `-vv` for more detail) as a top-level flag:
+    Pass `-v` as a top-level flag:
     ```bash
     summon -v start --name my-session
     ```
@@ -339,11 +336,11 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
     **Cause:** Credentials are stored in `~/.summon/google-credentials/` (or the XDG data directory equivalent). If this path differs from what workspace-mcp expects, credentials won't be found.
 
-    **Fix:** Check where summon stores credentials:
+    **Fix:** Check where summon stores data (including credentials):
     ```bash
-    summon config show | grep data_dir
+    summon version
     ```
-    Ensure the `WORKSPACE_MCP_CREDENTIALS_DIR` environment variable (set automatically by summon) points to the correct path. If credentials are in a different location, re-run `summon config google-auth`.
+    The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon config google-auth`.
 
 ---
 
@@ -404,7 +401,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```
     3. If not authenticated, run the interactive auth flow:
     ```bash
-    summon config slack-auth
+    summon config slack-auth WORKSPACE_NAME
     ```
     4. Ensure Playwright is installed:
     ```bash

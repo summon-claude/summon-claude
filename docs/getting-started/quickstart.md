@@ -1,51 +1,65 @@
 # Quick Start
 
-This walkthrough covers your first summon-claude session from terminal to Slack.
+This walkthrough sets up your first project with a PM agent. The PM spawns, directs, and monitors Claude sessions on your behalf — all through Slack.
 
 ## Prerequisites
 
 - summon-claude [installed](installation.md)
-- [Slack app configured](slack-setup.md) and `summon config check` passing
+- [Slack app configured](slack-setup.md) and [configuration verified](configuration.md) (`summon config check` passing)
+- A project directory (any git repo works)
 
 ---
 
-## Step 1: Start a session
+## Step 1: Register a project
 
-In your terminal, navigate to your project directory and run:
+Navigate to your project directory and register it:
 
 ```bash
-summon start
+summon project add my-api ~/code/my-api
 ```
 
-summon-claude launches a Claude Code session in the background and prints an authentication code:
+This creates a named project that summon-claude tracks. You can optionally set workflow instructions that guide every session:
 
-<!-- terminal:summon-start -->
-``` { .text .annotate }
+```bash
+summon project workflow set my-api
+```
+
+---
+
+## Step 2: Start your PM agent
+
+```bash
+summon project up
+```
+
+This starts PM agents for all registered projects. The PM prints an authentication code:
+
+<!-- terminal:project-up -->
+```
 ==================================================
-  SUMMON CODE: a7f3b219  # (1)
+  SUMMON CODE: a7f3b219
   Type in Slack: /summon a7f3b219
-  Expires in 5 minutes  # (2)
+  Expires in 5 minutes
 ==================================================
 ```
+<!-- /terminal:project-up -->
 
-1. This is a one-time code. Type it exactly as shown in any Slack channel.
-2. Codes expire after 5 minutes. Run `summon start` again if it expires.
-<!-- /terminal:summon-start -->
+The code is single-use — type it exactly as shown in any Slack channel. Codes expire after 5 minutes; run `summon project up` again to get a new one.
 
 !!! note "Background process"
     The session runs as a background daemon. You can close this terminal window after authenticating — Claude keeps running.
 
 ---
 
-## Step 2: Authenticate in Slack
+## Step 3: Authenticate in Slack
 
-Open Slack, go to any channel where you want the session to live, and type:
+Open Slack, go to any channel where you want the PM to live, and type:
 
 ```
 /summon ABC123
 ```
 
-Use the exact code from your terminal. The session binds to that channel.
+Use the exact code from your terminal. The PM agent binds to that channel.
 
 ![Slash command in Slack](../assets/screenshots/quickstart-slack-auth.png)
 
@@ -54,42 +68,38 @@ Use the exact code from your terminal. The session binds to that channel.
 
 ---
 
-## Step 3: Send your first message
+## Step 4: Give the PM its first task
 
-Once authenticated, summon-claude posts a welcome message in the channel. You can now send messages directly in the channel:
+Once authenticated, summon-claude posts a welcome message in the channel. Send the PM its first task directly in the channel:
 
 ```
-Hello! What can you help me with today?
+Review the README and suggest improvements
 ```
 
 ![First message exchange in Slack](../assets/screenshots/quickstart-first-message.png)
 
+???+ tip "Emoji lifecycle"
+    summon-claude uses emoji reactions to show what Claude is doing:
+
+    | Emoji | Meaning |
+    |-------|---------|
+    | :inbox_tray: | Message received, Claude is thinking |
+    | :gear: | Claude is actively working (running tools) |
+    | :white_check_mark: | Turn completed successfully |
+    | :octagonal_sign: | Turn cancelled by `!stop` command |
+    | :warning: | Turn ended with an error |
+
+    For full details on emoji reactions and thread organization, see [Threading](../concepts/threading.md).
+
 ---
 
-## Understanding the emoji lifecycle
+## Step 5: Review tool permissions
 
-summon-claude uses emoji reactions to show what Claude is doing:
-
-| Emoji | Meaning |
-|-------|---------|
-| :inbox_tray: | Message received, Claude is thinking |
-| :gear: | Claude is actively working (running tools) |
-| :white_check_mark: | Turn completed successfully |
-| :warning: | Turn ended with an error |
-
----
-
-## Step 4: Review tool permissions
-
-When Claude wants to use a tool (run a command, read a file, etc.), summon-claude posts a message with Approve/Deny buttons:
+When Claude wants to use a tool (run a command, edit a file, etc.), summon-claude sends you an **ephemeral message** — visible only to you — with Approve/Deny buttons. A ping is also posted to the main channel so you get a notification.
 
 ![Tool permission request in Slack](../assets/screenshots/quickstart-permission-request.png)
 
-Click **Approve** to let Claude proceed, or **Deny** to reject the action. Claude adapts its approach based on your decision.
-
----
-
-## Step 5: Explore available commands
+Click **Approve** to let Claude proceed, or **Deny** to reject the action. Claude adapts its approach based on your decision. Read-only tools (file reads, searches, web fetches) are auto-approved without prompting — see [Permissions](../reference/permissions.md) for the full list.
 
 Type `!help` in the Slack channel to see all available in-channel commands:
 
@@ -106,31 +116,45 @@ Common commands:
 | `!help` | List all available commands |
 | `!status` | Show session status and context usage |
 | `!end` | End the session gracefully |
-| `!stop` | Stop immediately (same as `summon stop`) |
+| `!stop` | Cancel the current Claude turn (session stays active) |
 
 ---
 
 ## Step 6: End the session
 
-When you're done, end the session from Slack:
+When you're done, stop all project sessions:
+
+```bash
+summon project down
+```
+
+Or end just the PM session from Slack:
 
 ```
 !end
-```
-
-Or from the terminal:
-
-```bash
-summon stop
 ```
 
 Either method terminates the Claude session and posts a summary in the channel.
 
 ---
 
-## What's next
+??? tip "Quick ad-hoc sessions (no project setup)"
+    For one-off tasks that don't need a PM, use `summon start` directly:
 
-- [User Guide: Sessions](../guide/sessions.md) — session lifecycle, naming, and management
-- [User Guide: Commands](../guide/commands.md) — full command reference for in-channel interaction
-- [User Guide: Permissions](../guide/permissions.md) — how tool permission handling works
-- [User Guide: Configuration](../guide/configuration.md) — customize summon-claude behavior
+    ```bash
+    summon start
+    ```
+
+    This creates a single session. Authenticate in Slack with `/summon CODE`, interact, and end with `!end` or `summon stop`.
+
+    See [Sessions](../guide/sessions.md) for details.
+
+---
+
+## See also
+
+- [Projects](../guide/projects.md) — multi-session project management with PM agents
+- [Sessions](../guide/sessions.md) — session lifecycle, naming, and management
+- [Commands](../reference/commands.md) — full command reference for in-channel interaction
+- [Permissions](../reference/permissions.md) — how tool permission handling works
+- [Configuration](../guide/configuration.md) — customize summon-claude behavior

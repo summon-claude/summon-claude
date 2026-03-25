@@ -4,12 +4,12 @@ This script is a LOCAL developer tool — it cannot run in CI because it require
 a running Claude CLI, authenticated Anthropic account, and real Slack workspace.
 
 The flow:
-  1. Starts a real `summon start` session
+  1. Registers a project and starts a PM via `summon project up`
   2. Authenticates via `/summon CODE` in the Slack web UI (Playwright)
-  3. Sends a real message to Claude
+  3. Sends a task to the PM agent
   4. Waits for Claude to respond
-  5. Screenshots the channel, thread, and permission UI
-  6. Stops the session and archives the channel
+  5. Screenshots the channel, thread, permission UI, and canvas
+  6. Stops the project and archives the channel
 
 Sections:
   slack-setup   — validates manually-captured Slack setup screenshots
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 import time
 from collections.abc import Callable
@@ -43,7 +44,10 @@ import click
 DEFAULT_OUTPUT_DIR = Path("docs/assets/screenshots")
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 800
+HEADER_HEIGHT = 50
+FOOTER_HEIGHT = 110  # compose box + sandbox banner
 SESSION_NAME = "docs-screenshots"
+PROJECT_NAME = "docs-screenshots"
 
 MANUAL_SCREENSHOTS = [
     {"name": "slack-setup-create-app.png", "description": "Create New App dialog at api.slack.com"},
@@ -64,23 +68,30 @@ MANUAL_SCREENSHOTS = [
 # ---------------------------------------------------------------------------
 
 
-def start_summon_session() -> tuple[subprocess.Popen, str]:
-    """Start `summon start` and extract the auth code from stdout.
+def start_project_session() -> tuple[subprocess.Popen | None, str]:
+    """Register a project and run `summon project up`, extract auth code."""
+    env = _make_env()
 
-    Returns (process, short_code).
-    """
-    click.echo("  Starting summon session...")
+    click.echo("  Registering screenshot project...")
+    subprocess.run(
+        ["summon", "project", "add", PROJECT_NAME, "."],
+        capture_output=True,
+        env=env,
+    )
+
+    click.echo("  Starting project PM...")
     proc = subprocess.Popen(
-        ["summon", "start", "--name", SESSION_NAME],
+        ["summon", "project", "up"],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        env=env,
     )
 
     # Read stdout lines until we find the auth code
     code_pattern = re.compile(r"SUMMON CODE:\s*(\w+)")
     short_code = None
-    deadline = time.time() + 30
+    deadline = time.time() + 60  # PM takes longer to initialize
 
     while time.time() < deadline:
         line = proc.stdout.readline()
@@ -97,25 +108,47 @@ def start_summon_session() -> tuple[subprocess.Popen, str]:
 
     if not short_code:
         proc.terminate()
-        raise RuntimeError("Failed to extract auth code from summon start")
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        raise RuntimeError("Failed to extract auth code from summon project up")
 
     click.echo(f"  Auth code: {short_code}")
     return proc, short_code
 
 
-def stop_summon_session(proc: subprocess.Popen) -> None:
-    """Stop the session and terminate the subprocess."""
-    click.echo("  Stopping summon session...")
+def stop_project_session(proc: subprocess.Popen | None) -> None:
+    """Stop the project and clean up."""
+    env = _make_env()
+    click.echo("  Stopping project sessions...")
     try:
         subprocess.run(
-            ["summon", "stop", SESSION_NAME],
+            ["summon", "project", "down"],
             capture_output=True,
             timeout=15,
+            env=env,
         )
     except Exception as exc:
-        click.echo(f"  WARNING: summon stop failed: {exc}", err=True)
-    proc.terminate()
-    proc.wait(timeout=10)
+        click.echo(f"  WARNING: project down failed: {exc}", err=True)
+
+    click.echo("  Removing screenshot project...")
+    try:
+        subprocess.run(
+            ["summon", "project", "remove", PROJECT_NAME, "--yes"],
+            capture_output=True,
+            timeout=15,
+            env=env,
+        )
+    except Exception as exc:
+        click.echo(f"  WARNING: project remove failed: {exc}", err=True)
+
+    if proc:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
 
 
 def find_session_channel(bot_token: str) -> str | None:
@@ -396,8 +429,8 @@ def capture_screenshots(  # noqa: PLR0913
     captured = []
     channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
 
-    # Slack sidebar is ~250px wide — crop it out of all screenshots
-    sidebar_width = 260
+    # Slack sidebar is ~300px wide — crop it out of all screenshots
+    sidebar_width = 300
 
     def snap(name: str) -> None:
         dest = output_dir / name
@@ -405,9 +438,9 @@ def capture_screenshots(  # noqa: PLR0913
             path=str(dest),
             clip={
                 "x": sidebar_width,
-                "y": 0,
+                "y": HEADER_HEIGHT,
                 "width": VIEWPORT_WIDTH - sidebar_width,
-                "height": VIEWPORT_HEIGHT,
+                "height": VIEWPORT_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT,
             },
         )
         click.echo(f"  captured: {dest}")
@@ -446,9 +479,11 @@ def capture_screenshots(  # noqa: PLR0913
     resp = client.conversations_history(channel=channel_id, limit=50)
     messages = resp.get("messages", [])
 
-    # Find turn thread starters (contain "Turn" and tool-related emoji)
+    # Find turn thread starters (contain emoji reactions or have replies)
     turn_threads = [
-        m["ts"] for m in messages if "Turn" in m.get("text", "") and m.get("reply_count", 0) > 0
+        m["ts"]
+        for m in messages
+        if m.get("reply_count", 0) > 0 and m.get("subtype") is None  # skip join/leave messages
     ]
 
     if turn_threads:
@@ -467,9 +502,35 @@ def capture_screenshots(  # noqa: PLR0913
         page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
         page.wait_for_timeout(2_000)
         snap("quickstart-permission-request.png")
-        snap("permissions-approval.png")
+        # permissions-approval.png shows the same view — copy instead of re-capturing
+        shutil.copy2(
+            output_dir / "quickstart-permission-request.png",
+            output_dir / "permissions-approval.png",
+        )
+        click.echo(f"  copied: {output_dir / 'permissions-approval.png'}")
+        captured.append("permissions-approval.png")
     else:
         click.echo("  No permission ts — skipping permission screenshots")
+
+    # Canvas screenshots — navigate to the canvas tab
+    click.echo("  Attempting canvas capture...")
+    try:
+        # Navigate back to channel
+        nav(channel_url, wait_ms=3_000)
+        # Try to click the canvas tab
+        canvas_tab = page.locator('[data-qa="channel_canvas_tab"], [data-qa="canvas-tab-button"]')
+        if canvas_tab.count() > 0:
+            canvas_tab.first.click(timeout=5_000)
+            page.wait_for_timeout(3_000)
+            snap("canvas-channel-tab.png")
+
+            # Try to capture the canvas content
+            page.wait_for_timeout(2_000)
+            snap("canvas-pm-active-work.png")
+        else:
+            click.echo("  Canvas tab not found — skipping canvas screenshots")
+    except Exception as exc:
+        click.echo(f"  WARNING: Canvas capture failed: {exc}", err=True)
 
     return captured
 
@@ -592,6 +653,80 @@ def _capture_summon_start_banner() -> str:
     return "\n".join(lines)
 
 
+def _capture_project_up_banner() -> str:
+    """Run summon project up and capture just the auth banner."""
+    env = _make_env()
+
+    # Ensure project exists
+    subprocess.run(
+        ["uv", "run", "summon", "project", "add", TERMINAL_SESSION_NAME, "."],
+        capture_output=True,
+        env=env,
+    )
+
+    click.echo("    Starting project for banner capture...")
+    proc = subprocess.Popen(
+        ["uv", "run", "summon", "project", "up"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+    )
+
+    lines: list[str] = []
+    border_re = re.compile(r"^={10,}$")
+    in_banner = False
+    deadline = time.time() + 60
+
+    try:
+        while time.time() < deadline:
+            line = proc.stdout.readline()
+            if not line:
+                if proc.poll() is not None:
+                    break
+                time.sleep(0.1)
+                continue
+            stripped = line.rstrip()
+            if not stripped:
+                if in_banner:
+                    lines.append(stripped)
+                continue
+            if border_re.match(stripped):
+                lines.append(stripped)
+                if in_banner:
+                    break
+                in_banner = True
+            elif in_banner:
+                lines.append(stripped)
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        try:
+            subprocess.run(
+                ["uv", "run", "summon", "project", "down"],
+                capture_output=True,
+                timeout=15,
+                env=env,
+            )
+            subprocess.run(
+                ["uv", "run", "summon", "project", "remove", TERMINAL_SESSION_NAME, "--yes"],
+                capture_output=True,
+                timeout=15,
+                env=env,
+            )
+        except Exception:
+            pass
+
+    if len(lines) < 3:
+        raise RuntimeError(f"Failed to capture project up banner (got {len(lines)} lines): {lines}")
+
+    click.echo(f"    Captured {len(lines)} lines of banner output")
+    return "\n".join(lines)
+
+
 # -- Capture registry -------------------------------------------------------
 #
 # Add new entries here to auto-capture more CLI commands.  The runner iterates
@@ -603,22 +738,19 @@ _START_EXTRA_MD = (
     "2. Codes expire after 5 minutes. Run `summon start` again if it expires."
 )
 
+_PROJECT_UP_EXTRA_MD = (
+    "\n"
+    "1. This is a one-time code. Type it exactly as shown in any Slack channel.\n"
+    "2. Codes expire after 5 minutes. Run `summon project up` again if it expires."
+)
+
 CAPTURES: list[CaptureSpec] = [
     # -- Getting started ----------------------------------------------------
     CaptureSpec(
-        marker="summon-version-short",
+        marker="summon-version",
         md_file="docs/getting-started/installation.md",
-        command=["summon", "--version"],
-    ),
-    CaptureSpec(
-        marker="summon-start",
-        md_file="docs/getting-started/quickstart.md",
-        command=[],
-        fence="{ .text .annotate }",
-        timeout=30,
-        capture_fn=_capture_summon_start_banner,
-        post_process=_add_start_annotations,
-        extra_md=_START_EXTRA_MD,
+        command=["summon", "version"],
+        post_process=_sanitize_paths,
     ),
     # -- Guide: sessions ----------------------------------------------------
     CaptureSpec(
@@ -637,15 +769,20 @@ CAPTURES: list[CaptureSpec] = [
         post_process=_add_start_annotations,
         extra_md=_START_EXTRA_MD,
     ),
+    CaptureSpec(
+        marker="project-up",
+        md_file="docs/getting-started/quickstart.md",
+        command=[],
+        fence="{ .text .annotate }",
+        timeout=60,
+        capture_fn=_capture_project_up_banner,
+        post_process=_add_start_annotations,
+        extra_md=_PROJECT_UP_EXTRA_MD,
+    ),
     # -- Guide: configuration -----------------------------------------------
     CaptureSpec(
-        marker="config-show",
-        md_file="docs/guide/configuration.md",
-        command=["summon", "config", "show"],
-    ),
-    CaptureSpec(
         marker="config-check",
-        md_file="docs/guide/configuration.md",
+        md_file="docs/getting-started/configuration.md",
         command=["summon", "config", "check"],
         timeout=30,
         post_process=_sanitize_paths,
@@ -835,7 +972,7 @@ def run_terminal_section(dry_run: bool = False) -> bool:
 )
 @click.option(
     "--message",
-    default="Read the README.md and give me a one-paragraph summary.",
+    default="Review the README.md and suggest improvements",
     help="Message to send to Claude for generating screenshot content.",
 )
 def main(
@@ -938,8 +1075,8 @@ def main(
     channel_id = None
 
     try:
-        # 1. Start summon session
-        proc, short_code = start_summon_session()
+        # 1. Start project session (PM-based)
+        proc, short_code = start_project_session()
 
         # 2. Authenticate via Playwright
         with sync_playwright() as pw:
@@ -949,7 +1086,7 @@ def main(
             authenticate_via_slack(page, team_id, short_code, output_dir)
 
             # 3. Wait for session channel
-            channel_id = wait_for_session_channel(bot_token, timeout=60)
+            channel_id = wait_for_session_channel(bot_token, timeout=90)
 
             # 4. Navigate to session channel and send message
             channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
@@ -966,7 +1103,7 @@ def main(
             send_message_via_slack(page, message)
 
             # 5. Wait for Claude to respond
-            wait_for_claude_response(bot_token, channel_id, timeout=120)
+            wait_for_claude_response(bot_token, channel_id, timeout=180)
 
             # 6. Post a mock permission request for screenshot purposes.
             #    Real permission requests can't be triggered reliably because
@@ -995,7 +1132,7 @@ def main(
 
     finally:
         if proc:
-            stop_summon_session(proc)
+            stop_project_session(proc)
         if channel_id and not keep_channel:
             archive_channel(bot_token, channel_id)
         elif channel_id:

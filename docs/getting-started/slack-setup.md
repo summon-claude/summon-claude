@@ -21,11 +21,16 @@ Before starting your first session, you need to create a Slack app and configure
 
     ![Pick a workspace](../assets/screenshots/slack-setup-app-workspace.png)
 
-4. Paste the contents of [`slack-app-manifest.yaml`](https://github.com/summon-claude/summon-claude/blob/main/slack-app-manifest.yaml) from the repository
+4. Select the **YAML** tab (Slack defaults to JSON), then paste the contents of [`slack-app-manifest.yaml`](https://github.com/summon-claude/summon-claude/blob/main/slack-app-manifest.yaml) from the repository
 
     ![Paste manifest YAML](../assets/screenshots/slack-setup-manifest.png)
 
-5. Click **Next**, review the summary, then click **Create**
+5. Click **Next** to see Slack's review screen. Verify:
+    - App name is **summon-claude**
+    - Scopes include `channels:manage`, `chat:write`, `reactions:write`, and others
+    - Features show Socket Mode enabled
+
+    Then click **Create**
 
 !!! tip "Using the manifest"
     The manifest pre-configures all required scopes, event subscriptions, and Socket Mode settings. Do not create the app manually — the manifest ensures nothing is missed.
@@ -46,14 +51,14 @@ After creating the app, install it to your workspace:
 
 ---
 
-## Step 3: Enable Socket Mode
+## Step 3: Verify Socket Mode is enabled
 
-In your app settings, go to **Settings > Socket Mode** and toggle **Enable Socket Mode** on.
+The app manifest sets `socket_mode_enabled: true`, so Socket Mode should already be on. To confirm, go to **Settings > Socket Mode** in your app settings and verify the toggle is enabled.
 
 ![Socket Mode toggle](../assets/screenshots/slack-setup-socket-mode.png)
 
 !!! warning "Socket Mode is required"
-    summon-claude uses Socket Mode (WebSocket) for real-time event delivery. Without it, the app will not receive messages from Slack.
+    summon-claude uses Socket Mode (WebSocket) for real-time event delivery. Without it, the app will not receive messages from Slack. If the toggle is off, enable it manually — this can happen if the app was created without the manifest or if the setting was changed after creation.
 
 ---
 
@@ -87,25 +92,9 @@ You need three values from the Slack app settings:
 
 ---
 
-## Step 6: Run the setup wizard
+## Step 6: Configure summon-claude
 
-summon-claude includes an interactive setup wizard:
-
-```bash
-summon init
-```
-
-The wizard prompts for Slack tokens and other configuration options, validates connectivity, then writes them to the config file. It automatically runs `summon config check` at the end to verify everything is working.
-
----
-
-## Step 7: Validate the configuration
-
-```bash
-summon config check
-```
-
-This verifies that all credentials are present, checks token format, tests database writability, and validates Slack API connectivity.
+With your credentials collected, proceed to the [Configuration](configuration.md) page to run the setup wizard and verify your installation.
 
 ---
 
@@ -130,6 +119,6 @@ This verifies that all credentials are present, checks token format, tests datab
 
 ## Next steps
 
-With Slack configured, you're ready to start your first session:
+With your Slack app created and credentials collected, configure summon-claude:
 
-[Quick Start](quickstart.md){ .md-button .md-button--primary }
+[Configuration](configuration.md){ .md-button .md-button--primary }

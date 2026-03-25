@@ -1,5 +1,8 @@
 # Projects
 
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
+
 Projects group related sessions under a shared name, workflow instructions, and a channel-prefix convention. A project can have a dedicated PM agent that coordinates child sessions on your behalf.
 
 ---
@@ -40,23 +43,7 @@ summon project add my-api
 summon project add frontend ~/work/acme-frontend
 ```
 
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `--description TEXT` | Human-readable description |
-| `--channel-prefix TEXT` | Slack channel prefix for project sessions (default: project name, lowercased) |
-| `--workflow-instructions TEXT` | Instructions injected into every session's system prompt |
-| `--workflow-file PATH` | Read workflow instructions from a file instead |
-
-**Channel prefix conventions:**
-
-Channel prefixes must be valid Slack channel-name segments (lowercase letters, numbers, hyphens). summon-claude enforces uniqueness across projects so channels are unambiguous.
-
-```bash
-summon project add my-api --channel-prefix api
-# Sessions get channels like: api-worker-a1b2c3, api-review-d4e5f6
-```
+After registering, set workflow instructions and other project settings using the `summon project workflow` subcommands documented [below](#managing-workflow-instructions).
 
 ### `summon project list`
 
@@ -66,7 +53,7 @@ Show all registered projects:
 summon project list
 ```
 
-The table includes each project's ID, name, directory, channel prefix, and PM status (running / stopped).
+The table includes each project's name, directory, PM status (running / stopped / errored / auth...), and ID prefix.
 
 ```bash
 summon project list --output json
@@ -74,17 +61,13 @@ summon project list --output json
 
 ### `summon project up`
 
-Start PM agents for all projects (or a specific one):
+Start PM agents for all registered projects:
 
 ```bash
-# Start PMs for all projects
 summon project up
-
-# Start PM for one project
-summon project up my-api
 ```
 
-Each project gets one PM session. If a PM is already running for a project, `up` skips it.
+Each project gets one PM session. If a PM is already running for a project, `up` skips it. There is no per-project syntax — `project up` always starts PMs for all projects that need one.
 
 !!! note "Authentication still required"
     Each PM session starts with an authentication code, just like `summon start`. The PM prints its code so you can bind it to a Slack channel with `/summon CODE`.
@@ -100,8 +83,8 @@ summon project down my-api
 `down` stops the PM and all child sessions it manages. All sessions (PM and children) are marked **suspended** rather than completed — this lets `project up` restart them deterministically later (cascade restart). Each session's Slack channel is renamed with a `zzz-` prefix on disconnect (e.g., `my-api-worker-a1b2c3` becomes `zzz-my-api-worker-a1b2c3`), making it easy to visually identify inactive sessions in the Slack sidebar.
 
 ```bash
-# Stop all projects
-summon project down --all
+# Stop all projects (omit NAME to stop all)
+summon project down
 ```
 
 **Cascade restart:** When you run `summon project up` after a `down`, summon-claude finds all suspended sessions for the project and resumes them with full transcript continuity. Rather than creating fresh sessions, it creates new summon sessions that bind to the **existing** Slack channels — the `zzz-` prefix is removed, and the original channel name is restored. Canvas content, conversation history, and the Claude Code session transcript all carry over. The resumed sessions keep the same `cwd` and model they had before, so you can pause and resume an entire multi-session workflow without reconfiguring anything or losing context.
@@ -123,20 +106,76 @@ summon project remove proj-a1b2c3
 
 ## Workflow instructions
 
-Workflow instructions are injected into the system prompt of every session created under the project. Use them to encode team conventions, coding standards, or project-specific context.
+Workflow instructions are a block of free-form text that gets injected into the **system prompt** of every session created under a project. Because they live in the system prompt rather than conversation history, they:
 
-You can set initial workflow instructions when adding a project:
+- **Persist across sessions** — every new session (PM, child, or ad-hoc) inherits the same instructions automatically.
+- **Survive context compaction** — when a long session compacts its conversation history to free up context, system prompt content is preserved. Your conventions stay active for the entire session lifetime.
+- **Apply uniformly** — the PM agent, child workers, and any session spawned under the project all receive the same instructions.
+
+No default workflows ship with summon-claude — workflow instructions are entirely yours to define. They encode whatever your project needs: coding standards, tool preferences, repository conventions, review checklists, or operational guardrails.
+
+After registering a project, set its workflow instructions:
 
 ```bash
-summon project add my-api \
-  --workflow-instructions "Always run 'uv run pytest' before committing. Follow the existing module structure in src/. Open PRs to the 'main' branch."
+summon project add my-api ~/code/my-api
+summon project workflow set my-api
 ```
 
-For longer instructions, use a file:
+This opens `$EDITOR` where you can write your instructions. For example:
 
-```bash
-summon project add my-api --workflow-file ./workflow.md
+```text
+Always run 'uv run pytest' before committing.
+Follow the existing module structure in src/.
+Open PRs to the 'main' branch.
 ```
+
+### Example workflows
+
+The following examples show real-world patterns. Use them as starting points and tailor them to your project.
+
+**Python project:**
+
+```text
+Use uv for all Python operations (uv run, uv add, uvx).
+Run `uv run pytest` before committing — all tests must pass.
+Follow the existing module structure in src/myapp/.
+Use absolute imports (from myapp.utils import ..., not relative).
+Type hints are required on all public functions.
+Format with `uvx ruff format` and lint with `uvx ruff check --fix`.
+```
+
+**Code review:**
+
+```text
+Review all PRs for:
+- Security issues (injection, auth bypass, secret leakage)
+- Test coverage (new code paths must have tests)
+- Adherence to the team style guide in docs/STYLE.md
+
+Post findings as individual PR review comments on specific lines.
+Use the "Request changes" status for security issues; "Comment" for style nits.
+Always check that CI is green before approving.
+```
+
+**Monorepo:**
+
+```text
+This is a monorepo. Each service lives in services/<name>/.
+Never modify shared libraries in lib/ without explicit approval.
+Each service has its own Dockerfile and README.
+Run tests only for the affected service: `cd services/<name> && make test`.
+Cross-service API changes require updating the OpenAPI spec in api-specs/.
+```
+
+### Writing effective workflow instructions
+
+Good workflow instructions are specific and actionable. A few guidelines:
+
+- **Name exact commands.** "Run tests before committing" is vague. "Run `uv run pytest tests/`" is unambiguous.
+- **Reference file paths.** Point to style guides, config files, API specs, or directory structures by their actual path in the repo.
+- **State conventions explicitly.** If your team uses absolute imports, feature branches, or a particular commit message format, say so. Claude cannot infer unwritten conventions.
+- **Include guardrails.** If certain files or directories should not be modified without approval, state that boundary. "Never modify `lib/` without explicit approval" is a clear constraint.
+- **Keep it focused.** Workflow instructions are always present in the system prompt. Overly long instructions dilute the important points. Aim for the set of rules that matter on every task, not an exhaustive manual.
 
 ### Managing workflow instructions
 
@@ -186,8 +225,7 @@ Without `$INCLUDE_GLOBAL`, project-specific instructions fully replace the globa
 
 ---
 
-## What's next
+## See also
 
-- [PM Agents](pm-agents.md) — the orchestrator session that runs within a project
 - [Scribe](scribe.md) — background monitoring agent
 - [Configuration](configuration.md) — project-level config options

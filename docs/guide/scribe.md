@@ -1,9 +1,9 @@
 # Scribe Agent
 
-The scribe is a background monitoring agent that keeps an eye on your inboxes so you don't have to. It periodically checks Gmail, Google Calendar, Google Drive, and optionally external Slack channels, then posts alerts, daily summaries, and important signals to its persistent `#0-summon-scribe` channel.
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
 
-!!! note "Preview feature"
-    The scribe agent system is a preview feature. Configuration uses `SUMMON_SCRIBE_*` environment variables and the behavior may change in future releases.
+The scribe is a background monitoring agent that keeps an eye on your inboxes so you don't have to. It periodically checks Gmail, Google Calendar, Google Drive, and optionally external Slack channels, then posts alerts, daily summaries, and important signals to its persistent `#0-summon-scribe` channel.
 
 ---
 
@@ -27,11 +27,8 @@ Key behaviors:
 
 ### Step 1: Enable the scribe
 
-Set the following in your config or environment:
-
 ```bash
-# In ~/.config/summon/config.env
-SUMMON_SCRIBE_ENABLED=true
+summon config set SUMMON_SCRIBE_ENABLED true
 ```
 
 ### Step 2: Enable data sources
@@ -41,7 +38,7 @@ The scribe has two data collectors, each with its own enable flag. Enable at lea
 #### Google Workspace
 
 ```bash
-SUMMON_SCRIBE_GOOGLE_ENABLED=true
+summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
 ```
 
 Then authenticate with Google:
@@ -99,8 +96,8 @@ All scribe configuration uses `SUMMON_SCRIBE_*` environment variables. These can
 **Example with keyword filtering and quiet hours:**
 
 ```bash
-SUMMON_SCRIBE_IMPORTANCE_KEYWORDS=urgent,outage,deploy,PagerDuty
-SUMMON_SCRIBE_QUIET_HOURS=23:00-07:00
+summon config set SUMMON_SCRIBE_IMPORTANCE_KEYWORDS urgent,outage,deploy,PagerDuty
+summon config set SUMMON_SCRIBE_QUIET_HOURS 23:00-07:00
 ```
 
 ### Google Workspace
@@ -114,7 +111,7 @@ The default services are `gmail`, `calendar`, `drive`. The full set of supported
 
 ```bash
 # Monitor only Gmail and Calendar, not Drive
-SUMMON_SCRIBE_GOOGLE_SERVICES=gmail,calendar
+summon config set SUMMON_SCRIBE_GOOGLE_SERVICES gmail,calendar
 ```
 
 !!! note "Requires workspace-mcp"
@@ -135,9 +132,9 @@ DMs and @mentions are always captured regardless of `SUMMON_SCRIBE_SLACK_MONITOR
 **Example:**
 
 ```bash
-SUMMON_SCRIBE_SLACK_ENABLED=true
-SUMMON_SCRIBE_SLACK_BROWSER=chrome
-SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C01ABC123,C02DEF456
+summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+summon config set SUMMON_SCRIBE_SLACK_BROWSER chrome
+summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01ABC123,C02DEF456
 ```
 
 ---
@@ -292,8 +289,7 @@ SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C01ABC123,C02DEF456
 
 ---
 
-## What's next
+## See also
 
 - [Projects](projects.md) — the project system the scribe runs within
-- [Canvas](canvas.md) — how the scribe canvas is structured and synced
 - [Configuration](configuration.md) — full configuration reference

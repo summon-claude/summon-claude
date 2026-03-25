@@ -8,6 +8,12 @@ Run long-running AI agents in the background. Interact, review permissions, and 
 
 <div class="grid cards" markdown>
 
+-   **Project management**
+
+    ---
+
+    Group sessions into projects with a PM agent that spawns, directs, and monitors multiple Claude sessions on your behalf.
+
 -   **Real-time streaming**
 
     ---
@@ -32,12 +38,6 @@ Run long-running AI agents in the background. Interact, review permissions, and 
 
     Persistent markdown canvas per session. Claude can read and write structured notes that survive conversation compaction.
 
--   **Project management**
-
-    ---
-
-    Group sessions into projects with a PM agent coordinating work across multiple Claude sessions.
-
 -   **Scheduled jobs and tasks**
 
     ---
@@ -50,27 +50,36 @@ Run long-running AI agents in the background. Interact, review permissions, and 
 
 ## How it works
 
-**1. Start a session**
+**1. Register a project**
 
 ```bash
-summon start
+summon project add my-api ~/code/my-api
 ```
 
-summon-claude launches a Claude Code session in the background and prints a short authentication code.
+Link a name, working directory, and Slack channel prefix to a project.
 
-**2. Authenticate in Slack**
+**2. Set workflow instructions**
 
-In any Slack channel, type:
-
-```
-/summon ABC123
+```bash
+summon project workflow set my-api
 ```
 
-Claude connects to that channel. All interaction happens there from now on.
+Encode team conventions, coding standards, or project context into every session's system prompt.
 
-**3. Interact entirely through Slack**
+**3. Start your PM agents**
 
-Send messages, review tool permissions with buttons, and receive streaming responses — no terminal required.
+```bash
+summon project up
+```
+
+PM agents launch in the background for all registered projects. Authenticate each one in Slack with `/summon CODE`, then give it instructions — the PM spawns, directs, and monitors child sessions on your behalf.
+
+**4. Interact entirely through Slack**
+
+Send messages, review tool permissions with buttons, and receive streaming responses — no terminal required. The PM coordinates everything.
+
+!!! tip "Quick ad-hoc sessions"
+    Don't need the full project setup? Run `summon start` to launch a single session directly. See the [Quick Start guide](getting-started/quickstart.md).
 
 ---
 
@@ -88,8 +97,14 @@ Send messages, review tool permissions with buttons, and receive streaming respo
 
 === "Homebrew"
     ```bash
-    brew install summon-claude/summon/summon-claude
+    brew install wgordon17/summon/summon-claude
     ```
+
+Then run the interactive setup wizard:
+
+```bash
+summon init
+```
 
 [Get started with the full setup guide](getting-started/quickstart.md){ .md-button .md-button--primary }
 [Installation details](getting-started/installation.md){ .md-button }

@@ -116,7 +116,7 @@ Compacts the conversation context to reduce token usage. Optional instructions t
 !summon resume <session-id>     # resume a specific session
 ```
 
-Spawns or resumes sessions from within a running session. Child sessions appear as new Slack channels. Requires the PM agent feature — see [Projects](projects.md).
+Spawns or resumes sessions from within a running session. Child sessions appear as new Slack channels. Requires the PM agent feature — see [Projects](../guide/projects.md).
 
 ### !diff
 

@@ -9,13 +9,13 @@ theme:
     - navigation.tabs
     - navigation.tabs.sticky
     - navigation.sections
-    - navigation.expand
     - navigation.top
     - navigation.instant
     - navigation.instant.progress
     - navigation.tracking
     - navigation.footer
     - navigation.indexes
+    - navigation.path
     - content.code.copy
     - content.code.select
     - content.code.annotate
@@ -25,7 +25,6 @@ theme:
     - search.highlight
     - search.share
     - header.autohide
-    - toc.integrate
   palette:
     - media: "(prefers-color-scheme)"
       toggle:
@@ -72,17 +71,20 @@ plugins:
           - index.md
         Getting Started:
           - getting-started/*.md
-        User Guide:
+        Guides:
           - guide/*.md
         Reference:
           - reference/*.md
           - reference/api/*.md
-        Architecture:
-          - architecture/*.md
+        Concepts:
+          - concepts/*.md
         Troubleshooting:
           - troubleshooting.md
         Development:
           - development/*.md
+
+extra_css:
+  - stylesheets/extra.css
 
 extra:
   version:
@@ -95,38 +97,39 @@ nav:
     - Installation: getting-started/installation.md
     - Slack Setup: getting-started/slack-setup.md
     - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
     - Upgrading: getting-started/upgrading.md
-  - User Guide:
+  - Guides:
     - guide/index.md
-    - Sessions: guide/sessions.md
-    - Commands: guide/commands.md
-    - Configuration: guide/configuration.md
-    - Permissions: guide/permissions.md
-    - Threading: guide/threading.md
     - Projects: guide/projects.md
     - PM Agents: guide/pm-agents.md
     - Scribe: guide/scribe.md
-    - Canvas: guide/canvas.md
-    - Cron & Tasks: guide/cron-tasks.md
     - GitHub Integration: guide/github-integration.md
+    - Cron & Tasks: guide/cron-tasks.md
+    - Canvas: guide/canvas.md
+    - Configuration: guide/configuration.md
+    - Sessions: guide/sessions.md
   - Reference:
     - reference/index.md
     - CLI: reference/cli.md
-    - Environment Variables: reference/environment-variables.md
+    - Configuration Reference: reference/environment-variables.md
     - MCP Tools: reference/mcp-tools.md
+    - In-Session Commands: reference/commands.md
+    - Permissions: reference/permissions.md
     - API Reference:
       - reference/api/index.md
       - Configuration: reference/api/config.md
       - Sessions: reference/api/sessions.md
       - Slack: reference/api/slack.md
       - CLI Modules: reference/api/cli.md
-  - Architecture:
-    - architecture/index.md
-    - Overview: architecture/overview.md
-    - Daemon: architecture/daemon.md
-    - Slack Integration: architecture/slack-integration.md
-    - Database: architecture/database.md
-    - Security: architecture/security.md
+  - Concepts:
+    - concepts/index.md
+    - Overview: concepts/overview.md
+    - Threading & Streaming: concepts/threading.md
+    - Daemon: concepts/daemon.md
+    - Slack Integration: concepts/slack-integration.md
+    - Database: concepts/database.md
+    - Security: concepts/security.md
   - Troubleshooting: troubleshooting.md
   - Development:
     - development/index.md

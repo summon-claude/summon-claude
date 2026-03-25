@@ -1,5 +1,8 @@
 # GitHub Integration
 
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
+
 summon-claude can connect Claude sessions to the GitHub remote MCP server, giving Claude access to GitHub tools (read repositories, search code, create issues, review PRs, etc.) directly from Slack.
 
 ---
@@ -113,17 +116,67 @@ Redaction happens at the Slack output boundary — tokens cannot appear in messa
 
 ## PR reviewer sessions
 
-A common pattern is to have the PM agent spawn a dedicated PR reviewer session:
+The PM agent can spawn dedicated reviewer sessions that use GitHub MCP tools to review pull requests. There are two ways this happens: you ask for a review, or the PM detects a PR automatically during its periodic scan.
+
+### Asking the PM to review a PR
+
+Send the PM a message in its Slack channel:
 
 ```
-Review the open pull requests in github.com/myorg/myrepo.
-Spawn a worker to do a thorough code review on PR #42 and post
-a summary to the canvas when done.
+Review PR #42 on myorg/myrepo.
 ```
 
-The PM spawns a worker session, which uses the GitHub MCP tools to read the PR diff, files, and existing comments, then posts a review. The PM receives the results and can present them to you or trigger further actions.
+The PM reads the PR metadata (branch, status, whether it is draft), then spawns a reviewer session. You can also paste a full URL:
 
-The reviewer session uses Opus for thorough code analysis. Approval of the actual PR review submission (`pull_request_review_write`) still requires your Slack approval.
+```
+Review https://github.com/myorg/myrepo/pull/42 — focus on the auth changes.
+```
+
+If the PR is draft or closed, the PM tells you and does not spawn a reviewer.
+
+### Automatic review after child work
+
+The PM also detects PRs without being asked. During each periodic scan (default: every 15 minutes), the PM checks completed child sessions for GitHub PR URLs in their Slack history. If it finds a PR it has not yet reviewed, it spawns a reviewer automatically and notes it on the canvas.
+
+If your project has [workflow instructions](projects.md#managing-workflow-instructions) that define pre-review steps (e.g., "run the test suite before review"), the PM follows those steps first and only spawns a reviewer after they pass.
+
+### What the reviewer does
+
+The PM spawns the reviewer as a new child session with:
+
+- **Model**: Opus (hardcoded for thorough analysis)
+- **CWD**: the directory where the PR branch is already checked out (from the child session that created the PR), or a fresh worktree for external PRs
+- **Name**: `rv-pr{number}` (e.g., `rv-pr42`)
+
+The reviewer session works through the PR systematically:
+
+1. Reads the full diff, changed files, and existing comments via GitHub MCP tools
+2. Checks for bugs, security issues, logic errors, and style problems
+3. Fixes issues directly — commits with descriptive messages and pushes to the PR's head branch
+4. Runs the project's test suite before every push
+5. Applies the "Ready for Review" label when satisfied
+6. Posts a detailed summary of findings and fixes to its Slack channel
+
+The reviewer follows strict safety rules: it never pushes to `main` or `master`, never force-pushes, and does not modify files outside the scope of the PR's changes.
+
+When the reviewer finishes, the PM reads its channel for the summary and updates the project canvas (e.g., "PR #42 — reviewed").
+
+### Approval gate
+
+The reviewer can read PR data freely (Tier 1 auto-approved), but posting a review requires your approval. `pull_request_review_write` is a Tier 2 operation — the reviewer posts a permission request to Slack and waits for you to approve or deny before the review is submitted to GitHub. This gives you a chance to read the review content before it becomes visible on the PR.
+
+### Worktree isolation for reviews
+
+When the PM spawns a reviewer for a PR that was not created by one of its child sessions (an "external" PR), it uses worktree isolation:
+
+1. The PM spawns the reviewer at the project root
+2. The reviewer enters a worktree using `EnterWorktree(name="review-pr{number}")`
+3. Inside the worktree, the reviewer fetches and checks out the PR's head branch
+4. All file reads and writes are constrained to the worktree directory
+
+For PRs created by a child session, the reviewer runs in that child's existing CWD where the branch is already checked out — no worktree needed.
+
+The PM cleans up stale review worktrees automatically. During periodic scans, it checks worktrees under `.claude/worktrees/review-pr*` and removes any whose PR has been merged or closed.
 
 ---
 

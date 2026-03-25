@@ -1,5 +1,8 @@
 # Canvas Integration
 
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
+
 Every summon-claude session gets a persistent markdown canvas — a dedicated tab in its Slack channel that Claude can read and write. Unlike the message thread (which can be compacted away), the canvas survives conversation history changes and gives Claude a place to store structured notes, status, and work output.
 
 ---
@@ -7,6 +10,8 @@ Every summon-claude session gets a persistent markdown canvas — a dedicated ta
 ## How canvases work
 
 When a session authenticates to a Slack channel, summon-claude creates (or finds) a canvas for that channel. The canvas lives as a tab in the channel, visible to anyone in the workspace.
+
+<!-- TODO: add canvas-channel-tab.png screenshot (run docs-screenshots.py --section session-ux) -->
 
 All canvas state is stored locally in SQLite first. A background worker syncs the local state to Slack on a 2-second dirty delay, then again on a 60-second heartbeat interval. This means:
 
@@ -31,6 +36,11 @@ Used for regular `summon start` sessions:
 - **Current Task** — what Claude is working on right now
 - **Notes** — free-form markdown for Claude to accumulate context
 
+<!-- TODO: Screenshot needed — canvas-standard-template.png
+     Show a standard agent canvas with Session Info, Current Task, and Notes
+     sections populated with example content.
+     Requires manual capture from a live Slack workspace. (BUG-019) -->
+
 ### PM agent canvas
 
 Used for PM sessions (started via `summon project up`):
@@ -40,7 +50,7 @@ Used for PM sessions (started via `summon project up`):
 - **Completed Work** — summary of finished sessions
 - **Notes** — PM-level notes and decisions
 
-<!-- TODO: add pm-canvas-template.png screenshot (requires paid Slack plan) -->
+<!-- TODO: add canvas-pm-active-work.png screenshot (run docs-screenshots.py --section session-ux) -->
 
 ### Global PM canvas
 
@@ -53,6 +63,11 @@ Used for the scribe monitoring agent:
 - **Recent Signals** — items from the latest scan
 - **Active Items** — ongoing events and threads
 - **Suppressed** — items seen but filtered below importance threshold
+
+<!-- TODO: Screenshot needed — canvas-scribe-signals.png
+     Show a scribe canvas with Recent Signals and Active Items sections
+     populated with example monitoring data (e.g., GitHub events, Slack threads).
+     Requires manual capture from a live Slack workspace. (BUG-019) -->
 
 ---
 
@@ -136,8 +151,7 @@ Or read it directly in Slack by clicking the canvas tab in the channel header.
 
 ---
 
-## What's next
+## See also
 
 - [PM Agents](pm-agents.md) — how the PM uses the canvas for work tracking
 - [Scribe](scribe.md) — the scribe canvas structure
-- [Cron & Tasks](cron-tasks.md) — how scheduled jobs and tasks appear on the canvas

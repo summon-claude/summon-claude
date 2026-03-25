@@ -1,6 +1,61 @@
 # Cron & Tasks
 
+??? info "Prerequisites"
+    This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
+
 summon-claude gives Claude two tools for managing ongoing work: **cron jobs** for time-based recurring actions, and **tasks** for tracking discrete units of work. Both are session-scoped and integrate with the canvas for visibility.
+
+## How you use cron and tasks
+
+You don't need to know the tool names or parameters — just tell Claude what you want in your Slack session, and it handles the rest.
+
+**Scheduling recurring work:**
+
+> "Check for new GitHub issues every hour and post a summary"
+
+Claude creates a cron job that fires every hour with a prompt to check GitHub and summarize new issues. You see the results in your Slack channel each time the job runs.
+
+**Setting one-shot reminders:**
+
+> "Remind me to review the PR at 3pm"
+
+Claude creates a one-shot cron job scheduled for 3pm. When it fires, Claude posts a reminder in your channel. The job deletes itself after running once.
+
+**Tracking work items:**
+
+> "Create a task to review the auth module — high priority"
+
+Claude creates a task entry that appears on the session canvas. You can ask about task status anytime, and Claude updates tasks as work progresses.
+
+Under the hood, Claude translates your requests into MCP tool calls (`CronCreate`, `TaskCreate`, etc.). The sections below document these tools for reference — but in practice, you just ask Claude in plain language.
+
+---
+
+## Conversational examples
+
+Here are examples of what you might type in Slack and what happens:
+
+**Setting up a recurring check:**
+
+> "Set up a recurring check every 30 minutes for any failing CI jobs"
+
+Claude creates a cron job with a 30-minute interval. Every 30 minutes, Claude checks CI status and posts in your channel only if there are failures. The job shows up on the canvas under **Scheduled Jobs** with its next run time.
+
+**Creating and querying tasks:**
+
+> "Create a task to review the auth module — high priority"
+
+Claude creates a high-priority task and confirms it. Later, you can ask:
+
+> "What tasks are open right now?"
+
+Claude lists all pending and in-progress tasks for the session, showing their priority and current status.
+
+**Canceling a scheduled job:**
+
+> "Stop checking for CI failures, I fixed the pipeline"
+
+Claude finds the relevant cron job and cancels it. The job disappears from the canvas.
 
 ---
 
@@ -200,7 +255,7 @@ This gives you full visibility into the work distribution from the PM's Slack ch
 
 ---
 
-## What's next
+## See also
 
 - [PM Agents](pm-agents.md) — how the PM coordinates tasks across sessions
 - [Canvas](canvas.md) — how cron and task data appears on the canvas

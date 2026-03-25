@@ -1,95 +1,122 @@
-# Environment Variables
+# Configuration Reference
 
-All `SUMMON_*` variables are read from the environment or from the config file
-(`~/.config/summon/config.env` by default). Variables in the config file are
-overridden by the actual environment.
+All configuration options can be set with `summon config set` or as environment
+variables. Values in the config file (`~/.config/summon/config.env` by default)
+are overridden by actual environment variables.
 
-Use `summon config show` to see resolved values (tokens masked).
-Use `summon config set KEY VALUE` to set a value in the config file.
+```bash
+# Set a value
+summon config set SUMMON_DEFAULT_MODEL claude-opus-4-6
+
+# View all resolved values (tokens masked)
+summon config show
+
+# Open the config file in your editor
+summon config edit
+```
 
 ---
 
-## Required
+## Slack Credentials
 
-These three variables must be set before summon can start.
+These three options must be set before summon can start. See [Slack Setup](../getting-started/slack-setup.md) for instructions on obtaining these values.
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `SUMMON_SLACK_BOT_TOKEN` | Slack Bot User OAuth token. Must start with `xoxb-`. | `xoxb-123-456-abc` |
-| `SUMMON_SLACK_APP_TOKEN` | Slack App-Level token for Socket Mode. Must start with `xapp-`. | `xapp-1-A01...` |
-| `SUMMON_SLACK_SIGNING_SECRET` | Slack signing secret for request verification. | `abc123def456...` |
-
-See [Slack Setup](../getting-started/slack-setup.md) for instructions on obtaining these values.
+| Config Key | Type | Description |
+|------------|------|-------------|
+| `SUMMON_SLACK_BOT_TOKEN` | secret | Slack Bot User OAuth token. Must start with `xoxb-`. |
+| `SUMMON_SLACK_APP_TOKEN` | secret | Slack App-Level token for Socket Mode. Must start with `xapp-`. |
+| `SUMMON_SLACK_SIGNING_SECRET` | secret | Slack signing secret for request verification (hex string). |
 
 ---
 
 ## Session Defaults
 
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_DEFAULT_MODEL` | _(Claude's default)_ | Model to use for new sessions. Accepts any Claude model identifier. | `claude-opus-4-6` |
-| `SUMMON_DEFAULT_EFFORT` | `high` | Default effort level for new sessions. Must be one of: `low`, `medium`, `high`, `max`. | `medium` |
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_DEFAULT_MODEL` | text | _(Claude's default)_ | Claude model to use for new sessions (e.g. `claude-opus-4-6`). |
+| `SUMMON_DEFAULT_EFFORT` | choice: `low`, `medium`, `high`, `max` | `high` | Thinking effort level for new sessions. |
+| `SUMMON_CHANNEL_PREFIX` | text | `summon` | Prefix for auto-created Slack channel names. Channels are named `{prefix}-{session-name}`. Must be lowercase alphanumeric, hyphens, and underscores only. |
 
 See [Sessions](../guide/sessions.md) for how model and effort affect behavior.
 
 ---
 
-## Display
+## Scribe
 
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_CHANNEL_PREFIX` | `summon` | Prefix for auto-created Slack channel names. Channels are named `{prefix}-{session-name}`. | `claude` |
-| `SUMMON_MAX_INLINE_CHARS` | `2500` | Maximum characters for inline Slack messages. Responses longer than this are uploaded as files. | `4000` |
-| `SUMMON_PERMISSION_DEBOUNCE_MS` | `500` | Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message. | `1000` |
+Core settings for the background scribe agent. See [Scribe](../guide/scribe.md) for full setup and configuration details.
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_SCRIBE_ENABLED` | boolean | `false` | Enable the background scribe agent. |
+| `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | integer | `5` | How often the scribe scans for new information. Minimum 1. |
+| `SUMMON_SCRIBE_CWD` | text | _(data dir)/scribe_ | Working directory for the scribe session. |
+| `SUMMON_SCRIBE_MODEL` | text | _(inherits default model)_ | Model override for the scribe session. |
+| `SUMMON_SCRIBE_IMPORTANCE_KEYWORDS` | text | _(empty)_ | Comma-separated keywords that flag a message as high-priority (e.g. `urgent,deadline`). |
+| `SUMMON_SCRIBE_QUIET_HOURS` | text | _(empty)_ | Time window for reduced alerts, format `HH:MM-HH:MM` (e.g. `22:00-07:00`). Only level-5 alerts are surfaced during this window. |
+
+### Scribe Google
+
+Google Workspace data collector settings. Requires the `google` optional extra (`uv tool install summon-claude[google]`).
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_SCRIBE_GOOGLE_ENABLED` | boolean | `false` | Enable the Google Workspace data collector for scribe. |
+| `SUMMON_SCRIBE_GOOGLE_SERVICES` | text | `gmail,calendar,drive` | Comma-separated list of Google services to monitor. Valid values: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`. |
+
+### Scribe Slack
+
+Slack monitoring via browser automation. Requires the `slack-browser` optional extra (`uv tool install summon-claude[slack-browser]`).
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_SCRIBE_SLACK_ENABLED` | boolean | `false` | Enable the Slack data collector (uses Playwright browser automation). |
+| `SUMMON_SCRIBE_SLACK_BROWSER` | choice: `chrome`, `firefox`, `webkit` | `chrome` | Browser for Slack monitoring. |
+| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | text | _(empty)_ | Comma-separated Slack channel names to monitor. |
 
 ---
 
-## Thinking
+## GitHub
 
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_ENABLE_THINKING` | `true` | Pass `ThinkingConfigAdaptive` to the Claude SDK, enabling extended thinking when the model decides it's useful. Set to `false` to disable. | `false` |
-| `SUMMON_SHOW_THINKING` | `false` | Route `ThinkingBlock` content to the Slack turn thread so thinking is visible. By default thinking is processed but not posted. | `true` |
-
----
-
-## GitHub Integration
-
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_GITHUB_PAT` | _(none)_ | GitHub Personal Access Token. Enables the GitHub remote MCP server for all sessions. Accepts classic (`ghp_*`) or fine-grained (`github_pat_*`) tokens. | `ghp_abc123...` |
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_GITHUB_PAT` | secret | _(none)_ | GitHub Personal Access Token. Enables the GitHub remote MCP server for all sessions. Accepts classic (`ghp_*`) or fine-grained (`github_pat_*`) tokens. |
 
 See [GitHub Integration](../guide/github-integration.md) for setup details.
 
 ---
 
-## Scribe Agent
+## Display
 
-The scribe is a background monitoring agent that watches external sources and surfaces important information in Slack.
+!!! note "Advanced"
+    These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
 
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_SCRIBE_ENABLED` | `false` | Enable the scribe agent. | `true` |
-| `SUMMON_SCRIBE_GOOGLE_ENABLED` | `false` | Enable the Google Workspace data collector for scribe. Requires workspace-mcp. | `true` |
-| `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | `5` | How often the scribe scans for new information. Minimum 1. | `15` |
-| `SUMMON_SCRIBE_CWD` | _(data dir)/scribe_ | Working directory for the scribe session. | `/home/user/scribe` |
-| `SUMMON_SCRIBE_MODEL` | _(inherits `SUMMON_DEFAULT_MODEL`)_ | Model override for the scribe session. | `claude-haiku-4-5-20251001` |
-| `SUMMON_SCRIBE_IMPORTANCE_KEYWORDS` | _(empty)_ | Comma-separated keywords that flag a message as high-priority. | `urgent,action required,deadline` |
-| `SUMMON_SCRIBE_QUIET_HOURS` | _(empty)_ | Time window in `HH:MM-HH:MM` format during which only level-5 alerts are surfaced. | `22:00-07:00` |
-| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated list of Google Workspace services to monitor. Valid values: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`. Requires workspace-mcp. | `gmail,calendar` |
-| `SUMMON_SCRIBE_SLACK_ENABLED` | `false` | Enable the Slack data collector (uses Playwright browser automation). | `true` |
-| `SUMMON_SCRIBE_SLACK_BROWSER` | `chrome` | Browser for Slack monitoring. Must be one of: `chrome`, `firefox`, `webkit`. | `firefox` |
-| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | _(empty)_ | Comma-separated Slack channel names to monitor. | `general,engineering` |
-
-See [Scribe](../guide/scribe.md) for full setup and configuration details.
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_MAX_INLINE_CHARS` | integer | `2500` | Maximum characters for inline Slack messages. Responses longer than this are uploaded as files. |
 
 ---
 
-## System
+## Behavior
 
-| Variable | Default | Description | Example |
-|----------|---------|-------------|---------|
-| `SUMMON_NO_UPDATE_CHECK` | `false` | Disable the background PyPI update check on `summon start`. | `true` |
+!!! note "Advanced"
+    These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_PERMISSION_DEBOUNCE_MS` | integer | `500` | Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message. |
+| `SUMMON_NO_UPDATE_CHECK` | boolean | `false` | Disable the background PyPI update check on `summon start`. |
+
+---
+
+## Thinking
+
+!!! note "Advanced"
+    These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_ENABLE_THINKING` | boolean | `true` | Enable extended thinking (passes `ThinkingConfigAdaptive` to the Claude SDK). Set to `false` to disable. |
+| `SUMMON_SHOW_THINKING` | boolean | `false` | Route thinking block content to the Slack turn thread so thinking is visible. By default thinking is processed but not posted. |
 
 ---
 
