@@ -543,6 +543,74 @@ def workflow_clear(project_name: str | None) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Global PM commands
+# ---------------------------------------------------------------------------
+
+
+@cli.group("global")
+def cmd_global() -> None:
+    """Manage the Global PM agent."""
+
+
+@cmd_global.command("status")
+@click.pass_context
+def global_status(ctx: click.Context) -> None:
+    """Show Global PM session status."""
+
+    async def _run() -> None:
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        async with SessionRegistry() as registry:
+            active = await registry.list_active()
+            gpm = [
+                s
+                for s in active
+                if s.get("session_name") == "global-pm" and not s.get("project_id")
+            ]
+            if gpm:
+                from summon_claude.cli.formatting import print_session_detail  # noqa: PLC0415
+
+                click.echo("Global PM: running")
+                print_session_detail(gpm[0])
+            else:
+                click.echo("Global PM: not running")
+
+    asyncio.run(_run())
+
+
+@cmd_global.command("down")
+@click.pass_context
+def global_down(ctx: click.Context) -> None:
+    """Stop the Global PM agent."""
+
+    async def _run() -> None:
+        from summon_claude.cli import daemon_client  # noqa: PLC0415
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        async with SessionRegistry() as registry:
+            active = await registry.list_active()
+            gpm = [
+                s
+                for s in active
+                if s.get("session_name") == "global-pm" and not s.get("project_id")
+            ]
+            if not gpm:
+                click.echo("Global PM is not running.")
+                return
+            sid = gpm[0]["session_id"]
+            try:
+                found = await daemon_client.stop_session(sid)
+                if found:
+                    click.echo(f"Global PM stopped ({sid[:8]}...).")
+                else:
+                    click.echo("Global PM session not found in daemon.")
+            except Exception as e:
+                click.echo(f"Failed to stop Global PM: {e}", err=True)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # Top-level commands: init, config
 # ---------------------------------------------------------------------------
 
