@@ -441,3 +441,126 @@ class TestDoctorCli:
         assert home not in redacted.message
         assert home not in redacted.details[0]
         assert home not in redacted.collected_logs["log"][0]
+
+    def test_redact_result_keys(self) -> None:
+        """Log filename keys with UUIDs should be redacted."""
+        from summon_claude.cli.doctor import _redact_result
+
+        uuid_name = "12345678-abcd-1234-abcd-1234567890ab.log"
+        r = CheckResult(
+            status="info",
+            subsystem="logs",
+            message="ok",
+            collected_logs={uuid_name: ["line1"]},
+        )
+        redacted = _redact_result(r)
+        # Full UUID should not survive in keys
+        assert uuid_name not in redacted.collected_logs
+        # Truncated UUID should be present
+        assert any("12345678..." in k for k in redacted.collected_logs)
+
+    def test_write_export(self, tmp_path: Path) -> None:
+        """--export should write valid JSON with redacted results."""
+        from summon_claude.cli.doctor import _write_export
+
+        results = [
+            CheckResult(
+                status="pass",
+                subsystem="test",
+                message="all good",
+            ),
+            CheckResult(
+                status="fail",
+                subsystem="bad",
+                message="broken",
+                suggestion="fix it",
+            ),
+        ]
+        export_path = str(tmp_path / "report.json")
+        _write_export(export_path, results)
+
+        import json
+
+        data = json.loads(Path(export_path).read_text())
+        assert data["version"] == "1.0"
+        assert len(data["checks"]) == 2
+        assert data["checks"][0]["status"] == "pass"
+        assert data["checks"][1]["suggestion"] == "fix it"
+
+    def test_build_submit_body(self) -> None:
+        """--submit body should contain check results and escape @."""
+        from summon_claude.cli.doctor import _build_submit_body
+
+        results = [
+            CheckResult(
+                status="pass",
+                subsystem="test",
+                message="ok @user",
+            ),
+        ]
+        body = _build_submit_body(results)
+        assert "\\@user" in body
+        assert "@user" not in body.replace("\\@", "")
+        assert "## summon doctor report" in body
+
+    def test_build_submit_body_logs_in_code_blocks(self) -> None:
+        """Log content in submit body should be inside fenced code blocks."""
+        from summon_claude.cli.doctor import _build_submit_body
+
+        results = [
+            CheckResult(
+                status="info",
+                subsystem="logs",
+                message="logs found",
+                collected_logs={"daemon.log": ["ERROR something"]},
+            ),
+        ]
+        body = _build_submit_body(results)
+        assert "```" in body
+
+
+# ---------------------------------------------------------------------------
+# Helper function tests
+# ---------------------------------------------------------------------------
+
+
+class TestHelpers:
+    def test_human_size_bytes(self) -> None:
+        from summon_claude.diagnostics import _human_size
+
+        assert _human_size(0) == "0.0 B"
+        assert _human_size(512) == "512.0 B"
+
+    def test_human_size_kb(self) -> None:
+        from summon_claude.diagnostics import _human_size
+
+        assert _human_size(1536) == "1.5 KB"
+
+    def test_human_size_mb(self) -> None:
+        from summon_claude.diagnostics import _human_size
+
+        result = _human_size(2 * 1024 * 1024)
+        assert result == "2.0 MB"
+
+    def test_tail_file(self, tmp_path: Path) -> None:
+        from summon_claude.diagnostics import _tail_file
+
+        f = tmp_path / "test.log"
+        f.write_text("\n".join(f"line{i}" for i in range(200)))
+        lines = _tail_file(f, 50)
+        assert len(lines) == 50
+        assert lines[-1] == "line199"
+
+    def test_tail_file_short(self, tmp_path: Path) -> None:
+        from summon_claude.diagnostics import _tail_file
+
+        f = tmp_path / "test.log"
+        f.write_text("line1\nline2\nline3")
+        lines = _tail_file(f, 100)
+        assert len(lines) == 3
+
+    def test_tail_file_missing(self) -> None:
+        from summon_claude.diagnostics import _tail_file
+
+        lines = _tail_file(Path("/nonexistent/file.log"), 10)
+        assert lines == []

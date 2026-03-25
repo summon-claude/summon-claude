@@ -7,6 +7,7 @@ and all check implementations registered in DIAGNOSTIC_REGISTRY.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import importlib.metadata
 import os
 import platform
@@ -515,7 +516,7 @@ class LogsCheck:
     name = "logs"
     description = "Log directory, daemon and session log tails with redaction"
 
-    async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002, PLR0915
+    async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002, PLR0912, PLR0915
         from summon_claude.config import get_data_dir  # noqa: PLC0415
 
         log_dir = get_data_dir() / "logs"
@@ -547,16 +548,25 @@ class LogsCheck:
             details.append("daemon.log: not found")
 
         # Most recent session log (any .log except daemon.log)
+        def _safe_mtime(f: Path) -> float:
+            try:
+                return f.stat().st_mtime
+            except OSError:
+                return 0.0
+
         session_logs = sorted(
-            [f for f in log_dir.glob("*.log") if f.name != "daemon.log"],
-            key=lambda f: f.stat().st_mtime,
+            [f for f in log_dir.glob("*.log") if f.name != "daemon.log" and f.exists()],
+            key=_safe_mtime,
             reverse=True,
         )
         if session_logs:
             latest = session_logs[0]
-            age_hours = (now - latest.stat().st_mtime) / 3600
-            size_str = _human_size(latest.stat().st_size)
-            details.append(f"{latest.name}: {size_str}, {age_hours:.1f}h old")
+            try:
+                age_hours = (now - latest.stat().st_mtime) / 3600
+                size_str = _human_size(latest.stat().st_size)
+                details.append(f"{latest.name}: {size_str}, {age_hours:.1f}h old")
+            except OSError:
+                details.append(f"{latest.name}: could not stat")
             lines = _tail_file(latest, _LOG_MAX_LINES)
             collected_logs[latest.name] = [redactor.redact(ln) for ln in lines]
         else:
@@ -566,18 +576,29 @@ class LogsCheck:
         all_lines = [ln for lines in collected_logs.values() for ln in lines]
         error_count = sum(1 for ln in all_lines if "ERROR" in ln)
         warning_count = sum(1 for ln in all_lines if "WARNING" in ln)
+        total_collected = len(all_lines)
         details.append(
-            f"Last {_LOG_MAX_LINES} lines: {error_count} errors, {warning_count} warnings"
+            f"{total_collected} collected lines: {error_count} errors, {warning_count} warnings"
         )
 
         # Total disk usage
-        total_size = sum(f.stat().st_size for f in log_dir.glob("*.log*") if f.is_file())
+        total_size = 0
+        for f in log_dir.glob("*.log*"):
+            try:
+                if f.is_file():
+                    total_size += f.stat().st_size
+            except OSError:
+                pass
         details.append(f"Total log size: {_human_size(total_size)}")
 
         # Staleness check
-        all_log_files = list(log_dir.glob("*.log"))
-        if all_log_files:
-            most_recent_mtime = max(f.stat().st_mtime for f in all_log_files)
+        all_log_files = [f for f in log_dir.glob("*.log") if f.exists()]
+        mtimes = []
+        for f in all_log_files:
+            with contextlib.suppress(OSError):
+                mtimes.append(f.stat().st_mtime)
+        if mtimes:
+            most_recent_mtime = max(mtimes)
             if most_recent_mtime < stale_threshold:
                 message = f"All logs are older than {_LOG_STALE_DAYS} days (stale)"
                 status: Literal["pass", "fail", "warn", "info", "skip"] = "warn"
@@ -790,14 +811,17 @@ class GitHubMcpCheck:
             headers={"Authorization": f"Bearer {pat}", "User-Agent": "summon-claude/doctor"},
         )
         try:
-            loop = asyncio.get_running_loop()
-            response = await asyncio.wait_for(
-                loop.run_in_executor(None, urllib.request.urlopen, req),
-                timeout=10,
-            )
             import json  # noqa: PLC0415
 
-            data = json.loads(response.read())
+            def _do_request() -> dict:
+                with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+                    return json.loads(resp.read())
+
+            loop = asyncio.get_running_loop()
+            data = await asyncio.wait_for(
+                loop.run_in_executor(None, _do_request),
+                timeout=15,
+            )
             login = data.get("login", "unknown")
             return CheckResult(
                 status="pass",

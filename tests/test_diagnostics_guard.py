@@ -6,7 +6,6 @@ and config credential fields have corresponding diagnostic checks.
 
 from __future__ import annotations
 
-import ast
 import re
 from pathlib import Path
 
@@ -255,3 +254,29 @@ def test_all_registry_entries_implement_protocol() -> None:
         assert hasattr(check, "name"), f"'{name}'.name missing"
         assert hasattr(check, "description"), f"'{name}'.description missing"
         assert callable(getattr(check, "run", None)), f"'{name}'.run not callable"
+
+
+# ---------------------------------------------------------------------------
+# Step 5: _DB_TABLES guard test
+# ---------------------------------------------------------------------------
+
+
+def test_db_tables_matches_schema() -> None:
+    """_DB_TABLES must include all tables in the live schema."""
+    import asyncio
+
+    from summon_claude.diagnostics import _DB_TABLES
+    from summon_claude.sessions.registry import SessionRegistry
+
+    async def _get_tables() -> set[str]:
+        async with SessionRegistry() as reg:
+            rows = await reg.db.execute_fetchall(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            )
+            return {r[0] for r in rows}
+
+    schema_tables = asyncio.run(_get_tables())
+    db_tables_set = set(_DB_TABLES)
+
+    missing = schema_tables - db_tables_set
+    assert not missing, f"Tables in schema but missing from _DB_TABLES: {sorted(missing)}"
