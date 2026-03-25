@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import urllib.error
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -11,11 +11,9 @@ import pytest
 from summon_claude.config import SummonConfig
 from summon_claude.diagnostics import (
     DIAGNOSTIC_REGISTRY,
-    KNOWN_SUBSYSTEMS,
     CheckResult,
     DaemonCheck,
     DatabaseCheck,
-    DiagnosticCheck,
     EnvironmentCheck,
     GitHubMcpCheck,
     LogsCheck,
@@ -199,46 +197,110 @@ class TestEnvironmentCheck:
 # ---------------------------------------------------------------------------
 
 
+def _make_daemon_mocks(  # noqa: PLR0913
+    *,
+    running: bool = False,
+    sock_exists: bool = False,
+    pid_exists: bool = False,
+    pid_text: str = "12345",
+    pid_alive: bool = True,
+    active_sessions: list | None = None,
+) -> dict:
+    """Build a dict of patches for DaemonCheck tests."""
+    mock_reg = MagicMock()
+    mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+    mock_reg.__aexit__ = AsyncMock(return_value=False)
+    mock_reg.list_active = AsyncMock(return_value=active_sessions or [])
+
+    sock_path = MagicMock(spec=Path)
+    sock_path.exists.return_value = sock_exists
+
+    pid_path = MagicMock(spec=Path)
+    pid_path.exists.return_value = pid_exists
+    pid_path.read_text.return_value = pid_text
+
+    patches = {
+        "running": patch("summon_claude.daemon.is_daemon_running", return_value=running),
+        "socket": patch("summon_claude.daemon._daemon_socket", return_value=sock_path),
+        "pid": patch("summon_claude.daemon._daemon_pid", return_value=pid_path),
+        "registry": patch("summon_claude.sessions.registry.SessionRegistry", return_value=mock_reg),
+    }
+
+    if pid_exists and pid_alive:
+        patches["kill"] = patch("summon_claude.diagnostics.os.kill", return_value=None)
+    elif pid_exists and not pid_alive:
+        patches["kill"] = patch("summon_claude.diagnostics.os.kill", side_effect=ProcessLookupError)
+
+    return patches
+
+
 class TestDaemonCheck:
     @pytest.fixture()
     def check(self) -> DaemonCheck:
         return DaemonCheck()
 
     async def test_daemon_running(self, check: DaemonCheck) -> None:
-        mock_reg = MagicMock()
-        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
-        mock_reg.__aexit__ = AsyncMock(return_value=False)
-        mock_reg.db = MagicMock()
-        mock_reg.db.execute_fetchall = AsyncMock(return_value=[(0,)])
+        mocks = _make_daemon_mocks(running=True, active_sessions=[])
+        with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
+            result = await check.run(None)
+        assert result.status == "pass"
+        assert "running and healthy" in result.message
 
+    async def test_daemon_not_running_clean(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=False, sock_exists=False, pid_exists=False)
+        with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
+            result = await check.run(None)
+        assert result.status == "info"
+        assert "not running" in result.message.lower()
+
+    async def test_stale_socket(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=False, sock_exists=True)
+        with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
+            result = await check.run(None)
+        assert result.status == "warn"
+        assert any("stale" in d.lower() for d in result.details)
+
+    async def test_stale_pid_dead_process(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(
+            running=False, pid_exists=True, pid_alive=False, pid_text="99999"
+        )
         with (
-            patch(
-                "summon_claude.daemon.is_daemon_running",
-                return_value=True,
-            ),
-            patch(
-                "summon_claude.daemon._daemon_socket",
-                return_value=Path("/tmp/test.sock"),
-            ),
-            patch(
-                "summon_claude.daemon._daemon_pid",
-                return_value=Path("/tmp/nonexistent.pid"),
-            ),
-            patch(
-                "summon_claude.sessions.registry.SessionRegistry",
-                return_value=mock_reg,
-            ),
+            mocks["running"],
+            mocks["socket"],
+            mocks["pid"],
+            mocks["registry"],
+            mocks["kill"],
+        ):
+            result = await check.run(None)
+        assert result.status == "warn"
+        assert any("dead" in d.lower() for d in result.details)
+
+    async def test_pid_alive(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=True, pid_exists=True, pid_alive=True, pid_text="12345")
+        with (
+            mocks["running"],
+            mocks["socket"],
+            mocks["pid"],
+            mocks["registry"],
+            mocks["kill"],
         ):
             result = await check.run(None)
         assert result.status == "pass"
+        assert any("alive" in d.lower() for d in result.details)
 
-    async def test_daemon_not_running_clean(self, check: DaemonCheck) -> None:
-        """When daemon isn't running and no stale files, status is info."""
-        result = await check.run(None)
-        # This test just verifies the check runs without error.
-        # Status depends on actual system state — daemon may or may not be running.
-        assert result.status in ("pass", "info", "warn")
-        assert result.subsystem == "daemon"
+    async def test_orphaned_sessions(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=False, active_sessions=[{"id": "a"}, {"id": "b"}])
+        with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
+            result = await check.run(None)
+        assert result.status == "warn"
+        assert any("orphan" in d.lower() for d in result.details)
+
+    async def test_unreadable_pid_file(self, check: DaemonCheck) -> None:
+        mocks = _make_daemon_mocks(running=False, pid_exists=True, pid_text="not-a-number")
+        with mocks["running"], mocks["socket"], mocks["pid"], mocks["registry"]:
+            result = await check.run(None)
+        assert result.status == "warn"
+        assert any("could not read" in d.lower() for d in result.details)
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +321,97 @@ class TestDatabaseCheck:
             result = await check.run(None)
         assert result.status == "warn"
         assert "not found" in result.message.lower()
+
+    async def test_db_schema_current(self, check: DatabaseCheck, tmp_path: Path) -> None:
+        """Schema at current version + integrity ok → pass."""
+        from summon_claude.sessions.migrations import CURRENT_SCHEMA_VERSION
+
+        db_file = tmp_path / "registry.db"
+        db_file.write_bytes(b"")  # create file so exists() passes
+
+        mock_db = MagicMock()
+
+        def _mock_execute(sql, *_args):
+            ctx = MagicMock()
+            if "PRAGMA integrity_check" in sql:
+                ctx.fetchone = AsyncMock(return_value=("ok",))
+            elif "SELECT COUNT" in sql:
+                ctx.fetchone = AsyncMock(return_value=(42,))
+            ctx.__aenter__ = AsyncMock(return_value=ctx)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            return ctx
+
+        mock_db.execute = _mock_execute
+
+        mock_reg = MagicMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.db = mock_db
+
+        with (
+            patch("summon_claude.config.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.sessions.registry.SessionRegistry", return_value=mock_reg),
+            patch(
+                "summon_claude.sessions.migrations.get_schema_version",
+                return_value=CURRENT_SCHEMA_VERSION,
+            ),
+        ):
+            result = await check.run(None)
+        assert result.status == "pass"
+        assert "ok" in result.message.lower()
+
+    async def test_db_schema_behind(self, check: DatabaseCheck, tmp_path: Path) -> None:
+        from summon_claude.sessions.migrations import CURRENT_SCHEMA_VERSION
+
+        db_file = tmp_path / "registry.db"
+        db_file.write_bytes(b"")
+
+        mock_db = MagicMock()
+
+        def _mock_execute(sql, *_args):
+            ctx = MagicMock()
+            if "PRAGMA integrity_check" in sql:
+                ctx.fetchone = AsyncMock(return_value=("ok",))
+            elif "SELECT COUNT" in sql:
+                ctx.fetchone = AsyncMock(return_value=(0,))
+            ctx.__aenter__ = AsyncMock(return_value=ctx)
+            ctx.__aexit__ = AsyncMock(return_value=False)
+            return ctx
+
+        mock_db.execute = _mock_execute
+
+        mock_reg = MagicMock()
+        mock_reg.__aenter__ = AsyncMock(return_value=mock_reg)
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+        mock_reg.db = mock_db
+
+        with (
+            patch("summon_claude.config.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.sessions.registry.SessionRegistry", return_value=mock_reg),
+            patch(
+                "summon_claude.sessions.migrations.get_schema_version",
+                return_value=CURRENT_SCHEMA_VERSION - 1,
+            ),
+        ):
+            result = await check.run(None)
+        assert result.status == "fail"
+        assert "behind" in result.message.lower()
+
+    async def test_db_open_failure(self, check: DatabaseCheck, tmp_path: Path) -> None:
+        db_file = tmp_path / "registry.db"
+        db_file.write_bytes(b"")
+
+        mock_reg = MagicMock()
+        mock_reg.__aenter__ = AsyncMock(side_effect=RuntimeError("corrupt"))
+        mock_reg.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("summon_claude.config.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.sessions.registry.SessionRegistry", return_value=mock_reg),
+        ):
+            result = await check.run(None)
+        assert result.status == "fail"
+        assert "failed to open" in result.message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +463,40 @@ class TestSlackCheck:
         ):
             result = await check.run(config)
         assert result.status == "fail"
+
+    async def test_slack_api_error(self, check: SlackCheck) -> None:
+        from slack_sdk.errors import SlackApiError
+
+        config = SummonConfig.for_test()
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.get.return_value = "invalid_auth"
+        mock_client.auth_test.side_effect = SlackApiError(
+            message="invalid_auth", response=mock_response
+        )
+        with patch("slack_sdk.WebClient", return_value=mock_client):
+            result = await check.run(config)
+        assert result.status == "fail"
+        assert "slack api error" in result.message.lower()
+
+    async def test_slack_timeout(self, check: SlackCheck) -> None:
+        config = SummonConfig.for_test()
+        with patch(
+            "asyncio.wait_for",
+            side_effect=TimeoutError,
+        ):
+            result = await check.run(config)
+        assert result.status == "fail"
+        assert "timed out" in result.message.lower()
+
+    async def test_slack_generic_exception(self, check: SlackCheck) -> None:
+        config = SummonConfig.for_test()
+        mock_client = MagicMock()
+        mock_client.auth_test.side_effect = ConnectionError("network down")
+        with patch("slack_sdk.WebClient", return_value=mock_client):
+            result = await check.run(config)
+        assert result.status == "fail"
+        assert "connectivity error" in result.message.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -385,6 +572,61 @@ class TestWorkspaceMcpCheck:
         result = await check.run(config)
         assert result.status == "skip"
 
+    async def test_binary_not_found(self, check: WorkspaceMcpCheck) -> None:
+        config = SummonConfig.for_test(scribe_enabled=True)
+        mock_bin = MagicMock(spec=Path)
+        mock_bin.exists.return_value = False
+        with (
+            patch("summon_claude.config.find_workspace_mcp_bin", return_value=mock_bin),
+            patch(
+                "summon_claude.config.get_google_credentials_dir",
+                return_value=Path("/tmp/creds"),
+            ),
+        ):
+            result = await check.run(config)
+        assert result.status == "fail"
+        assert "not found" in result.message.lower()
+
+    async def test_binary_found_no_creds(self, check: WorkspaceMcpCheck, tmp_path: Path) -> None:
+        config = SummonConfig.for_test(scribe_enabled=True)
+        mock_bin = MagicMock(spec=Path)
+        mock_bin.exists.return_value = True
+        creds_dir = tmp_path / "nonexistent_creds"
+        with (
+            patch("summon_claude.config.find_workspace_mcp_bin", return_value=mock_bin),
+            patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
+        ):
+            result = await check.run(config)
+        assert result.status == "warn"
+
+    async def test_binary_found_import_error(
+        self, check: WorkspaceMcpCheck, tmp_path: Path
+    ) -> None:
+        config = SummonConfig.for_test(scribe_enabled=True)
+        mock_bin = MagicMock(spec=Path)
+        mock_bin.exists.return_value = True
+        creds_dir = tmp_path / "creds"
+        creds_dir.mkdir()
+        (creds_dir / "client_secret.json").write_text("{}")
+
+        import builtins
+
+        real_import = builtins.__import__
+
+        def _block_auth(name, *args, **kwargs):
+            if name.startswith("auth."):
+                raise ImportError(f"No module named '{name}'")
+            return real_import(name, *args, **kwargs)
+
+        with (
+            patch("summon_claude.config.find_workspace_mcp_bin", return_value=mock_bin),
+            patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
+            patch("builtins.__import__", side_effect=_block_auth),
+        ):
+            result = await check.run(config)
+        assert result.status == "warn"
+        assert any("not importable" in d.lower() for d in result.details)
+
 
 # ---------------------------------------------------------------------------
 # GitHubMcpCheck tests
@@ -407,6 +649,73 @@ class TestGitHubMcpCheck:
         result = await check.run(config)
         assert result.status == "skip"
 
+    async def test_pat_valid(self, check: GitHubMcpCheck) -> None:
+        config = SummonConfig.for_test(github_pat="ghp_test123")
+
+        def _fake_urlopen(req, *, timeout=None):
+            import io
+            import json
+
+            resp = MagicMock()
+            resp.read.return_value = json.dumps({"login": "testuser"}).encode()
+            resp.__enter__ = MagicMock(return_value=resp)
+            resp.__exit__ = MagicMock(return_value=False)
+            return resp
+
+        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            result = await check.run(config)
+        assert result.status == "pass"
+        # SEC-003: username should NOT be in message
+        assert "testuser" not in result.message
+
+    async def test_pat_invalid_401(self, check: GitHubMcpCheck) -> None:
+        config = SummonConfig.for_test(github_pat="ghp_invalid")
+
+        def _raise_401(req, *, timeout=None):
+            raise urllib.error.HTTPError(
+                url="https://api.github.com/user",
+                code=401,
+                msg="Unauthorized",
+                hdrs=None,  # type: ignore[arg-type]
+                fp=None,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_raise_401):
+            result = await check.run(config)
+        assert result.status == "fail"
+        assert "invalid or expired" in result.message.lower()
+
+    async def test_pat_http_500(self, check: GitHubMcpCheck) -> None:
+        config = SummonConfig.for_test(github_pat="ghp_test123")
+
+        def _raise_500(req, *, timeout=None):
+            raise urllib.error.HTTPError(
+                url="https://api.github.com/user",
+                code=500,
+                msg="Server Error",
+                hdrs=None,  # type: ignore[arg-type]
+                fp=None,
+            )
+
+        with patch("urllib.request.urlopen", side_effect=_raise_500):
+            result = await check.run(config)
+        assert result.status == "warn"
+        assert "500" in result.message
+
+    async def test_pat_timeout(self, check: GitHubMcpCheck) -> None:
+        config = SummonConfig.for_test(github_pat="ghp_test123")
+        with patch("asyncio.wait_for", side_effect=TimeoutError):
+            result = await check.run(config)
+        assert result.status == "warn"
+        assert "timed out" in result.message.lower()
+
+    async def test_pat_generic_exception(self, check: GitHubMcpCheck) -> None:
+        config = SummonConfig.for_test(github_pat="ghp_test123")
+        with patch("urllib.request.urlopen", side_effect=ConnectionError("dns fail")):
+            result = await check.run(config)
+        assert result.status == "warn"
+        assert "validation failed" in result.message.lower()
+
 
 # ---------------------------------------------------------------------------
 # CLI doctor tests
@@ -425,6 +734,19 @@ class TestDoctorCli:
 
         result = _format_status("fail", color=False)
         assert result == "[FAIL]"
+
+    def test_format_status_all_statuses(self) -> None:
+        from summon_claude.cli.doctor import _format_status
+
+        for status in ("pass", "fail", "warn", "info", "skip"):
+            no_color = _format_status(status, color=False)
+            assert no_color == f"[{status.upper()}]"
+
+        with_color = _format_status("skip", color=True)
+        assert "SKIP" in with_color
+
+        unknown = _format_status("unknown_status", color=False)
+        assert unknown == "[UNKNOWN_STATUS]"
 
     def test_redact_result(self) -> None:
         from summon_claude.cli.doctor import _redact_result
@@ -463,11 +785,12 @@ class TestDoctorCli:
         """--export should write valid JSON with redacted results."""
         from summon_claude.cli.doctor import _write_export
 
+        home = str(Path.home())
         results = [
             CheckResult(
                 status="pass",
                 subsystem="test",
-                message="all good",
+                message=f"path is {home}/secret",
             ),
             CheckResult(
                 status="fail",
@@ -486,6 +809,8 @@ class TestDoctorCli:
         assert len(data["checks"]) == 2
         assert data["checks"][0]["status"] == "pass"
         assert data["checks"][1]["suggestion"] == "fix it"
+        # Verify redaction is applied
+        assert home not in data["checks"][0]["message"]
 
     def test_build_submit_body(self) -> None:
         """--submit body should contain check results and escape @."""
@@ -517,6 +842,34 @@ class TestDoctorCli:
         ]
         body = _build_submit_body(results)
         assert "```" in body
+
+    async def test_run_checks_crash_recovery(self) -> None:
+        """A crashing check should produce a synthetic fail result."""
+        from summon_claude.cli.doctor import _run_checks
+
+        class CrashingCheck:
+            name = "crasher"
+            description = "always crashes"
+
+            async def run(self, config):
+                raise RuntimeError("kaboom")
+
+        original_registry = dict(DIAGNOSTIC_REGISTRY)
+        try:
+            DIAGNOSTIC_REGISTRY.clear()
+            DIAGNOSTIC_REGISTRY["crasher"] = CrashingCheck()  # type: ignore[assignment]
+
+            results: list[CheckResult] = []
+            await _run_checks(results, None)
+
+            assert len(results) == 1
+            assert results[0].status == "fail"
+            assert "crashed" in results[0].message.lower()
+            assert results[0].suggestion is not None
+            assert "bug" in results[0].suggestion.lower()
+        finally:
+            DIAGNOSTIC_REGISTRY.clear()
+            DIAGNOSTIC_REGISTRY.update(original_registry)
 
 
 # ---------------------------------------------------------------------------

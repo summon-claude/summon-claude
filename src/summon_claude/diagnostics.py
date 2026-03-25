@@ -100,9 +100,9 @@ class Redactor:
         # 1. Token secrets (xoxb-, xapp-, sk-ant-, ghp_, github_pat_, gho_, ghu_, ghs_, ghr_)
         text = redact_secrets(text)
         # 2. Path normalization — longer specific dirs first, home last
-        if _DATA_DIR != _HOME_DIR and not _DATA_DIR.startswith(_HOME_DIR):
+        if _DATA_DIR != _HOME_DIR:
             text = text.replace(_DATA_DIR, "[data_dir]")
-        if _CONFIG_DIR != _HOME_DIR and not _CONFIG_DIR.startswith(_HOME_DIR):
+        if _CONFIG_DIR != _HOME_DIR:
             text = text.replace(_CONFIG_DIR, "[config_dir]")
         text = text.replace(_HOME_DIR, "~")
         # 3. Slack IDs: user (U), channel (C), team (T), bot (B)
@@ -119,7 +119,7 @@ redactor = Redactor()
 
 
 # ---------------------------------------------------------------------------
-# EnvironmentCheck (Task 3)
+# EnvironmentCheck
 # ---------------------------------------------------------------------------
 
 
@@ -211,6 +211,7 @@ async def _get_version(cmd: str, *args: str, max_wait: float = 5) -> str | None:
     except TimeoutError:
         if proc is not None:
             proc.kill()
+            await proc.wait()  # reap zombie
         return None
     except (FileNotFoundError, OSError):
         return None
@@ -220,7 +221,7 @@ DIAGNOSTIC_REGISTRY["environment"] = EnvironmentCheck()
 
 
 # ---------------------------------------------------------------------------
-# DaemonCheck (Task 4)
+# DaemonCheck
 # ---------------------------------------------------------------------------
 
 
@@ -229,6 +230,8 @@ class DaemonCheck:
     description = "Daemon process liveness, socket connectivity, and orphaned sessions"
 
     async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002, PLR0912, PLR0915
+        # _daemon_pid/_daemon_socket are private but no public alternative exists;
+        # diagnostic check is a legitimate consumer of daemon internals.
         from summon_claude.daemon import (  # noqa: PLC0415
             _daemon_pid,
             _daemon_socket,
@@ -310,7 +313,7 @@ DIAGNOSTIC_REGISTRY["daemon"] = DaemonCheck()
 
 
 # ---------------------------------------------------------------------------
-# DatabaseCheck (Task 5)
+# DatabaseCheck
 # ---------------------------------------------------------------------------
 
 _DB_TABLES = [
@@ -393,6 +396,7 @@ class DatabaseCheck:
                 # Row counts
                 for table in _DB_TABLES:
                     try:
+                        # table values are compile-time constants from _DB_TABLES, not user input
                         async with db.execute(f"SELECT COUNT(*) FROM {table}") as cur:  # noqa: S608
                             row = await cur.fetchone()
                             count = row[0] if row else 0
@@ -430,7 +434,7 @@ DIAGNOSTIC_REGISTRY["database"] = DatabaseCheck()
 
 
 # ---------------------------------------------------------------------------
-# SlackCheck (Task 6)
+# SlackCheck
 # ---------------------------------------------------------------------------
 
 
@@ -505,7 +509,7 @@ DIAGNOSTIC_REGISTRY["slack"] = SlackCheck()
 
 
 # ---------------------------------------------------------------------------
-# LogsCheck (Task 7)
+# LogsCheck
 # ---------------------------------------------------------------------------
 
 _LOG_STALE_DAYS = 7
@@ -645,7 +649,7 @@ DIAGNOSTIC_REGISTRY["logs"] = LogsCheck()
 
 
 # ---------------------------------------------------------------------------
-# WorkspaceMcpCheck (Task 8)
+# WorkspaceMcpCheck
 # ---------------------------------------------------------------------------
 
 
@@ -738,7 +742,7 @@ DIAGNOSTIC_REGISTRY["mcp_workspace"] = WorkspaceMcpCheck()
 
 
 # ---------------------------------------------------------------------------
-# GitHubMcpCheck (Task 8)
+# GitHubMcpCheck
 # ---------------------------------------------------------------------------
 
 
@@ -782,12 +786,12 @@ class GitHubMcpCheck:
                     ),
                 )
 
-            login = result.get("login", "unknown")
+            # Don't include login per SEC-003 (same as SlackCheck)
             return CheckResult(
                 status="pass",
                 subsystem="mcp_github",
-                message=f"GitHub token valid (user: {login})",
-                details=[f"Authenticated as: {login}"],
+                message="GitHub token valid",
+                details=["auth: connected successfully"],
             )
 
         except ImportError:
@@ -818,16 +822,16 @@ class GitHubMcpCheck:
                     return json.loads(resp.read())
 
             loop = asyncio.get_running_loop()
-            data = await asyncio.wait_for(
+            await asyncio.wait_for(
                 loop.run_in_executor(None, _do_request),
                 timeout=15,
             )
-            login = data.get("login", "unknown")
+            # Don't include login per SEC-003 (same as SlackCheck)
             return CheckResult(
                 status="pass",
                 subsystem="mcp_github",
-                message=f"GitHub PAT valid (user: {login})",
-                details=[f"Authenticated as: {login}"],
+                message="GitHub PAT valid",
+                details=["auth: connected successfully"],
             )
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):

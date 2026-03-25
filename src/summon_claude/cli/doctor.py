@@ -71,8 +71,8 @@ async def async_doctor(
     # Load config — failure produces a synthetic result
     config = _load_config(config_path_override, results)
 
-    # Run all checks sequentially
-    await _await_checks(results, config)
+    # Run all checks in parallel
+    await _run_checks(results, config)
 
     # Print interactive output
     _print_results(results, use_color, verbose)
@@ -113,23 +113,28 @@ def _load_config(
         return None
 
 
-async def _await_checks(
+async def _run_checks(
     results: list[CheckResult],
     config: SummonConfig | None,
 ) -> None:
-    """Run all diagnostic checks sequentially."""
+    """Run all diagnostic checks in parallel."""
     bug_url = "https://github.com/summon-claude/summon-claude/issues"
-    for name, check in DIAGNOSTIC_REGISTRY.items():
+
+    async def _safe_run(name: str, check: object) -> CheckResult:
         try:
-            result = await check.run(config)
+            return await check.run(config)  # type: ignore[union-attr]
         except Exception as e:
-            result = CheckResult(
+            return CheckResult(
                 status="fail",
                 subsystem=name,
                 message=f"Check crashed: {e}",
                 suggestion=f"File a bug report at {bug_url}",
             )
-        results.append(result)
+
+    outcomes = await asyncio.gather(
+        *(_safe_run(name, check) for name, check in DIAGNOSTIC_REGISTRY.items())
+    )
+    results.extend(outcomes)
 
 
 def _print_results(
@@ -139,16 +144,17 @@ def _print_results(
 ) -> None:
     """Print interactive check results."""
     for result in results:
-        status_str = _format_status(result.status, color=use_color)
-        subsystem = result.subsystem.replace("_", " ").title()
-        click.echo(f"{status_str} {subsystem}: {result.message}")
+        redacted = _redact_result(result)
+        status_str = _format_status(redacted.status, color=use_color)
+        subsystem = redacted.subsystem.replace("_", " ").title()
+        click.echo(f"{status_str} {subsystem}: {redacted.message}")
 
         if verbose:
-            for detail in result.details:
+            for detail in redacted.details:
                 click.echo(f"    {detail}")
-            if result.suggestion:
-                click.echo(f"    Suggestion: {result.suggestion}")
-            for log_name, log_lines in result.collected_logs.items():
+            if redacted.suggestion:
+                click.echo(f"    Suggestion: {redacted.suggestion}")
+            for log_name, log_lines in redacted.collected_logs.items():
                 shown = log_lines[-20:]
                 click.echo(f"    --- {log_name} (last {len(shown)} lines) ---")
                 for log_line in shown:
@@ -322,6 +328,7 @@ async def _submit_to_github(gh: str, body: str) -> None:
     except TimeoutError:
         if proc is not None:
             proc.kill()
+            await proc.wait()  # reap zombie
         click.echo(
             "Error: gh issue create timed out after 30s",
             err=True,
