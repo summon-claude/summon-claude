@@ -321,8 +321,9 @@ Slack input flows through `BoltRouter` (a single shared Bolt app per daemon), wh
 | `event_dispatcher.py` | Routes Slack events to session handles by channel |
 | `summon_cli_mcp.py` | MCP tools exposing session lifecycle management to Claude agents |
 | `cli/__init__.py` | CLI entry point: global flags, subcommands, daemon interaction |
-| `cli/config.py` | Config subcommand handlers: show, path, edit, set, check, google-auth |
-| `cli/slack_auth.py` | External Slack workspace auth: slack-auth, slack-channels, slack-status, slack-remove |
+| `cli/auth.py` | Auth group: unified authentication commands for GitHub, Google, Slack |
+| `cli/config.py` | Config subcommand handlers: show, path, edit, set, check |
+| `cli/slack_auth.py` | External Slack workspace auth helpers (browser login, channel picker) |
 | `cli/daemon_client.py` | Typed async client for daemon Unix socket control API |
 | `cli/db.py` | Database maintenance command logic (status, vacuum, purge) |
 | `cli/reset.py` | Reset command implementations (data, config) |

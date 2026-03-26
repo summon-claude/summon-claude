@@ -75,13 +75,18 @@ def auth_status(ctx: click.Context) -> None:
         if not quiet:
             import json  # noqa: PLC0415
 
-            workspace = json.loads(workspace_config_path.read_text())
-            url = workspace.get("url", "unknown")
-            existing = _check_existing_slack_auth()
-            if existing:
-                click.echo(f"  [PASS] Slack: authenticated ({url}, {existing['age']})")
-            else:
-                click.echo(f"  [FAIL] Slack: auth expired or missing ({url})")
+            try:
+                workspace = json.loads(workspace_config_path.read_text())
+                url = workspace.get("url", "unknown")
+            except (json.JSONDecodeError, OSError, AttributeError):
+                click.echo("  [FAIL] Slack: workspace config is corrupted")
+                url = None
+            if url is not None:
+                existing = _check_existing_slack_auth()
+                if existing:
+                    click.echo(f"  [PASS] Slack: authenticated ({url}, {existing['age']})")
+                else:
+                    click.echo(f"  [FAIL] Slack: auth expired or missing ({url})")
     elif not quiet:
         click.echo("  [INFO] Slack: not configured (run `summon auth slack login`)")
 
