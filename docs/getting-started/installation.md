@@ -126,11 +126,7 @@ summon-claude uses Click, which supports tab completion for bash, zsh, and fish.
     ```
 
 === "fish"
-    ```fish
-    _SUMMON_COMPLETE=fish_source summon | source
-    ```
-
-    Or to make it persistent, add to `~/.config/fish/completions/summon.fish`:
+    Add to `~/.config/fish/completions/summon.fish`:
 
     ```fish
     _SUMMON_COMPLETE=fish_source summon | source

@@ -28,6 +28,10 @@ Understand how summon-claude works — from high-level architecture to the threa
 
     Authentication, authorization, and secret handling.
 
+-   :material-chart-donut: **[Context Management](context.md)**
+
+    Compaction, overflow recovery, and context tracking.
+
 </div>
 
 !!! tip "Suggested reading order"

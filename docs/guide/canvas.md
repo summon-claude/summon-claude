@@ -11,7 +11,7 @@ Every summon-claude session gets a persistent markdown canvas — a dedicated ta
 
 When a session authenticates to a Slack channel, summon-claude creates (or finds) a canvas for that channel. The canvas lives as a tab in the channel, visible to anyone in the workspace.
 
-<!-- TODO: add canvas-channel-tab.png screenshot (run docs-screenshots.py --section session-ux) -->
+![Canvas tab in channel header](../assets/screenshots/canvas-channel-tab.png)
 
 All canvas state is stored locally in SQLite first. A background worker syncs the local state to Slack on a 2-second dirty delay, then again on a 60-second heartbeat interval. This means:
 
@@ -50,7 +50,7 @@ Used for PM sessions (started via `summon project up`):
 - **Completed Work** — summary of finished sessions
 - **Notes** — PM-level notes and decisions
 
-<!-- TODO: add canvas-pm-active-work.png screenshot (run docs-screenshots.py --section session-ux) -->
+![PM canvas with session status and scheduled jobs](../assets/screenshots/canvas-pm-active-work.png)
 
 ### Global PM canvas
 

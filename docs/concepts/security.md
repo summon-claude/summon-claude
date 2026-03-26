@@ -143,11 +143,42 @@ Audit logs can be purged with `summon db purge`.
 
 All `SlackClient` output methods (post, update, upload, ephemeral, canvas) call `redact_secrets()` at the Slack API boundary.
 
-## Channel Isolation
+## Session Isolation Model
 
-Each session is bound to a specific private Slack channel created during the auth flow. The `EventDispatcher` only routes events to the session that owns the channel — messages from other channels are silently dropped.
+!!! info "Single-tenant design"
+    summon-claude is a **single-tenant tool** — one user, one daemon, one machine. It is not designed for shared or multi-user deployments. The security model assumes the person running the daemon is the only person interacting with sessions.
 
-The daemon socket is restricted to mode `0600` (owner-only) so other users on the same machine cannot issue IPC commands. The SQLite database file is also `0600`.
+### Private channel boundary
+
+Each session is bound to a private Slack channel created during authentication. The channel is the primary isolation mechanism:
+
+- Channels are created with `is_private=True` — only invited members can see or post in them.
+- Only the bot and the authenticated user are invited at creation time.
+- The `EventDispatcher` routes events by channel ID — messages from other channels are silently dropped.
+
+Under normal single-tenant operation, this means only the session owner can interact with Claude. However, Slack workspace admins can join any private channel, and the owner could manually invite others.
+
+### What is identity-checked
+
+These operations verify that the acting user matches the session's `authenticated_user_id`:
+
+- **Permission approvals** — Approve/Deny button clicks are checked in `PermissionHandler.handle_action`. Clicks from non-owners are logged and ignored. Permission messages are posted as ephemeral (visible only to the owner).
+- **Reaction-based abort** — Only the owner's `:octagonal_sign:` reaction triggers a turn abort.
+- **`!summon start` / `!summon resume`** — Spawn and resume commands verify the requesting user.
+- **MCP tools** — `session_message`, `session_start`, `session_stop`, `session_info`, `session_list`, and `session_resume` all scope-guard by `authenticated_user_id`. Cross-channel canvas reads also verify ownership.
+
+### What relies on channel membership
+
+These operations do **not** perform application-level identity checks — they rely on the private channel boundary:
+
+- **Regular messages** — Any message posted to the session channel is forwarded to Claude regardless of sender.
+- **Most !commands** — `!end`, `!stop`, `!model`, `!effort`, `!compact`, `!clear` execute for any channel member. Read-only commands (`!help`, `!status`) are intentionally open.
+
+This is acceptable for single-tenant use. If you need multi-user access to the same workspace, do not invite additional users to session channels.
+
+### Infrastructure isolation
+
+The daemon socket is restricted to mode `0600` (owner-only) so other OS users on the same machine cannot issue IPC commands. The SQLite database file is also `0600`.
 
 ## CWD Constraints for Spawn Sessions
 

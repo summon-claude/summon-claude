@@ -9,33 +9,40 @@ summon-claude can connect Claude sessions to the GitHub remote MCP server, givin
 
 ## Setup
 
-Set your GitHub Personal Access Token in the summon config:
+Authenticate with GitHub using the device flow:
 
 ```bash
-summon config set SUMMON_GITHUB_PAT ghp_your_token_here
+summon config github-auth
 ```
 
-Or add it to your config file:
+This opens a browser for GitHub OAuth consent. Once complete, the token is stored securely in summon's config directory.
+
+To verify authentication status:
 
 ```bash
-# ~/.config/summon/config.env
-SUMMON_GITHUB_PAT=ghp_your_token_here
+summon config check
 ```
 
 !!! note "No Copilot subscription required"
-    The GitHub remote MCP server at `api.githubcopilot.com/mcp/` works with a standard GitHub PAT (classic `ghp_*` or fine-grained `github_pat_*`). A GitHub Copilot subscription is not required.
+    The GitHub remote MCP server at `api.githubcopilot.com/mcp/` works with OAuth tokens. A GitHub Copilot subscription is not required.
 
-Once set, the GitHub MCP server is wired into **all** sessions automatically — no per-session configuration needed.
+Once authenticated, the GitHub MCP server is wired into **all** sessions automatically — no per-session configuration needed.
+
+To remove stored credentials:
+
+```bash
+summon config github-logout
+```
 
 ---
 
 ## How it works
 
-When `SUMMON_GITHUB_PAT` is configured, summon adds the GitHub remote MCP server to every Claude session's `mcp_servers` list:
+When GitHub credentials are configured, summon adds the GitHub remote MCP server to every Claude session's `mcp_servers` list:
 
 ```
 https://api.githubcopilot.com/mcp/
-Authorization: Bearer <your-pat>
+Authorization: Bearer <your-token>
 ```
 
 This uses GitHub's HTTP transport (no local binary or Go install required). The MCP connection is lazy — it only connects when Claude first uses a GitHub tool, so startup time is unaffected.
@@ -184,21 +191,17 @@ The PM cleans up stale review worktrees automatically. During periodic scans, it
 
 **Claude says GitHub tools are not available**
 
-Check that `SUMMON_GITHUB_PAT` is set:
+Check that GitHub credentials are configured:
 
 ```bash
-summon config show
+summon config check
 ```
 
-The token should appear (masked) in the output. If it is missing, re-run `summon config set SUMMON_GITHUB_PAT <token>`.
+If GitHub shows as "not set", re-run `summon config github-auth`.
 
 **Permission denied errors from GitHub**
 
-The PAT may lack the required scopes. For most operations, a classic PAT needs:
-- `repo` — full repository access
-- `read:org` — for organization repositories
-
-For fine-grained PATs, grant repository read/write access for the specific repos.
+The OAuth token may lack the required scopes. Re-run `summon config github-auth` to re-authenticate with the correct permissions.
 
 **Tool calls time out**
 
@@ -206,8 +209,9 @@ The GitHub MCP server is remote — network latency affects tool response times.
 
 ---
 
-## Related
+## See also
 
-- [Sessions](sessions.md) — session lifecycle
+- [Scribe Integrations](scribe-integrations.md) — Google Workspace and Slack browser monitoring
 - [PM Agents](pm-agents.md) — spawning reviewer sessions
-- [Configuration](configuration.md) — full config reference
+- [Sessions](sessions.md) — session lifecycle
+- [Configuration](configuration.md) — full configuration reference

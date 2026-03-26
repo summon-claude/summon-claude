@@ -18,7 +18,7 @@ Navigate to your project directory and register it:
 summon project add my-api ~/code/my-api
 ```
 
-This creates a named project that summon-claude tracks. You can optionally set workflow instructions that guide every session:
+This creates a named project that summon-claude tracks. You can optionally set [workflow instructions](../guide/projects.md#managing-workflow-instructions) that guide every session:
 
 ```bash
 summon project workflow set my-api
@@ -26,7 +26,7 @@ summon project workflow set my-api
 
 ---
 
-## Step 2: Start your PM agent
+## Step 2: Start your Project Manager agent
 
 ```bash
 summon project up

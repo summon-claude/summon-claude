@@ -18,7 +18,11 @@ Learn how to use summon-claude effectively. Most users work through **projects**
 
 -   :octicons-mark-github-16: **[GitHub Integration](github-integration.md)**
 
-    PR review and GitHub tools.
+    PR review, code search, and GitHub tools.
+
+-   :material-puzzle: **[Scribe Integrations](scribe-integrations.md)**
+
+    Google Workspace and Slack browser monitoring.
 
 -   :material-clock-outline: **[Cron & Tasks](cron-tasks.md)**
 

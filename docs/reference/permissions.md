@@ -1,4 +1,4 @@
-# Permission Handling
+# Agent Permissions
 
 When Claude wants to run a tool that could modify files, execute commands, or take other consequential actions, summon pauses and asks for your approval in Slack. This keeps you in control without interrupting every read operation.
 

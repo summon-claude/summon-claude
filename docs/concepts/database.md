@@ -31,17 +31,24 @@ Use `summon config path` or `summon db status` to see the active path. The datab
 
 ## Schema
 
-Current schema version: **14** (`CURRENT_SCHEMA_VERSION` in `sessions/migrations.py`)
+<!-- schema:schema-version -->
+```
+14
+```
+<!-- /schema:schema-version -->
+
+(`CURRENT_SCHEMA_VERSION` in `sessions/migrations.py`)
 
 ### sessions
 
 The primary session tracking table.
 
+<!-- schema:schema-sessions -->
 ```sql
 CREATE TABLE sessions (
     session_id TEXT PRIMARY KEY,
     pid INTEGER NOT NULL,
-    status TEXT NOT NULL,           -- pending_auth, active, completed, errored, suspended
+    status TEXT NOT NULL,
     session_name TEXT,
     cwd TEXT NOT NULL,
     slack_channel_id TEXT,
@@ -54,44 +61,36 @@ CREATE TABLE sessions (
     last_activity_at TEXT,
     total_cost_usd REAL DEFAULT 0.0,
     total_turns INTEGER DEFAULT 0,
-    error_message TEXT,
-    parent_session_id TEXT,         -- set for child sessions (spawn flow)
-    authenticated_user_id TEXT,     -- Slack user ID that authenticated
-    effort TEXT,                    -- effort level (low, medium, high, max)
-    project_id TEXT,                -- FK to projects
-    context_pct REAL                -- last-known context window usage
-)
+    error_message TEXT
+, parent_session_id TEXT, authenticated_user_id TEXT, context_pct REAL, project_id TEXT, effort TEXT)
 ```
-
-Partial unique index prevents name collisions among active sessions:
-```sql
-CREATE UNIQUE INDEX idx_active_session_name
-ON sessions (session_name)
-WHERE session_name IS NOT NULL AND status IN ('pending_auth', 'active')
-```
+<!-- /schema:schema-sessions -->
 
 ### channels
 
 Normalized channel data (one row per Slack channel, independent of session lifecycle).
 
+<!-- schema:schema-channels -->
 ```sql
 CREATE TABLE channels (
-    channel_id TEXT PRIMARY KEY,
-    channel_name TEXT NOT NULL,
-    claude_session_id TEXT,
-    canvas_id TEXT,
-    canvas_markdown TEXT,
-    cwd TEXT NOT NULL,
-    authenticated_user_id TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-)
+            channel_id TEXT PRIMARY KEY,
+            channel_name TEXT NOT NULL,
+            claude_session_id TEXT,
+            canvas_id TEXT,
+            canvas_markdown TEXT,
+            cwd TEXT NOT NULL,
+            authenticated_user_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
 ```
+<!-- /schema:schema-channels -->
 
 ### pending_auth_tokens
 
 Short-code tokens for the `/summon <code>` authentication flow.
 
+<!-- schema:schema-pending_auth_tokens -->
 ```sql
 CREATE TABLE pending_auth_tokens (
     short_code TEXT PRIMARY KEY,
@@ -101,11 +100,13 @@ CREATE TABLE pending_auth_tokens (
     failed_attempts INTEGER NOT NULL DEFAULT 0
 )
 ```
+<!-- /schema:schema-pending_auth_tokens -->
 
 ### spawn_tokens
 
 Capability tokens for pre-authenticated programmatic session creation.
 
+<!-- schema:schema-spawn_tokens -->
 ```sql
 CREATE TABLE spawn_tokens (
     token TEXT PRIMARY KEY,
@@ -115,56 +116,63 @@ CREATE TABLE spawn_tokens (
     cwd TEXT NOT NULL,
     spawn_source TEXT NOT NULL DEFAULT 'session',
     created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL
+    expires_at TEXT NOT NULL,
+    consumed INTEGER NOT NULL DEFAULT 0
 )
 ```
+<!-- /schema:schema-spawn_tokens -->
 
 ### projects
 
 Project configuration (PM agent multi-session groups).
 
+<!-- schema:schema-projects -->
 ```sql
-CREATE TABLE projects (
-    project_id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    directory TEXT NOT NULL,
-    channel_prefix TEXT NOT NULL,   -- unique index
-    pm_channel_id TEXT,
-    workflow_instructions TEXT DEFAULT NULL, -- NULL = use global, '' = explicit clear
-    hooks TEXT DEFAULT NULL,        -- JSON lifecycle hooks, NULL = use global
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-)
+CREATE TABLE "projects" (
+            project_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            directory TEXT NOT NULL,
+            channel_prefix TEXT NOT NULL,
+            pm_channel_id TEXT,
+            workflow_instructions TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            hooks TEXT DEFAULT NULL
+        )
 ```
+<!-- /schema:schema-projects -->
 
 ### workflow_defaults
 
 Global workflow defaults applied when no project-level override exists.
 
+<!-- schema:schema-workflow_defaults -->
 ```sql
 CREATE TABLE workflow_defaults (
-    id INTEGER PRIMARY KEY CHECK (id = 1),  -- enforces single row
-    instructions TEXT NOT NULL DEFAULT '',
-    hooks TEXT DEFAULT NULL,                -- JSON lifecycle hooks
-    updated_at TEXT NOT NULL
-)
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            instructions TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        , hooks TEXT DEFAULT NULL)
 ```
+<!-- /schema:schema-workflow_defaults -->
 
 ### session_tasks
 
 Structured task tracking for sessions (used by `TaskCreate`/`TaskUpdate` tools).
 
+<!-- schema:schema-session_tasks -->
 ```sql
 CREATE TABLE session_tasks (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    content TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    priority TEXT NOT NULL DEFAULT 'medium',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-)
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            content TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            priority TEXT NOT NULL DEFAULT 'medium',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+        )
 ```
+<!-- /schema:schema-session_tasks -->
 
 `ON DELETE CASCADE` removes tasks automatically when the parent session is deleted.
 
@@ -172,6 +180,7 @@ CREATE TABLE session_tasks (
 
 Event log for security and debugging.
 
+<!-- schema:schema-audit_log -->
 ```sql
 CREATE TABLE audit_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,17 +191,20 @@ CREATE TABLE audit_log (
     details TEXT
 )
 ```
+<!-- /schema:schema-audit_log -->
 
 Recorded event types: `session_created`, `auth_attempted`, `auth_succeeded`, `auth_failed`, `session_active`, `session_ended`, `session_errored`, `session_stopped`, `spawn_token_consumed`, `spawn_token_rejected`.
 
 ### schema_version
 
+<!-- schema:schema-schema_version -->
 ```sql
 CREATE TABLE schema_version (
-    id INTEGER PRIMARY KEY CHECK (id = 1),  -- single row
+    id INTEGER PRIMARY KEY CHECK (id = 1),
     version INTEGER NOT NULL
 )
 ```
+<!-- /schema:schema-schema_version -->
 
 ## Migration System
 
@@ -211,44 +223,28 @@ CREATE TABLE schema_version (
 
 | From → To | Change |
 |-----------|--------|
-| 1 → 2 | Added `parent_session_id`, `authenticated_user_id` to sessions |
-| 2 → 3 | Created `workflow_defaults` table |
-| 3 → 4 | Added partial unique index on active session names |
-| 4 → 5 | Added `canvas_id`, `canvas_markdown` to sessions |
-| 5 → 6 | Added index on `parent_session_id` |
-| 6 → 7 | Added `context_pct` to sessions |
-| 7 → 8 | Created `projects` table, added `project_id` to sessions |
-| 8 → 9 | Added unique index on `channel_prefix` in projects |
-| 9 → 10 | Created `channels` table, added `effort` to sessions, migrated and dropped `canvas_id`/`canvas_markdown` from sessions |
-| 10 → 11 | Created `session_tasks` table |
-| 11 → 12 | Added `hooks` column to `workflow_defaults` and `projects` |
-| 12 → 13 | Added covering index on `(authenticated_user_id, status, slack_channel_id)` for PM status queries |
-| 13 → 14 | Made `projects.workflow_instructions` nullable (NULL = use global, `''` = explicit clear); recreated `projects` table via copy-drop-rename; added `(parent_session_id, status)` index |
-
-## Adding a Migration
-
-1. Write a new `_migrate_N_to_N+1(db)` async function in `sessions/migrations.py`.
-2. Add it to `_MIGRATIONS[N]`.
-3. Increment `CURRENT_SCHEMA_VERSION` to `N+1`.
-4. Use `contextlib.suppress(sqlite3.OperationalError)` or try/except for `ALTER TABLE ADD COLUMN` (SQLite lacks `IF NOT EXISTS` for column additions).
-5. Wrap destructive operations (DROP, data migrations) in a check for existing data first.
-6. Do **not** modify any existing migration function — migrations are run exactly once per database.
-
-Example:
-
-```python
-async def _migrate_14_to_15(db: aiosqlite.Connection) -> None:
-    """Add my_new_column to sessions table."""
-    with contextlib.suppress(sqlite3.OperationalError):
-        await db.execute("ALTER TABLE sessions ADD COLUMN my_new_column TEXT")
-
-_MIGRATIONS: dict[int, Any] = {
-    # ... existing entries ...
-    14: _migrate_14_to_15,
-}
-
-CURRENT_SCHEMA_VERSION = 15
+<!-- schema:migration-history -->
 ```
+| 0 → 1 | Baseline (no-op) |
+| 1 → 2 | Add parent_session_id and authenticated_user_id to sessions table. |
+| 2 → 3 | Create workflow_defaults table. |
+| 3 → 4 | Add partial unique index on active session names. |
+| 4 → 5 | Add canvas_id and canvas_markdown to sessions table. |
+| 5 → 6 | Add index on parent_session_id for list_children queries. |
+| 6 → 7 | Add context_pct column for tracking context window usage. |
+| 7 → 8 | Create projects table and add project_id column to sessions table. |
+| 8 → 9 | Add unique index on channel_prefix in projects table. |
+| 9 → 10 | Create channels table, add effort column, migrate canvas data, drop redundant columns. |
+| 10 → 11 | Create session_tasks table for structured task tracking. |
+| 11 → 12 | Add hooks column to workflow_defaults and projects tables. |
+| 12 → 13 | Add index on authenticated_user_id + status for channel scoping queries. |
+| 13 → 14 | Make projects.workflow_instructions nullable (NULL = use global, '' = explicit clear). |
+
+Current schema version: **14**
+```
+<!-- /schema:migration-history -->
+
+See [Contributing — Database Migrations](../development/contributing.md#database-migrations) for instructions on writing new migrations.
 
 ## Database Commands
 

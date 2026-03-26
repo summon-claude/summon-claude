@@ -111,26 +111,6 @@ This displays every configuration value grouped by category, with indicators sho
 
 ---
 
-## Google Workspace setup
-
-### summon config google-auth
-
-```bash
-summon config google-auth
-```
-
-Initiates the Google OAuth flow for Scribe's Google Workspace integration. Opens a browser for authentication. Credentials are stored in the summon data directory (`google-credentials/`).
-
-### summon config google-status
-
-```bash
-summon config google-status
-```
-
-Shows current Google authentication status: whether credentials exist, which scopes are granted, and whether the token is still valid.
-
----
-
 ## Next steps
 
 With configuration verified, you're ready to start your first session:

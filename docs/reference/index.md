@@ -20,13 +20,9 @@ Technical reference documentation.
 
     `!`-prefixed commands for session control in Slack.
 
--   :material-shield-check: **[Permissions](permissions.md)**
+-   :material-shield-check: **[Agent Permissions](permissions.md)**
 
     Tool approval tiers and auto-approve rules.
-
--   :material-api: **[API Reference](api/index.md)**
-
-    Python API documentation.
 
 </div>
 

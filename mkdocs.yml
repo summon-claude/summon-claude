@@ -75,7 +75,6 @@ plugins:
           - guide/*.md
         Reference:
           - reference/*.md
-          - reference/api/*.md
         Concepts:
           - concepts/*.md
         Troubleshooting:
@@ -105,6 +104,7 @@ nav:
     - PM Agents: guide/pm-agents.md
     - Scribe: guide/scribe.md
     - GitHub Integration: guide/github-integration.md
+    - Scribe Integrations: guide/scribe-integrations.md
     - Cron & Tasks: guide/cron-tasks.md
     - Canvas: guide/canvas.md
     - Lifecycle Hooks: guide/hooks.md
@@ -116,13 +116,8 @@ nav:
     - Configuration Reference: reference/environment-variables.md
     - MCP Tools: reference/mcp-tools.md
     - In-Session Commands: reference/commands.md
-    - Permissions: reference/permissions.md
-    - API Reference:
-      - reference/api/index.md
-      - Configuration: reference/api/config.md
-      - Sessions: reference/api/sessions.md
-      - Slack: reference/api/slack.md
-      - CLI Modules: reference/api/cli.md
+    - Prompts: reference/prompts.md
+    - Agent Permissions: reference/permissions.md
   - Concepts:
     - concepts/index.md
     - Overview: concepts/overview.md
@@ -130,6 +125,7 @@ nav:
     - Daemon: concepts/daemon.md
     - Slack Integration: concepts/slack-integration.md
     - Database: concepts/database.md
+    - Context Management: concepts/context.md
     - Security: concepts/security.md
   - Troubleshooting: troubleshooting.md
   - Development:

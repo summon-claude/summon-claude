@@ -45,9 +45,19 @@ DEFAULT_OUTPUT_DIR = Path("docs/assets/screenshots")
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 900
 TOP_NAV_HEIGHT = 44  # Slack workspace-level toolbar (search bar)
-SANDBOX_BANNER_HEIGHT = 36  # developer sandbox banner at bottom
-SESSION_NAME = "docs-screenshots"
-PROJECT_NAME = "docs-screenshots"
+SANDBOX_BANNER_HEIGHT = 44  # developer sandbox banner at bottom
+_SESSION_BASE = "docs-screenshots"
+
+
+def _unique_suffix() -> str:
+    """Short timestamp suffix for unique channel/project names."""
+    return str(int(time.time()))[-6:]
+
+
+# Generated once per run so every function sees the same names.
+_run_suffix = _unique_suffix()
+SESSION_NAME = f"{_SESSION_BASE}-{_run_suffix}"
+PROJECT_NAME = f"{_SESSION_BASE}-{_run_suffix}"
 
 MANUAL_SCREENSHOTS = [
     {"name": "slack-setup-create-app.png", "description": "Create New App dialog at api.slack.com"},
@@ -125,8 +135,11 @@ def start_project_session() -> tuple[subprocess.Popen | None, str]:
     short_code = None
     deadline = time.time() + 60  # PM takes longer to initialize
 
+    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
+        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
+    stdout = proc.stdout
     while time.time() < deadline:
-        line = proc.stdout.readline()
+        line = stdout.readline()
         if not line:
             if proc.poll() is not None:
                 break
@@ -183,11 +196,61 @@ def stop_project_session(proc: subprocess.Popen | None) -> None:
             proc.kill()
 
 
-def find_session_channel(bot_token: str) -> str | None:
-    """Find the session channel by looking for channels matching the session name.
+def _slack_api_call_with_retry(fn, *, max_retries: int = 5):  # type: ignore[no-untyped-def]
+    """Call a Slack API function with retry on rate limiting."""
+    from slack_sdk.errors import SlackApiError
 
-    Paginates through all channels since the bot may be in many channels.
+    for attempt in range(max_retries + 1):
+        try:
+            return fn()
+        except SlackApiError as exc:
+            if exc.response.get("error") == "ratelimited" and attempt < max_retries:
+                retry_after = int(exc.response.headers.get("Retry-After", 10))
+                wait = max(retry_after, 5)
+                click.echo(
+                    f"  Rate limited, waiting {wait}s (attempt {attempt + 1}/{max_retries})..."
+                )
+                time.sleep(wait)
+            else:
+                raise
+    return None  # unreachable, but satisfies type checker
+
+
+def find_session_channel(bot_token: str) -> str | None:
+    """Find the session channel by querying the summon DB for matching sessions.
+
+    Avoids Slack API rate limits by reading directly from the local session
+    registry database rather than paginating ``conversations.list``.
+    Falls back to Slack API only if DB lookup fails.
     """
+    import sqlite3
+
+    try:
+        from summon_claude.config import get_data_dir
+
+        db_path = get_data_dir() / "registry.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            try:
+                # Join sessions with projects to find the PM session for our project.
+                # PROJECT_NAME may be truncated in channel_prefix/session_name, so
+                # match by project name directly.
+                rows = conn.execute(
+                    "SELECT s.slack_channel_id FROM sessions s "
+                    "JOIN projects p ON s.project_id = p.project_id "
+                    "WHERE p.name = ? AND s.slack_channel_id IS NOT NULL "
+                    "AND s.status IN ('active', 'pending_auth') "
+                    "ORDER BY s.started_at DESC LIMIT 1",
+                    (PROJECT_NAME,),
+                ).fetchall()
+                if rows and rows[0][0]:
+                    return rows[0][0]
+            finally:
+                conn.close()
+    except Exception as exc:
+        click.echo(f"  DB lookup failed ({exc}), trying Slack API...", err=True)
+
+    # Fallback: Slack API (slow, rate-limit prone)
     from slack_sdk import WebClient
 
     client = WebClient(token=bot_token)
@@ -196,20 +259,25 @@ def find_session_channel(bot_token: str) -> str | None:
         kwargs = {"types": "public_channel,private_channel", "limit": 200, "exclude_archived": True}
         if cursor:
             kwargs["cursor"] = cursor
-        resp = client.conversations_list(**kwargs)
+        call_kwargs = dict(kwargs)
+        resp = _slack_api_call_with_retry(lambda _kw=call_kwargs: client.conversations_list(**_kw))
+        if resp is None:
+            break
         for ch in resp.get("channels", []):
             if SESSION_NAME in ch.get("name", ""):
                 return ch["id"]
         cursor = resp.get("response_metadata", {}).get("next_cursor")
         if not cursor:
             break
+        time.sleep(3)
     return None
 
 
 def get_team_id(bot_token: str) -> str:
     from slack_sdk import WebClient
 
-    return WebClient(token=bot_token).auth_test()["team_id"]
+    resp = WebClient(token=bot_token).auth_test()
+    return str(resp["team_id"])
 
 
 def archive_channel(bot_token: str, channel_id: str) -> None:
@@ -225,6 +293,51 @@ def archive_channel(bot_token: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Playwright capture
 # ---------------------------------------------------------------------------
+
+
+def _crop_to_last_messages(page, dest: Path, *, padding: int = 16) -> None:
+    """Screenshot only the last few visible messages in the channel.
+
+    Uses JS to find the bounding rect of the last message containers,
+    then clips the screenshot to that region.  Falls back to a bottom-
+    of-viewport crop if the selectors don't match.
+    """
+    bbox = page.evaluate(
+        """(padding) => {
+        // Slack wraps each message in a [data-qa="virtual-list-item"] element
+        const items = document.querySelectorAll('[data-qa="virtual-list-item"]');
+        if (items.length === 0) return null;
+        // Take the last 3 items (or fewer if less exist)
+        const last = Array.from(items).slice(-3);
+        let top = Infinity, bottom = 0, left = Infinity, right = 0;
+        for (const el of last) {
+            const r = el.getBoundingClientRect();
+            if (r.top < top) top = r.top;
+            if (r.bottom > bottom) bottom = r.bottom;
+            if (r.left < left) left = r.left;
+            if (r.right > right) right = r.right;
+        }
+        return {
+            x: Math.max(0, left - padding),
+            y: Math.max(0, top - padding),
+            width: right - left + padding * 2,
+            height: bottom - top + padding * 2,
+        };
+    }""",
+        padding,
+    )
+    if bbox:
+        page.screenshot(path=str(dest), clip=bbox)
+    else:
+        # Fallback: bottom slice of viewport
+        click.echo("  WARNING: message elements not found, using viewport fallback", err=True)
+        clip = {
+            "x": 0,
+            "y": VIEWPORT_HEIGHT - 300,
+            "width": VIEWPORT_WIDTH,
+            "height": 250,
+        }
+        page.screenshot(path=str(dest), clip=clip)
 
 
 def _dismiss_overlays(page) -> None:
@@ -383,7 +496,7 @@ def wait_for_session_channel(bot_token: str, timeout: int = 60) -> str:
         if channel_id:
             click.echo(f"  Session channel found: {channel_id}")
             return channel_id
-        time.sleep(2)
+        time.sleep(10)
     raise RuntimeError(f"Session channel not found within {timeout}s")
 
 
@@ -413,7 +526,11 @@ def wait_for_claude_response(bot_token: str, channel_id: str, timeout: int = 120
 
     while time.time() < deadline:
         time.sleep(5)
-        resp = client.conversations_history(channel=channel_id, limit=50)
+        resp = _slack_api_call_with_retry(
+            lambda: client.conversations_history(channel=channel_id, limit=50)
+        )
+        if resp is None:
+            continue
         messages = resp.get("messages", [])
         if len(messages) > baseline_count:
             # Look for a message that looks like a turn completion (has the checkered_flag footer)
@@ -437,7 +554,7 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
     a realistic-looking permission message using the same Block Kit format that
     summon's PermissionHandler uses.
 
-    Returns the message ts for use in capture_screenshots.
+    Returns the message ts for use in milestone screenshot capture.
     """
     from slack_sdk import WebClient
 
@@ -535,24 +652,12 @@ def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -
     return help_ts  # Return ts anyway so we can still try to screenshot
 
 
-def capture_screenshots(  # noqa: PLR0913
-    page,
-    output_dir: Path,
-    team_id: str,
-    channel_id: str,
-    *,
-    help_ts: str | None = None,
-    perm_ts: str | None = None,
-) -> list[str]:
-    """Navigate to the session channel and capture clean screenshots.
+def _make_snap(page, output_dir: Path, captured: list[str]):
+    """Create a reusable ``snap()`` helper bound to the given page and output dir.
 
-    All screenshots hide the Slack sidebar and (for channel views) the thread
-    panel via DOM manipulation, producing focused views that show only the
-    relevant content area — no surrounding sidebars or split views.
+    Returns ``(snap, nav, clip_region)`` so callers can capture screenshots
+    at any point during the session flow — not just at the end.
     """
-    captured = []
-    channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
-
     clip_region = {
         "x": 0,
         "y": TOP_NAV_HEIGHT,
@@ -591,95 +696,7 @@ def capture_screenshots(  # noqa: PLR0913
         page.goto(url, wait_until="domcontentloaded", timeout=60_000)
         page.wait_for_timeout(wait_ms)
 
-    # Navigate to channel
-    click.echo("  Capturing channel screenshots...")
-    nav(channel_url)
-    _dismiss_overlays(page)
-
-    # --- Channel-view screenshots (sidebar + thread panel hidden) ----------
-
-    # 1. quickstart-slack-auth.png — auth/welcome message at top of channel
-    click.echo("  Scrolling to top for auth screenshot...")
-    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 0)")
-    page.wait_for_timeout(2_000)
-    snap("quickstart-slack-auth.png")
-
-    # 2. quickstart-first-message.png — channel view with first turn exchange
-    #    Show the channel (NOT a thread panel) with the turn response visible.
-    click.echo("  Capturing first message exchange...")
-    nav(channel_url, wait_ms=3_000)
-    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-    page.wait_for_timeout(2_000)
-    snap("quickstart-first-message.png")
-
-    # 3. quickstart-permission-request.png — permission Approve/Deny buttons
-    if perm_ts:
-        click.echo("  Capturing permission request screenshot...")
-        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-        page.wait_for_timeout(1_000)
-        snap("quickstart-permission-request.png")
-        # permissions-approval.png shows the same view — copy instead of re-capturing
-        shutil.copy2(
-            output_dir / "quickstart-permission-request.png",
-            output_dir / "permissions-approval.png",
-        )
-        click.echo(f"  copied: {output_dir / 'permissions-approval.png'}")
-        captured.append("permissions-approval.png")
-    else:
-        click.echo("  No permission ts — skipping permission screenshots")
-
-    # --- Thread-view screenshot (thread panel expanded to full width) -------
-
-    # 4. quickstart-help.png — !help response shown in expanded thread view
-    if help_ts:
-        help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
-        click.echo(f"  Capturing !help thread: {help_thread_url}")
-        nav(help_thread_url, wait_ms=5_000)
-        snap("quickstart-help.png", thread_view=True)
-    else:
-        # Fallback: channel view scrolled to bottom (won't show help response)
-        click.echo("  No !help thread ts — falling back to channel view")
-        nav(channel_url, wait_ms=3_000)
-        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-        page.wait_for_timeout(2_000)
-        snap("quickstart-help.png")
-
-    # --- Canvas screenshots ------------------------------------------------
-
-    # 5-6. Canvas tab view — click the canvas tab in the channel header.
-    #      The tab only appears after summon creates the canvas (async).
-    click.echo("  Attempting canvas capture...")
-    try:
-        nav(channel_url, wait_ms=3_000)
-        canvas_tab = page.locator('button[data-qa="canvas"][role="tab"]')
-        canvas_tab.wait_for(state="visible", timeout=15_000)
-        canvas_tab.click(timeout=5_000)
-        page.wait_for_timeout(3_000)
-        # Redact filesystem paths in canvas content before capturing
-        page.evaluate(
-            """(home) => {
-            document.querySelectorAll('td, span, div, a').forEach(el => {
-                if (el.children.length === 0 && el.textContent.includes(home)) {
-                    el.textContent = el.textContent.replaceAll(home, '~/project');
-                }
-            });
-        }""",
-            str(Path.home()),
-        )
-        snap("canvas-channel-tab.png")
-
-        # Second capture after content fully renders
-        page.wait_for_timeout(2_000)
-        snap("canvas-pm-active-work.png")
-    except Exception as exc:
-        click.echo(f"  Canvas capture failed ({type(exc).__name__}): {exc}", err=True)
-
-    # Clean up debug screenshots from previous runs
-    for debug_file in output_dir.glob("_debug_*.png"):
-        debug_file.unlink()
-        click.echo(f"  Removed debug artifact: {debug_file.name}")
-
-    return captured
+    return snap, nav, clip_region
 
 
 # ---------------------------------------------------------------------------
@@ -755,9 +772,12 @@ def _capture_summon_start_banner() -> str:
     in_banner = False
     deadline = time.time() + 30
 
+    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
+        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
+    stdout = proc.stdout
     try:
         while time.time() < deadline:
-            line = proc.stdout.readline()
+            line = stdout.readline()
             if not line:
                 if proc.poll() is not None:
                     break
@@ -825,9 +845,12 @@ def _capture_project_up_banner() -> str:
     in_banner = False
     deadline = time.time() + 60
 
+    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
+        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
+    stdout = proc.stdout
     try:
         while time.time() < deadline:
-            line = proc.stdout.readline()
+            line = stdout.readline()
             if not line:
                 if proc.poll() is not None:
                     break
@@ -937,6 +960,236 @@ CAPTURES: list[CaptureSpec] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Schema extraction — queries the live DB for current CREATE TABLE statements
+# ---------------------------------------------------------------------------
+
+_DATABASE_MD = "docs/concepts/database.md"
+
+_SCHEMA_TABLES = [
+    "sessions",
+    "channels",
+    "pending_auth_tokens",
+    "spawn_tokens",
+    "projects",
+    "workflow_defaults",
+    "session_tasks",
+    "audit_log",
+    "schema_version",
+]
+
+
+def _extract_table_sql(table_name: str) -> str:
+    """Extract the CREATE TABLE statement for a table from the live DB."""
+    import sqlite3
+
+    from summon_claude.config import get_data_dir
+
+    db_path = get_data_dir() / "registry.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,),
+        ).fetchone()
+        if not row or not row[0]:
+            return f"-- table '{table_name}' not found"
+        return str(row[0])
+    finally:
+        conn.close()
+
+
+def _extract_schema_version() -> str:
+    """Get the current schema version from the live DB."""
+    import sqlite3
+
+    from summon_claude.config import get_data_dir
+
+    db_path = get_data_dir() / "registry.db"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        row = conn.execute("SELECT version FROM schema_version WHERE id=1").fetchone()
+        return str(row[0]) if row else "unknown"
+    finally:
+        conn.close()
+
+
+def _extract_migration_history() -> str:
+    """Extract migration history from source code."""
+    from summon_claude.sessions.migrations import _MIGRATIONS, CURRENT_SCHEMA_VERSION
+
+    lines = []
+    for from_ver in sorted(_MIGRATIONS.keys()):
+        to_ver = from_ver + 1
+        fn = _MIGRATIONS[from_ver]
+        if fn is None:
+            desc = "Baseline (no-op)"
+        else:
+            desc = (fn.__doc__ or "").strip().split("\n")[0] or "(undocumented)"
+        lines.append(f"| {from_ver} → {to_ver} | {desc} |")
+    lines.append(f"\nCurrent schema version: **{CURRENT_SCHEMA_VERSION}**")
+    return "\n".join(lines)
+
+
+def run_schema_section(dry_run: bool = False) -> bool:
+    """Extract live schema from DB and inject into database.md.
+
+    Returns True if at least one schema was injected, False if all failed.
+    """
+    click.echo("\n[schema] Extracting live schema from database...")
+
+    if dry_run:
+        for table in _SCHEMA_TABLES:
+            click.echo(f"  (schema) {table} → {_DATABASE_MD}")
+        click.echo(f"  (schema) migration-history → {_DATABASE_MD}")
+        click.echo(f"  (schema) schema-version → {_DATABASE_MD}")
+        return True
+
+    succeeded = 0
+    failed = 0
+    md_path = Path(_DATABASE_MD)
+
+    # Extract each table's CREATE TABLE
+    for table in _SCHEMA_TABLES:
+        click.echo(f"  Extracting: {table}...")
+        try:
+            sql = _extract_table_sql(table)
+        except Exception as exc:
+            click.echo(f"    WARNING: failed to extract {table}: {exc}", err=True)
+            failed += 1
+            continue
+
+        if _inject_terminal_block(md_path, f"schema-{table}", sql, fence="sql", prefix="schema"):
+            click.echo(f"    → injected into {_DATABASE_MD}")
+            succeeded += 1
+        else:
+            click.echo(
+                f"    WARNING: no <!-- schema:schema-{table} --> marker in {_DATABASE_MD}",
+                err=True,
+            )
+            failed += 1
+
+    # Extract migration history
+    click.echo("  Extracting: migration-history...")
+    try:
+        history = _extract_migration_history()
+        if _inject_terminal_block(md_path, "migration-history", history, fence="", prefix="schema"):
+            click.echo(f"    → injected into {_DATABASE_MD}")
+            succeeded += 1
+        else:
+            failed += 1
+    except Exception as exc:
+        click.echo(f"    WARNING: failed to extract migration history: {exc}", err=True)
+        failed += 1
+
+    # Extract schema version
+    click.echo("  Extracting: schema-version...")
+    try:
+        version = _extract_schema_version()
+        if _inject_terminal_block(md_path, "schema-version", version, fence="", prefix="schema"):
+            click.echo(f"    → injected into {_DATABASE_MD}")
+            succeeded += 1
+        else:
+            failed += 1
+    except Exception as exc:
+        click.echo(f"    WARNING: failed to extract schema version: {exc}", err=True)
+        failed += 1
+
+    click.echo(f"\n  Done: {succeeded} schemas extracted, {failed} skipped/failed.")
+    return succeeded > 0
+
+
+# ---------------------------------------------------------------------------
+# Prompt extraction — imports prompt constants from source and injects into docs
+# ---------------------------------------------------------------------------
+
+_PROMPTS_MD = "docs/reference/prompts.md"
+
+
+def _import_prompt(attr_name: str) -> str:
+    """Import a prompt constant from summon_claude.sessions.session."""
+    from summon_claude.sessions.session import (
+        _CANVAS_PROMPT_SECTION,
+        _COMPACT_PROMPT,
+        _OVERFLOW_RECOVERY_PROMPT,
+        _PM_SYSTEM_PROMPT_APPEND,
+        _REVIEWER_SYSTEM_PROMPT_TEMPLATE,
+        _SCHEDULING_PROMPT_SECTION,
+        _SCRIBE_SYSTEM_PROMPT_APPEND,
+    )
+
+    prompts = {
+        "pm-system": _PM_SYSTEM_PROMPT_APPEND,
+        "scribe-system": _SCRIBE_SYSTEM_PROMPT_APPEND,
+        "reviewer-system": _REVIEWER_SYSTEM_PROMPT_TEMPLATE,
+        "compact": _COMPACT_PROMPT,
+        "overflow-recovery": _OVERFLOW_RECOVERY_PROMPT,
+        "canvas": _CANVAS_PROMPT_SECTION,
+        "scheduling": _SCHEDULING_PROMPT_SECTION,
+    }
+    return prompts[attr_name]
+
+
+PROMPT_MARKERS = [
+    "pm-system",
+    "scribe-system",
+    "reviewer-system",
+    "compact",
+    "overflow-recovery",
+    "canvas",
+    "scheduling",
+]
+
+
+def run_prompts_section(dry_run: bool = False) -> bool:
+    """Extract prompts from source code and inject into docs.
+
+    Returns True if at least one prompt was injected, False if all failed.
+    """
+    click.echo("\n[prompts] Extracting prompts from source code...")
+
+    if dry_run:
+        for marker in PROMPT_MARKERS:
+            click.echo(f"  (prompt) {marker} → {_PROMPTS_MD}")
+        return True
+
+    succeeded = 0
+    failed = 0
+    md_path = Path(_PROMPTS_MD)
+
+    for marker in PROMPT_MARKERS:
+        click.echo(f"  Extracting: {marker}...")
+        try:
+            content = _import_prompt(marker)
+        except Exception as exc:
+            click.echo(f"    WARNING: failed to import {marker}: {exc}", err=True)
+            failed += 1
+            continue
+
+        # Strip leading/trailing whitespace for clean display
+        content = content.strip()
+
+        # Validate content won't corrupt markdown
+        error = _validate_content(content, marker)
+        if error:
+            click.echo(f"    WARNING: skipping {marker}: {error}", err=True)
+            failed += 1
+            continue
+
+        if _inject_terminal_block(md_path, marker, content, prefix="prompt"):
+            click.echo(f"    → injected into {_PROMPTS_MD}")
+            succeeded += 1
+        else:
+            click.echo(
+                f"    WARNING: no <!-- prompt:{marker} --> marker in {_PROMPTS_MD}",
+                err=True,
+            )
+            failed += 1
+
+    click.echo(f"\n  Done: {succeeded} prompts extracted, {failed} skipped/failed.")
+    return succeeded > 0
+
+
 # -- Runner -----------------------------------------------------------------
 
 
@@ -1006,18 +1259,20 @@ def _validate_content(content: str, marker: str) -> str | None:
     return None
 
 
-def _inject_terminal_block(
+def _inject_terminal_block(  # noqa: PLR0913
     md_path: Path,
     marker: str,
     content: str,
     fence: str = "text",
     extra_md: str = "",
+    *,
+    prefix: str = "terminal",
 ) -> bool:
-    """Replace content between ``<!-- terminal:MARKER -->`` markers."""
+    """Replace content between ``<!-- {prefix}:MARKER -->`` markers."""
     md_text = md_path.read_text()
     esc = re.escape(marker)
     pattern = re.compile(
-        rf"(<!-- terminal:{esc} -->)\n(.*?\n)?(<!-- /terminal:{esc} -->)",
+        rf"(<!-- {prefix}:{esc} -->)\n(.*?\n)?(<!-- /{prefix}:{esc} -->)",
         re.DOTALL,
     )
 
@@ -1104,7 +1359,7 @@ def run_terminal_section(dry_run: bool = False) -> bool:
 @click.option(
     "--section",
     default=None,
-    type=click.Choice(["slack-setup", "session-ux", "terminal"]),
+    type=click.Choice(["slack-setup", "session-ux", "terminal", "prompts", "schema"]),
     help="Capture only a specific section.",
 )
 @click.option(
@@ -1143,12 +1398,19 @@ def main(
     Requires: SUMMON_TEST_SLACK_BOT_TOKEN.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    sections = [section] if section else ["slack-setup", "session-ux", "terminal"]
+    all_sections = ["slack-setup", "session-ux", "terminal", "prompts", "schema"]
+    sections = [section] if section else all_sections
 
     if dry_run:
         for sec in sections:
             if sec == "terminal":
                 run_terminal_section(dry_run=True)
+                continue
+            if sec == "prompts":
+                run_prompts_section(dry_run=True)
+                continue
+            if sec == "schema":
+                run_schema_section(dry_run=True)
                 continue
             items = (
                 MANUAL_SCREENSHOTS
@@ -1176,6 +1438,14 @@ def main(
 
     # Terminal capture (no Slack/Playwright prereqs needed)
     if "terminal" in sections and not run_terminal_section() and sections == ["terminal"]:
+        raise SystemExit(1)
+
+    # Prompt extraction (no prereqs needed)
+    if "prompts" in sections and not run_prompts_section() and sections == ["prompts"]:
+        raise SystemExit(1)
+
+    # Schema extraction (needs local DB)
+    if "schema" in sections and not run_schema_section() and sections == ["schema"]:
         raise SystemExit(1)
 
     # Validate manual screenshots
@@ -1243,14 +1513,35 @@ def main(
 
             authenticate_via_slack(page, team_id, short_code)
 
+            # Set up reusable screenshot helpers
+            captured: list[str] = []
+            snap, nav, _ = _make_snap(page, output_dir, captured)
+
+            # --- Milestone 1: Auth screenshot (/summon command + bot response)
+            #     Capture immediately after authenticate_via_slack returns,
+            #     while the page still shows the channel where /summon was typed.
+            #     Crop tightly to just the last messages (the /summon ephemeral
+            #     response) to exclude workspace onboarding clutter above.
+            click.echo("  Capturing auth screenshot (slash command + bot response)...")
+            _dismiss_overlays(page)
+            _inject_screenshot_css(page, _CHANNEL_VIEW_CSS)
+            # Scroll to bottom so the auth response is visible
+            page.evaluate(
+                "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
+            )
+            page.wait_for_timeout(2_000)
+            # Find the last few messages and crop to their bounding box
+            auth_dest = output_dir / "quickstart-slack-auth.png"
+            _crop_to_last_messages(page, auth_dest)
+            click.echo(f"  captured: {auth_dest}")
+            captured.append("quickstart-slack-auth.png")
+
             # 3. Wait for session channel
-            channel_id = wait_for_session_channel(bot_token, timeout=90)
-
-            # 4. Navigate to session channel and send message
+            channel_id = wait_for_session_channel(bot_token, timeout=180)
             channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
-            page.goto(channel_url, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_timeout(8_000)
 
+            # 4. Navigate to session channel
+            nav(channel_url)
             _dismiss_overlays(page)
 
             # Debug screenshot to tempdir (not docs dir) to verify channel loaded
@@ -1258,30 +1549,98 @@ def main(
             page.screenshot(path=str(debug_path), full_page=False)
             click.echo(f"  Debug screenshot saved: {debug_path}")
 
+            # 5. Send task message
             send_message_via_slack(page, message)
 
-            # 5. Wait for Claude to respond
+            # 6. Wait for Claude to respond
             wait_for_claude_response(bot_token, channel_id, timeout=180)
 
-            # 6. Post a mock permission request for screenshot purposes.
+            # --- Milestone 2: First message screenshot (welcome + task + response)
+            click.echo("  Capturing first message exchange...")
+            nav(channel_url, wait_ms=3_000)
+            page.evaluate(
+                "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
+            )
+            page.wait_for_timeout(2_000)
+            snap("quickstart-first-message.png")
+
+            # 7. Post a mock permission request for screenshot purposes.
             #    Real permission requests can't be triggered reliably because
             #    Claude Code SDK mode auto-approves most tools within the project.
             perm_ts = _post_mock_permission(bot_token, channel_id)
 
-            # 7. Send !help and wait for thread reply
-            page.wait_for_timeout(3_000)
+            # --- Milestone 3: Permission request screenshot
+            if perm_ts:
+                click.echo("  Capturing permission request screenshot...")
+                page.wait_for_timeout(3_000)
+                nav(channel_url, wait_ms=3_000)
+                page.evaluate(
+                    "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
+                )
+                page.wait_for_timeout(1_000)
+                snap("quickstart-permission-request.png")
+                # permissions-approval.png shows the same view — copy instead of re-capturing
+                shutil.copy2(
+                    output_dir / "quickstart-permission-request.png",
+                    output_dir / "permissions-approval.png",
+                )
+                click.echo(f"  copied: {output_dir / 'permissions-approval.png'}")
+                captured.append("permissions-approval.png")
+            else:
+                click.echo("  No permission ts — skipping permission screenshots")
+
+            # 8. Send !help and wait for thread reply
             send_message_via_slack(page, "!help")
             help_ts = wait_for_help_response(bot_token, channel_id, timeout=30)
 
-            # 8. Capture all screenshots
-            captured = capture_screenshots(
-                page,
-                output_dir,
-                team_id,
-                channel_id,
-                help_ts=help_ts,
-                perm_ts=perm_ts,
-            )
+            # --- Milestone 4: !help thread screenshot
+            if help_ts:
+                help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
+                click.echo(f"  Capturing !help thread: {help_thread_url}")
+                nav(help_thread_url, wait_ms=5_000)
+                snap("quickstart-help.png", thread_view=True)
+            else:
+                # Fallback: channel view scrolled to bottom (won't show help response)
+                click.echo("  No !help thread ts — falling back to channel view")
+                nav(channel_url, wait_ms=3_000)
+                page.evaluate(
+                    "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
+                )
+                page.wait_for_timeout(2_000)
+                snap("quickstart-help.png")
+
+            # --- Milestone 5: Canvas screenshots
+            click.echo("  Attempting canvas capture...")
+            try:
+                nav(channel_url, wait_ms=3_000)
+                canvas_tab = page.locator('button[data-qa="canvas"][role="tab"]')
+                canvas_tab.wait_for(state="visible", timeout=15_000)
+                canvas_tab.click(timeout=5_000)
+                page.wait_for_timeout(3_000)
+                # Redact filesystem paths in canvas content before capturing
+                page.evaluate(
+                    """(home) => {
+                    document.querySelectorAll('td, span, div, a').forEach(el => {
+                        if (el.children.length === 0 && el.textContent.includes(home)) {
+                            el.textContent = el.textContent.replaceAll(home, '~/project');
+                        }
+                    });
+                }""",
+                    str(Path.home()),
+                )
+                snap("canvas-channel-tab.png")
+
+                # Second capture after content fully renders
+                page.wait_for_timeout(2_000)
+                snap("canvas-pm-active-work.png")
+            except Exception as exc:
+                click.echo(f"  Canvas capture failed ({type(exc).__name__}): {exc}", err=True)
+
+            # Clean up debug screenshots from previous runs
+            for debug_file in output_dir.glob("_debug_*.png"):
+                debug_file.unlink()
+                click.echo(f"  Removed debug artifact: {debug_file.name}")
+
             click.echo(f"\n  Done: {len(captured)} screenshots captured.")
 
             context.close()
@@ -1297,4 +1656,4 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    main()  # type: ignore[call-arg]  # Click provides args from CLI

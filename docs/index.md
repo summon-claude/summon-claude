@@ -8,37 +8,37 @@ Run long-running AI agents in the background. Interact, review permissions, and 
 
 <div class="grid cards" markdown>
 
--   **Project management**
+-   **[Project management](guide/projects.md)**
 
     ---
 
     Group sessions into projects with a PM agent that spawns, directs, and monitors multiple Claude sessions on your behalf.
 
--   **Real-time streaming**
+-   **[Real-time streaming](concepts/threading.md)**
 
     ---
 
     Responses stream to Slack as Claude types them. No waiting for full completions before you see results.
 
--   **Interactive permissions**
+-   **[Interactive permissions](reference/permissions.md)**
 
     ---
 
     Tool-use requests surface as Slack buttons. Approve or deny without switching to a terminal.
 
--   **Smart thread organization**
+-   **[Smart thread organization](concepts/threading.md#subagent-threads)**
 
     ---
 
     Each turn gets its own thread. Subagent work is nested automatically so your channel stays readable.
 
--   **Canvas integration**
+-   **[Canvas integration](guide/canvas.md)**
 
     ---
 
     Persistent markdown canvas per session. Claude can read and write structured notes that survive conversation compaction.
 
--   **Scheduled jobs and tasks**
+-   **[Scheduled jobs and tasks](guide/cron-tasks.md)**
 
     ---
 

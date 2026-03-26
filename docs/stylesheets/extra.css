@@ -1,3 +1,10 @@
+/* Wrap text in "text" code blocks — these are prose (prompts, terminal
+   output), not code, so horizontal scrolling is unhelpful. */
+.md-typeset code.language-text {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
 /* Dark mode: improve grid card contrast against page background.
    Without this, cards have transparent backgrounds and nearly invisible
    borders (12% opacity) in slate mode, making them blend into the page. */

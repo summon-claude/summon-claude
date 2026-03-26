@@ -57,7 +57,7 @@ summon config google-status
 
 #### External Slack monitoring
 
-See the [Slack browser monitoring](#slack-browser-monitoring) section below for full setup instructions.
+See [Scribe Integrations — Slack Browser Monitoring](scribe-integrations.md#slack-browser-monitoring) for full setup instructions.
 
 ### Step 3: Start the scribe
 
@@ -141,65 +141,7 @@ summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01ABC123,C02DEF456
 
 ## Slack browser monitoring
 
-The scribe's Slack data collector uses Playwright to authenticate with an external Slack workspace, then intercepts WebSocket frames to capture messages in real time. This section covers the setup commands.
-
-!!! warning "Browser-based monitoring"
-    Slack channel monitoring uses Playwright to capture WebSocket frames from your Slack workspace. This requires the `slack-browser` extra (`pip install summon-claude[slack-browser]`) and a Chromium-based browser installed on the host.
-
-### Authenticate with a Slack workspace
-
-```bash
-summon config slack-auth myteam
-```
-
-This opens a visible browser window at your Slack workspace. Log in normally — the browser closes automatically after detecting your session. Auth state (cookies and localStorage) is saved to summon's data directory.
-
-The `WORKSPACE` argument accepts:
-
-- A workspace name: `myteam` (becomes `https://myteam.slack.com`)
-- An enterprise name: `acme.enterprise` (becomes `https://acme.enterprise.slack.com`)
-- A full URL: `https://myteam.slack.com`
-
-After login, the command prompts you to select which channels to monitor using an interactive picker.
-
-!!! tip "Enterprise Grid workspaces"
-    Enterprise Grid workspaces serve a workspace picker at their enterprise URL. The scribe handles this automatically by extracting team IDs from the saved browser state and navigating directly to `app.slack.com/client/{TEAM_ID}`.
-
-### Select monitored channels
-
-To change which channels are monitored without re-authenticating:
-
-```bash
-summon config slack-channels
-```
-
-This uses the cached channel list from the last authentication. To refresh the channel list from Slack:
-
-```bash
-summon config slack-channels --refresh
-```
-
-### Check auth status
-
-```bash
-summon config slack-status
-```
-
-Shows the configured workspace URL, user ID, auth state age, and monitored channels.
-
-### Remove auth state
-
-```bash
-summon config slack-remove
-```
-
-Removes saved browser auth state and workspace config. This cannot be undone.
-
-### How it works
-
-The browser user must be a member of any channel being monitored — the WebSocket only delivers messages for channels the authenticated user belongs to.
-
-The primary auth cookie (`d`) has a roughly 1-year TTL, so re-authentication is rarely needed. The `x` cookie (CSRF) is not required.
+For full setup instructions (install, authentication, channel selection), see [Scribe Integrations — Slack Browser Monitoring](scribe-integrations.md#slack-browser-monitoring).
 
 ---
 
