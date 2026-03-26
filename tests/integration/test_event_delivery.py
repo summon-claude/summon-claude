@@ -103,11 +103,8 @@ class TestFileEvents:
         await slack_client.upload(f"content-{nonce}", f"test-{nonce}.txt", title=f"Test {nonce}")
 
         event = await event_consumer.wait_for_event(
-            lambda e: e.get("type") == "file_shared",
+            lambda e: e.get("type") == "file_shared" and e.get("channel_id") == test_channel,
             timeout=15.0,
         )
         file_id = event.get("file_id")
         assert isinstance(file_id, str) and file_id, f"file_shared event missing file_id: {event}"
-        # channel_id is present in Slack's file_shared events but verify gracefully
-        if "channel_id" in event:
-            assert event["channel_id"] == test_channel

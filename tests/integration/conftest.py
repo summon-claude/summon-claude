@@ -292,12 +292,13 @@ async def fresh_channel(slack_harness):
 
 
 @pytest.fixture
-async def event_consumer(slack_harness):
-    """Socket Mode consumer — connects, collects events, disconnects.
+async def event_consumer(slack_harness, test_channel):
+    """Socket Mode consumer — connects, verifies pipeline, disconnects.
 
-    Each test gets a fresh connection (~2-3s overhead). Events from
-    previous tests don't leak because the consumer is new. A drain()
-    after start() clears any pending events delivered on connection.
+    Each test gets a fresh connection. A canary message verifies the
+    event pipeline is live before the test starts — this both proves
+    Socket Mode delivery works AND naturally drains stale events from
+    other tests that accumulated while no consumer was connected.
     """
     consumer = EventConsumer(
         bot_token=slack_harness.bot_token,
@@ -310,12 +311,19 @@ async def event_consumer(slack_harness):
         pytest.skip("Socket Mode connection timed out (15s)")
     except Exception as exc:
         pytest.skip(f"Socket Mode connection failed: {exc}")
-    # Drain stale events with adaptive loop — exits in 0.5s on fast
-    # networks (no stale events), up to 2s on slow ones.
-    for _ in range(4):
-        await asyncio.sleep(0.5)
-        if not consumer.drain():
-            break
+    # Canary: post a message and verify it arrives via Socket Mode.
+    # Proves the pipeline is live and drains stale events in the process.
+    canary = f"canary-{secrets.token_hex(4)}"
+    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
+    try:
+        await consumer.wait_for_event(
+            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
+            timeout=10.0,
+        )
+    except TimeoutError:
+        await consumer.stop()
+        pytest.skip("Socket Mode canary failed — events not flowing")
+    consumer.drain()  # clear any remaining stale events after canary
     yield consumer
     await consumer.stop()
 
