@@ -32,6 +32,8 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
+    github_auth_cmd,
+    github_logout,
     google_auth,
     google_status,
 )
@@ -780,6 +782,21 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
     """Set a configuration value (e.g. SUMMON_SLACK_BOT_TOKEN)."""
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
     config_set(key, value, config_path_override)
+
+
+@cmd_config.command("github-auth")
+def config_github_auth_cmd() -> None:
+    """Authenticate with GitHub for MCP tools."""
+    try:
+        asyncio.run(github_auth_cmd())
+    except KeyboardInterrupt:
+        click.echo("\nAuthentication cancelled.", err=True)
+
+
+@cmd_config.command("github-logout")
+def config_github_logout_cmd() -> None:
+    """Remove stored GitHub authentication."""
+    github_logout()
 
 
 @cmd_config.command("google-auth")

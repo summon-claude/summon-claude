@@ -112,6 +112,8 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
 | `summon config check` | Validate config, test connectivity (Slack, GitHub, Google), and show feature inventory |
+| `summon config github-auth` | Authenticate with GitHub via OAuth device flow (run once, token stored locally) |
+| `summon config github-logout` | Remove stored GitHub authentication |
 | `summon config google-auth` | Authenticate with Google Workspace for scribe monitoring |
 | `summon config google-status` | Check Google Workspace authentication status |
 | `summon config slack-auth WORKSPACE` | Authenticate with an external Slack workspace (name, e.g. `myteam`, or URL) |
@@ -223,7 +225,6 @@ When running as a local install (e.g., `uv run summon`), all paths resolve to
 | `SUMMON_PERMISSION_DEBOUNCE_MS` | `500` | Debounce window for batching permission requests (ms) |
 | `SUMMON_MAX_INLINE_CHARS` | `2500` | Threshold for inline vs file upload display |
 | `SUMMON_NO_UPDATE_CHECK` | `false` | Disable update notifications on `summon start` |
-| `SUMMON_GITHUB_PAT` | (unset) | GitHub PAT for the remote MCP server (classic `ghp_` or fine-grained `github_pat_`) |
 | `SUMMON_ENABLE_THINKING` | `true` | Enable adaptive thinking tokens in Claude responses |
 | `SUMMON_SHOW_THINKING` | `false` | Post thinking content to turn threads in Slack |
 | `SUMMON_SCRIBE_ENABLED` | `false` | Enable scribe monitoring agent (PM agent system — preview) |
