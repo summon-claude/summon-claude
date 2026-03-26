@@ -563,25 +563,25 @@ def capture_screenshots(  # noqa: PLR0913
     else:
         click.echo("  No permission ts — skipping permission screenshots")
 
-    # Canvas screenshots — navigate to the canvas tab
+    # Canvas screenshots — click the canvas tab in the channel header.
+    # The canvas tab is a <button data-qa="canvas" role="tab"> sibling to the
+    # Messages tab.  It only appears after summon creates the canvas (async),
+    # so we poll briefly.
     click.echo("  Attempting canvas capture...")
     try:
-        # Navigate back to channel
         nav(channel_url, wait_ms=3_000)
-        # Try to click the canvas tab
-        canvas_tab = page.locator('[data-qa="channel_canvas_tab"], [data-qa="canvas-tab-button"]')
-        if canvas_tab.count() > 0:
-            canvas_tab.first.click(timeout=5_000)
-            page.wait_for_timeout(3_000)
-            snap("canvas-channel-tab.png")
+        canvas_tab = page.locator('button[data-qa="canvas"][role="tab"]')
+        # Poll for up to 15s — canvas creation is async after session startup
+        canvas_tab.wait_for(state="visible", timeout=15_000)
+        canvas_tab.click(timeout=5_000)
+        page.wait_for_timeout(3_000)
+        snap("canvas-channel-tab.png")
 
-            # Try to capture the canvas content
-            page.wait_for_timeout(2_000)
-            snap("canvas-pm-active-work.png")
-        else:
-            click.echo("  Canvas tab not found — skipping canvas screenshots")
+        # Second capture after content fully renders
+        page.wait_for_timeout(2_000)
+        snap("canvas-pm-active-work.png")
     except Exception as exc:
-        click.echo(f"  WARNING: Canvas capture failed: {exc}", err=True)
+        click.echo(f"  Canvas tab not found — skipping canvas screenshots ({exc})", err=True)
 
     return captured
 
