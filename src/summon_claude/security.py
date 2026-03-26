@@ -46,8 +46,8 @@ _MARKDOWN_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)")
 _HTML_IMG_RE = re.compile(r"<img\s[^>]*>", re.IGNORECASE)
 
 # Untrusted delimiter patterns — strip from output to prevent nonce leakage.
-# Matches both BEGIN and END variants with any hex nonce.
-_DELIMITER_RE = re.compile(r"<<?/?\s*UNTRUSTED_EXTERNAL_DATA_[a-f0-9]+\s*>>")
+# Process-specific: only matches this process's actual nonce, not arbitrary hex.
+_DELIMITER_RE = re.compile(re.escape(UNTRUSTED_BEGIN) + "|" + re.escape(UNTRUSTED_END))
 
 # Suspicious URL patterns — data exfiltration via URL parameters
 _EXFIL_URL_RE = re.compile(
@@ -94,12 +94,22 @@ def validate_agent_output(text: str) -> tuple[str, list[str]]:
             f"Removed {html_count} HTML image tag(s) — potential data exfiltration vector"
         )
 
-    # Flag (but don't remove) suspicious URLs — may be legitimate
-    exfil_urls = _EXFIL_URL_RE.findall(text)
-    if exfil_urls:
+    # Defang suspicious URLs — make non-clickable to prevent exfiltration
+    def _defang_url(m: re.Match[str]) -> str:
+        url = m.group(0)
+        # Case-insensitive: regex uses IGNORECASE so scheme may be any case
+        lower = url.lower()
+        if lower.startswith("https://"):
+            return "hxxps://" + url[8:]
+        if lower.startswith("http://"):
+            return "hxxp://" + url[7:]
+        return url
+
+    text, exfil_count = _EXFIL_URL_RE.subn(_defang_url, text)
+    if exfil_count:
         warnings.append(
-            f"Flagged {len(exfil_urls)} URL(s) with sensitive-looking "
-            "parameter names — review for data exfiltration"
+            f"Defanged {exfil_count} URL(s) with sensitive-looking "
+            "parameter names — potential data exfiltration"
         )
 
     return text, warnings

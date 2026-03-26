@@ -645,7 +645,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 safe_sender = re.sub(r"<@(U\w+)>", r"user:\1", safe_sender)
                 safe_sender = re.sub(r"<!subteam\^[^>]+>", "group", safe_sender)
                 attribution = redact_secrets(f"_Message from {safe_sender}:_\n{safe_text}")
-                attribution, _ = validate_agent_output(attribution)
+                attribution, sec_warnings = validate_agent_output(attribution)
+                for w in sec_warnings:
+                    logger.warning("session_message output validation: %s", w)
                 try:
                     await _web_client.chat_postMessage(channel=target_channel_id, text=attribution)
                 except Exception:

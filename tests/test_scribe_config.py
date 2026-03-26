@@ -150,30 +150,6 @@ class TestScribeConfigSettableKeys:
 class TestGoogleWorkspaceMCP:
     """Tests for Google Workspace MCP config helper."""
 
-    def test_build_google_workspace_mcp_default_services(self):
-        from summon_claude.sessions.session import _build_google_workspace_mcp
-
-        result = _build_google_workspace_mcp("gmail,calendar,drive")
-        # Command should be the workspace-mcp binary co-located with sys.executable
-        assert result["command"].endswith("workspace-mcp")
-        assert "--tools" in result["args"]
-        # Services should be split into separate args, not one comma-separated string
-        assert "gmail" in result["args"]
-        assert "calendar" in result["args"]
-        assert "drive" in result["args"]
-        assert "--tool-tier" in result["args"]
-        assert "core" in result["args"]
-        assert "--single-user" in result["args"]
-        # Env overrides direct credentials to summon's data dir
-        assert "WORKSPACE_MCP_CREDENTIALS_DIR" in result["env"]
-
-    def test_build_google_workspace_mcp_custom_services(self):
-        from summon_claude.sessions.session import _build_google_workspace_mcp
-
-        result = _build_google_workspace_mcp("gmail")
-        assert "gmail" in result["args"]
-        assert "calendar" not in result["args"]
-
     def test_build_google_workspace_mcp_bin_path(self):
         """Binary is co-located with sys.executable, not dependent on PATH."""
         from summon_claude.config import find_workspace_mcp_bin
@@ -735,6 +711,7 @@ class TestScribeDisallowedTools:
         assert "--source" in result["args"]
         assert "Google Workspace" in result["args"]
         assert "--" in result["args"]
+        assert "--read-only" in result["args"]
 
     def test_scribe_disallowed_workspace_tools_exist(self):
         """Guard: workspace-mcp write tools in disallowed set must exist in package."""

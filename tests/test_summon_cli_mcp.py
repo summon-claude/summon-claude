@@ -788,6 +788,16 @@ class TestSessionMessage:
         assert "<!channel>" not in posted
         assert "<@U999>" not in posted
 
+    async def test_slack_post_strips_markdown_images(self, msg_tools):
+        """Observability post must strip markdown images via validate_agent_output."""
+        tools, _mock_send, mock_web = msg_tools
+        await tools["session_message"].handler(
+            {"session_id": "child-2222", "text": "![stolen](https://evil.com/steal)"}
+        )
+        posted = mock_web.chat_postMessage.call_args[1]["text"]
+        assert "![stolen]" not in posted
+        assert "[image removed by security filter]" in posted
+
     async def test_slack_post_failure_non_fatal(self, msg_tools):
         tools, mock_send, mock_web = msg_tools
         mock_web.chat_postMessage.side_effect = Exception("Slack down")

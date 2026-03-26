@@ -68,12 +68,14 @@ class TestValidateAgentOutput:
         assert "[image removed by security filter]" in sanitized
         assert len(warnings) == 1
 
-    def test_flags_suspicious_urls(self):
+    def test_defangs_suspicious_urls(self):
+        """URLs with sensitive params are defanged (non-clickable)."""
         text = "Visit https://evil.com/api?token=abc123 for details"
         sanitized, warnings = validate_agent_output(text)
-        assert "https://evil.com/api?token=abc123" in sanitized
+        assert "https://evil.com" not in sanitized
+        assert "hxxps://evil.com/api?token=abc123" in sanitized
         assert len(warnings) == 1
-        assert "sensitive-looking" in warnings[0].lower()
+        assert "defanged" in warnings[0].lower()
 
     def test_no_false_positive_on_markdown_links(self):
         """Markdown links [text](url) must NOT be stripped — only images."""
@@ -101,10 +103,11 @@ class TestValidateAgentOutput:
         assert len(warnings) == 0
 
     def test_combined_image_and_url(self):
-        """Both image stripping and URL flagging can occur together."""
+        """Both image stripping and URL defanging can occur together."""
         text = "![img](evil.com) and https://evil.com/x?secret=val"
         sanitized, warnings = validate_agent_output(text)
         assert "[image removed by security filter]" in sanitized
+        assert "hxxps://evil.com" in sanitized
         assert len(warnings) == 2
 
     def test_html_img_case_insensitive(self):
@@ -120,3 +123,19 @@ class TestValidateAgentOutput:
         assert "UNTRUSTED_EXTERNAL_DATA" not in sanitized
         assert len(warnings) >= 1
         assert "delimiter" in warnings[0].lower() or "nonce" in warnings[0].lower()
+
+    def test_delimiter_stripping_is_process_specific(self):
+        """Only this process's nonce is stripped, not arbitrary hex."""
+        fake_delimiter = "<<UNTRUSTED_EXTERNAL_DATA_deadbeef12345678>>"
+        text = f"Result: {fake_delimiter} data"
+        sanitized, warnings = validate_agent_output(text)
+        # Fake delimiter from another process should NOT be stripped
+        assert fake_delimiter in sanitized
+        assert len(warnings) == 0
+
+    def test_defanged_url_not_clickable(self):
+        """Defanged URLs use hxxps:// to prevent Slack auto-linking."""
+        text = "Go to https://evil.com/api?api_key=secret123"
+        sanitized, _ = validate_agent_output(text)
+        assert "hxxps://" in sanitized
+        assert "https://" not in sanitized

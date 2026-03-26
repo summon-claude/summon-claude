@@ -558,6 +558,34 @@ class TestOutputValidation:
         assert "[image removed by security filter]" in posted_text
 
     @pytest.mark.asyncio
+    async def test_post_ephemeral_strips_markdown_images(self):
+        """SlackClient.post_ephemeral() must strip markdown images from output."""
+        mock_web = AsyncMock()
+        mock_web.chat_postEphemeral = AsyncMock(return_value={})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.post_ephemeral("U123", "Data: ![stolen](https://evil.com/steal)")
+
+        call_args = mock_web.chat_postEphemeral.call_args
+        posted_text = call_args.kwargs.get("text", "")
+        assert "![stolen]" not in posted_text
+        assert "[image removed by security filter]" in posted_text
+
+    @pytest.mark.asyncio
+    async def test_upload_strips_markdown_images(self):
+        """SlackClient.upload() must strip markdown images from content."""
+        mock_web = AsyncMock()
+        mock_web.files_upload_v2 = AsyncMock(return_value={})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.upload("Content: ![img](https://evil.com/track)", "file.txt")
+
+        call_args = mock_web.files_upload_v2.call_args
+        posted_content = call_args.kwargs.get("content", "")
+        assert "![img]" not in posted_content
+        assert "[image removed by security filter]" in posted_content
+
+    @pytest.mark.asyncio
     async def test_clean_text_passes_through(self):
         mock_web = AsyncMock()
         mock_web.chat_postMessage = AsyncMock(return_value={"ts": "1234", "channel": "C123"})

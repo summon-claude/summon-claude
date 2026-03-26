@@ -192,7 +192,7 @@ _WORKTREE_DISALLOWED_TOOLS = frozenset(
 # (mcp__server__tool). MCP tools are primarily defended by:
 # - workspace-mcp: --read-only flag (write tools never registered)
 # - Slack/Canvas MCP: can_use_tool callback requires Slack button approval
-# - summon-cli: not registered for Scribe (is_pm=False)
+# - summon-cli: registered with is_pm=False (excludes session_start/stop/message/resume/log_status)
 # The bare names below are defense-in-depth for built-in tools (Cron*, Task*)
 # and in case the CLI ever changes to match bare names.
 _SCRIBE_DISALLOWED_TOOLS: frozenset[str] = frozenset(
@@ -570,26 +570,6 @@ def _build_scan_cron(interval_s: int) -> str:
     if interval_min <= 59:
         return f"*/{interval_min} * * * *"
     return f"0 */{max(1, interval_min // 60)} * * *"
-
-
-def _build_google_workspace_mcp(services: str) -> dict:
-    """Build MCP server config for Google Workspace (workspace-mcp).
-
-    Direct (non-proxied) version — retained for non-Scribe sessions that
-    may use workspace-mcp in the future without spotlighting overhead.
-    Scribe sessions use ``_build_google_workspace_mcp_untrusted`` instead.
-
-    The ``--tools`` flag expects space-separated service names, so we
-    split the comma-separated config value into individual args.
-    Includes ``env`` overrides so the MCP server subprocess stores
-    credentials in summon's data directory.
-    """
-    service_list = [s.strip() for s in services.split(",") if s.strip()]
-    return {
-        "command": str(find_workspace_mcp_bin()),
-        "args": ["--tools", *service_list, "--tool-tier", "core", "--single-user"],
-        "env": google_mcp_env(),
-    }
 
 
 def _build_google_workspace_mcp_untrusted(services: str) -> dict:

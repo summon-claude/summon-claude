@@ -144,7 +144,7 @@ class SlackClient:
         text, sec_warnings = validate_agent_output(text)
         if sec_warnings:
             for w in sec_warnings:
-                logger.warning("Update validation [%s]: %s", self.channel_id, w)
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {"channel": channel or self.channel_id, "ts": ts, "text": text}
         if blocks:
             kwargs["blocks"] = _redact_blocks(blocks)
@@ -198,6 +198,10 @@ class SlackClient:
     ) -> None:
         """Upload a file to the channel."""
         content = redact_secrets(content)
+        content, sec_warnings = validate_agent_output(content)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "content": content,
