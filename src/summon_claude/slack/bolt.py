@@ -29,6 +29,7 @@ import re
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
@@ -92,12 +93,12 @@ class _RateLimiter:
 
 
 # ---------------------------------------------------------------------------
-# _DiagnosticResult + EventProbe — active event pipeline health verification
+# DiagnosticResult + EventProbe — active event pipeline health verification
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
-class _DiagnosticResult:
+class DiagnosticResult:
     """Result of an event pipeline health probe or diagnostic cascade."""
 
     healthy: bool
@@ -122,7 +123,6 @@ class EventProbe:
     def __init__(
         self,
         web_client: AsyncWebClient,
-        bot_user_id: str,  # noqa: ARG002
         config: SummonConfig,
     ) -> None:
         self._web_client = web_client
@@ -132,30 +132,14 @@ class EventProbe:
         self._event_received: asyncio.Event = asyncio.Event()
         self._last_disconnect_reason: str | None = None
         self._probe_cancelled: bool = False
+        self._probe_lock: asyncio.Lock = asyncio.Lock()
 
     async def setup_anchor(self) -> None:
         """Create or find the private health probe channel and post an anchor message."""
         if self._anchor_channel_id is not None:
             return
 
-        channel_id: str | None = None
-
-        # Try to create the channel
-        try:
-            resp = await self._web_client.conversations_create(
-                name=_PROBE_CHANNEL_NAME,
-                is_private=True,
-            )
-            channel_id = resp["channel"]["id"]  # type: ignore[index]
-            logger.debug("EventProbe: created probe channel %s", channel_id)
-        except Exception as e:
-            error_str = str(e)
-            if "name_taken" not in error_str:
-                raise
-
-            # Find existing channel via pagination (max 3 suffix attempts)
-            channel_id = await self._find_or_recover_channel()
-
+        channel_id = await self._resolve_probe_channel()
         if channel_id is None:
             raise RuntimeError("EventProbe: could not find or create probe channel")
 
@@ -166,73 +150,106 @@ class EventProbe:
         )
         self._anchor_channel_id = channel_id
         self._anchor_ts = resp["ts"]
+        self._save_channel_cache(channel_id)
         logger.debug("EventProbe: anchor posted in %s at ts=%s", channel_id, self._anchor_ts)
 
-    async def _find_or_recover_channel(self) -> str | None:
-        """Find existing probe channel via pagination, or try suffixed name."""
-        cursor: str | None = None
-        for _ in range(50):  # safety limit on pagination
-            kwargs: dict = {"types": "private_channel", "limit": 200}
-            if cursor:
-                kwargs["cursor"] = cursor
-            resp = await self._web_client.conversations_list(**kwargs)
-            for ch in resp.get("channels", []):
-                if ch.get("name") == _PROBE_CHANNEL_NAME:
-                    channel_id = ch["id"]
-                    # Try to unarchive if archived
-                    if ch.get("is_archived"):
-                        with contextlib.suppress(Exception):
-                            await self._web_client.conversations_unarchive(channel=channel_id)
-                    return channel_id
-            next_cursor = resp.get("response_metadata", {}).get("next_cursor", "")
-            if not next_cursor:
-                break
-            cursor = next_cursor
+    async def _resolve_probe_channel(self) -> str | None:
+        """Resolve the probe channel: cached ID → create → random-suffix fallback."""
+        import secrets  # noqa: PLC0415
 
-        # Full pagination exhausted — create with suffix (max 3 attempts)
-        for suffix in range(2, 5):
-            name = f"{_PROBE_CHANNEL_NAME}-{suffix}"
+        # 1. Try cached channel ID (1 API call to validate)
+        cached_id = self._load_channel_cache()
+        if cached_id is not None:
+            try:
+                resp = await self._web_client.conversations_info(channel=cached_id)
+                ch = resp.get("channel", {})
+                if ch.get("is_archived"):
+                    with contextlib.suppress(Exception):
+                        await self._web_client.conversations_unarchive(channel=cached_id)
+                logger.debug("EventProbe: reusing cached probe channel %s", cached_id)
+                return cached_id
+            except Exception:
+                logger.debug("EventProbe: cached channel %s is stale, creating new", cached_id)
+                self._clear_channel_cache()
+
+        # 2. Try to create the channel (canonical name first, then random suffix)
+        for name in (_PROBE_CHANNEL_NAME, f"{_PROBE_CHANNEL_NAME}-{secrets.token_hex(3)}"):
             try:
                 resp = await self._web_client.conversations_create(
                     name=name,
                     is_private=True,
                 )
-                return resp["channel"]["id"]  # type: ignore[index]
+                channel_id = resp["channel"]["id"]  # type: ignore[index]
+                logger.debug("EventProbe: created probe channel %s (%s)", channel_id, name)
+                return channel_id
             except Exception as e:
                 if "name_taken" not in str(e):
                     raise
         return None
 
-    async def run_probe(self, timeout: float = 10.0) -> _DiagnosticResult:  # noqa: ASYNC109, PLR0911
-        """Run an active event probe. Returns a _DiagnosticResult."""
+    @staticmethod
+    def _channel_cache_path() -> Path:
+        from summon_claude.config import get_data_dir  # noqa: PLC0415
+
+        return get_data_dir() / "probe-channel-id"
+
+    @staticmethod
+    def _load_channel_cache() -> str | None:
+        path = EventProbe._channel_cache_path()
+        try:
+            content = path.read_text().strip()
+            return content if content else None
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def _save_channel_cache(channel_id: str) -> None:
+        path = EventProbe._channel_cache_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(channel_id)
+
+    @staticmethod
+    def _clear_channel_cache() -> None:
+        EventProbe._channel_cache_path().unlink(missing_ok=True)
+
+    async def run_probe(self, timeout: float = 10.0) -> DiagnosticResult:  # noqa: ASYNC109
+        """Run an active event probe."""
         if self._anchor_channel_id is None or self._anchor_ts is None:
-            return _DiagnosticResult(
+            return DiagnosticResult(
                 healthy=False,
                 reason="unknown",
                 details="Probe anchor not set up.",
             )
 
+        async with self._probe_lock:
+            return await self._run_probe_locked(timeout, self._anchor_channel_id, self._anchor_ts)
+
+    async def _run_probe_locked(
+        self, wait_seconds: float, channel_id: str, anchor_ts: str
+    ) -> DiagnosticResult:
+        """Probe implementation — must be called under _probe_lock."""
         self._event_received.clear()
         self._probe_cancelled = False
+        self._last_disconnect_reason = None
 
         # Step 1: Remove existing reaction (best-effort, ignore no_reaction)
         with contextlib.suppress(Exception):
             await self._web_client.reactions_remove(
-                channel=self._anchor_channel_id,
-                timestamp=self._anchor_ts,
+                channel=channel_id,
+                timestamp=anchor_ts,
                 name=_PROBE_REACTION,
             )
 
         # Step 2: Add reaction
         try:
             await self._web_client.reactions_add(
-                channel=self._anchor_channel_id,
-                timestamp=self._anchor_ts,
+                channel=channel_id,
+                timestamp=anchor_ts,
                 name=_PROBE_REACTION,
             )
         except Exception as e:
             if "already_reacted" not in str(e):
-                return _DiagnosticResult(
+                return DiagnosticResult(
                     healthy=False,
                     reason="unknown",
                     details=f"Failed to add reaction: {e}",
@@ -240,13 +257,13 @@ class EventProbe:
             # already_reacted: remove stuck reaction and retry
             try:
                 await self._web_client.reactions_remove(
-                    channel=self._anchor_channel_id,
-                    timestamp=self._anchor_ts,
+                    channel=channel_id,
+                    timestamp=anchor_ts,
                     name=_PROBE_REACTION,
                 )
                 await self._web_client.reactions_add(
-                    channel=self._anchor_channel_id,
-                    timestamp=self._anchor_ts,
+                    channel=channel_id,
+                    timestamp=anchor_ts,
                     name=_PROBE_REACTION,
                 )
             except Exception as e2:
@@ -254,31 +271,34 @@ class EventProbe:
                     logger.warning(
                         "EventProbe: reaction irrecoverably stuck — skipping probe cycle"
                     )
-                    return _DiagnosticResult(
+                    return DiagnosticResult(
                         healthy=True,
                         reason="healthy",
                         details="Probe skipped (reaction stuck).",
                     )
-                return _DiagnosticResult(
+                return DiagnosticResult(
                     healthy=False,
                     reason="unknown",
                     details=f"Failed to add reaction after retry: {e2}",
                 )
 
-        # Step 3: Wait for event
+        # Step 3: Wait for event (or cancellation via cancel_probe setting _event_received)
         try:
-            await asyncio.wait_for(self._event_received.wait(), timeout=timeout)
-            return _DiagnosticResult(healthy=True, reason="healthy", details="Event pipeline OK.")
+            await asyncio.wait_for(self._event_received.wait(), timeout=wait_seconds)
         except TimeoutError:
-            if self._probe_cancelled:
-                return _DiagnosticResult(
-                    healthy=True,
-                    reason="cancelled",
-                    details="Probe cancelled during reconnect.",
-                )
-            return await self._run_diagnostic_cascade()
+            if not self._probe_cancelled:
+                return await self._run_diagnostic_cascade()
+            # Cancelled during timeout — fall through to cancelled result below
 
-    async def _run_diagnostic_cascade(self) -> _DiagnosticResult:
+        if self._probe_cancelled:
+            return DiagnosticResult(
+                healthy=True,
+                reason="cancelled",
+                details="Probe cancelled during reconnect.",
+            )
+        return DiagnosticResult(healthy=True, reason="healthy", details="Event pipeline OK.")
+
+    async def _run_diagnostic_cascade(self) -> DiagnosticResult:
         """Sequential diagnostic checks to identify the root cause of probe failure."""
         app_url = self._config.slack_app_url
 
@@ -286,7 +306,7 @@ class EventProbe:
         try:
             await self._web_client.api_test()
         except Exception:
-            return _DiagnosticResult(
+            return DiagnosticResult(
                 healthy=False,
                 reason="slack_down",
                 details="Slack API is unreachable. Check network connectivity.",
@@ -296,7 +316,7 @@ class EventProbe:
         try:
             await self._web_client.auth_test()
         except Exception:
-            return _DiagnosticResult(
+            return DiagnosticResult(
                 healthy=False,
                 reason="token_revoked",
                 details="Bot token is invalid or revoked.",
@@ -305,7 +325,7 @@ class EventProbe:
 
         # 3. link_disabled disconnect reason (auth_test already confirmed token is valid)
         if self._last_disconnect_reason == "link_disabled":
-            return _DiagnosticResult(
+            return DiagnosticResult(
                 healthy=False,
                 reason="socket_disabled",
                 details="Socket Mode was disabled.",
@@ -313,7 +333,7 @@ class EventProbe:
             )
 
         # 4. Socket connected but no events
-        return _DiagnosticResult(
+        return DiagnosticResult(
             healthy=False,
             reason="events_disabled",
             details=(
@@ -346,8 +366,8 @@ class EventProbe:
 
             elif msg_type == "disconnect":
                 reason = data.get("reason")
-                if reason:
-                    self._last_disconnect_reason = reason
+                if reason and isinstance(reason, str):
+                    self._last_disconnect_reason = reason[:64]
                     logger.debug("EventProbe: disconnect reason=%s", reason)
 
         except Exception as e:
@@ -356,12 +376,13 @@ class EventProbe:
     def cancel_probe(self) -> None:
         """Mark any in-flight probe as cancelled (called before reconnect)."""
         self._probe_cancelled = True
+        self._event_received.set()
 
     def reset_cancel(self) -> None:
         """Clear the cancelled flag (called after reconnect completes)."""
         self._probe_cancelled = False
 
-    def format_alert(self, result: _DiagnosticResult) -> str:
+    def format_alert(self, result: DiagnosticResult) -> str:
         """Format a diagnostic result as a Slack alert message string."""
         from summon_claude.slack.client import redact_secrets  # noqa: PLC0415
 
@@ -398,14 +419,20 @@ class _HealthMonitor:
         self._dispatcher = dispatcher
         self._consecutive_failures = 0
         self._consecutive_probe_failures = 0
-        self._last_diagnostic: _DiagnosticResult | None = None
+        self._last_diagnostic: DiagnosticResult | None = None
         self._stop_event = asyncio.Event()
+
+    @property
+    def last_diagnostic(self) -> DiagnosticResult | None:
+        """Return the most recent diagnostic result from a failed probe."""
+        return self._last_diagnostic
 
     def update_handler(self, socket_handler: AsyncSocketModeHandler) -> None:
         """Switch to a new socket handler after reconnection."""
         self._socket_handler = socket_handler
         self._consecutive_failures = 0
         self._consecutive_probe_failures = 0
+        self._last_diagnostic = None
         logger.debug("_HealthMonitor: handler updated, failure counters reset")
 
     def stop(self) -> None:
@@ -426,9 +453,11 @@ class _HealthMonitor:
             connected = await client.is_connected()
         except Exception as e:
             logger.debug("_HealthMonitor: health check exception: %s", e)
+            self._last_diagnostic = None  # clear stale probe diagnostic
             return False
 
         if not connected:
+            self._last_diagnostic = None  # clear stale probe diagnostic
             return False
 
         # Skip event probe if no sessions are active or probe is not available
@@ -446,6 +475,7 @@ class _HealthMonitor:
 
         if result.healthy:
             self._consecutive_probe_failures = 0
+            self._last_diagnostic = None
             return True
 
         self._last_diagnostic = result
@@ -559,11 +589,7 @@ class BoltRouter:
             logger.debug("BoltRouter: bot_user_id cached as %s", self.bot_user_id)
 
             # Create EventProbe — degrade gracefully if setup fails
-            probe = EventProbe(
-                self.web_client,
-                self.bot_user_id,  # pyright: ignore[reportArgumentType]
-                self._config,
-            )
+            probe = EventProbe(web_client=self.web_client, config=self._config)
             try:
                 await probe.setup_anchor()
                 self._event_probe = probe
@@ -661,15 +687,14 @@ class BoltRouter:
         logger.error(
             "BoltRouter: socket reconnection exhausted — posting to sessions and shutting down"
         )
-        # If exhaustion is due to event pipeline failure, signal for session suspension
+        # If exhaustion is due to event pipeline failure (not socket/network),
+        # signal for session suspension so sessions can be resumed after fixing.
         diagnostic = (
-            self._health_monitor._last_diagnostic  # noqa: SLF001
-            if self._health_monitor is not None
-            else None
+            self._health_monitor.last_diagnostic if self._health_monitor is not None else None
         )
         if (
             diagnostic is not None
-            and not diagnostic.healthy
+            and diagnostic.reason in ("events_disabled", "unknown")
             and self.event_failure_callback is not None
         ):
             try:
@@ -710,16 +735,17 @@ class BoltRouter:
         with contextlib.suppress(Exception):
             # Build diagnostic-aware notice text
             diagnostic = (
-                self._health_monitor._last_diagnostic  # noqa: SLF001
-                if self._health_monitor is not None
-                else None
+                self._health_monitor.last_diagnostic if self._health_monitor is not None else None
             )
             if diagnostic is not None and self._event_probe is not None:
                 notice_text = self._event_probe.format_alert(diagnostic)
-                notice_text += (
-                    "\nFix the issue, then run `summon project up` to resume project sessions"
-                    " or `summon start` for new sessions."
-                )
+                if diagnostic.reason in ("events_disabled", "unknown"):
+                    notice_text += (
+                        "\nFix the issue, then run `summon project up` to resume"
+                        " project sessions or `summon start` for new sessions."
+                    )
+                else:
+                    notice_text += "\nAll sessions are terminating. Restart with `summon start`."
             else:
                 notice_text = (
                     ":x: *Slack connection lost permanently.*\n"

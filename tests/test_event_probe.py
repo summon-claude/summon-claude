@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from summon_claude.config import SummonConfig
-from summon_claude.slack.bolt import EventProbe, _DiagnosticResult
+from summon_claude.slack.bolt import DiagnosticResult, EventProbe
 
 
 def _make_config(**overrides) -> SummonConfig:
@@ -39,7 +39,7 @@ def _make_probe(client=None, config=None) -> EventProbe:
         client = _make_web_client()
     if config is None:
         config = _make_config()
-    return EventProbe(web_client=client, bot_user_id="UBOT", config=config)
+    return EventProbe(web_client=client, config=config)
 
 
 def _make_ws_message(data: dict):
@@ -68,64 +68,86 @@ def _make_non_text_ws_message():
 
 
 class TestSetupAnchor:
+    """All tests patch channel cache to isolate from filesystem."""
+
+    _NO_CACHE = patch.object(EventProbe, "_load_channel_cache", return_value=None)
+    _NO_SAVE = patch.object(EventProbe, "_save_channel_cache")
+
     async def test_setup_anchor_creates_channel_and_posts(self):
         client = _make_web_client()
         probe = _make_probe(client)
 
-        await probe.setup_anchor()
+        with self._NO_CACHE, self._NO_SAVE:
+            await probe.setup_anchor()
 
         client.conversations_create.assert_awaited_once()
         client.chat_postMessage.assert_awaited_once()
         assert probe._anchor_channel_id == "C_PROBE"
         assert probe._anchor_ts == "1234567890.000001"
 
-    async def test_setup_anchor_finds_existing_channel(self):
+    async def test_setup_anchor_uses_cached_channel(self):
+        """Cached channel ID validated with conversations_info — skips create."""
         client = _make_web_client()
-        # Simulate name_taken error on create
-        client.conversations_create = AsyncMock(
-            side_effect=Exception("name_taken — channel already exists")
-        )
-        # Existing channel returned in list
-        client.conversations_list = AsyncMock(
-            return_value={
-                "channels": [
-                    {"id": "C_EXISTING", "name": "summon-health-probe", "is_archived": False}
-                ],
-                "response_metadata": {"next_cursor": ""},
-            }
+        client.conversations_info = AsyncMock(
+            return_value={"channel": {"id": "C_CACHED", "is_archived": False}}
         )
         probe = _make_probe(client)
 
-        await probe.setup_anchor()
+        with (
+            patch.object(EventProbe, "_load_channel_cache", return_value="C_CACHED"),
+            self._NO_SAVE,
+        ):
+            await probe.setup_anchor()
 
-        assert probe._anchor_channel_id == "C_EXISTING"
-        client.chat_postMessage.assert_awaited_once()
+        assert probe._anchor_channel_id == "C_CACHED"
+        client.conversations_create.assert_not_awaited()
+        client.conversations_info.assert_awaited_once_with(channel="C_CACHED")
 
-    async def test_setup_anchor_unarchives_existing_channel(self):
+    async def test_setup_anchor_stale_cache_creates_new(self):
+        """Stale cached channel ID falls through to create."""
         client = _make_web_client()
-        client.conversations_create = AsyncMock(side_effect=Exception("name_taken"))
-        client.conversations_list = AsyncMock(
-            return_value={
-                "channels": [{"id": "C_ARCH", "name": "summon-health-probe", "is_archived": True}],
-                "response_metadata": {"next_cursor": ""},
-            }
-        )
-        client.conversations_unarchive = AsyncMock(return_value={"ok": True})
+        client.conversations_info = AsyncMock(side_effect=Exception("channel_not_found"))
         probe = _make_probe(client)
 
-        await probe.setup_anchor()
+        with (
+            patch.object(EventProbe, "_load_channel_cache", return_value="C_STALE"),
+            self._NO_SAVE,
+            patch.object(EventProbe, "_clear_channel_cache"),
+        ):
+            await probe.setup_anchor()
 
-        client.conversations_unarchive.assert_awaited_once_with(channel="C_ARCH")
-        assert probe._anchor_channel_id == "C_ARCH"
+        assert probe._anchor_channel_id == "C_PROBE"
+        client.conversations_create.assert_awaited_once()
+
+    async def test_setup_anchor_name_taken_creates_with_random_suffix(self):
+        """When canonical name is taken, creates with random suffix."""
+        client = _make_web_client()
+        call_count = 0
+
+        async def _create(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("name_taken")
+            return {"channel": {"id": "C_SUFFIXED"}}
+
+        client.conversations_create = _create
+        probe = _make_probe(client)
+
+        with self._NO_CACHE, self._NO_SAVE:
+            await probe.setup_anchor()
+
+        assert probe._anchor_channel_id == "C_SUFFIXED"
+        assert call_count == 2
 
     async def test_setup_anchor_is_idempotent(self):
         client = _make_web_client()
         probe = _make_probe(client)
 
-        await probe.setup_anchor()
-        await probe.setup_anchor()  # second call must be a no-op
+        with self._NO_CACHE, self._NO_SAVE:
+            await probe.setup_anchor()
+            await probe.setup_anchor()  # second call must be a no-op
 
-        # Only called once despite two setup_anchor() calls
         assert client.conversations_create.await_count == 1
 
     async def test_setup_anchor_raises_on_unexpected_error(self):
@@ -133,7 +155,20 @@ class TestSetupAnchor:
         client.conversations_create = AsyncMock(side_effect=Exception("access_denied"))
         probe = _make_probe(client)
 
-        with pytest.raises(Exception, match="access_denied"):
+        with self._NO_CACHE, self._NO_SAVE, pytest.raises(Exception, match="access_denied"):
+            await probe.setup_anchor()
+
+    async def test_setup_anchor_both_names_taken_raises(self):
+        """When both canonical and suffixed names are taken, raises RuntimeError."""
+        client = _make_web_client()
+        client.conversations_create = AsyncMock(side_effect=Exception("name_taken"))
+        probe = _make_probe(client)
+
+        with (
+            self._NO_CACHE,
+            self._NO_SAVE,
+            pytest.raises(RuntimeError, match="could not find or create"),
+        ):
             await probe.setup_anchor()
 
 
@@ -250,6 +285,59 @@ class TestRunProbe:
 
         assert result.healthy is False
         assert result.reason == "unknown"
+
+    async def test_run_probe_cancel_interrupts_wait(self):
+        """cancel_probe() should unblock the wait immediately."""
+        probe = self._primed_probe()
+
+        async def _cancel_quickly():
+            await asyncio.sleep(0.02)
+            probe.cancel_probe()
+
+        cancel_task = asyncio.create_task(_cancel_quickly())
+        import time
+
+        start = time.monotonic()
+        result = await probe.run_probe(timeout=5.0)
+        elapsed = time.monotonic() - start
+        await cancel_task
+
+        assert result.healthy is True
+        assert result.reason == "cancelled"
+        # Should return much faster than the 5s timeout
+        assert elapsed < 1.0
+
+
+# ---------------------------------------------------------------------------
+# _last_disconnect_reason clearing
+# ---------------------------------------------------------------------------
+
+
+class TestDisconnectReasonClearing:
+    def _primed_probe(self, client=None) -> EventProbe:
+        if client is None:
+            client = _make_web_client()
+        probe = _make_probe(client)
+        probe._anchor_channel_id = "C_PROBE"
+        probe._anchor_ts = "111.222"
+        return probe
+
+    async def test_run_probe_clears_disconnect_reason(self):
+        """run_probe() should clear _last_disconnect_reason to prevent stale values."""
+        probe = self._primed_probe()
+        probe._last_disconnect_reason = "link_disabled"
+
+        # Trigger event quickly so probe succeeds
+        async def _trigger():
+            await asyncio.sleep(0.05)
+            probe._event_received.set()
+
+        trigger = asyncio.create_task(_trigger())
+        result = await probe.run_probe(timeout=5.0)
+        await trigger
+
+        assert result.healthy is True
+        assert probe._last_disconnect_reason is None
 
 
 # ---------------------------------------------------------------------------
@@ -435,11 +523,11 @@ class TestFormatAlert:
     def _make_probe_with_config(self, app_token: str) -> EventProbe:
         config = _make_config(slack_app_token=app_token)
         client = _make_web_client()
-        return EventProbe(web_client=client, bot_user_id="UBOT", config=config)
+        return EventProbe(web_client=client, config=config)
 
     def test_format_alert_with_url(self):
         probe = self._make_probe_with_config("xapp-1-A0123ABCDE-12345-abc")
-        result = _DiagnosticResult(
+        result = DiagnosticResult(
             healthy=False,
             reason="events_disabled",
             details="Events are not being delivered.",
@@ -454,7 +542,7 @@ class TestFormatAlert:
 
     def test_format_alert_without_url(self):
         probe = self._make_probe_with_config("xapp-test-token")
-        result = _DiagnosticResult(
+        result = DiagnosticResult(
             healthy=False,
             reason="slack_down",
             details="Slack API is unreachable.",
@@ -473,7 +561,7 @@ class TestFormatAlert:
 
 
 class TestEventProbeGuards:
-    """Pin _DiagnosticResult reason values and EventProbe public API."""
+    """Pin DiagnosticResult reason values and EventProbe public API."""
 
     def test_valid_reason_values_pinned(self):
         valid_reasons = {

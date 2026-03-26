@@ -2457,3 +2457,66 @@ class TestSuspendOnShutdown:
 
         # update_status should NOT be called for pre-suspend
         mock_reg.update_status.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Tests: _handle_health_check IPC handler
+# ---------------------------------------------------------------------------
+
+
+class TestHealthCheckIPC:
+    """Tests for _handle_health_check IPC handler."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_no_probe(self):
+        """When event_probe is None, returns skipped."""
+        manager, _provider, _dispatcher = _make_manager()
+        manager._event_probe = None
+        result = await manager._handle_health_check()
+        assert result["reason"] == "skipped"
+        assert result["healthy"] is None
+
+    @pytest.mark.asyncio
+    async def test_health_check_healthy(self):
+        """When probe returns healthy, returns healthy result."""
+        from summon_claude.slack.bolt import DiagnosticResult
+
+        manager, _provider, _dispatcher = _make_manager()
+        mock_probe = MagicMock()
+        mock_probe.run_probe = AsyncMock(
+            return_value=DiagnosticResult(healthy=True, reason="healthy", details="OK")
+        )
+        manager._event_probe = mock_probe
+        result = await manager._handle_health_check()
+        assert result["healthy"] is True
+        assert result["reason"] == "healthy"
+
+    @pytest.mark.asyncio
+    async def test_health_check_probe_raises(self):
+        """When probe raises, returns error."""
+        manager, _provider, _dispatcher = _make_manager()
+        mock_probe = MagicMock()
+        mock_probe.run_probe = AsyncMock(side_effect=RuntimeError("probe crashed"))
+        manager._event_probe = mock_probe
+        result = await manager._handle_health_check()
+        assert result["healthy"] is None
+        assert result["reason"] == "error"
+
+    @pytest.mark.asyncio
+    async def test_health_check_timeout(self):
+        """When probe times out, returns timeout result."""
+        manager, _provider, _dispatcher = _make_manager()
+        mock_probe = MagicMock()
+        mock_probe.run_probe = AsyncMock(side_effect=TimeoutError)
+        manager._event_probe = mock_probe
+        result = await manager._handle_health_check()
+        assert result["healthy"] is None
+        assert result["reason"] == "timeout"
+
+    @pytest.mark.asyncio
+    async def test_set_suspend_on_shutdown(self):
+        """set_suspend_on_shutdown() sets the flag via public API."""
+        manager, _provider, _dispatcher = _make_manager()
+        assert manager._suspend_on_shutdown is False
+        manager.set_suspend_on_shutdown()
+        assert manager._suspend_on_shutdown is True

@@ -87,6 +87,10 @@ class SessionManager:
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
         self._suspend_on_shutdown: bool = False  # set by health monitor on event pipeline failure
 
+    def set_suspend_on_shutdown(self) -> None:
+        """Mark for session suspension on shutdown (called on event pipeline failure)."""
+        self._suspend_on_shutdown = True
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -582,13 +586,21 @@ class SessionManager:
                 "remediation_url": None,
             }
         try:
-            result = await self._event_probe.run_probe()
+            result = await asyncio.wait_for(self._event_probe.run_probe(timeout=5.0), timeout=10.0)
             return {
                 "type": "health_check_result",
                 "healthy": result.healthy,
                 "reason": result.reason,
                 "details": result.details,
                 "remediation_url": result.remediation_url,
+            }
+        except TimeoutError:
+            return {
+                "type": "health_check_result",
+                "healthy": None,
+                "reason": "timeout",
+                "details": "Health check timed out.",
+                "remediation_url": None,
             }
         except Exception as e:
             logger.warning("health_check IPC: probe failed with exception: %s", e)

@@ -13,8 +13,8 @@ from summon_claude.config import SummonConfig
 from summon_claude.event_dispatcher import EventDispatcher
 from summon_claude.slack.bolt import (
     BoltRouter,
+    DiagnosticResult,
     EventProbe,
-    _DiagnosticResult,
     _HealthMonitor,
     _RateLimiter,
 )
@@ -546,7 +546,7 @@ class TestHealthMonitorWithProbe:
     async def test_runs_probe_when_sessions_active(self):
         mock_probe = MagicMock(spec=EventProbe)
         mock_probe.run_probe = AsyncMock(
-            return_value=_DiagnosticResult(healthy=True, reason="healthy", details="OK")
+            return_value=DiagnosticResult(healthy=True, reason="healthy", details="OK")
         )
         monitor, _, _ = self._make_monitor_with_probe(probe=mock_probe)
         result = await monitor._is_healthy()
@@ -556,7 +556,7 @@ class TestHealthMonitorWithProbe:
     async def test_probe_failure_marks_unhealthy(self):
         mock_probe = MagicMock(spec=EventProbe)
         mock_probe.run_probe = AsyncMock(
-            return_value=_DiagnosticResult(
+            return_value=DiagnosticResult(
                 healthy=False,
                 reason="events_disabled",
                 details="Events not delivered.",
@@ -579,7 +579,7 @@ class TestHealthMonitorWithProbe:
             on_exhausted=on_exhausted,
             max_reconnect_attempts=3,
         )
-        monitor._last_diagnostic = _DiagnosticResult(
+        monitor._last_diagnostic = DiagnosticResult(
             healthy=False,
             reason="socket_disabled",
             details="Socket Mode was disabled.",
@@ -599,7 +599,7 @@ class TestHealthMonitorWithProbe:
             on_exhausted=on_exhausted,
             max_reconnect_attempts=3,
         )
-        monitor._last_diagnostic = _DiagnosticResult(
+        monitor._last_diagnostic = DiagnosticResult(
             healthy=False, reason="events_disabled", details="Events not delivered."
         )
         await monitor._handle_unhealthy()
@@ -612,13 +612,161 @@ class TestHealthMonitorWithProbe:
     async def test_probe_cancelled_during_reconnect_returns_healthy(self):
         mock_probe = MagicMock(spec=EventProbe)
         mock_probe.run_probe = AsyncMock(
-            return_value=_DiagnosticResult(
+            return_value=DiagnosticResult(
                 healthy=True, reason="cancelled", details="Probe cancelled."
             )
         )
         monitor, _, _ = self._make_monitor_with_probe(probe=mock_probe)
         result = await monitor._is_healthy()
         assert result is True
+
+    async def test_probe_exception_returns_healthy(self):
+        """Probe exception should not mark socket as unhealthy."""
+        mock_probe = MagicMock(spec=EventProbe)
+        mock_probe.run_probe = AsyncMock(side_effect=RuntimeError("probe crash"))
+        monitor, _, _ = self._make_monitor_with_probe(probe=mock_probe)
+        result = await monitor._is_healthy()
+        assert result is True
+
+    async def test_slack_down_triggers_reconnect_not_exhaustion(self):
+        """slack_down should use reconnect logic, not immediate exhaustion."""
+        on_exhausted = AsyncMock()
+        on_reconnect = AsyncMock()
+        mock_handler = MagicMock()
+        mock_handler.client.is_connected = AsyncMock(return_value=True)
+        monitor = _HealthMonitor(
+            socket_handler=mock_handler,
+            on_reconnect_needed=on_reconnect,
+            on_exhausted=on_exhausted,
+            max_reconnect_attempts=3,
+        )
+        monitor._last_diagnostic = DiagnosticResult(
+            healthy=False,
+            reason="slack_down",
+            details="Slack unreachable.",
+        )
+        await monitor._handle_unhealthy()
+        on_reconnect.assert_awaited_once()
+        on_exhausted.assert_not_awaited()
+        assert monitor._consecutive_probe_failures == 0
+
+    async def test_socket_disconnect_clears_stale_diagnostic(self):
+        """Socket disconnect must clear stale probe diagnostic to prevent misclassification."""
+        mock_probe = MagicMock(spec=EventProbe)
+        mock_probe.run_probe = AsyncMock(
+            return_value=DiagnosticResult(
+                healthy=False, reason="events_disabled", details="Events not delivered."
+            )
+        )
+        monitor, on_reconnect, on_exhausted = self._make_monitor_with_probe(probe=mock_probe)
+
+        # First: probe fails → _last_diagnostic set
+        result = await monitor._is_healthy()
+        assert result is False
+        assert monitor._last_diagnostic is not None
+        assert monitor._last_diagnostic.reason == "events_disabled"
+
+        # Now: socket disconnects → _last_diagnostic must be cleared
+        monitor._socket_handler.client.is_connected = AsyncMock(return_value=False)
+        result = await monitor._is_healthy()
+        assert result is False
+        assert monitor._last_diagnostic is None  # cleared by socket disconnect
+
+        # _handle_unhealthy should use socket reconnect path, not probe failure path
+        await monitor._handle_unhealthy()
+        on_reconnect.assert_awaited_once()  # socket reconnect, not probe exhaustion
+
+
+# ---------------------------------------------------------------------------
+# event_failure_callback
+# ---------------------------------------------------------------------------
+
+
+class TestEventFailureCallback:
+    async def test_event_failure_callback_fires_on_event_pipeline_failure(self):
+        """event_failure_callback fires when diagnostic is events_disabled."""
+        cfg = make_config()
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.all_channel_ids = MagicMock(return_value=[])
+
+        with (
+            patch("summon_claude.slack.bolt.AsyncApp") as patched_app_cls,
+            patch("summon_claude.slack.bolt.AsyncWebClient"),
+            patch("summon_claude.slack.bolt.AsyncSocketModeHandler") as patched_handler_cls,
+        ):
+            patched_app_cls.return_value = _mock_app()
+            mock_handler = AsyncMock()
+            mock_handler.client = MagicMock()
+            mock_handler.client.on_message_listeners = []
+            patched_handler_cls.return_value = mock_handler
+
+            router = BoltRouter(cfg, mock_dispatcher)
+            router.web_client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+
+            mock_probe = MagicMock(spec=EventProbe)
+            mock_probe.setup_anchor = AsyncMock()
+            mock_probe.on_ws_message = AsyncMock()
+
+            with patch("summon_claude.slack.bolt.EventProbe", return_value=mock_probe):
+                await router.start()
+
+            # Set up health monitor with a diagnostic
+            router._health_monitor = MagicMock()
+            router._health_monitor.last_diagnostic = DiagnosticResult(
+                healthy=False,
+                reason="events_disabled",
+                details="Events not delivered.",
+            )
+
+            callback = MagicMock()
+            router.event_failure_callback = callback
+            router.shutdown_callback = MagicMock()
+
+            await router._on_reconnect_exhausted()
+
+            callback.assert_called_once()
+
+    async def test_event_failure_callback_not_fired_on_slack_down(self):
+        """event_failure_callback should NOT fire when diagnostic is slack_down."""
+        cfg = make_config()
+        mock_dispatcher = MagicMock()
+        mock_dispatcher.all_channel_ids = MagicMock(return_value=[])
+
+        with (
+            patch("summon_claude.slack.bolt.AsyncApp") as patched_app_cls,
+            patch("summon_claude.slack.bolt.AsyncWebClient"),
+            patch("summon_claude.slack.bolt.AsyncSocketModeHandler") as patched_handler_cls,
+        ):
+            patched_app_cls.return_value = _mock_app()
+            mock_handler = AsyncMock()
+            mock_handler.client = MagicMock()
+            mock_handler.client.on_message_listeners = []
+            patched_handler_cls.return_value = mock_handler
+
+            router = BoltRouter(cfg, mock_dispatcher)
+            router.web_client.auth_test = AsyncMock(return_value={"user_id": "UBOT"})
+
+            mock_probe = MagicMock(spec=EventProbe)
+            mock_probe.setup_anchor = AsyncMock()
+            mock_probe.on_ws_message = AsyncMock()
+
+            with patch("summon_claude.slack.bolt.EventProbe", return_value=mock_probe):
+                await router.start()
+
+            router._health_monitor = MagicMock()
+            router._health_monitor.last_diagnostic = DiagnosticResult(
+                healthy=False,
+                reason="slack_down",
+                details="Slack unreachable.",
+            )
+
+            callback = MagicMock()
+            router.event_failure_callback = callback
+            router.shutdown_callback = MagicMock()
+
+            await router._on_reconnect_exhausted()
+
+            callback.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

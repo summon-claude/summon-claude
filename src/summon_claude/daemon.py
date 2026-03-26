@@ -15,7 +15,6 @@ Public API
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import fcntl
 import json
 import logging
@@ -181,9 +180,11 @@ def _write_startup_error(message: str) -> None:
     error_path.parent.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
     content = f"[{timestamp}]\n{message}\n"
-    error_path.write_text(content)
-    with contextlib.suppress(OSError):
-        error_path.chmod(0o600)
+    fd = os.open(str(error_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, content.encode())
+    finally:
+        os.close(fd)
 
 
 async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
@@ -257,7 +258,10 @@ async def _run_startup_probe(bolt_router: BoltRouter) -> None:
         )
     else:
         diagnostic_msg = event_probe.format_alert(startup_result)
-        _write_startup_error(diagnostic_msg)
+        try:
+            _write_startup_error(diagnostic_msg)
+        except OSError as e:
+            logger.warning("Could not write startup error file: %s", e)
         logger.critical(
             "Startup event probe failed: %s — %s",
             startup_result.reason,
@@ -295,6 +299,9 @@ async def daemon_main(config: SummonConfig) -> None:
     # Mark any sessions left active from a previous daemon as errored
     await _cleanup_orphaned_sessions(bolt_router.web_client)
 
+    # Startup probe runs BEFORE the control socket is created (line ~304).
+    # On hard failure, _run_startup_probe raises SystemExit before the socket
+    # appears, so _wait_for_socket times out and reads the error file.
     await _run_startup_probe(bolt_router)
 
     if bolt_router.bot_user_id is None:  # pragma: no cover — start() always sets this
@@ -332,7 +339,7 @@ async def daemon_main(config: SummonConfig) -> None:
     bolt_router.shutdown_callback = session_manager.shutdown_event.set
 
     def _on_event_failure() -> None:
-        session_manager._suspend_on_shutdown = True  # noqa: SLF001
+        session_manager.set_suspend_on_shutdown()
 
     bolt_router.event_failure_callback = _on_event_failure
     health_task = bolt_router.start_health_monitor()

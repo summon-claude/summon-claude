@@ -14,7 +14,7 @@ import pytest
 
 from summon_claude.daemon import MAX_MESSAGE_SIZE, recv_msg, send_msg
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.slack.bolt import _DiagnosticResult
+from summon_claude.slack.bolt import DiagnosticResult
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -357,7 +357,7 @@ class TestWaitForSocketWithErrorFile:
 
 
 class TestDaemonMainStartupProbe:
-    async def _make_mock_bolt(self, probe_result: _DiagnosticResult):
+    async def _make_mock_bolt(self, probe_result: DiagnosticResult):
         mock_bolt = AsyncMock()
         mock_bolt.start = AsyncMock()
         mock_bolt.stop = AsyncMock()
@@ -381,7 +381,7 @@ class TestDaemonMainStartupProbe:
         error_path = tmp_path / "last-startup-error"
         error_path.write_text("old error")
 
-        result = _DiagnosticResult(healthy=True, reason="healthy", details="OK")
+        result = DiagnosticResult(healthy=True, reason="healthy", details="OK")
         mock_bolt, _ = await self._make_mock_bolt(result)
         mock_session_manager = AsyncMock()
         shutdown_event = asyncio.Event()
@@ -407,7 +407,7 @@ class TestDaemonMainStartupProbe:
         assert not error_path.exists()
 
     async def test_startup_probe_unhealthy_writes_error_file(self, tmp_path):
-        result = _DiagnosticResult(
+        result = DiagnosticResult(
             healthy=False,
             reason="token_revoked",
             details="Token invalid.",
@@ -432,12 +432,85 @@ class TestDaemonMainStartupProbe:
         assert error_path.exists()
 
     async def test_startup_probe_events_disabled_soft_fails(self, tmp_path):
-        result = _DiagnosticResult(
+        result = DiagnosticResult(
             healthy=False,
             reason="events_disabled",
             details="Events not delivered.",
         )
         mock_bolt, _ = await self._make_mock_bolt(result)
+        mock_session_manager = AsyncMock()
+        shutdown_event = asyncio.Event()
+        mock_session_manager.shutdown_event = shutdown_event
+        mock_session_manager.handle_client = AsyncMock()
+        mock_server = AsyncMock()
+        mock_server.close = MagicMock()
+
+        from summon_claude.daemon import daemon_main
+
+        with (
+            _patch_data_dir(tmp_path),
+            patch("summon_claude.daemon.BoltRouter", return_value=mock_bolt),
+            patch("summon_claude.daemon.EventDispatcher", return_value=MagicMock()),
+            patch("summon_claude.daemon.SessionManager", return_value=mock_session_manager),
+            patch("asyncio.start_unix_server", return_value=mock_server),
+            patch("summon_claude.daemon._cleanup_orphaned_sessions", new=AsyncMock()),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            shutdown_event.set()
+            await daemon_main(MagicMock())  # must not raise
+
+        assert not (tmp_path / "last-startup-error").exists()
+
+    async def test_startup_probe_unknown_soft_fails(self, tmp_path):
+        """Probe with reason='unknown' should soft-fail (continue without error file)."""
+        result = DiagnosticResult(
+            healthy=False,
+            reason="unknown",
+            details="Unknown failure.",
+        )
+        mock_bolt, _ = await self._make_mock_bolt(result)
+        mock_session_manager = AsyncMock()
+        shutdown_event = asyncio.Event()
+        mock_session_manager.shutdown_event = shutdown_event
+        mock_session_manager.handle_client = AsyncMock()
+        mock_server = AsyncMock()
+        mock_server.close = MagicMock()
+
+        from summon_claude.daemon import daemon_main
+
+        with (
+            _patch_data_dir(tmp_path),
+            patch("summon_claude.daemon.BoltRouter", return_value=mock_bolt),
+            patch("summon_claude.daemon.EventDispatcher", return_value=MagicMock()),
+            patch("summon_claude.daemon.SessionManager", return_value=mock_session_manager),
+            patch("asyncio.start_unix_server", return_value=mock_server),
+            patch("summon_claude.daemon._cleanup_orphaned_sessions", new=AsyncMock()),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            shutdown_event.set()
+            await daemon_main(MagicMock())
+
+        assert not (tmp_path / "last-startup-error").exists()
+
+    async def test_startup_probe_exception_soft_fails(self, tmp_path):
+        """Probe that raises an exception should soft-fail."""
+        mock_bolt = AsyncMock()
+        mock_bolt.start = AsyncMock()
+        mock_bolt.stop = AsyncMock()
+        mock_bolt.shutdown_callback = None
+        mock_bolt.event_failure_callback = None
+
+        mock_probe = MagicMock()
+        mock_probe.run_probe = AsyncMock(side_effect=RuntimeError("probe crash"))
+        mock_bolt.event_probe = mock_probe
+
+        async def _noop():
+            await asyncio.sleep(0)
+
+        _mock_health_task = asyncio.get_event_loop().create_task(_noop())
+        _mock_health_task.cancel()
+        mock_bolt.start_health_monitor = MagicMock(return_value=_mock_health_task)
+
         mock_session_manager = AsyncMock()
         shutdown_event = asyncio.Event()
         mock_session_manager.shutdown_event = shutdown_event
