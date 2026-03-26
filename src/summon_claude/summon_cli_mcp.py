@@ -1092,6 +1092,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             text += f"\n\n_Last updated: {now}_"
 
             text = redact_secrets(text)
+            text, sec_warnings = validate_agent_output(text)
+            for w in sec_warnings:
+                logger.warning("session_status_update output validation: %s", w)
 
             try:
                 await _web_client.chat_update(

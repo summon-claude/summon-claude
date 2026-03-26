@@ -137,5 +137,12 @@ class TestValidateAgentOutput:
         """Defanged URLs use hxxps:// to prevent Slack auto-linking."""
         text = "Go to https://evil.com/api?api_key=secret123"
         sanitized, _ = validate_agent_output(text)
-        assert "hxxps://" in sanitized
-        assert "https://" not in sanitized
+        assert "hxxps://evil.com/api?api_key=secret123" in sanitized
+
+    def test_defang_handles_uppercase_scheme(self):
+        """Uppercase HTTPS:// is matched by IGNORECASE regex and defanged."""
+        text = "Visit HTTPS://evil.com/api?token=abc123"
+        sanitized, warnings = validate_agent_output(text)
+        assert "HTTPS://evil.com" not in sanitized
+        assert "hxxps://evil.com/api?token=abc123" in sanitized
+        assert len(warnings) == 1
