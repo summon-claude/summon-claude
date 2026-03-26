@@ -18,11 +18,9 @@ Sections:
 
 Environment variables:
   SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery, cleanup, and team ID
-  SUMMON_TEST_SLACK_COOKIE         Browser session cookie (`d` cookie, `xoxd-` prefix)
 
-Security: Both variables are privileged credentials. Set them in your shell session
-  (not in .env files or shell profiles that could be committed). The cookie grants
-  full Slack web UI access as your user account.
+Browser auth: Uses saved Playwright state from `summon config slack-auth` (preferred).
+  Falls back to SUMMON_TEST_SLACK_COOKIE env var (raw `d` cookie) if no saved state.
 
 Usage:
   uv run python scripts/docs-screenshots.py [OPTIONS]
@@ -30,6 +28,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -61,6 +60,37 @@ MANUAL_SCREENSHOTS = [
     {"name": "slack-setup-app-token-properties.png", "description": "Generated token properties"},
     {"name": "slack-setup-socket-mode.png", "description": "Socket Mode toggle enabled"},
 ]
+
+
+# ---------------------------------------------------------------------------
+# Slack auth discovery
+# ---------------------------------------------------------------------------
+
+
+def _find_slack_auth_state() -> str | None:
+    """Find saved Playwright state from ``summon config slack-auth``.
+
+    Reads the workspace config file and returns the auth_state_path if the
+    state file exists on disk. Returns None if no saved auth is available.
+    """
+    try:
+        from summon_claude.config import get_data_dir
+    except ImportError:
+        return None
+
+    workspace_config = get_data_dir() / "slack_workspace.json"
+    if not workspace_config.is_file():
+        return None
+
+    try:
+        config = json.loads(workspace_config.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    state_path = config.get("auth_state_path", "")
+    if state_path and Path(state_path).is_file():
+        return state_path
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -208,23 +238,43 @@ def _dismiss_overlays(page) -> None:
         pass  # Overlay may not be present — safe to skip
 
 
-def create_browser_context(pw, cookie_value: str, *, headless: bool = True):
+def create_browser_context(
+    pw,
+    *,
+    state_file: str | None = None,
+    cookie_value: str | None = None,
+    headless: bool = True,
+):
+    """Create a Playwright browser context with Slack auth.
+
+    Prefers ``state_file`` (full Playwright state from ``summon config slack-auth``).
+    Falls back to injecting a raw ``d`` cookie from ``cookie_value``.
+    """
     browser = pw.chromium.launch(headless=headless)
-    context = browser.new_context(
-        viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
-    )
-    context.add_cookies(
-        [
-            {
-                "name": "d",
-                "value": cookie_value,
-                "domain": ".slack.com",
-                "path": "/",
-                "secure": True,
-                "httpOnly": True,
-            },
-        ]
-    )
+    if state_file:
+        context = browser.new_context(
+            viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+            storage_state=state_file,
+        )
+    elif cookie_value:
+        context = browser.new_context(
+            viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT},
+        )
+        context.add_cookies(
+            [
+                {
+                    "name": "d",
+                    "value": cookie_value,
+                    "domain": ".slack.com",
+                    "path": "/",
+                    "secure": True,
+                    "httpOnly": True,
+                },
+            ]
+        )
+    else:
+        msg = "Either state_file or cookie_value is required"
+        raise ValueError(msg)
     return browser, context
 
 
@@ -1046,16 +1096,23 @@ def main(
     # Check prerequisites
     click.echo("\n[session-ux] End-to-end screenshot capture (real summon session)...")
     bot_token = os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN")
-    cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
-
-    missing_vars = []
     if not bot_token:
-        missing_vars.append("SUMMON_TEST_SLACK_BOT_TOKEN")
-    if not cookie_value:
-        missing_vars.append("SUMMON_TEST_SLACK_COOKIE")
-    if missing_vars:
-        click.echo(f"  Skipping: missing env vars: {', '.join(missing_vars)}", err=True)
+        click.echo("  Skipping: missing SUMMON_TEST_SLACK_BOT_TOKEN", err=True)
         return
+
+    # Browser auth: try saved Playwright state from `summon config slack-auth`,
+    # fall back to raw SUMMON_TEST_SLACK_COOKIE env var.
+    slack_state_file = _find_slack_auth_state()
+    cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
+    if not slack_state_file and not cookie_value:
+        click.echo(
+            "  Skipping: no Slack browser auth found.\n"
+            "  Run `summon config slack-auth <workspace-url>` or set SUMMON_TEST_SLACK_COOKIE.",
+            err=True,
+        )
+        return
+    if slack_state_file:
+        click.echo(f"  Using saved Slack auth: {slack_state_file}")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -1080,7 +1137,9 @@ def main(
 
         # 2. Authenticate via Playwright
         with sync_playwright() as pw:
-            browser, context = create_browser_context(pw, cookie_value)
+            browser, context = create_browser_context(
+                pw, state_file=slack_state_file, cookie_value=cookie_value
+            )
             page = context.new_page()
 
             authenticate_via_slack(page, team_id, short_code, output_dir)
