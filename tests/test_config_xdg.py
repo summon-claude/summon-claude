@@ -196,10 +196,14 @@ class TestLocalInstallDetection:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("VIRTUAL_ENV", str(venv))
 
-        from summon_claude.config import _detect_install_mode
+        from unittest.mock import patch
+
+        from summon_claude.config import _detect_install_mode, _find_project_root
 
         _detect_install_mode.cache_clear()
-        assert _detect_install_mode() == ("local", tmp_path)
+        _find_project_root.cache_clear()
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            assert _detect_install_mode() == ("local", tmp_path)
 
     def test_virtual_env_not_set(self, tmp_path, monkeypatch):
         """No VIRTUAL_ENV, pyproject.toml present -> global."""
@@ -298,10 +302,15 @@ class TestLocalInstallDetection:
         monkeypatch.chdir(subdir)
         monkeypatch.setenv("VIRTUAL_ENV", str(venv))
 
-        from summon_claude.config import _detect_install_mode
+        from unittest.mock import patch
+
+        from summon_claude.config import _detect_install_mode, _find_project_root
 
         _detect_install_mode.cache_clear()
-        assert _detect_install_mode() == ("local", tmp_path)
+        _find_project_root.cache_clear()
+        # tmp_path is outside real $HOME; mock so auto-detect home check passes
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            assert _detect_install_mode() == ("local", tmp_path)
 
 
 class TestLocalInstallPathResolution:
@@ -481,10 +490,14 @@ class TestUnrecognizedSummonLocal:
         monkeypatch.setenv("SUMMON_LOCAL", "yes")
         monkeypatch.setenv("VIRTUAL_ENV", str(venv))
 
-        from summon_claude.config import _detect_install_mode
+        from unittest.mock import patch
+
+        from summon_claude.config import _detect_install_mode, _find_project_root
 
         _detect_install_mode.cache_clear()
-        mode, root = _detect_install_mode()
+        _find_project_root.cache_clear()
+        with patch("summon_claude.config.Path.home", return_value=tmp_path):
+            mode, root = _detect_install_mode()
         assert mode == "local"
         assert root == tmp_path
 
@@ -519,24 +532,27 @@ class TestFindProjectRootHardening:
         with patch("summon_claude.config.Path.home", return_value=fake_home):
             assert _find_project_root() is None
 
-    def test_stops_at_filesystem_root(self, tmp_path, monkeypatch):
-        """Walk-up stops at filesystem root for CWD outside home tree."""
-        # Simulate CWD outside home tree by patching home to a disjoint path
+    def test_rejects_project_root_outside_home(self, tmp_path, monkeypatch):
+        """Project root outside $HOME is rejected by _detect_install_mode."""
         fake_home = tmp_path / "fakehome" / "user"
         fake_home.mkdir(parents=True)
-        # CWD is outside fake_home's tree entirely
         outside = tmp_path / "outside" / "project"
         outside.mkdir(parents=True)
+        (outside / "pyproject.toml").touch()
+        (outside / ".venv").mkdir()
         monkeypatch.chdir(outside)
+        monkeypatch.setenv("VIRTUAL_ENV", str(outside / ".venv"))
 
         from unittest.mock import patch
 
-        from summon_claude.config import _find_project_root
+        from summon_claude.config import _detect_install_mode, _find_project_root
 
+        _detect_install_mode.cache_clear()
         _find_project_root.cache_clear()
         with patch("summon_claude.config.Path.home", return_value=fake_home):
-            # No pyproject.toml anywhere, walk should reach / and stop
-            assert _find_project_root() is None
+            # _find_project_root finds it, but _detect_install_mode rejects it
+            mode, _ = _detect_install_mode()
+            assert mode == "global"
 
 
 class TestDefaultDbPathMigrationGuard:

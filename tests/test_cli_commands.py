@@ -239,9 +239,10 @@ class TestCmdInit:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("SUMMON_LOCAL", "1")
 
-        from summon_claude.config import _detect_install_mode
+        from summon_claude.config import _detect_install_mode, _find_project_root
 
         _detect_install_mode.cache_clear()
+        _find_project_root.cache_clear()
 
         inputs = (
             "\n".join(

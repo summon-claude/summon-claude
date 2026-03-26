@@ -47,9 +47,9 @@ def _xdg_dir(env_var: str, default_subdir: str, xdg_subdir: str) -> Path:
 def _find_project_root() -> Path | None:
     """Walk up from CWD looking for pyproject.toml. Return containing dir or None.
 
-    Stops at the user's home directory parent (or filesystem root) to avoid
-    picking up stray ``pyproject.toml`` files in system directories.  Uses a
-    single ``lstat`` call per candidate to atomically reject symlinks.
+    Stops at the user's home directory parent to avoid picking up stray
+    ``pyproject.toml`` files in system directories.  Uses a single ``lstat``
+    call per candidate to atomically reject symlinks.
     """
     current = Path.cwd().resolve()
     home_parent = Path.home().resolve().parent
@@ -76,7 +76,7 @@ def _detect_install_mode() -> tuple[str, Path | None]:
     """
     project_root = _find_project_root()
 
-    # Explicit override
+    # Explicit override — bypasses home-directory restriction
     summon_local = os.environ.get("SUMMON_LOCAL", "").strip()
     if summon_local == "0":
         return ("global", None)
@@ -84,6 +84,12 @@ def _detect_install_mode() -> tuple[str, Path | None]:
         return ("local", project_root) if project_root is not None else ("global", None)
     if summon_local:
         logger.warning("SUMMON_LOCAL=%r not recognized (use '0' or '1'), ignoring", summon_local)
+
+    # Auto-detect: restrict to $HOME to avoid triggering on system projects
+    if project_root is not None:
+        home = Path.home().resolve()
+        if not project_root.is_relative_to(home):
+            return ("global", None)
 
     # Auto-detect: VIRTUAL_ENV under project root
     venv_str = os.environ.get("VIRTUAL_ENV", "").strip()
