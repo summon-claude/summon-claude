@@ -119,7 +119,8 @@ def start_project_session() -> tuple[subprocess.Popen | None, str]:
     )
 
     # Read stdout lines until we find the auth code
-    code_pattern = re.compile(r"SUMMON CODE:\s*(\w+)")
+    # Matches both "SUMMON CODE: abc123" and "/summon abc123" formats
+    code_pattern = re.compile(r"(?:SUMMON CODE:\s*|/summon\s+)(\w+)")
     short_code = None
     deadline = time.time() + 60  # PM takes longer to initialize
 
