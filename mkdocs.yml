@@ -107,6 +107,7 @@ nav:
     - GitHub Integration: guide/github-integration.md
     - Cron & Tasks: guide/cron-tasks.md
     - Canvas: guide/canvas.md
+    - Lifecycle Hooks: guide/hooks.md
     - Configuration: guide/configuration.md
     - Sessions: guide/sessions.md
   - Reference:

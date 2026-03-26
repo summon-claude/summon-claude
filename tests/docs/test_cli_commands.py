@@ -42,11 +42,6 @@ INTERNAL_COMMANDS: frozenset[str] = frozenset(
         "db",
         "hooks",
         "hooks run",
-        # Admin maintenance (not in human-authored getting-started/guide/concepts docs)
-        "hooks set",
-        "hooks uninstall",
-        "hooks show",
-        "hooks clear",
     }
 )
 

@@ -28,6 +28,10 @@ Learn how to use summon-claude effectively. Most users work through **projects**
 
     Persistent session documents.
 
+-   :material-hook: **[Lifecycle Hooks](hooks.md)**
+
+    Run shell commands on worktree creation, project up/down.
+
 -   :material-cog: **[Configuration](configuration.md)**
 
     Customize summon-claude behavior.
