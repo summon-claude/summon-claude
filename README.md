@@ -112,14 +112,15 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config path` | Print the config file path |
 | `summon config edit` | Open config file in `$EDITOR` |
 | `summon config check` | Validate config, test connectivity (Slack, GitHub, Google), and show feature inventory |
-| `summon config github-auth` | Authenticate with GitHub via OAuth device flow (run once, token stored locally) |
-| `summon config github-logout` | Remove stored GitHub authentication |
-| `summon config google-auth` | Authenticate with Google Workspace for scribe monitoring |
-| `summon config google-status` | Check Google Workspace authentication status |
-| `summon config slack-auth WORKSPACE` | Authenticate with an external Slack workspace (name, e.g. `myteam`, or URL) |
-| `summon config slack-channels` | Update monitored channel selection from cached list (`--refresh` to re-fetch) |
-| `summon config slack-status` | Show external Slack workspace auth and channel config |
-| `summon config slack-remove` | Remove external Slack workspace auth state |
+| `summon auth status` | Show authentication status for all configured providers |
+| `summon auth github login` | Authenticate with GitHub via OAuth device flow (run once, token stored locally) |
+| `summon auth github logout` | Remove stored GitHub authentication |
+| `summon auth google login` | Authenticate with Google Workspace for scribe monitoring |
+| `summon auth google status` | Check Google Workspace authentication status |
+| `summon auth slack login WORKSPACE` | Authenticate with an external Slack workspace (name, e.g. `myteam`, or URL) |
+| `summon auth slack channels` | Update monitored channel selection from cached list (`--refresh` to re-fetch) |
+| `summon auth slack status` | Show external Slack workspace auth and channel config |
+| `summon auth slack logout` | Remove external Slack workspace auth state |
 | `summon db status` | Show schema version, integrity, and row counts (migrations apply automatically on connect) |
 | `summon db vacuum` | Compact the database and check integrity |
 | `summon db purge [--older-than N] --yes` | Purge completed/errored sessions, audit logs, and expired tokens older than N days (default: 30) |
