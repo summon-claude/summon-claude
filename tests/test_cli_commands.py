@@ -724,6 +724,22 @@ class TestAuthStatus:
         assert result.exit_code == 0
         assert "No authentication configured" not in result.output
 
+    def test_auth_status_corrupted_workspace_json(self, tmp_path):
+        """auth status handles corrupted workspace JSON gracefully."""
+        ws_file = tmp_path / "ws.json"
+        ws_file.write_text("not valid json{{{")
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=ws_file),
+            patch("summon_claude.cli.auth.get_config_file", return_value=tmp_path / "cfg"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "corrupted" in result.output
+        assert "summon auth slack login" in result.output
+
 
 class TestGitHubAuthCLI:
     """Tests for auth github login/logout Click commands."""

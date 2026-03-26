@@ -79,7 +79,10 @@ def auth_status(ctx: click.Context) -> None:
                 workspace = json.loads(workspace_config_path.read_text())
                 url = workspace.get("url", "unknown")
             except (json.JSONDecodeError, OSError, AttributeError):
-                click.echo("  [FAIL] Slack: workspace config is corrupted")
+                click.echo(
+                    "  [FAIL] Slack: workspace config is corrupted"
+                    " (re-run `summon auth slack login`)"
+                )
                 url = None
             if url is not None:
                 existing = _check_existing_slack_auth()
