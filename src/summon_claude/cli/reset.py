@@ -75,12 +75,14 @@ async def _refuse_if_running() -> bool:
     return False
 
 
-async def _reset_directory(
+async def _reset_directory(  # noqa: PLR0913
     ctx: click.Context,
     get_dir: Callable[[], Path],
     label: str,
     warning: str,
     success: str,
+    *,
+    force: bool = False,
 ) -> None:
     """Shared reset logic for data and config directories."""
     if not is_interactive(ctx):
@@ -96,20 +98,31 @@ async def _reset_directory(
         return
 
     # Safety checks BEFORE prompting — refuse early if the path is unsafe.
-    if target.is_symlink():
-        click.echo(f"Error: {label} directory is a symlink. Refusing to delete.")
+    # --force bypasses these but still requires interactive confirmation below.
+    if target.is_symlink() and not force:
+        click.echo(
+            f"Error: {label} directory is a symlink. Refusing to delete (add --force to bypass)."
+        )
         raise SystemExit(1)
     resolved = target.resolve()
     home = Path.home().resolve()
-    if not resolved.is_relative_to(home):
+    if not resolved.is_relative_to(home) and not force:
         click.echo(
             f"Error: {label} directory resolves outside home directory ({resolved}). "
-            "Refusing to delete."
+            "Refusing to delete (add --force to bypass)."
         )
         raise SystemExit(1)
 
+    # Hard floor — never delete shallow paths regardless of --force.
+    # Catches symlinks to / or top-level dirs like /etc, /home, /Users.
+    if len(resolved.parts) < 3:
+        click.echo(f"Error: resolved path is too shallow ({resolved}). Refusing to delete.")
+        raise SystemExit(1)
+
+    if force:
+        click.echo("Safety checks bypassed (--force).")
     click.echo(warning.format(path=resolved))
-    click.confirm("Continue?", default=False, abort=True)
+    click.confirm("Are you SURE?" if force else "Continue?", default=False, abort=True)
 
     try:
         shutil.rmtree(resolved)
@@ -119,7 +132,7 @@ async def _reset_directory(
     click.echo(success)
 
 
-async def async_reset_data(ctx: click.Context) -> None:
+async def async_reset_data(ctx: click.Context, *, force: bool = False) -> None:
     """Delete all runtime data (database, logs, etc.) after confirmation."""
     await _reset_directory(
         ctx,
@@ -128,10 +141,11 @@ async def async_reset_data(ctx: click.Context) -> None:
         "This will delete all runtime data at {path} including the session "
         "database, project registrations, logs, and daemon state.",
         "Data cleared. Run 'summon start' to begin a new session.",
+        force=force,
     )
 
 
-async def async_reset_config(ctx: click.Context) -> None:
+async def async_reset_config(ctx: click.Context, *, force: bool = False) -> None:
     """Delete all configuration (Slack tokens, Google OAuth credentials) after confirmation."""
     await _reset_directory(
         ctx,
@@ -141,4 +155,5 @@ async def async_reset_config(ctx: click.Context) -> None:
         "Slack tokens, Google OAuth credentials, and external Slack auth state.",
         "Configuration cleared. Run 'summon hooks uninstall' to remove the Claude Code"
         " hook bridge, then 'summon init' to reconfigure.",
+        force=force,
     )

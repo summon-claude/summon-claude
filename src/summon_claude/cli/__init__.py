@@ -887,17 +887,27 @@ def cmd_reset() -> None:
 
 
 @cmd_reset.command("data")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Bypass symlink/outside-home safety checks. Still requires confirmation.",
+)
 @click.pass_context
-def reset_data(ctx: click.Context) -> None:
+def reset_data(ctx: click.Context, force: bool) -> None:
     """Delete all runtime data and start fresh."""
-    asyncio.run(async_reset_data(ctx))
+    asyncio.run(async_reset_data(ctx, force=force))
 
 
 @cmd_reset.command("config")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Bypass symlink/outside-home safety checks. Still requires confirmation.",
+)
 @click.pass_context
-def reset_config(ctx: click.Context) -> None:
+def reset_config(ctx: click.Context, force: bool) -> None:
     """Delete all configuration (Slack tokens, Google OAuth credentials)."""
-    asyncio.run(async_reset_config(ctx))
+    asyncio.run(async_reset_config(ctx, force=force))
 
 
 # ---------------------------------------------------------------------------

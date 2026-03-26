@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -219,8 +220,30 @@ class TestResetData:
             result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "symlink" in result.output
+        assert "--force" in result.output
         assert "Continue?" not in result.output
         assert target.exists()
+
+    def test_reset_data_force_bypasses_symlink(self, tmp_path):
+        """'reset data --force' should bypass symlink check but still confirm."""
+        target = tmp_path / "real"
+        target.mkdir()
+        (target / "registry.db").touch()
+        symlink = tmp_path / "data"
+        symlink.symlink_to(target)
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_data_dir", return_value=symlink),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
+        ):
+            result = runner.invoke(cli, ["reset", "data", "--force"], input="y\n")
+        assert result.exit_code == 0
+        assert "Safety checks bypassed" in result.output
+        assert "Are you SURE?" in result.output
+        assert not target.exists()
 
     def test_reset_data_refuses_non_interactive(self, tmp_path):
         """'reset data' should refuse in non-interactive mode."""
@@ -232,6 +255,20 @@ class TestResetData:
             patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
         ):
             result = runner.invoke(cli, ["--no-interactive", "reset", "data"])
+        assert result.exit_code != 0
+        assert "interactive mode" in result.output
+        assert data_dir.exists()
+
+    def test_reset_data_force_still_refuses_non_interactive(self, tmp_path):
+        """'reset data --force' should still refuse in non-interactive mode."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+        ):
+            result = runner.invoke(cli, ["--no-interactive", "reset", "data", "--force"])
         assert result.exit_code != 0
         assert "interactive mode" in result.output
         assert data_dir.exists()
@@ -251,8 +288,82 @@ class TestResetData:
             result = runner.invoke(cli, ["reset", "data"])
         assert result.exit_code != 0
         assert "outside home" in result.output
+        assert "--force" in result.output
         assert "Continue?" not in result.output
         assert data_dir.exists()
+
+    def test_reset_data_force_bypasses_outside_home(self, tmp_path):
+        """'reset data --force' should bypass outside-home check but still confirm."""
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        (data_dir / "registry.db").touch()
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_data_dir", return_value=data_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path / "fakehome"),
+        ):
+            result = runner.invoke(cli, ["reset", "data", "--force"], input="y\n")
+        assert result.exit_code == 0
+        assert "Safety checks bypassed" in result.output
+        assert "Are you SURE?" in result.output
+        assert not data_dir.exists()
+
+    def test_reset_data_force_refuses_shallow_path(self):
+        """'reset data --force' should still refuse paths with < 3 components (e.g. /etc)."""
+        mock_target = MagicMock()
+        mock_target.exists.return_value = True
+        mock_target.is_symlink.return_value = True
+        mock_target.resolve.return_value = Path("/etc")
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_data_dir", return_value=mock_target),
+            patch("summon_claude.cli.reset.Path.home", return_value=Path("/Users/fake")),
+        ):
+            result = runner.invoke(cli, ["reset", "data", "--force"])
+        assert result.exit_code != 0
+        assert "too shallow" in result.output
+
+    def test_reset_data_force_aborts_on_no(self, tmp_path):
+        """'reset data --force' should abort when user declines 'Are you SURE?'."""
+        target = tmp_path / "real"
+        target.mkdir()
+        symlink = tmp_path / "data"
+        symlink.symlink_to(target)
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_data_dir", return_value=symlink),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
+        ):
+            result = runner.invoke(cli, ["reset", "data", "--force"], input="n\n")
+        assert result.exit_code != 0
+        assert target.exists()
+        assert "Are you SURE?" in result.output
+
+    def test_reset_data_force_still_refuses_running_sessions(self):
+        """'reset data --force' should still refuse when sessions are running."""
+        runner = CliRunner()
+        mock_sessions = [{"session_id": "abc", "session_name": "test-sess"}]
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=True),
+            patch(
+                "summon_claude.cli.daemon_client.list_sessions",
+                new_callable=AsyncMock,
+                return_value=mock_sessions,
+            ),
+        ):
+            result = runner.invoke(cli, ["reset", "data", "--force"])
+        assert result.exit_code != 0
+        assert "summon stop --all" in result.output
 
 
 class TestResetConfig:
@@ -389,8 +500,49 @@ class TestResetConfig:
             result = runner.invoke(cli, ["reset", "config"])
         assert result.exit_code != 0
         assert "symlink" in result.output
+        assert "--force" in result.output
         assert "Continue?" not in result.output
         assert target.exists()
+
+    def test_reset_config_force_bypasses_symlink(self, tmp_path):
+        """'reset config --force' should bypass symlink check but still confirm."""
+        target = tmp_path / "real"
+        target.mkdir()
+        (target / "config.env").touch()
+        symlink = tmp_path / "config"
+        symlink.symlink_to(target)
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_config_dir", return_value=symlink),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path),
+        ):
+            result = runner.invoke(cli, ["reset", "config", "--force"], input="y\n")
+        assert result.exit_code == 0
+        assert "Safety checks bypassed" in result.output
+        assert "Are you SURE?" in result.output
+        assert not target.exists()
+
+    def test_reset_config_force_bypasses_outside_home(self, tmp_path):
+        """'reset config --force' should bypass outside-home check but still confirm."""
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        (config_dir / "config.env").touch()
+
+        runner = CliRunner()
+        with (
+            patch("summon_claude.cli.reset.is_interactive", return_value=True),
+            patch("summon_claude.cli.reset.is_daemon_running", return_value=False),
+            patch("summon_claude.cli.reset.get_config_dir", return_value=config_dir),
+            patch("summon_claude.cli.reset.Path.home", return_value=tmp_path / "fakehome"),
+        ):
+            result = runner.invoke(cli, ["reset", "config", "--force"], input="y\n")
+        assert result.exit_code == 0
+        assert "Safety checks bypassed" in result.output
+        assert "Are you SURE?" in result.output
+        assert not config_dir.exists()
 
     def test_reset_config_rmtree_failure(self, tmp_path):
         """'reset config' should show friendly error if rmtree fails."""
