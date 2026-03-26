@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import patch
 
 import pytest
@@ -18,16 +17,8 @@ from summon_claude.config import (
 
 
 def _make_config(**overrides) -> SummonConfig:
-    """Create a SummonConfig with valid defaults, bypassing .env file loading."""
-    defaults = {
-        "slack_bot_token": "xoxb-test-token",
-        "slack_app_token": "xapp-test-token",
-        "slack_signing_secret": "abc123def456",
-    }
-    defaults.update(overrides)
-    # Prevent pydantic-settings from reading any .env file during tests
-    with patch.dict(os.environ, {}, clear=False):
-        return SummonConfig.model_validate(defaults)
+    """Create a SummonConfig isolated from env vars and .env files."""
+    return SummonConfig.for_test(**overrides)
 
 
 class TestSummonConfigDefaults:
