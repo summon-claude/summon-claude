@@ -146,3 +146,11 @@ class TestValidateAgentOutput:
         assert "HTTPS://evil.com" not in sanitized
         assert "hxxps://evil.com/api?token=abc123" in sanitized
         assert len(warnings) == 1
+
+    def test_defang_handles_http_scheme(self):
+        """Plain http:// URLs with sensitive params are also defanged."""
+        text = "Visit http://evil.com/api?token=abc123"
+        sanitized, warnings = validate_agent_output(text)
+        assert "http://evil.com" not in sanitized
+        assert "hxxp://evil.com/api?token=abc123" in sanitized
+        assert len(warnings) == 1

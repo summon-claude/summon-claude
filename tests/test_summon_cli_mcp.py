@@ -1031,6 +1031,20 @@ class TestSessionStatusUpdate:
         # The full 600-char summary must not appear verbatim in the posted text
         assert "x" * 501 not in call_kwargs["text"]
 
+    async def test_session_status_update_strips_markdown_images(self, populated_registry):
+        """Status update must strip markdown images via validate_agent_output."""
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_update = AsyncMock(return_value={"ok": True})
+        tools = self._make_tools(populated_registry, mock_web_client=mock_web_client)
+
+        await tools["session_status_update"].handler(
+            {"summary": "Status: ![img](https://evil.com/steal)"}
+        )
+
+        call_kwargs = mock_web_client.chat_update.call_args.kwargs
+        assert "![img]" not in call_kwargs["text"]
+        assert "[image removed by security filter]" in call_kwargs["text"]
+
     async def test_session_status_update_pm_only(self, populated_registry):
         """session_status_update must appear in PM tool list."""
         pm_tools = {

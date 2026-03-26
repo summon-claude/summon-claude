@@ -390,6 +390,11 @@ class SlackClient:
 
         Returns ``True`` on success, ``False`` on failure (never raises).
         """
+        title = redact_secrets(title)
+        title, sec_warnings = validate_agent_output(title)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             await self._web.api_call(
                 "canvases.edit",

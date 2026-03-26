@@ -586,6 +586,48 @@ class TestOutputValidation:
         assert "[image removed by security filter]" in posted_content
 
     @pytest.mark.asyncio
+    async def test_set_topic_strips_markdown_images(self):
+        """SlackClient.set_topic() must strip markdown images."""
+        mock_web = AsyncMock()
+        mock_web.conversations_setTopic = AsyncMock(return_value={})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.set_topic("Status: ![img](https://evil.com/track)")
+
+        call_args = mock_web.conversations_setTopic.call_args
+        posted_topic = call_args.kwargs.get("topic", "")
+        assert "![img]" not in posted_topic
+        assert "[image removed by security filter]" in posted_topic
+
+    @pytest.mark.asyncio
+    async def test_canvas_create_strips_markdown_images(self):
+        """SlackClient.canvas_create() must strip markdown images from content."""
+        mock_web = AsyncMock()
+        mock_web.api_call = AsyncMock(return_value={"canvas_id": "F_ABC"})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.canvas_create("Content: ![img](https://evil.com/track)")
+
+        call_args = mock_web.api_call.call_args
+        md = call_args.kwargs["json"]["document_content"]["markdown"]
+        assert "![img]" not in md
+        assert "[image removed by security filter]" in md
+
+    @pytest.mark.asyncio
+    async def test_canvas_sync_strips_markdown_images(self):
+        """SlackClient.canvas_sync() must strip markdown images from content."""
+        mock_web = AsyncMock()
+        mock_web.api_call = AsyncMock(return_value={})
+        client = SlackClient(web_client=mock_web, channel_id="C123")
+
+        await client.canvas_sync("F_ABC", "Data: ![img](https://evil.com/track)")
+
+        call_args = mock_web.api_call.call_args
+        md = call_args.kwargs["json"]["changes"][0]["document_content"]["markdown"]
+        assert "![img]" not in md
+        assert "[image removed by security filter]" in md
+
+    @pytest.mark.asyncio
     async def test_clean_text_passes_through(self):
         mock_web = AsyncMock()
         mock_web.chat_postMessage = AsyncMock(return_value={"ts": "1234", "channel": "C123"})
