@@ -33,6 +33,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -42,9 +43,9 @@ import click
 
 DEFAULT_OUTPUT_DIR = Path("docs/assets/screenshots")
 VIEWPORT_WIDTH = 1280
-VIEWPORT_HEIGHT = 800
-HEADER_HEIGHT = 50
-FOOTER_HEIGHT = 110  # compose box + sandbox banner
+VIEWPORT_HEIGHT = 900
+TOP_NAV_HEIGHT = 44  # Slack workspace-level toolbar (search bar)
+SANDBOX_BANNER_HEIGHT = 36  # developer sandbox banner at bottom
 SESSION_NAME = "docs-screenshots"
 PROJECT_NAME = "docs-screenshots"
 
@@ -239,6 +240,74 @@ def _dismiss_overlays(page) -> None:
         pass  # Overlay may not be present — safe to skip
 
 
+def _inject_screenshot_css(page, css: str) -> None:
+    """Inject a ``<style>`` tag with ``!important`` overrides into Slack's DOM.
+
+    Using a ``<style>`` tag (rather than inline ``element.style``) lets us
+    override Slack's own CSS rules via ``!important``.  The tag is replaced
+    on each call so successive screenshots can use different CSS.
+    """
+    page.evaluate(
+        """(css) => {
+        document.getElementById('summon-screenshot-overrides')?.remove();
+        const style = document.createElement('style');
+        style.id = 'summon-screenshot-overrides';
+        style.textContent = css;
+        document.head.appendChild(style);
+    }""",
+        css,
+    )
+    page.wait_for_timeout(500)
+
+
+# CSS that hides sidebar + thread panel, overlays the primary channel view
+# at full viewport size via position:fixed (bypasses Slack's grid layout).
+_CHANNEL_VIEW_CSS = """
+    .p-tab_rail,
+    .p-channel_sidebar {
+        display: none !important;
+    }
+    .p-view_contents:not(.p-view_contents--primary):not(.p-view_contents--secondary) {
+        display: none !important;
+    }
+    .p-view_contents--secondary,
+    .p-flexpane {
+        display: none !important;
+    }
+    .p-view_contents--primary {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        z-index: 99999 !important;
+    }
+    /* Hide "N new messages" jump banner — multiple selectors for resilience
+       since Slack changes these across versions */
+    .c-message_list__unread_banner,
+    .c-message_list__unread_banner__separator,
+    .c-message_list__jump_to_unread,
+    [data-qa="unread_banner"],
+    [data-qa="unread_messages_separator_button"],
+    [data-qa="channel_page_new_messages_banner"] {
+        display: none !important;
+    }
+"""
+
+# CSS that hides sidebar only (keeps both primary and secondary visible).
+# Thread screenshots use element screenshot on the secondary view instead
+# of viewport clipping, so we only need to remove the sidebar.
+_THREAD_VIEW_CSS = """
+    .p-tab_rail,
+    .p-channel_sidebar {
+        display: none !important;
+    }
+    .p-view_contents:not(.p-view_contents--primary):not(.p-view_contents--secondary) {
+        display: none !important;
+    }
+"""
+
+
 def create_browser_context(
     pw,
     *,
@@ -279,7 +348,7 @@ def create_browser_context(
     return browser, context
 
 
-def authenticate_via_slack(page, team_id: str, short_code: str, output_dir: Path) -> None:
+def authenticate_via_slack(page, team_id: str, short_code: str) -> None:
     """Type `/summon CODE` in the Slack web UI to authenticate."""
     slack_url = f"https://app.slack.com/client/{team_id}"
     click.echo(f"  Authenticating in Slack: /summon {short_code}")
@@ -287,8 +356,8 @@ def authenticate_via_slack(page, team_id: str, short_code: str, output_dir: Path
     page.goto(slack_url, wait_until="domcontentloaded", timeout=60_000)
     page.wait_for_timeout(12_000)
 
-    # Debug screenshot to see page state
-    debug_path = output_dir / "_debug_auth_page.png"
+    # Debug screenshot to tempdir (not docs dir) to see page state
+    debug_path = Path(tempfile.gettempdir()) / "_debug_slack_auth_page.png"
     page.screenshot(path=str(debug_path), full_page=False)
     click.echo(f"  Debug screenshot saved: {debug_path}")
 
@@ -472,28 +541,49 @@ def capture_screenshots(  # noqa: PLR0913
     team_id: str,
     channel_id: str,
     *,
-    bot_token: str,
     help_ts: str | None = None,
     perm_ts: str | None = None,
 ) -> list[str]:
-    """Navigate to the session channel and capture all screenshots."""
+    """Navigate to the session channel and capture clean screenshots.
+
+    All screenshots hide the Slack sidebar and (for channel views) the thread
+    panel via DOM manipulation, producing focused views that show only the
+    relevant content area — no surrounding sidebars or split views.
+    """
     captured = []
     channel_url = f"https://app.slack.com/client/{team_id}/{channel_id}"
 
-    # Slack sidebar is ~300px wide — crop it out of all screenshots
-    sidebar_width = 300
+    clip_region = {
+        "x": 0,
+        "y": TOP_NAV_HEIGHT,
+        "width": VIEWPORT_WIDTH,
+        "height": VIEWPORT_HEIGHT - TOP_NAV_HEIGHT - SANDBOX_BANNER_HEIGHT,
+    }
 
-    def snap(name: str) -> None:
+    def snap(name: str, *, thread_view: bool = False) -> None:
+        """Capture a clean screenshot.
+
+        When *thread_view* is True the sidebar is hidden and the thread
+        panel is captured via element screenshot (natural size).  Otherwise
+        sidebar and thread panel are both hidden and the primary channel
+        view is overlaid at full viewport width.
+        """
         dest = output_dir / name
-        page.screenshot(
-            path=str(dest),
-            clip={
-                "x": sidebar_width,
-                "y": HEADER_HEIGHT,
-                "width": VIEWPORT_WIDTH - sidebar_width,
-                "height": VIEWPORT_HEIGHT - HEADER_HEIGHT - FOOTER_HEIGHT,
-            },
-        )
+        if thread_view:
+            _inject_screenshot_css(page, _THREAD_VIEW_CSS)
+            secondary = page.locator(".p-view_contents--secondary")
+            if secondary.count() > 0 and secondary.first.is_visible():
+                secondary.first.screenshot(path=str(dest))
+            else:
+                click.echo(
+                    f"  WARNING: thread panel not found, falling back to channel view for {name}",
+                    err=True,
+                )
+                _inject_screenshot_css(page, _CHANNEL_VIEW_CSS)
+                page.screenshot(path=str(dest), clip=clip_region)
+        else:
+            _inject_screenshot_css(page, _CHANNEL_VIEW_CSS)
+            page.screenshot(path=str(dest), clip=clip_region)
         click.echo(f"  captured: {dest}")
         captured.append(name)
 
@@ -504,54 +594,29 @@ def capture_screenshots(  # noqa: PLR0913
     # Navigate to channel
     click.echo("  Capturing channel screenshots...")
     nav(channel_url)
+    _dismiss_overlays(page)
 
-    # Scroll to top for auth/welcome message
+    # --- Channel-view screenshots (sidebar + thread panel hidden) ----------
+
+    # 1. quickstart-slack-auth.png — auth/welcome message at top of channel
     click.echo("  Scrolling to top for auth screenshot...")
     page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 0)")
     page.wait_for_timeout(2_000)
     snap("quickstart-slack-auth.png")
 
-    # Navigate to !help thread for help output screenshot
-    if help_ts:
-        help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
-        click.echo(f"  Capturing !help thread: {help_thread_url}")
-        nav(help_thread_url, wait_ms=5_000)
-    else:
-        # Fallback: scroll to bottom of channel (won't show help response)
-        click.echo("  No !help thread ts — falling back to channel bottom")
-        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-        page.wait_for_timeout(2_000)
-    snap("quickstart-help.png")
+    # 2. quickstart-first-message.png — channel view with first turn exchange
+    #    Show the channel (NOT a thread panel) with the turn response visible.
+    click.echo("  Capturing first message exchange...")
+    nav(channel_url, wait_ms=3_000)
+    page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
+    page.wait_for_timeout(2_000)
+    snap("quickstart-first-message.png")
 
-    # Find threads by looking for turn starters in the channel
-    from slack_sdk import WebClient
-
-    client = WebClient(token=bot_token)
-    resp = client.conversations_history(channel=channel_id, limit=50)
-    messages = resp.get("messages", [])
-
-    # Find turn thread starters (contain emoji reactions or have replies)
-    turn_threads = [
-        m["ts"]
-        for m in messages
-        if m.get("reply_count", 0) > 0 and m.get("subtype") is None  # skip join/leave messages
-    ]
-
-    if turn_threads:
-        # Navigate to the first turn thread (oldest = last in reverse-chrono list)
-        thread_ts = turn_threads[-1]
-        thread_url = f"{channel_url}/thread/{channel_id}-{thread_ts}"
-        click.echo(f"  Capturing turn thread: {thread_url}")
-        nav(thread_url, wait_ms=5_000)
-        snap("quickstart-first-message.png")
-
-    # Capture permission request (mock message posted to channel by _post_mock_permission)
+    # 3. quickstart-permission-request.png — permission Approve/Deny buttons
     if perm_ts:
-        # Navigate to channel and scroll to bottom where the mock message is
         click.echo("  Capturing permission request screenshot...")
-        nav(channel_url, wait_ms=3_000)
         page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
-        page.wait_for_timeout(2_000)
+        page.wait_for_timeout(1_000)
         snap("quickstart-permission-request.png")
         # permissions-approval.png shows the same view — copy instead of re-capturing
         shutil.copy2(
@@ -563,25 +628,56 @@ def capture_screenshots(  # noqa: PLR0913
     else:
         click.echo("  No permission ts — skipping permission screenshots")
 
-    # Canvas screenshots — click the canvas tab in the channel header.
-    # The canvas tab is a <button data-qa="canvas" role="tab"> sibling to the
-    # Messages tab.  It only appears after summon creates the canvas (async),
-    # so we poll briefly.
+    # --- Thread-view screenshot (thread panel expanded to full width) -------
+
+    # 4. quickstart-help.png — !help response shown in expanded thread view
+    if help_ts:
+        help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
+        click.echo(f"  Capturing !help thread: {help_thread_url}")
+        nav(help_thread_url, wait_ms=5_000)
+        snap("quickstart-help.png", thread_view=True)
+    else:
+        # Fallback: channel view scrolled to bottom (won't show help response)
+        click.echo("  No !help thread ts — falling back to channel view")
+        nav(channel_url, wait_ms=3_000)
+        page.evaluate("document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)")
+        page.wait_for_timeout(2_000)
+        snap("quickstart-help.png")
+
+    # --- Canvas screenshots ------------------------------------------------
+
+    # 5-6. Canvas tab view — click the canvas tab in the channel header.
+    #      The tab only appears after summon creates the canvas (async).
     click.echo("  Attempting canvas capture...")
     try:
         nav(channel_url, wait_ms=3_000)
         canvas_tab = page.locator('button[data-qa="canvas"][role="tab"]')
-        # Poll for up to 15s — canvas creation is async after session startup
         canvas_tab.wait_for(state="visible", timeout=15_000)
         canvas_tab.click(timeout=5_000)
         page.wait_for_timeout(3_000)
+        # Redact filesystem paths in canvas content before capturing
+        page.evaluate(
+            """(home) => {
+            document.querySelectorAll('td, span, div, a').forEach(el => {
+                if (el.children.length === 0 && el.textContent.includes(home)) {
+                    el.textContent = el.textContent.replaceAll(home, '~/project');
+                }
+            });
+        }""",
+            str(Path.home()),
+        )
         snap("canvas-channel-tab.png")
 
         # Second capture after content fully renders
         page.wait_for_timeout(2_000)
         snap("canvas-pm-active-work.png")
     except Exception as exc:
-        click.echo(f"  Canvas tab not found — skipping canvas screenshots ({exc})", err=True)
+        click.echo(f"  Canvas capture failed ({type(exc).__name__}): {exc}", err=True)
+
+    # Clean up debug screenshots from previous runs
+    for debug_file in output_dir.glob("_debug_*.png"):
+        debug_file.unlink()
+        click.echo(f"  Removed debug artifact: {debug_file.name}")
 
     return captured
 
@@ -845,9 +941,11 @@ CAPTURES: list[CaptureSpec] = [
 
 
 def _make_env() -> dict[str, str]:
-    """Build a subprocess environment with CLAUDECODE unset."""
+    """Build a subprocess environment with CLAUDECODE and test credentials unset."""
     env = os.environ.copy()
     env.pop("CLAUDECODE", None)
+    env.pop("SUMMON_TEST_SLACK_BOT_TOKEN", None)
+    env.pop("SUMMON_TEST_SLACK_COOKIE", None)
     return env
 
 
@@ -1042,7 +1140,7 @@ def main(
     This is a LOCAL developer tool — requires Claude CLI, summon config,
     and Slack browser credentials. Cannot run in CI.
 
-    Requires: SUMMON_TEST_SLACK_BOT_TOKEN, SUMMON_TEST_SLACK_COOKIE.
+    Requires: SUMMON_TEST_SLACK_BOT_TOKEN.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     sections = [section] if section else ["slack-setup", "session-ux", "terminal"]
@@ -1143,7 +1241,7 @@ def main(
             )
             page = context.new_page()
 
-            authenticate_via_slack(page, team_id, short_code, output_dir)
+            authenticate_via_slack(page, team_id, short_code)
 
             # 3. Wait for session channel
             channel_id = wait_for_session_channel(bot_token, timeout=90)
@@ -1155,8 +1253,8 @@ def main(
 
             _dismiss_overlays(page)
 
-            # Debug screenshot to verify channel loaded
-            debug_path = output_dir / "_debug_channel_page.png"
+            # Debug screenshot to tempdir (not docs dir) to verify channel loaded
+            debug_path = Path(tempfile.gettempdir()) / "_debug_slack_channel_page.png"
             page.screenshot(path=str(debug_path), full_page=False)
             click.echo(f"  Debug screenshot saved: {debug_path}")
 
@@ -1181,7 +1279,6 @@ def main(
                 output_dir,
                 team_id,
                 channel_id,
-                bot_token=bot_token,
                 help_ts=help_ts,
                 perm_ts=perm_ts,
             )

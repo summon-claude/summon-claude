@@ -306,6 +306,16 @@ class TestMakeEnv:
         env["SENTINEL"] = "1"
         assert "SENTINEL" not in os.environ
 
+    def test_strips_test_bot_token(self, monkeypatch) -> None:
+        monkeypatch.setenv("SUMMON_TEST_SLACK_BOT_TOKEN", "xoxb-test")
+        env = _make_env()
+        assert "SUMMON_TEST_SLACK_BOT_TOKEN" not in env
+
+    def test_strips_test_cookie(self, monkeypatch) -> None:
+        monkeypatch.setenv("SUMMON_TEST_SLACK_COOKIE", "xoxd-test")
+        env = _make_env()
+        assert "SUMMON_TEST_SLACK_COOKIE" not in env
+
 
 # ---------------------------------------------------------------------------
 # _capture_summon_start_banner
