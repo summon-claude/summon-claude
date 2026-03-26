@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 def _pick_channels(channels: list[dict[str, str]] | None) -> str:
     """Interactive channel picker. Returns comma-separated channel IDs.
 
-    Reusable by both ``slack-auth`` and ``slack-channels`` commands.
+    Reusable by both ``auth slack login`` and ``auth slack channels`` commands.
     Includes an empty-selection guard: if the user confirms with nothing
     selected (likely pressed Enter instead of Space), offers a retry.
     """
@@ -334,7 +334,10 @@ def _save_workspace_config(
 
     click.echo(f"Workspace config saved to {config_path}")
     if not user_id:
-        click.echo("Note: @mention detection disabled (no user ID). Re-run slack-auth to add it.")
+        click.echo(
+            "Note: @mention detection disabled (no user ID)."
+            " Re-run `summon auth slack login` to add it."
+        )
 
 
 def slack_status() -> None:
@@ -348,7 +351,7 @@ def slack_status() -> None:
     workspace = json.loads(config_path.read_text())
     click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
     user_id = workspace.get("user_id", "")
-    click.echo(f"User ID: {user_id or 'not set (re-run slack-auth to add)'}")
+    click.echo(f"User ID: {user_id or 'not set (re-run `summon auth slack login` to add)'}")
 
     state_path = Path(workspace.get("auth_state_path", ""))
     if state_path.exists():
@@ -357,7 +360,7 @@ def slack_status() -> None:
         mtime = datetime.datetime.fromtimestamp(state_path.stat().st_mtime, tz=datetime.UTC)
         click.echo(f"Auth state: {state_path} (saved {mtime.isoformat()})")
     else:
-        click.echo("Auth state: MISSING (re-run slack-auth)")
+        click.echo("Auth state: MISSING (re-run `summon auth slack login`)")
 
     channels = os.environ.get("SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS", "")
     if channels:
