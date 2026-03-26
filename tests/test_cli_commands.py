@@ -695,7 +695,7 @@ class TestCheckGithubStatus:
 
 
 class TestGitHubAuthCLI:
-    """Tests for github-auth and github-logout Click commands."""
+    """Tests for auth github login/logout Click commands."""
 
     def test_github_auth_success(self):
         from unittest.mock import AsyncMock
@@ -713,7 +713,7 @@ class TestGitHubAuthCLI:
             new=AsyncMock(return_value=mock_result),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-auth"])
+            result = runner.invoke(cli, ["auth", "github", "login"])
 
         assert result.exit_code == 0
         assert "octocat" in result.output
@@ -741,7 +741,7 @@ class TestGitHubAuthCLI:
             new=AsyncMock(side_effect=_fake_flow),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-auth"])
+            result = runner.invoke(cli, ["auth", "github", "login"])
 
         assert result.exit_code == 0
         # ESC byte stripped — ANSI sequence can't be interpreted by terminal
@@ -759,7 +759,7 @@ class TestGitHubAuthCLI:
             new=AsyncMock(side_effect=GitHubAuthError("test error")),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-auth"])
+            result = runner.invoke(cli, ["auth", "github", "login"])
 
         assert result.exit_code != 0
         assert "test error" in result.output
@@ -773,7 +773,7 @@ class TestGitHubAuthCLI:
             new=AsyncMock(side_effect=aiohttp.ClientError("Connection refused")),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-auth"])
+            result = runner.invoke(cli, ["auth", "github", "login"])
 
         assert result.exit_code != 0
         assert "Network error" in result.output
@@ -787,14 +787,14 @@ class TestGitHubAuthCLI:
             new=AsyncMock(side_effect=KeyboardInterrupt),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-auth"])
+            result = runner.invoke(cli, ["auth", "github", "login"])
 
         assert "cancelled" in result.output.lower()
 
     def test_github_logout_with_token(self):
         with patch("summon_claude.github_auth.remove_token", return_value=True):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-logout"])
+            result = runner.invoke(cli, ["auth", "github", "logout"])
 
         assert result.exit_code == 0
         assert "removed" in result.output
@@ -802,7 +802,7 @@ class TestGitHubAuthCLI:
     def test_github_logout_no_token(self):
         with patch("summon_claude.github_auth.remove_token", return_value=False):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "github-logout"])
+            result = runner.invoke(cli, ["auth", "github", "logout"])
 
         assert result.exit_code == 0
         assert "No GitHub token" in result.output

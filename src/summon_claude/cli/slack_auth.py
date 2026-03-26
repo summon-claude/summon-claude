@@ -342,7 +342,7 @@ def slack_status() -> None:
     config_path = get_workspace_config_path()
     if not config_path.exists():
         click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon config slack-auth <workspace-url>")
+        click.echo("Run: summon auth slack login <workspace-url>")
         return
 
     workspace = json.loads(config_path.read_text())
@@ -410,7 +410,7 @@ def slack_channels(*, refresh: bool = False) -> None:
     config_path = get_workspace_config_path()
     if not config_path.exists():
         click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon config slack-auth <workspace>")
+        click.echo("Run: summon auth slack login <workspace>")
         return
 
     workspace = json.loads(config_path.read_text())
@@ -433,7 +433,7 @@ def slack_channels(*, refresh: bool = False) -> None:
 
     if not channels:
         click.echo("Could not load channels — auth state may be expired.")
-        click.echo(f"Re-run: summon config slack-auth {workspace_url}")
+        click.echo(f"Re-run: summon auth slack login {workspace_url}")
         return
 
     monitored = _pick_channels(channels)
@@ -450,7 +450,7 @@ def _fetch_channels_via_playwright(
 
     if not state_path.is_file():
         click.echo("Auth state expired or missing.")
-        click.echo(f"Re-run: summon config slack-auth {workspace_url}")
+        click.echo(f"Re-run: summon auth slack login {workspace_url}")
         return None
 
     try:

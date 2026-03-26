@@ -384,7 +384,7 @@ def google_auth() -> None:
         click.echo(f"Credentials stored in {get_google_credentials_dir()}")
     except subprocess.CalledProcessError:
         click.echo("Google auth flow did not complete.", err=True)
-        click.echo("Run `summon config google-status` to check auth state.")
+        click.echo("Run `summon auth google status` to check auth state.")
         sys.exit(1)
 
 
@@ -444,7 +444,7 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
     token = load_token()
     if not token:
         if not quiet:
-            click.echo(f"{prefix}[INFO] GitHub: not configured (run `summon config github-auth`)")
+            click.echo(f"{prefix}[INFO] GitHub: not configured (run `summon auth github login`)")
         return None
 
     try:
@@ -456,7 +456,7 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
 
     if result is None:
         if not quiet:
-            click.echo(f"{prefix}[FAIL] GitHub: token invalid — run `summon config github-auth`")
+            click.echo(f"{prefix}[FAIL] GitHub: token invalid — run `summon auth github login`")
         return False
 
     if not quiet:
@@ -486,7 +486,7 @@ def _check_google_status(
     creds_dir = get_google_credentials_dir()
     if not creds_dir.exists():
         if not quiet:
-            click.echo(f"{prefix}Google: not configured (run `summon config google-auth`)")
+            click.echo(f"{prefix}Google: not configured (run `summon auth google login`)")
         return None
 
     store = LocalDirectoryCredentialStore(str(creds_dir))
@@ -516,7 +516,7 @@ def _check_google_status(
         elif cred.expired and cred.refresh_token:
             status = "expired (will refresh on next use)"
         else:
-            click.echo(f"{prefix}Google: invalid — re-run `summon config google-auth` ({user})")
+            click.echo(f"{prefix}Google: invalid — re-run `summon auth google login` ({user})")
             all_ok = False
             continue
 
@@ -527,7 +527,7 @@ def _check_google_status(
             click.echo(f"{prefix}Google: {status} but missing scopes ({user})")
             if not quiet:
                 click.echo(f"{prefix}  Missing: {', '.join(sorted(missing)[:3])}...")
-                click.echo(f"{prefix}  Re-run `summon config google-auth` to grant scopes")
+                click.echo(f"{prefix}  Re-run `summon auth google login` to grant scopes")
             all_ok = False
         elif not quiet:
             click.echo(f"{prefix}Google: {status} ({user})")
@@ -768,7 +768,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             click.echo("  [FAIL] Google Workspace credentials have issues")
             all_pass = False
     elif not quiet:
-        click.echo("  [INFO] Google Workspace: not configured (summon config google-auth)")
+        click.echo("  [INFO] Google Workspace: not configured (summon auth google login)")
 
     # Optional extras availability (informational)
     if not quiet:
@@ -874,7 +874,7 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
             has_creds = False
         if not has_creds:
             click.echo(
-                "  [INFO] Scribe enabled but Google not configured (summon config google-auth)"
+                "  [INFO] Scribe enabled but Google not configured (summon auth google login)"
             )
 
     # Getting started nudge (only when count is confirmed 0, not on DB failure)
