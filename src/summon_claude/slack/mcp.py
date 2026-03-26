@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 _MAX_TEXT_CHARS = 3000  # Slack section block limit
+_GPM_ATTRIBUTION = "[Global PM]"  # SEC-004: attribution prefix for cross-channel posts
 _MARKDOWN_BLOCK_LIMIT = 12000  # Slack type: markdown block cumulative limit
 
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")
@@ -207,7 +208,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
     allowed_channels: Callable[[], Awaitable[set[str]]],
     cwd: str = ".",
     *,
-    is_pm: bool = False,
+    is_global_pm: bool = False,
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances bound to the given SlackClient.
 
@@ -787,7 +788,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
                     "is_error": True,
                 }
             # [SEC-004] Attribution prefix for cross-channel posts
-            text = f"[Global PM] {text}"
+            text = f"{_GPM_ATTRIBUTION} {text}"
             ref = await client.post_to_channel(resolved, text)
             return {
                 "content": [{"type": "text", "text": f"Posted to {ref.channel_id} (ts={ref.ts})"}]
@@ -810,7 +811,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         fetch_thread,
         get_context,
     ]
-    if is_pm:
+    if is_global_pm:
         tools.append(post_to_channel)
     return tools
 
@@ -820,8 +821,10 @@ def create_summon_mcp_server(
     allowed_channels: Callable[[], Awaitable[set[str]]],
     cwd: str = ".",
     *,
-    is_pm: bool = False,
+    is_global_pm: bool = False,
 ) -> McpSdkServerConfig:
     """Create an MCP server with Slack tools bound to the current SlackClient."""
-    tools = create_summon_mcp_tools(client, allowed_channels=allowed_channels, cwd=cwd, is_pm=is_pm)
+    tools = create_summon_mcp_tools(
+        client, allowed_channels=allowed_channels, cwd=cwd, is_global_pm=is_global_pm
+    )
     return create_sdk_mcp_server(name="summon-slack", version="1.0.0", tools=tools)

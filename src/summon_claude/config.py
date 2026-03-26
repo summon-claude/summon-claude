@@ -750,14 +750,7 @@ def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
     )
 
 
-def _validate_scribe_scan_interval(v: str) -> str | None:
-    try:
-        return None if int(v) >= 1 else "Must be at least 1"
-    except (ValueError, TypeError):
-        return "Must be an integer"
-
-
-def _validate_global_pm_scan_interval(v: str) -> str | None:
+def _validate_scan_interval_minutes(v: str) -> str | None:
     try:
         return None if int(v) >= 1 else "Must be at least 1"
     except (ValueError, TypeError):
@@ -882,7 +875,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="How often the scribe agent scans for new data",
         input_type="int",
         visible=_scribe_enabled,
-        validate_fn=_validate_scribe_scan_interval,
+        validate_fn=_validate_scan_interval_minutes,
     ),
     ConfigOption(
         field_name="scribe_cwd",
@@ -979,7 +972,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="How often the Global PM scans all projects",
         input_type="int",
         visible=lambda _c: False,
-        validate_fn=_validate_global_pm_scan_interval,
+        validate_fn=_validate_scan_interval_minutes,
     ),
     ConfigOption(
         field_name="global_pm_cwd",

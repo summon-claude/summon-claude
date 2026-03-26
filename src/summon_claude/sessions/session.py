@@ -2087,6 +2087,17 @@ class SummonSession:
             for ch in resp.get("channels", []):
                 ch_name = ch.get("name", "")
                 if ch_name in (gpm_channel_name, zzz_gpm_name):
+                    # [SEC-003] Verify the bot created this channel to prevent
+                    # name-squatting by workspace members who pre-create the name.
+                    if ch.get("creator") != self._bot_user_id:
+                        logger.warning(
+                            "Global PM: channel #%s exists but was created by %s, not bot "
+                            "(%s) — skipping to prevent channel hijack",
+                            ch_name,
+                            ch.get("creator"),
+                            self._bot_user_id,
+                        )
+                        continue
                     channel_id = ch["id"]
                     await web_client.conversations_join(channel=channel_id)
                     if ch_name == zzz_gpm_name:
@@ -2294,7 +2305,7 @@ class SummonSession:
         _cached_channels: set[str] | None = None
         _channels_cached_at: float = 0.0
 
-        if is_pm and not self._project_id:
+        if self._global_pm_profile:
             # Global PM: access all active channels for this user
             async def _global_pm_channel_scope() -> set[str]:
                 nonlocal _cached_channels, _channels_cached_at
@@ -2334,12 +2345,12 @@ class SummonSession:
                 if _scribe_channels_cache is not None:
                     return _scribe_channels_cache
                 channels = {_own_cid}
-                # Include Global PM channel if it exists (GPM not yet in M4 — handle missing).
+                # Include Global PM channel if it exists.
                 try:
                     active = await _reg.list_active()
                     for sess in active:
                         sname = sess.get("session_name", "")
-                        if "-pm-" in sname and sess.get("project_id") is None:
+                        if sname == "global-pm" and sess.get("project_id") is None:
                             cid = sess.get("slack_channel_id")
                             if cid:
                                 channels.add(cid)
@@ -2364,7 +2375,7 @@ class SummonSession:
             rt.client,
             allowed_channels=channel_scope,
             cwd=self._cwd,
-            is_pm=is_pm,
+            is_global_pm=self._global_pm_profile,
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 
