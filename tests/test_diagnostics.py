@@ -719,8 +719,9 @@ class TestGitHubMcpCheck:
         ):
             result = await check.run(None)
         assert result.status == "pass"
-        # SEC-003: username should NOT be in message
+        # SEC-003: username should NOT leak into message or details
         assert "testuser" not in result.message
+        assert all("testuser" not in d for d in result.details)
 
     async def test_token_invalid(self, check: GitHubMcpCheck) -> None:
         with (
