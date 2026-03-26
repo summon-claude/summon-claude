@@ -508,6 +508,7 @@ class SessionManager:
                             "session_id": sid,
                             "channel_id": s.channel_id,
                             "session_name": s.name,
+                            "project_id": s.project_id,
                             "status": "active",
                         }
                         for sid, s in self._sessions.items()

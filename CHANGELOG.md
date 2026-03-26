@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Dynamic channel scoping** — PM sessions use registry-driven channel resolvers: project PMs see own channel + child session channels; global PMs see all user channels. Replaces inline Python filtering with SQL-level `authenticated_user_id` scoping
 - **PM heartbeat topic reconciliation** — PM sessions update channel topic every 30s via `count_active_children` DB query, providing a safety net for crashed children alongside the event-driven topic updates
 
+- **`summon reset data`** — Deletes all runtime data (database, logs, daemon state) and starts fresh
+- **`summon reset config`** — Deletes all configuration (Slack tokens, Google OAuth credentials)
+
 - **Config UX overhaul** — `summon init` groups options into core (Slack, model, scribe, GitHub) and advanced (display, behavior, thinking) with a gating prompt. Shows contextual help hints for Slack tokens and GitHub PAT. Auto-runs `config check` on completion
 - **Config check features section** — `summon config check` now shows a feature inventory (projects, workflow, hooks, hook bridge) with actionable commands, validates GitHub PAT via API, and nudges `summon config google-auth` when scribe is enabled
 
@@ -45,8 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Context tracking via JSONL transcript** — `sessions/context.py` parses the Claude CLI JSONL transcript for accurate per-step token counts, avoiding the over-reporting from cumulative SDK usage (#44)
 - **Registry schema migrations** — Schema changes extracted into `sessions/migrations.py` as the single source of truth. Fresh databases create the v1 baseline and run all migrations. Migrations v1→v2 (parent session, authenticated user), v2→v3 (workflow defaults table), v3→v4 (active name index), v4→v5 (canvas columns), v5→v6 (parent session index) (#39, #42, #45)
 - **CLI module extraction** — Business logic moved from `cli/__init__.py` into focused modules: `cli/start.py`, `cli/stop.py`, `cli/session.py`, `cli/db.py`, `cli/formatting.py`, `cli/helpers.py`, `cli/interactive.py` (#30)
-- **Schema versioning and DB CLI** — `summon db` subcommands: `status`, `reset --yes`, `vacuum`, `purge --older-than N --yes`. Migrations apply automatically on connect (#29)
+- **Schema versioning and DB CLI** — `summon db` subcommands: `status`, `vacuum`, `purge --older-than N --yes`. Migrations apply automatically on connect (#29)
+- **Google OAuth credentials location** — Now stored in config dir (`~/.config/summon/google-credentials/`) instead of data dir
 - **`update_status` field validation** — `_UPDATABLE_FIELDS` frozenset guards which columns `update_status()` can modify; `_VALID_STATUSES` frozenset guards valid status values (#31)
+
+### Removed
+
+- **`summon db reset`** — Subcommand removed; replaced by `summon reset data` (interactive-only — the `--yes` flag for non-interactive use is intentionally not carried forward)
 
 ### Fixed
 

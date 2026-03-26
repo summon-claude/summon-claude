@@ -624,7 +624,7 @@ class TestSlackRemoveCommand:
         mod = "summon_claude.cli.slack_auth"
         with (
             patch(f"{mod}.get_workspace_config_path", return_value=config_file),
-            patch(f"{mod}.get_data_dir", return_value=tmp_path),
+            patch(f"{mod}.get_browser_auth_dir", return_value=browser_auth),
         ):
             result = runner.invoke(cmd_config, ["slack-remove"], input="y\n")
 

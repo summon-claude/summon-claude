@@ -119,9 +119,10 @@ The code expires in 5 minutes. Run `summon start` again to get a new one.
 | `summon config slack-status` | Show external Slack workspace auth and channel config |
 | `summon config slack-remove` | Remove external Slack workspace auth state |
 | `summon db status` | Show schema version, integrity, and row counts (migrations apply automatically on connect) |
-| `summon db reset --yes` | Delete and recreate the registry database |
 | `summon db vacuum` | Compact the database and check integrity |
 | `summon db purge [--older-than N] --yes` | Purge completed/errored sessions, audit logs, and expired tokens older than N days (default: 30) |
+| `summon reset data` | Delete all runtime data (database, logs, daemon state) and start fresh |
+| `summon reset config` | Delete all configuration (Slack tokens, Google OAuth credentials) |
 | `summon project add NAME [DIR]` | Register a project directory for PM agent management |
 | `summon project remove NAME` | Remove a registered project |
 | `summon project list` | List all registered projects |
@@ -321,7 +322,8 @@ Slack input flows through `BoltRouter` (a single shared Bolt app per daemon), wh
 | `cli/config.py` | Config subcommand handlers: show, path, edit, set, check, google-auth |
 | `cli/slack_auth.py` | External Slack workspace auth: slack-auth, slack-channels, slack-status, slack-remove |
 | `cli/daemon_client.py` | Typed async client for daemon Unix socket control API |
-| `cli/db.py` | Database maintenance command logic (status, reset, vacuum, purge) |
+| `cli/db.py` | Database maintenance command logic (status, vacuum, purge) |
+| `cli/reset.py` | Reset command implementations (data, config) |
 | `cli/formatting.py` | Formatting helpers for CLI output (echo, format_json, session tables) |
 | `cli/helpers.py` | Session resolution and stop helpers for CLI commands |
 | `cli/interactive.py` | Interactive terminal selection with TTY-aware fallback |

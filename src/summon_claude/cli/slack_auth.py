@@ -13,7 +13,11 @@ from urllib.parse import urlparse
 
 import click
 
-from summon_claude.config import get_config_file, get_data_dir, get_workspace_config_path
+from summon_claude.config import (
+    get_browser_auth_dir,
+    get_config_file,
+    get_workspace_config_path,
+)
 
 if TYPE_CHECKING:
     from summon_claude.slack_browser import SlackAuthResult
@@ -238,7 +242,7 @@ def slack_auth(workspace: str) -> None:
     """Interactive Slack workspace authentication via Playwright.
 
     Opens a real browser window for the user to log in. Saves auth state
-    to ``get_data_dir() / browser_auth/``.
+    to ``get_browser_auth_dir()``.
 
     Accepts a workspace name (``myteam``), enterprise name (``acme.enterprise``),
     or full URL (``https://myteam.slack.com``).
@@ -381,7 +385,7 @@ def slack_remove() -> None:
     state_path = Path(workspace.get("auth_state_path", ""))
 
     # [SEC] Validate path is within expected directory before unlinking
-    expected_dir = get_data_dir() / "browser_auth"
+    expected_dir = get_browser_auth_dir()
     if state_path.name and (not state_path.resolve().is_relative_to(expected_dir.resolve())):
         click.echo(
             f"Auth state path {state_path} is outside expected directory — skipping removal.",

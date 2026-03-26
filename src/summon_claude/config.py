@@ -333,10 +333,10 @@ def discover_plugin_skills() -> list[PluginSkill]:
 def get_google_credentials_dir() -> Path:
     """Return the directory for storing Google OAuth credentials.
 
-    Uses ``get_data_dir() / "google-credentials"`` so credentials live
-    under summon's own XDG data directory, not workspace-mcp's default.
+    Uses ``get_config_dir() / "google-credentials"`` so credentials live
+    under summon's own XDG config directory, not workspace-mcp's default.
     """
-    return get_data_dir() / "google-credentials"
+    return get_config_dir() / "google-credentials"
 
 
 def google_mcp_env() -> dict[str, str]:
@@ -376,7 +376,12 @@ _SLACK_WORKSPACE_FILE = "slack_workspace.json"
 
 def get_workspace_config_path() -> Path:
     """Path to the external Slack workspace config file."""
-    return get_data_dir() / _SLACK_WORKSPACE_FILE
+    return get_config_dir() / _SLACK_WORKSPACE_FILE
+
+
+def get_browser_auth_dir() -> Path:
+    """Directory for Playwright browser auth state files (Slack cookies/localStorage)."""
+    return get_config_dir() / "browser_auth"
 
 
 def find_workspace_mcp_bin() -> Path:

@@ -160,8 +160,8 @@ async def get_status() -> dict[str, Any]:
 async def list_sessions() -> list[dict[str, Any]]:
     """Return the list of active sessions from the daemon status response.
 
-    Returns sparse dicts from the daemon (session_id, channel_id only),
-    not full registry records.
+    Returns sparse dicts from the daemon (session_id, channel_id,
+    session_name, project_id), not full registry records.
     """
     status = await get_status()
     sessions: list[dict[str, Any]] = status.get("sessions", [])

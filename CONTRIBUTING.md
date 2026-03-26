@@ -46,7 +46,8 @@ Project-specific scopes for summon-claude:
 - **permissions**: Permission handling and approval flow (`sessions/permissions.py`)
 - **mcp**: MCP server and tools (`slack/mcp.py`)
 - **registry**: Session storage and SQLite operations (`sessions/registry.py`)
-- **db**: Database maintenance CLI commands (`cli/` — `summon db` group: status, reset, vacuum, purge)
+- **db**: Database maintenance CLI commands (`cli/` — `summon db` group: status, vacuum, purge)
+- **reset**: Reset commands for data and config clearing (`cli/reset.py`)
 - **hooks**: Lifecycle hooks and Claude Code hook bridge (`sessions/hooks.py`, `cli/hooks.py`)
 - **plugin**: Claude Code plugin skill and manifest (`.claude-plugin/`)
 
@@ -326,11 +327,12 @@ src/summon_claude/
 │   ├── __init__.py        # Click wiring, root group, setup_logging
 │   ├── config.py          # Config subcommands (show, set, path, edit, check, google-auth)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
-│   ├── db.py              # DB subcommand implementations (status, reset, vacuum, purge)
+│   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
 │   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
 │   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
+│   ├── reset.py           # Reset command implementations (data, config)
 │   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
 │   ├── slack_auth.py      # External Slack workspace auth (slack-auth, slack-channels, slack-status)
 │   ├── start.py           # async_start() implementation
