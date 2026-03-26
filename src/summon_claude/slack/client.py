@@ -217,6 +217,10 @@ class SlackClient:
     async def set_topic(self, topic: str) -> None:
         """Set the channel topic."""
         topic = redact_secrets(topic)
+        topic, sec_warnings = validate_agent_output(topic)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         await self._web.conversations_setTopic(channel=self.channel_id, topic=topic)
 
     async def rename_channel(self, new_name: str) -> str | None:
@@ -322,6 +326,10 @@ class SlackClient:
         Returns the canvas file ID, or ``None`` if all attempts fail.
         """
         markdown = redact_secrets(markdown)
+        markdown, sec_warnings = validate_agent_output(markdown)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             resp = await self._web.api_call(
                 "canvases.create",
@@ -352,6 +360,10 @@ class SlackClient:
         Returns ``True`` on success, ``False`` on failure (never raises).
         """
         markdown = redact_secrets(markdown)
+        markdown, sec_warnings = validate_agent_output(markdown)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             await self._web.api_call(
                 "canvases.edit",
