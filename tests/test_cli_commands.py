@@ -694,6 +694,37 @@ class TestCheckGithubStatus:
         assert capsys.readouterr().out == ""
 
 
+class TestAuthStatus:
+    """Tests for summon auth status command."""
+
+    def test_auth_status_no_providers(self, tmp_path):
+        """auth status shows guidance when no providers configured."""
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=tmp_path / "x"),
+            patch("summon_claude.cli.auth.get_config_file", return_value=tmp_path / "cfg"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "No authentication configured" in result.output
+        assert "summon auth github login" in result.output
+
+    def test_auth_status_github_configured(self, tmp_path):
+        """auth status shows GitHub status when token exists."""
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=True),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=tmp_path / "x"),
+            patch("summon_claude.cli.auth.get_config_file", return_value=tmp_path / "cfg"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "No authentication configured" not in result.output
+
+
 class TestGitHubAuthCLI:
     """Tests for auth github login/logout Click commands."""
 

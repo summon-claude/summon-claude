@@ -29,12 +29,13 @@ from summon_claude.cli.config import (
     parse_env_file,
 )
 from summon_claude.cli.slack_auth import (
+    _check_existing_slack_auth,
     slack_auth,
     slack_channels,
     slack_remove,
     slack_status,
 )
-from summon_claude.config import get_config_file
+from summon_claude.config import get_config_file, get_workspace_config_path
 
 # ---------------------------------------------------------------------------
 # summon auth
@@ -68,8 +69,6 @@ def auth_status(ctx: click.Context) -> None:
         any_configured = True
 
     # External Slack
-    from summon_claude.config import get_workspace_config_path  # noqa: PLC0415
-
     workspace_config_path = get_workspace_config_path()
     if workspace_config_path.exists():
         any_configured = True
@@ -78,9 +77,6 @@ def auth_status(ctx: click.Context) -> None:
 
             workspace = json.loads(workspace_config_path.read_text())
             url = workspace.get("url", "unknown")
-
-            from summon_claude.cli.slack_auth import _check_existing_slack_auth  # noqa: PLC0415
-
             existing = _check_existing_slack_auth()
             if existing:
                 click.echo(f"  [PASS] Slack: authenticated ({url}, {existing['age']})")
