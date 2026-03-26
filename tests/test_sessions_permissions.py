@@ -323,13 +323,13 @@ class TestPermissionEphemeral:
         handler, _, _ = make_handler(authenticated_user_id="U_CUSTOM")
         assert handler._authenticated_user_id == "U_CUSTOM"
 
-    async def test_authenticated_user_id_default(self):
-        """PermissionHandler should default authenticated_user_id to empty string."""
+    def test_authenticated_user_id_is_required(self):
+        """PermissionHandler must require authenticated_user_id (no default)."""
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         config = make_config()
-        handler = PermissionHandler(router, config)
-        assert handler._authenticated_user_id == ""
+        with pytest.raises(TypeError, match="authenticated_user_id"):
+            PermissionHandler(router, config)  # type: ignore[call-arg]
 
     async def test_permission_ping_goes_to_main_channel(self):
         """Permission notification ping should go to main channel, not thread."""
@@ -526,3 +526,66 @@ class TestGitHubMCPGuardTests:
             assert not tool.startswith(_GITHUB_MCP_AUTO_APPROVE_PREFIXES), (
                 f"{tool} matches an auto-approve prefix"
             )
+
+
+class TestIdentityVerificationFailClosed:
+    """Guard tests: identity checks are fail-closed (no truthy bypass)."""
+
+    async def test_handle_action_rejects_when_authenticated_user_empty(self):
+        """handle_action should reject even if authenticated_user_id is empty string."""
+        handler, _, _ = make_handler(authenticated_user_id="")
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_INTRUDER",
+        )
+
+        assert batch_id not in handler._batch.decisions
+        assert not event.is_set()
+
+    async def test_handle_ask_user_action_rejects_when_authenticated_user_empty(self):
+        """handle_ask_user_action should reject even if authenticated_user_id is empty."""
+        handler, _, _ = make_handler(authenticated_user_id="")
+        # Set up state so the request_id exists — ensures rejection is from
+        # the identity check, not the "request_id not in events" early return.
+        handler._ask_user.events["req-1"] = asyncio.Event()
+        handler._ask_user.questions["req-1"] = [
+            {"question": "Q?", "header": "H", "options": [{"label": "A", "description": ""}]}
+        ]
+
+        await handler.handle_ask_user_action(
+            value="req-1|0|0",
+            user_id="U_INTRUDER",
+        )
+
+        # Answer should NOT have been recorded (identity check rejected it)
+        assert "req-1" not in handler._ask_user.answers or not handler._ask_user.answers.get(
+            "req-1"
+        )
+
+    async def test_receive_text_input_rejects_non_owner(self):
+        """receive_text_input should reject messages from non-owner users."""
+        handler, _, _ = make_handler(authenticated_user_id="U_OWNER")
+        handler._ask_user.pending_other = ("req-1", 0)
+        handler._ask_user.questions["req-1"] = [{"question": "Q?", "header": "H", "options": []}]
+
+        await handler.receive_text_input("hacked answer", user_id="U_INTRUDER")
+
+        # Pending should still be set (not consumed)
+        assert handler._ask_user.pending_other is not None
+
+    async def test_receive_text_input_accepts_owner(self):
+        """receive_text_input should accept messages from the session owner."""
+        handler, _, _ = make_handler(authenticated_user_id="U_OWNER")
+        handler._ask_user.pending_other = ("req-1", 0)
+        handler._ask_user.questions["req-1"] = [{"question": "Q?", "header": "H", "options": []}]
+        handler._ask_user.answers["req-1"] = {}
+        handler._ask_user.events["req-1"] = asyncio.Event()
+
+        await handler.receive_text_input("valid answer", user_id="U_OWNER")
+
+        # Pending should be consumed
+        assert handler._ask_user.pending_other is None
