@@ -195,9 +195,17 @@ def _check_existing_slack_auth() -> dict[str, str] | None:
     if not workspace_config_path.exists():
         return None
 
-    workspace = json.loads(workspace_config_path.read_text())
+    try:
+        workspace = json.loads(workspace_config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
     state_path = Path(workspace.get("auth_state_path", ""))
-    if not state_path.is_file():
+
+    # [SEC] Validate path exists and is within expected directory (mirrors slack_remove guard)
+    expected_dir = get_browser_auth_dir()
+    if not state_path.is_file() or (
+        state_path.name and not state_path.resolve().is_relative_to(expected_dir.resolve())
+    ):
         return None
 
     # Check the primary auth cookie ("d") for expiry.

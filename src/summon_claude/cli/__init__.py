@@ -780,6 +780,10 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
     config_set(key, value, config_path_override)
 
 
+# ---------------------------------------------------------------------------
+# auth command group (defined in cli/auth.py)
+# ---------------------------------------------------------------------------
+
 cli.add_command(cmd_auth)
 
 

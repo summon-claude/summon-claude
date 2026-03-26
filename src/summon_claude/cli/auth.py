@@ -16,6 +16,7 @@ Consolidates all authentication commands under `summon auth`:
 from __future__ import annotations
 
 import asyncio
+import re
 
 import click
 
@@ -77,7 +78,7 @@ def auth_status(ctx: click.Context) -> None:
 
             try:
                 workspace = json.loads(workspace_config_path.read_text())
-                url = workspace.get("url", "unknown")
+                url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))
             except (json.JSONDecodeError, OSError, AttributeError):
                 click.echo(
                     "  [FAIL] Slack: workspace config is corrupted"

@@ -544,14 +544,14 @@ class TestGoogleOptionalDep:
 class TestSlackStatusCommand:
     def test_slack_status_no_config(self, tmp_path):
         """auth slack status shows 'not configured' when no workspace config exists."""
-        runner = CliRunner()
-        from summon_claude.cli.auth import cmd_auth
+        from summon_claude.cli import cli
 
+        runner = CliRunner()
         with patch(
             "summon_claude.cli.slack_auth.get_workspace_config_path",
             return_value=tmp_path / "missing.json",
         ):
-            result = runner.invoke(cmd_auth, ["slack", "status"])
+            result = runner.invoke(cli, ["auth", "slack", "status"])
 
         assert result.exit_code == 0
         assert "No external Slack workspace configured" in result.output
@@ -559,6 +559,8 @@ class TestSlackStatusCommand:
     def test_slack_status_with_config(self, tmp_path):
         """auth slack status shows workspace URL and user ID from config."""
         import json
+
+        from summon_claude.cli import cli
 
         config_file = tmp_path / "ws.json"
         auth_state = tmp_path / "auth.json"
@@ -574,11 +576,9 @@ class TestSlackStatusCommand:
         )
 
         runner = CliRunner()
-        from summon_claude.cli.auth import cmd_auth
-
         target = "summon_claude.cli.slack_auth.get_workspace_config_path"
         with patch(target, return_value=config_file):
-            result = runner.invoke(cmd_auth, ["slack", "status"])
+            result = runner.invoke(cli, ["auth", "slack", "status"])
 
         assert result.exit_code == 0
         assert "myteam.slack.com" in result.output
@@ -588,14 +588,14 @@ class TestSlackStatusCommand:
 class TestSlackRemoveCommand:
     def test_slack_remove_no_config(self, tmp_path):
         """auth slack logout shows 'not configured' when no workspace config exists."""
-        runner = CliRunner()
-        from summon_claude.cli.auth import cmd_auth
+        from summon_claude.cli import cli
 
+        runner = CliRunner()
         with patch(
             "summon_claude.cli.slack_auth.get_workspace_config_path",
             return_value=tmp_path / "missing.json",
         ):
-            result = runner.invoke(cmd_auth, ["slack", "logout"])
+            result = runner.invoke(cli, ["auth", "slack", "logout"])
 
         assert result.exit_code == 0
         assert "No external Slack workspace configured" in result.output
@@ -603,6 +603,8 @@ class TestSlackRemoveCommand:
     def test_slack_remove_confirmed(self, tmp_path):
         """auth slack logout deletes auth state and config when confirmed."""
         import json
+
+        from summon_claude.cli import cli
 
         browser_auth = tmp_path / "browser_auth"
         browser_auth.mkdir()
@@ -619,14 +621,12 @@ class TestSlackRemoveCommand:
         )
 
         runner = CliRunner()
-        from summon_claude.cli.auth import cmd_auth
-
         mod = "summon_claude.cli.slack_auth"
         with (
             patch(f"{mod}.get_workspace_config_path", return_value=config_file),
             patch(f"{mod}.get_browser_auth_dir", return_value=browser_auth),
         ):
-            result = runner.invoke(cmd_auth, ["slack", "logout"], input="y\n")
+            result = runner.invoke(cli, ["auth", "slack", "logout"], input="y\n")
 
         assert result.exit_code == 0
         assert "removed" in result.output.lower()

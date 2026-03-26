@@ -7,6 +7,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -96,9 +97,10 @@ async def poll_for_token(
     Returns the access token string on success.
     Raises :class:`GitHubAuthError` on terminal errors.
     """
+    min_poll_interval = 5  # RFC 8628 §3.5 minimum
     cid = client_id or GITHUB_OAUTH_CLIENT_ID
     deadline = time.monotonic() + expires_in
-    current_interval = interval
+    current_interval = max(interval, min_poll_interval)
 
     while time.monotonic() < deadline:
         async with session.post(
@@ -136,7 +138,8 @@ async def poll_for_token(
         if error == "slow_down":
             current_interval += 5
         elif error != "authorization_pending":
-            raise GitHubAuthError(f"Unexpected error from GitHub: {error}")
+            safe_error = re.sub(r"[^\x20-\x7e]", "", str(error))[:200]
+            raise GitHubAuthError(f"Unexpected error from GitHub: {safe_error}")
 
         await asyncio.sleep(current_interval)
 
