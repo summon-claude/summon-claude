@@ -13,6 +13,8 @@ from typing import Any
 
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.security import validate_agent_output
+
 logger = logging.getLogger(__name__)
 
 ZZZ_PREFIX = "zzz-"
@@ -92,6 +94,10 @@ class SlackClient:
     ) -> MessageRef:
         """Post a message to the channel."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {"channel": self.channel_id, "text": text}
         if blocks:
             kwargs["blocks"] = _redact_blocks(blocks)
@@ -109,6 +115,10 @@ class SlackClient:
     ) -> None:
         """Post an ephemeral message visible only to user_id."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "user": user_id,
@@ -131,6 +141,10 @@ class SlackClient:
     ) -> None:
         """Update an existing message."""
         text = redact_secrets(text)
+        text, sec_warnings = validate_agent_output(text)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {"channel": channel or self.channel_id, "ts": ts, "text": text}
         if blocks:
             kwargs["blocks"] = _redact_blocks(blocks)
@@ -184,6 +198,10 @@ class SlackClient:
     ) -> None:
         """Upload a file to the channel."""
         content = redact_secrets(content)
+        content, sec_warnings = validate_agent_output(content)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         kwargs: dict[str, Any] = {
             "channel": self.channel_id,
             "content": content,
@@ -199,6 +217,10 @@ class SlackClient:
     async def set_topic(self, topic: str) -> None:
         """Set the channel topic."""
         topic = redact_secrets(topic)
+        topic, sec_warnings = validate_agent_output(topic)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         await self._web.conversations_setTopic(channel=self.channel_id, topic=topic)
 
     async def rename_channel(self, new_name: str) -> str | None:
@@ -304,6 +326,10 @@ class SlackClient:
         Returns the canvas file ID, or ``None`` if all attempts fail.
         """
         markdown = redact_secrets(markdown)
+        markdown, sec_warnings = validate_agent_output(markdown)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             resp = await self._web.api_call(
                 "canvases.create",
@@ -334,6 +360,10 @@ class SlackClient:
         Returns ``True`` on success, ``False`` on failure (never raises).
         """
         markdown = redact_secrets(markdown)
+        markdown, sec_warnings = validate_agent_output(markdown)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             await self._web.api_call(
                 "canvases.edit",
@@ -360,6 +390,11 @@ class SlackClient:
 
         Returns ``True`` on success, ``False`` on failure (never raises).
         """
+        title = redact_secrets(title)
+        title, sec_warnings = validate_agent_output(title)
+        if sec_warnings:
+            for w in sec_warnings:
+                logger.warning("Output validation [%s]: %s", self.channel_id, w)
         try:
             await self._web.api_call(
                 "canvases.edit",

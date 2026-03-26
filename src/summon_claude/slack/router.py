@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from summon_claude.security import validate_agent_output
 from summon_claude.slack.client import MessageRef, SlackClient
 from summon_claude.slack.formatting import markdown_to_mrkdwn
+
+logger = logging.getLogger(__name__)
 
 _MAX_SUBAGENT_THREADS = 100
 
@@ -112,6 +116,13 @@ class ThreadRouter:
         The ``text`` fallback is the raw markdown — readable in notifications
         even without rendering.
         """
+        # Sanitize BEFORE constructing blocks — client.post() validates
+        # the text param but blocks are passed through _redact_blocks only.
+        # (Text gets double-validated: here for blocks, and in client.post()
+        # for the text fallback. Second pass is idempotent — no-op.)
+        markdown, sec_warnings = validate_agent_output(markdown)
+        for w in sec_warnings:
+            logger.warning("Output validation [%s]: %s", self.client.channel_id, w)
         blocks = [{"type": "markdown", "text": markdown}]
         return await self._post_raw(markdown, blocks=blocks, thread_ts=thread_ts)
 
