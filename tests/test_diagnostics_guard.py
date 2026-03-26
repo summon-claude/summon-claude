@@ -152,9 +152,8 @@ _CREDENTIAL_TO_SUBSYSTEM: dict[str, str] = {
     "slack_bot_token": "slack",
     "slack_app_token": "slack",
     "slack_signing_secret": "slack",
-    # github_pat is forward-compatible: GitHubMcpCheck falls back to config.github_pat
-    # when github_auth module is absent. Coverage verified via MCP scanner (Step 1).
-    "github_pat": "mcp_github",
+    # github_auth uses file-based token storage (github_auth.load_token()),
+    # not a SummonConfig field. Coverage verified via MCP scanner (Step 1).
     "scribe_enabled": "mcp_workspace",  # scribe uses workspace-mcp's creds
 }
 

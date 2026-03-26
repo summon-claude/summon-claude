@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import urllib.error
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -702,80 +701,78 @@ class TestGitHubMcpCheck:
     def check(self) -> GitHubMcpCheck:
         return GitHubMcpCheck()
 
-    async def test_skip_no_config_no_github_auth(self, check: GitHubMcpCheck) -> None:
-        """Skip when github_auth doesn't exist and no config."""
-        result = await check.run(None)
+    async def test_skip_no_token(self, check: GitHubMcpCheck) -> None:
+        """Skip when no GitHub token is stored."""
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            result = await check.run(None)
         assert result.status == "skip"
+        assert "summon auth github login" in result.message
 
-    async def test_skip_no_pat(self, check: GitHubMcpCheck) -> None:
-        """Skip when no PAT configured and github_auth doesn't exist."""
-        config = SummonConfig.for_test(github_pat=None)
-        result = await check.run(config)
-        assert result.status == "skip"
-
-    async def test_pat_valid(self, check: GitHubMcpCheck) -> None:
-        config = SummonConfig.for_test(github_pat="ghp_test123")
-
-        def _fake_urlopen(req, *, timeout=None):
-            import json
-
-            resp = MagicMock()
-            resp.read.return_value = json.dumps({"login": "testuser"}).encode()
-            resp.__enter__ = MagicMock(return_value=resp)
-            resp.__exit__ = MagicMock(return_value=False)
-            return resp
-
-        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
-            result = await check.run(config)
+    async def test_token_valid(self, check: GitHubMcpCheck) -> None:
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test123"),
+            patch(
+                "summon_claude.github_auth.validate_token",
+                new_callable=AsyncMock,
+                return_value={"login": "testuser", "scopes": "repo"},
+            ),
+        ):
+            result = await check.run(None)
         assert result.status == "pass"
         # SEC-003: username should NOT be in message
         assert "testuser" not in result.message
 
-    async def test_pat_invalid_401(self, check: GitHubMcpCheck) -> None:
-        config = SummonConfig.for_test(github_pat="ghp_invalid")
-
-        def _raise_401(req, *, timeout=None):
-            raise urllib.error.HTTPError(
-                url="https://api.github.com/user",
-                code=401,
-                msg="Unauthorized",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=None,
-            )
-
-        with patch("urllib.request.urlopen", side_effect=_raise_401):
-            result = await check.run(config)
+    async def test_token_invalid(self, check: GitHubMcpCheck) -> None:
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_invalid"),
+            patch(
+                "summon_claude.github_auth.validate_token",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            result = await check.run(None)
         assert result.status == "fail"
         assert "invalid or expired" in result.message.lower()
 
-    async def test_pat_http_500(self, check: GitHubMcpCheck) -> None:
-        config = SummonConfig.for_test(github_pat="ghp_test123")
+    async def test_token_api_error(self, check: GitHubMcpCheck) -> None:
+        from summon_claude.github_auth import GitHubAuthError
 
-        def _raise_500(req, *, timeout=None):
-            raise urllib.error.HTTPError(
-                url="https://api.github.com/user",
-                code=500,
-                msg="Server Error",
-                hdrs=None,  # type: ignore[arg-type]
-                fp=None,
-            )
-
-        with patch("urllib.request.urlopen", side_effect=_raise_500):
-            result = await check.run(config)
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test123"),
+            patch(
+                "summon_claude.github_auth.validate_token",
+                new_callable=AsyncMock,
+                side_effect=GitHubAuthError("Token validation failed: HTTP 500"),
+            ),
+        ):
+            result = await check.run(None)
         assert result.status == "warn"
         assert "500" in result.message
 
-    async def test_pat_timeout(self, check: GitHubMcpCheck) -> None:
-        config = SummonConfig.for_test(github_pat="ghp_test123")
-        with patch("urllib.request.urlopen", side_effect=TimeoutError):
-            result = await check.run(config)
+    async def test_token_timeout(self, check: GitHubMcpCheck) -> None:
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test123"),
+            patch(
+                "summon_claude.github_auth.validate_token",
+                new_callable=AsyncMock,
+                side_effect=TimeoutError,
+            ),
+        ):
+            result = await check.run(None)
         assert result.status == "warn"
         assert "timed out" in result.message.lower()
 
-    async def test_pat_generic_exception(self, check: GitHubMcpCheck) -> None:
-        config = SummonConfig.for_test(github_pat="ghp_test123")
-        with patch("urllib.request.urlopen", side_effect=ConnectionError("dns fail")):
-            result = await check.run(config)
+    async def test_token_generic_exception(self, check: GitHubMcpCheck) -> None:
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test123"),
+            patch(
+                "summon_claude.github_auth.validate_token",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError("dns fail"),
+            ),
+        ):
+            result = await check.run(None)
         assert result.status == "warn"
         assert "validation failed" in result.message.lower()
 

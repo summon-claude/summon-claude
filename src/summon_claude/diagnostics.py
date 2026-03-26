@@ -751,119 +751,59 @@ class GitHubMcpCheck:
     name = "mcp_github"
     description = "GitHub token validity for remote MCP server"
 
-    async def run(self, config: SummonConfig | None) -> CheckResult:
-        # Forward-compatible: try github_auth module (M5 Track C), fall back to config.github_pat
-        try:
-            from summon_claude.github_auth import (  # type: ignore[import-not-found]  # noqa: PLC0415
-                load_token,
-                validate_token,
-            )
-
-            token = load_token()
-            if token is None:
-                return CheckResult(
-                    status="skip",
-                    subsystem="mcp_github",
-                    message="No GitHub token stored (run `summon config github-auth`)",
-                )
-
-            try:
-                result = await asyncio.wait_for(validate_token(token), timeout=10)
-            except TimeoutError:
-                return CheckResult(
-                    status="warn",
-                    subsystem="mcp_github",
-                    message="GitHub token validation timed out (network issue?)",
-                    suggestion="Check network connectivity to api.github.com.",
-                )
-
-            if result is None:
-                return CheckResult(
-                    status="fail",
-                    subsystem="mcp_github",
-                    message="GitHub token is invalid or expired",
-                    suggestion=(
-                        "Token is invalid — run `summon config github-auth` to re-authenticate."
-                    ),
-                )
-
-            # Don't include login per SEC-003 (same as SlackCheck)
-            return CheckResult(
-                status="pass",
-                subsystem="mcp_github",
-                message="GitHub token valid",
-                details=["auth: connected successfully"],
-            )
-
-        except ImportError:
-            # Fall back to config.github_pat
-            if config is None or not config.github_pat:
-                return CheckResult(
-                    status="skip",
-                    subsystem="mcp_github",
-                    message="GitHub PAT not configured",
-                )
-
-            return await self._check_pat(config.github_pat)
-
-    async def _check_pat(self, pat: str) -> CheckResult:
-        """Validate a GitHub PAT via direct HTTPS request."""
-        import urllib.error  # noqa: PLC0415
-        import urllib.request  # noqa: PLC0415
-
-        req = urllib.request.Request(
-            "https://api.github.com/user",
-            headers={"Authorization": f"Bearer {pat}", "User-Agent": "summon-claude/doctor"},
+    async def run(self, config: SummonConfig | None) -> CheckResult:  # noqa: ARG002
+        from summon_claude.github_auth import (  # noqa: PLC0415
+            GitHubAuthError,
+            load_token,
+            validate_token,
         )
+
+        token = load_token()
+        if token is None:
+            return CheckResult(
+                status="skip",
+                subsystem="mcp_github",
+                message="No GitHub token stored (run `summon auth github login`)",
+            )
+
         try:
-            import json  # noqa: PLC0415
-
-            def _do_request() -> dict:
-                with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
-                    return json.loads(resp.read())
-
-            loop = asyncio.get_running_loop()
-            await asyncio.wait_for(
-                loop.run_in_executor(None, _do_request),
-                timeout=15,
-            )
-            # Don't include login per SEC-003 (same as SlackCheck)
-            return CheckResult(
-                status="pass",
-                subsystem="mcp_github",
-                message="GitHub PAT valid",
-                details=["auth: connected successfully"],
-            )
-        except urllib.error.HTTPError as e:
-            if e.code in (401, 403):
-                return CheckResult(
-                    status="fail",
-                    subsystem="mcp_github",
-                    message="GitHub PAT is invalid or expired",
-                    suggestion=(
-                        "Update SUMMON_GITHUB_PAT in your config"
-                        " or run `summon config set SUMMON_GITHUB_PAT <token>`."
-                    ),
-                )
-            return CheckResult(
-                status="warn",
-                subsystem="mcp_github",
-                message=f"GitHub API returned {e.code}",
-                suggestion="Check network connectivity to api.github.com.",
-            )
+            result = await asyncio.wait_for(validate_token(token), timeout=10)
         except TimeoutError:
             return CheckResult(
                 status="warn",
                 subsystem="mcp_github",
-                message="GitHub PAT validation timed out (network issue?)",
+                message="GitHub token validation timed out (network issue?)",
+                suggestion="Check network connectivity to api.github.com.",
+            )
+        except GitHubAuthError as e:
+            return CheckResult(
+                status="warn",
+                subsystem="mcp_github",
+                message=f"GitHub API error: {e}",
                 suggestion="Check network connectivity to api.github.com.",
             )
         except Exception as e:
             return CheckResult(
                 status="warn",
                 subsystem="mcp_github",
-                message=f"GitHub PAT validation failed: {e}",
+                message=f"GitHub token validation failed: {e}",
             )
+
+        if result is None:
+            return CheckResult(
+                status="fail",
+                subsystem="mcp_github",
+                message="GitHub token is invalid or expired",
+                suggestion="Token is invalid — run `summon auth github login` to re-authenticate.",
+            )
+
+        # Don't include login per SEC-003 (same as SlackCheck)
+        return CheckResult(
+            status="pass",
+            subsystem="mcp_github",
+            message="GitHub token valid",
+            details=["auth: connected successfully"],
+        )
 
 
 DIAGNOSTIC_REGISTRY["mcp_github"] = GitHubMcpCheck()
