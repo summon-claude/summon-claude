@@ -356,7 +356,11 @@ def slack_status() -> None:
         click.echo("Run: summon auth slack login <workspace-url>")
         return
 
-    workspace = json.loads(config_path.read_text())
+    try:
+        workspace = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        return
     click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
     user_id = workspace.get("user_id", "")
     click.echo(f"User ID: {user_id or 'not set (re-run `summon auth slack login` to add)'}")
@@ -392,7 +396,13 @@ def slack_remove() -> None:
     if not click.confirm("Remove Slack auth state? This cannot be undone."):
         return
 
-    workspace = json.loads(config_path.read_text())
+    try:
+        workspace = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        click.echo("Workspace config is corrupted — removing config file only.")
+        with contextlib.suppress(FileNotFoundError):
+            config_path.unlink()
+        return
     state_path = Path(workspace.get("auth_state_path", ""))
 
     # [SEC] Validate path is within expected directory before unlinking
@@ -424,7 +434,11 @@ def slack_channels(*, refresh: bool = False) -> None:
         click.echo("Run: summon auth slack login <workspace>")
         return
 
-    workspace = json.loads(config_path.read_text())
+    try:
+        workspace = json.loads(config_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        return
     workspace_url = workspace.get("url", "")
     cached_channels = workspace.get("channels")
 

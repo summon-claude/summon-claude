@@ -54,6 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`SUMMON_GITHUB_PAT` config variable** — Replaced by OAuth App device flow via `summon auth github login`. Tokens are stored locally (never in config file). No deprecation period — PAT support is removed entirely
+- **Auth commands under `summon config`** — All authentication commands moved to `summon auth` group. Migration: `summon config github-auth` → `summon auth github login`, `summon config github-logout` → `summon auth github logout`, `summon config google-auth` → `summon auth google login`, `summon config google-status` → `summon auth google status`, `summon config slack-auth` → `summon auth slack login`, `summon config slack-status` → `summon auth slack status`, `summon config slack-remove` → `summon auth slack logout`, `summon config slack-channels` → `summon auth slack channels`. New: `summon auth status` shows unified status for all providers
 - **`summon db reset`** — Subcommand removed; replaced by `summon reset data` (interactive-only — the `--yes` flag for non-interactive use is intentionally not carried forward)
 
 ### Fixed
