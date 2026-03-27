@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import json
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -87,6 +88,18 @@ async def async_doctor(
         await _handle_submit(results, no_interactive)
 
 
+def _format_config_error(exc: Exception, redact_fn: Callable[[str], str]) -> str:
+    """Format a config loading error, avoiding Pydantic's verbose input_value dump."""
+    from pydantic import ValidationError  # noqa: PLC0415
+
+    if isinstance(exc, ValidationError):
+        missing = [err["loc"][0] for err in exc.errors() if err["type"] == "missing"]
+        if missing:
+            return f"{len(missing)} required field(s) missing: {', '.join(str(f) for f in missing)}"
+        return f"{exc.error_count()} validation error(s)"
+    return redact_fn(str(exc))
+
+
 def _load_config(
     config_path: str | None,
     results: list[CheckResult],
@@ -100,7 +113,7 @@ def _load_config(
     try:
         return _Config.from_file(config_path)
     except Exception as e:
-        safe_err = _redact_err(str(e))
+        safe_err = _format_config_error(e, _redact_err)
         # Synthetic subsystem — not in KNOWN_SUBSYSTEMS/DIAGNOSTIC_REGISTRY
         # because it's produced inline, not by a registered check.
         results.append(
