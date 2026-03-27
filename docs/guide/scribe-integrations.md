@@ -30,6 +30,14 @@ Install the Google extra if you haven't already:
     pipx inject summon-claude workspace-mcp
     ```
 
+First, run the guided setup to create Google OAuth credentials:
+
+```bash
+summon auth google setup
+```
+
+This walks you through creating a GCP project, enabling the required APIs, configuring the OAuth consent screen, and downloading your credentials.
+
 Then authenticate with Google:
 
 ```{ .bash .notest }

@@ -26,6 +26,7 @@ from summon_claude.cli.config import (
     github_auth_cmd,
     github_logout,
     google_auth,
+    google_setup,
     google_status,
     parse_env_file,
 )
@@ -98,6 +99,7 @@ def auth_status(ctx: click.Context) -> None:
         click.echo()
         click.echo("No authentication configured. Available providers:")
         click.echo("  summon auth github login    Authenticate with GitHub")
+        click.echo("  summon auth google setup    Set up Google OAuth credentials")
         click.echo("  summon auth google login    Authenticate with Google Workspace")
         click.echo("  summon auth slack login     Authenticate with external Slack")
 
@@ -135,6 +137,12 @@ def auth_github_logout() -> None:
 @cmd_auth.group("google")
 def auth_google() -> None:
     """Google Workspace authentication for scribe monitoring."""
+
+
+@auth_google.command("setup")
+def auth_google_setup() -> None:
+    """Interactive guided setup for Google OAuth credentials."""
+    google_setup()
 
 
 @auth_google.command("login")

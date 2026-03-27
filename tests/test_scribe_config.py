@@ -405,15 +405,14 @@ class TestGoogleIntegration:
         assert result.exit_code == 0
         assert "not configured" in result.output.lower()
 
-    def test_ensure_secrets_expands_tilde_in_json_path(self):
-        """~ in JSON file paths is expanded to the home directory."""
+    def test_google_setup_parses_json_credentials(self):
+        """google_setup reads client_id and client_secret from a JSON file."""
         import json
         import tempfile
         from pathlib import Path
 
-        from summon_claude.cli.config import _ensure_google_client_secrets
+        from summon_claude.cli.config import google_setup
 
-        # Create a real client_secret.json in a temp dir
         with tempfile.TemporaryDirectory() as tmpdir:
             secret_file = Path(tmpdir) / "client_secret.json"
             secret_file.write_text(
@@ -427,30 +426,56 @@ class TestGoogleIntegration:
                 )
             )
 
-            # Simulate user entering a path with ~
             fake_dir = Path(tmpdir) / "creds"
+            # Skip sections 1-3 with "s", provide JSON path for section 4
+            prompts = iter(["s", "s", "s", "", str(secret_file)])
             with (
                 patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
-                patch("os.environ.get", return_value=""),
-                patch("click.prompt", return_value=str(secret_file)),
+                patch("click.prompt", side_effect=prompts),
             ):
-                result = _ensure_google_client_secrets()
-            assert result["GOOGLE_OAUTH_CLIENT_ID"] == "test-id.apps.googleusercontent.com"
-            assert result["GOOGLE_OAUTH_CLIENT_SECRET"] == "test-secret"
+                google_setup()
 
-    def test_google_auth_cli_prompts_for_secrets(self):
-        """auth google login prompts interactively when no client secrets exist."""
+            client_env = fake_dir / "client_env"
+            assert client_env.exists()
+            content = client_env.read_text()
+            assert "GOOGLE_OAUTH_CLIENT_ID=test-id.apps.googleusercontent.com" in content
+            assert "GOOGLE_OAUTH_CLIENT_SECRET=test-secret" in content
+
+    def test_google_auth_cli_exits_without_credentials(self):
+        """auth google login exits with error when no credentials are configured."""
         from pathlib import Path
 
         from summon_claude.cli import cli
 
         runner = CliRunner()
-        # No env vars, no saved secrets -> should prompt
         fake_dir = Path("/nonexistent")
         with patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir):
-            result = runner.invoke(cli, ["auth", "google", "login"], input="\n\n")
-        # Prompts for credentials (aborted with empty input)
-        assert "google oauth client" in result.output.lower()
+            result = runner.invoke(cli, ["auth", "google", "login"])
+        assert result.exit_code != 0
+        assert "not configured" in result.output.lower() or "setup" in result.output.lower()
+
+    def test_google_setup_skips_when_credentials_exist(self):
+        """google_setup returns early when credentials exist and user declines re-run."""
+        import tempfile
+        from pathlib import Path
+
+        from summon_claude.cli.config import google_setup
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_dir = Path(tmpdir) / "creds"
+            fake_dir.mkdir()
+            client_env = fake_dir / "client_env"
+            client_env.write_text(
+                "GOOGLE_OAUTH_CLIENT_ID=existing-id\nGOOGLE_OAUTH_CLIENT_SECRET=existing-secret\n"
+            )
+
+            with (
+                patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+                patch("click.confirm", return_value=False),
+            ):
+                google_setup()
+            # File should be unchanged (no new credentials written)
+            assert "existing-id" in client_env.read_text()
 
     def test_workspace_mcp_cli_lists_tools(self):
         """workspace-mcp --cli (no args) lists available tools without error."""

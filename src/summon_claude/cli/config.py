@@ -262,101 +262,202 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
     click.echo(f"Set {key} in {config_file}")
 
 
-def _ensure_google_client_secrets() -> dict[str, str]:
-    """Ensure Google OAuth client credentials are available.
+def _setup_continue(step: int, title: str) -> bool:
+    """Print section header and prompt to continue or skip. Returns True to continue."""
+    click.echo(f"\n{'=' * 60}")
+    click.echo(f"  Step {step}: {title}")
+    click.echo(f"{'=' * 60}\n")
+    response = click.prompt(
+        "Press Enter to continue (or 's' to skip)", default="", show_default=False
+    )
+    return response.strip().lower() != "s"
 
-    Checks env vars first, then prompts interactively.  Returns env
-    dict with ``GOOGLE_OAUTH_CLIENT_ID`` and ``GOOGLE_OAUTH_CLIENT_SECRET``.
-    """
+
+def google_setup() -> None:
+    """Interactive guided setup for Google OAuth credentials."""
+    # Check for existing credentials
     client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
-
-    if client_id and client_secret:
-        click.echo("Using Google OAuth credentials from environment.")
-        return {"GOOGLE_OAUTH_CLIENT_ID": client_id, "GOOGLE_OAUTH_CLIENT_SECRET": client_secret}
-
-    # Check if we saved them previously in summon's config
     secrets_file = get_google_credentials_dir() / "client_env"
-    if secrets_file.exists():
+
+    if not (client_id and client_secret) and secrets_file.exists():
         for line in secrets_file.read_text().splitlines():
             if line.startswith("GOOGLE_OAUTH_CLIENT_ID="):
                 client_id = line.split("=", 1)[1].strip()
             elif line.startswith("GOOGLE_OAUTH_CLIENT_SECRET="):
                 client_secret = line.split("=", 1)[1].strip()
-        if client_id and client_secret:
-            return {
-                "GOOGLE_OAUTH_CLIENT_ID": client_id,
-                "GOOGLE_OAUTH_CLIENT_SECRET": client_secret,
-            }
 
-    # Interactive prompt
-    click.echo("Google OAuth client credentials are required.")
-    click.echo("Get these from https://console.cloud.google.com/apis/credentials")
-    click.echo("  1. Create or select a project")
-    click.echo("  2. Enable Gmail, Calendar, and Drive APIs")
-    click.echo("  3. Create an OAuth 2.0 Client ID (Desktop app type)")
-    click.echo("  4. Download the JSON file or copy the Client ID + Secret")
-    click.echo()
-    response = click.prompt(
-        "Path to client_secret.json (or paste Client ID)", default="", show_default=False
-    )
-    if not response:
-        click.echo("Client credentials are required.", err=True)
-        sys.exit(1)
+    if (
+        client_id
+        and client_secret
+        and not click.confirm(
+            "Google OAuth credentials already configured. Re-run setup?", default=False
+        )
+    ):
+        return
 
-    import json  # noqa: PLC0415
+    click.echo("\nGoogle OAuth Setup")
+    click.echo("=" * 60)
+    click.echo("This will guide you through creating Google OAuth credentials")
+    click.echo("for Gmail, Calendar, and Drive access.\n")
 
-    json_path = Path(response.strip()).expanduser()
-    if json_path.suffix == ".json" or json_path.exists():
-        # User provided a JSON file path
-        if not json_path.exists():
-            click.echo(f"File not found: {json_path}", err=True)
-            sys.exit(1)
-        try:
-            data = json.loads(json_path.read_text())
-            # Google's format nests under "installed" or "web"
-            inner = data.get("installed") or data.get("web") or data
-            client_id = inner["client_id"]
-            client_secret = inner["client_secret"]
-        except (json.JSONDecodeError, KeyError) as e:
-            click.echo(f"Invalid client_secret.json: {e}", err=True)
-            sys.exit(1)
-        # Copy the JSON to our credentials dir for workspace-mcp
-        dest = secrets_file.parent / "client_secret.json"
-        secrets_file.parent.mkdir(parents=True, exist_ok=True)
-        import shutil  # noqa: PLC0415
+    project_id: str | None = None
 
-        shutil.copy2(str(json_path), str(dest))
-        with contextlib.suppress(OSError):
-            dest.chmod(0o600)
-        click.echo(f"Copied {json_path.name} to {dest}")
-    else:
-        # User pasted a Client ID directly
-        client_id = response.strip()
-        client_secret = click.prompt("Google OAuth Client Secret", default="", show_default=False)
-        if not client_secret:
-            click.echo("Client Secret is required.", err=True)
-            sys.exit(1)
+    # Section 1: GCP Project
+    if _setup_continue(1, "Google Cloud Project"):
+        click.echo("List your existing GCP projects:\n")
+        click.echo(
+            '  gcloud projects list --format="table(projectId,name)"'
+            ' --filter="lifecycleState:ACTIVE"\n'
+        )
+        click.echo("Or visit: https://console.cloud.google.com/projectselector2/home\n")
 
-    # Persist env-style for future runs
-    secrets_file.parent.mkdir(parents=True, exist_ok=True)
+        project_id = click.prompt(
+            "Enter a project ID (or press Enter to create a new one)",
+            default="",
+            show_default=False,
+        ).strip()
+
+        if not project_id:
+            # Suggest a new project ID
+            import secrets as secrets_mod  # noqa: PLC0415
+
+            suggested = f"summon-claude-{secrets_mod.token_hex(3)[:5]}"
+            project_id = click.prompt("Project ID", default=suggested).strip()
+
+        # Validate project ID format
+        _project_id_re = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
+        while project_id and not _project_id_re.match(project_id):
+            click.echo("Invalid project ID. Rules: 6-30 chars, lowercase letters/digits/hyphens,")
+            click.echo("starts with a letter, cannot end with a hyphen.")
+            project_id = click.prompt(
+                "Enter a valid project ID", default="", show_default=False
+            ).strip()
+            if not project_id:
+                break
+
+        if project_id:
+            click.echo("\nTo create this project, run:\n")
+            click.echo(f'  gcloud projects create {project_id} --name="summon-claude"\n')
+            click.echo("Or visit: https://console.cloud.google.com/projectcreate")
+
+    # Section 2: Enable APIs
+    if _setup_continue(2, "Enable Google APIs"):
+        click.echo("Enable required Google APIs. Click each link:\n")
+        project_suffix = f"&project={project_id}" if project_id else ""
+        apis = [
+            ("Gmail API", "gmail.googleapis.com"),
+            ("Calendar API", "calendar-json.googleapis.com"),
+            ("Drive API", "drive.googleapis.com"),
+        ]
+        for label, api_id in apis:
+            click.echo(f"  {label}:")
+            click.echo(
+                f"    https://console.cloud.google.com/flows/enableapi?apiid={api_id}{project_suffix}\n"
+            )
+
+        api_ids = " ".join(api_id for _, api_id in apis)
+        project_flag = f" --project={project_id}" if project_id else ""
+        click.echo("Or use gcloud:\n")
+        click.echo(f"  gcloud services enable {api_ids}{project_flag}")
+
+    # Section 3: OAuth Consent Screen
+    if _setup_continue(3, "OAuth Consent Screen"):
+        project_suffix = f"?project={project_id}" if project_id else ""
+        click.echo("Configure the OAuth consent screen:\n")
+        click.echo(
+            f"  Branding: https://console.developers.google.com/auth/branding{project_suffix}"
+        )
+        click.echo(
+            f"  Audience: https://console.developers.google.com/auth/audience{project_suffix}\n"
+        )
+        click.echo("  1. Under Branding: fill in App name (e.g. 'summon-claude'),")
+        click.echo("     User support email (your email)")
+        click.echo("  2. Under Audience: select 'External' user type")
+        click.echo("  3. Under Publishing status: click 'Publish App' to switch to Production")
+        click.echo("     (avoids 7-day token expiry)\n")
+        click.echo("Note: You'll see an 'unverified app' warning during login — this is")
+        click.echo("normal for personal use.")
+
+    # Section 4: Create OAuth Client & Download Credentials
+    if not _setup_continue(4, "Create OAuth Client"):
+        click.echo("\nRun `summon auth google setup` again when you have your credentials.")
+        return
+
+    project_suffix = f"?project={project_id}" if project_id else ""
+    click.echo("Create an OAuth client:\n")
+    click.echo(f"  https://console.developers.google.com/auth/clients/create{project_suffix}\n")
+    click.echo("  1. Application type: 'Desktop app'")
+    click.echo("  2. Name: 'summon-claude' (or anything)")
+    click.echo("  3. Click 'Create'")
+    click.echo("  4. Click 'Download JSON' to save client_secret.json\n")
+
+    # Credential input loop
+    import json as json_mod  # noqa: PLC0415
+
+    while True:
+        response = click.prompt(
+            "Path to client_secret.json (or paste Client ID)", default="", show_default=False
+        )
+        if not response:
+            click.echo("Credentials are required to complete setup.")
+            if click.confirm("Skip for now?", default=True):
+                click.echo("\nRun `summon auth google setup` again when you have your credentials.")
+                return
+            continue
+
+        response = response.strip()
+        json_path = Path(response).expanduser()
+
+        if json_path.suffix == ".json" or json_path.exists():
+            # JSON file path
+            if not json_path.exists():
+                click.echo(f"File not found: {json_path}")
+                continue
+            try:
+                data = json_mod.loads(json_path.read_text())
+                inner = data.get("installed") or data.get("web") or data
+                client_id = inner["client_id"]
+                client_secret = inner["client_secret"]
+            except (json_mod.JSONDecodeError, KeyError, TypeError) as e:
+                click.echo(f"Invalid client_secret.json: {e}")
+                continue
+            # Copy JSON to credentials dir for workspace-mcp
+            import shutil  # noqa: PLC0415
+
+            dest = get_google_credentials_dir() / "client_secret.json"
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(json_path), str(dest))
+            with contextlib.suppress(OSError):
+                dest.chmod(0o600)
+            click.echo(f"Copied {json_path.name} to {dest}")
+        else:
+            # User pasted a Client ID directly
+            client_id = response
+            client_secret = click.prompt(
+                "Google OAuth Client Secret", default="", show_default=False
+            )
+            if not client_secret:
+                click.echo("Client Secret is required.")
+                continue
+
+        break
+
+    # Save credentials
+    creds_dir = get_google_credentials_dir()
+    creds_dir.mkdir(parents=True, exist_ok=True)
+    secrets_file = creds_dir / "client_env"
     secrets_file.write_text(
         f"GOOGLE_OAUTH_CLIENT_ID={client_id}\nGOOGLE_OAUTH_CLIENT_SECRET={client_secret}\n"
     )
     with contextlib.suppress(OSError):
         secrets_file.chmod(0o600)
-    click.echo(f"Saved credentials to {secrets_file}")
-
-    return {"GOOGLE_OAUTH_CLIENT_ID": client_id, "GOOGLE_OAUTH_CLIENT_SECRET": client_secret}
+    click.echo(f"\nCredentials saved to {secrets_file}")
+    click.echo("\nSetup complete! Run `summon auth google login` to authenticate.")
 
 
 def google_auth() -> None:
-    """Interactive Google Workspace authentication.
-
-    Prompts for OAuth client credentials if not configured, then runs the
-    workspace-mcp OAuth flow which opens a browser for authorization.
-    Credentials are stored under summon's XDG data directory.
-    """
+    """Interactive Google Workspace authentication."""
     bin_path = find_workspace_mcp_bin()
     if not bin_path.exists():
         click.echo(
@@ -366,14 +467,29 @@ def google_auth() -> None:
         )
         sys.exit(1)
 
-    # Ensure client credentials and build env for subprocess.
-    # Set LOG_LEVEL=WARNING to suppress workspace-mcp's INFO output.
-    client_env = _ensure_google_client_secrets()
+    # Load credentials from env vars or saved file
+    client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
+    client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
+
+    if not (client_id and client_secret):
+        secrets_file = get_google_credentials_dir() / "client_env"
+        if secrets_file.exists():
+            for line in secrets_file.read_text().splitlines():
+                if line.startswith("GOOGLE_OAUTH_CLIENT_ID="):
+                    client_id = line.split("=", 1)[1].strip()
+                elif line.startswith("GOOGLE_OAUTH_CLIENT_SECRET="):
+                    client_secret = line.split("=", 1)[1].strip()
+
+    if not (client_id and client_secret):
+        click.echo("No Google OAuth credentials configured.", err=True)
+        click.echo("Run `summon auth google setup` to create and configure credentials.", err=True)
+        sys.exit(1)
+
+    client_env = {"GOOGLE_OAUTH_CLIENT_ID": client_id, "GOOGLE_OAUTH_CLIENT_SECRET": client_secret}
     env = {**os.environ, **client_env, **google_mcp_env(), "LOG_LEVEL": "WARNING"}
 
     click.echo("Starting Google OAuth flow — a browser window will open for authorization.")
 
-    # workspace-mcp's ``start_google_auth`` tool initiates the OAuth flow.
     try:
         subprocess.run(  # noqa: S603
             [str(bin_path), "--single-user", "--cli", "start_google_auth"],
@@ -494,7 +610,7 @@ def _check_google_status(
     creds_dir = get_google_credentials_dir()
     if not creds_dir.exists():
         if not quiet:
-            _out("INFO", "Google: not configured (run `summon auth google login`)")
+            _out("INFO", "Google: not configured (run `summon auth google setup`)")
         return None
 
     store = LocalDirectoryCredentialStore(str(creds_dir))
@@ -879,7 +995,7 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         except OSError:
             has_creds = False
         if not has_creds:
-            _out("INFO", "Scribe enabled but Google not configured (summon auth google login)")
+            _out("INFO", "Scribe enabled but Google not configured (summon auth google setup)")
 
     # Getting started nudge (only when count is confirmed 0, not on DB failure)
     if project_count == 0:
