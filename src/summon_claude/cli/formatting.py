@@ -27,6 +27,22 @@ def format_ts(ts: str | None) -> str:
         return ts
 
 
+_TAG_STYLE: dict[str, tuple[str, str | None]] = {
+    "PASS": ("PASS", "green"),
+    "FAIL": ("FAIL", "red"),
+    "WARN": ("WARN", "yellow"),
+    "INFO": ("INFO", "blue"),
+}
+
+
+def format_tag(tag: str) -> str:
+    """Return a colored ``[PASS]``/``[FAIL]``/``[WARN]``/``[INFO]`` tag."""
+    label, fg = _TAG_STYLE.get(tag, (tag, None))
+    if fg is None:
+        return f"[{label}]"
+    return click.style(f"[{label}]", fg=fg, bold=True)
+
+
 def format_uptime(seconds: float) -> str:
     """Format a duration in seconds as a human-readable uptime string."""
     seconds = int(seconds)

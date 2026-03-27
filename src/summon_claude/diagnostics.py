@@ -447,7 +447,7 @@ class SlackCheck:
                 status="skip",
                 subsystem="slack",
                 message="Slack tokens not configured",
-                suggestion="Run `summon config check` for details.",
+                suggestion="Run `summon init` to set up.",
             )
 
         from slack_sdk import WebClient  # noqa: PLC0415

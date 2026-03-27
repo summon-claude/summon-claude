@@ -120,9 +120,7 @@ def _load_config(
             CheckResult(
                 status="fail",
                 subsystem="config",
-                message=(
-                    f"Config failed to load: {safe_err}. Run `summon config check` for details."
-                ),
+                message=(f"Config failed to load: {safe_err}. Run `summon init` to set up."),
             )
         )
         return None
