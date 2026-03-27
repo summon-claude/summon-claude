@@ -80,6 +80,7 @@ _VALID_FIRST_WORDS: frozenset[str] = frozenset(
         "auth",
         "config",
         "db",
+        "doctor",
         "hooks",
         "init",
         "project",
