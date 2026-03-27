@@ -19,7 +19,7 @@ Sections:
 Environment variables:
   SUMMON_TEST_SLACK_BOT_TOKEN      Bot token for channel discovery, cleanup, and team ID
 
-Browser auth: Uses saved Playwright state from `summon config slack-auth` (preferred).
+Browser auth: Uses saved Playwright state from `summon auth slack login` (preferred).
   Falls back to SUMMON_TEST_SLACK_COOKIE env var (raw `d` cookie) if no saved state.
 
 Usage:
@@ -79,7 +79,7 @@ MANUAL_SCREENSHOTS = [
 
 
 def _find_slack_auth_state() -> str | None:
-    """Find saved Playwright state from ``summon config slack-auth``.
+    """Find saved Playwright state from ``summon auth slack login``.
 
     Reads the workspace config file and returns the auth_state_path if the
     state file exists on disk. Returns None if no saved auth is available.
@@ -430,7 +430,7 @@ def create_browser_context(
 ):
     """Create a Playwright browser context with Slack auth.
 
-    Prefers ``state_file`` (full Playwright state from ``summon config slack-auth``).
+    Prefers ``state_file`` (full Playwright state from ``summon auth slack login``).
     Falls back to injecting a raw ``d`` cookie from ``cookie_value``.
     """
     browser = pw.chromium.launch(headless=headless)
@@ -750,6 +750,54 @@ def _add_start_annotations(banner: str) -> str:
 # -- Custom capture functions -----------------------------------------------
 
 
+def _read_banner_from_proc(proc: subprocess.Popen, deadline: float) -> list[str]:
+    """Read stdout from *proc* until the closing ``====`` border.
+
+    Returns the captured banner lines (including borders).  The caller
+    is responsible for terminating *proc* and running cleanup commands.
+    """
+    lines: list[str] = []
+    border_re = re.compile(r"^={10,}$")
+    in_banner = False
+
+    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
+        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
+    stdout = proc.stdout
+
+    while time.time() < deadline:
+        line = stdout.readline()
+        if not line:
+            if proc.poll() is not None:
+                break
+            time.sleep(0.1)
+            continue
+
+        stripped = line.rstrip()
+        if not stripped:
+            if in_banner:
+                lines.append(stripped)
+            continue
+
+        if border_re.match(stripped):
+            lines.append(stripped)
+            if in_banner:
+                break  # Closing border — done
+            in_banner = True
+        elif in_banner:
+            lines.append(stripped)
+
+    return lines
+
+
+def _terminate_proc(proc: subprocess.Popen) -> None:
+    """Terminate a subprocess, escalating to kill on timeout."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
+
 def _capture_summon_start_banner() -> str:
     """Run ``summon start`` and capture just the auth banner.
 
@@ -767,42 +815,10 @@ def _capture_summon_start_banner() -> str:
         env=env,
     )
 
-    lines: list[str] = []
-    border_re = re.compile(r"^={10,}$")
-    in_banner = False
-    deadline = time.time() + 30
-
-    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
-        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
-    stdout = proc.stdout
     try:
-        while time.time() < deadline:
-            line = stdout.readline()
-            if not line:
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.1)
-                continue
-
-            stripped = line.rstrip()
-            if not stripped:
-                if in_banner:
-                    lines.append(stripped)
-                continue
-
-            if border_re.match(stripped):
-                lines.append(stripped)
-                if in_banner:
-                    break  # Closing border — done
-                in_banner = True
-            elif in_banner:
-                lines.append(stripped)
+        lines = _read_banner_from_proc(proc, time.time() + 30)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _terminate_proc(proc)
         try:
             subprocess.run(
                 ["uv", "run", "summon", "stop", TERMINAL_SESSION_NAME],
@@ -840,40 +856,10 @@ def _capture_project_up_banner() -> str:
         env=env,
     )
 
-    lines: list[str] = []
-    border_re = re.compile(r"^={10,}$")
-    in_banner = False
-    deadline = time.time() + 60
-
-    if proc.stdout is None:  # guaranteed non-None by stdout=PIPE
-        raise RuntimeError("proc.stdout is None despite stdout=PIPE")
-    stdout = proc.stdout
     try:
-        while time.time() < deadline:
-            line = stdout.readline()
-            if not line:
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.1)
-                continue
-            stripped = line.rstrip()
-            if not stripped:
-                if in_banner:
-                    lines.append(stripped)
-                continue
-            if border_re.match(stripped):
-                lines.append(stripped)
-                if in_banner:
-                    break
-                in_banner = True
-            elif in_banner:
-                lines.append(stripped)
+        lines = _read_banner_from_proc(proc, time.time() + 60)
     finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
+        _terminate_proc(proc)
         try:
             subprocess.run(
                 ["uv", "run", "summon", "project", "down"],
@@ -1170,7 +1156,7 @@ def run_prompts_section(dry_run: bool = False) -> bool:
         content = content.strip()
 
         # Validate content won't corrupt markdown
-        error = _validate_content(content, marker)
+        error = _validate_content(content, marker, prefix="prompt")
         if error:
             click.echo(f"    WARNING: skipping {marker}: {error}", err=True)
             failed += 1
@@ -1245,14 +1231,14 @@ def _run_capture(spec: CaptureSpec) -> str | None:
     return result.stdout.strip()
 
 
-def _validate_content(content: str, marker: str) -> str | None:
+def _validate_content(content: str, marker: str, *, prefix: str = "terminal") -> str | None:
     """Check captured content for patterns that would corrupt the markdown.
 
     Returns an error message if the content is unsafe, or None if OK.
     """
-    if f"<!-- terminal:{marker} -->" in content:
+    if f"<!-- {prefix}:{marker} -->" in content:
         return "content contains the opening marker comment"
-    if f"<!-- /terminal:{marker} -->" in content:
+    if f"<!-- /{prefix}:{marker} -->" in content:
         return "content contains the closing marker comment"
     if "```" in content:
         return "content contains triple backticks (would break fences)"
@@ -1469,14 +1455,14 @@ def main(
         click.echo("  Skipping: missing SUMMON_TEST_SLACK_BOT_TOKEN", err=True)
         return
 
-    # Browser auth: try saved Playwright state from `summon config slack-auth`,
+    # Browser auth: try saved Playwright state from `summon auth slack login`,
     # fall back to raw SUMMON_TEST_SLACK_COOKIE env var.
     slack_state_file = _find_slack_auth_state()
     cookie_value = os.environ.get("SUMMON_TEST_SLACK_COOKIE")
     if not slack_state_file and not cookie_value:
         click.echo(
             "  Skipping: no Slack browser auth found.\n"
-            "  Run `summon config slack-auth <workspace-url>` or set SUMMON_TEST_SLACK_COOKIE.",
+            "  Run `summon auth slack login <workspace-url>` or set SUMMON_TEST_SLACK_COOKIE.",
             err=True,
         )
         return

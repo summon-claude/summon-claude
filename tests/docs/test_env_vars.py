@@ -101,7 +101,6 @@ FUZZY_DEFAULTS: dict[str, str | None] = {
     "SUMMON_DEFAULT_MODEL": None,
     "SUMMON_SCRIBE_CWD": None,
     "SUMMON_SCRIBE_MODEL": None,
-    "SUMMON_GITHUB_PAT": None,
     # Credentials — no default row in docs (3-column table)
     "SUMMON_SLACK_BOT_TOKEN": None,
     "SUMMON_SLACK_APP_TOKEN": None,

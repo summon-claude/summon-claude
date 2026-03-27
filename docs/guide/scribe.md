@@ -44,7 +44,7 @@ summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
 Then authenticate with Google:
 
 ```bash
-summon config google-auth
+summon auth google login
 ```
 
 This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Once complete, credentials are stored in summon's config directory.
@@ -52,7 +52,7 @@ This opens a browser for OAuth consent. Grant access to the Google services you 
 To verify authentication status:
 
 ```bash
-summon config google-status
+summon auth google status
 ```
 
 #### External Slack monitoring
@@ -115,7 +115,7 @@ summon config set SUMMON_SCRIBE_GOOGLE_SERVICES gmail,calendar
 ```
 
 !!! note "Requires workspace-mcp"
-    The Google collector requires the `google` extra: `pip install summon-claude[google]`. Google OAuth credentials must also be configured via `summon config google-auth`.
+    The Google collector requires the `google` extra: `uv tool install "summon-claude[google]"`. Google OAuth credentials must also be configured via `summon auth google login`.
 
 ### Slack channel monitoring
 

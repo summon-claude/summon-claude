@@ -307,7 +307,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
 ## Google Workspace
 
 ???+ tip "Google OAuth flow fails or never completes"
-    **Symptom:** `summon config google-auth` hangs, fails with an auth error, or the browser window doesn't open.
+    **Symptom:** `summon auth google login` hangs, fails with an auth error, or the browser window doesn't open.
 
     **Cause:** Missing or invalid `client_secret.json`, or the OAuth redirect URI is not configured.
 
@@ -316,7 +316,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     2. Place it in your summon data directory (check `summon config path` for the location).
     3. Run the auth flow:
     ```bash
-    summon config google-auth
+    summon auth google login
     ```
     4. Complete the browser-based consent flow.
 
@@ -327,7 +327,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
     **Fix:** Re-run the auth flow — it will request all required scopes:
     ```bash
-    summon config google-auth
+    summon auth google login
     ```
     If scope issues persist, revoke the app's access in your Google account settings and re-authorize.
 
@@ -340,7 +340,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```bash
     summon version
     ```
-    The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon config google-auth`.
+    The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon auth google login`.
 
 ---
 
@@ -374,11 +374,11 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```
     2. Verify Google authentication status:
     ```bash
-    summon config google-status
+    summon auth google status
     ```
     3. If not authenticated, run the auth flow:
     ```bash
-    summon config google-auth
+    summon auth google login
     ```
     4. Ensure the `workspace-mcp` binary is available. If missing, install the Google extra:
     ```bash
@@ -397,11 +397,11 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```
     2. Check Slack browser authentication status:
     ```bash
-    summon config slack-status
+    summon auth slack status
     ```
     3. If not authenticated, run the interactive auth flow:
     ```bash
-    summon config slack-auth WORKSPACE_NAME
+    summon auth slack login WORKSPACE_NAME
     ```
     4. Ensure Playwright is installed:
     ```bash
@@ -414,7 +414,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
     **Cause:** Enterprise Grid workspaces serve a workspace picker page at their enterprise domain (e.g., `gtest.enterprise.slack.com`). The actual Slack SPA client lives at `app.slack.com/client/{TEAM_ID}`.
 
-    **Fix:** Use `summon config slack-auth` to authenticate — it handles Enterprise Grid URL resolution automatically. The monitor extracts team IDs from localStorage in the saved browser state and navigates directly to `app.slack.com/client/{TEAM_ID}`, bypassing the workspace picker.
+    **Fix:** Use `summon auth slack login` to authenticate — it handles Enterprise Grid URL resolution automatically. The monitor extracts team IDs from localStorage in the saved browser state and navigates directly to `app.slack.com/client/{TEAM_ID}`, bypassing the workspace picker.
 
 ---
 
@@ -447,4 +447,6 @@ If your issue isn't covered here:
 1. Check the session logs: `summon session logs <session-name>`
 2. Enable verbose logging: `summon -v start --name my-session`
 3. Run config validation: `summon config check`
-4. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)
+4. Check auth status across all providers: `summon auth status`
+5. Reset data or config if things are corrupted: `summon reset data` or `summon reset config`
+6. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)

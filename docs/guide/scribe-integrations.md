@@ -33,7 +33,7 @@ Install the Google extra if you haven't already:
 Then authenticate with Google:
 
 ```bash
-summon config google-auth
+summon auth google login
 ```
 
 This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Credentials are stored in summon's config directory (`google-credentials/`).
@@ -41,7 +41,7 @@ This opens a browser for OAuth consent. Grant access to the Google services you 
 To verify authentication status:
 
 ```bash
-summon config google-status
+summon auth google status
 ```
 
 This shows whether credentials exist, which scopes are granted, and whether the token is still valid.
@@ -89,7 +89,7 @@ Install the Slack browser extra if you haven't already:
 ### Authenticate with a Slack workspace
 
 ```bash
-summon config slack-auth myteam
+summon auth slack login myteam
 ```
 
 This opens a visible browser window at your Slack workspace. Log in normally — the browser closes automatically after detecting your session. Auth state (cookies and localStorage) is saved to summon's data directory.
@@ -110,19 +110,19 @@ After login, the command prompts you to select which channels to monitor using a
 To change which channels are monitored without re-authenticating:
 
 ```bash
-summon config slack-channels
+summon auth slack channels
 ```
 
 This uses the cached channel list from the last authentication. To refresh the channel list from Slack:
 
 ```bash
-summon config slack-channels --refresh
+summon auth slack channels --refresh
 ```
 
 ### Check auth status
 
 ```bash
-summon config slack-status
+summon auth slack status
 ```
 
 Shows the configured workspace URL, user ID, auth state age, and monitored channels.
@@ -130,7 +130,7 @@ Shows the configured workspace URL, user ID, auth state age, and monitored chann
 ### Remove auth state
 
 ```bash
-summon config slack-remove
+summon auth slack logout
 ```
 
 Removes saved browser auth state and workspace config. This cannot be undone.

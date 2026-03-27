@@ -32,7 +32,7 @@
     Install via the summon-claude tap:
 
     ```bash
-    brew install wgordon17/summon/summon-claude
+    brew install summon-claude/summon/summon-claude
     ```
 
     !!! note
@@ -78,7 +78,7 @@ Some features require additional dependencies that are not included in the base 
     No extras needed — the Homebrew formula includes all dependencies.
 
     ```bash
-    brew install wgordon17/summon/summon-claude
+    brew install summon-claude/summon/summon-claude
     ```
 
 !!! tip "Already installed without extras?"
@@ -154,4 +154,4 @@ summon-claude checks for new versions on startup. To disable this:
 summon config set SUMMON_NO_UPDATE_CHECK true
 ```
 
-Or set `SUMMON_NO_UPDATE_CHECK=true` in your config file (`~/.config/summon-claude/config.env`).
+Or set `SUMMON_NO_UPDATE_CHECK=true` in your config file (`~/.config/summon/config.env`).

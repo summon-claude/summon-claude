@@ -17,7 +17,6 @@ concurrency:
 jobs:
   checks:
     name: Lint & Test
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -42,6 +41,7 @@ jobs:
 
   docs:
     name: Docs build check
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -79,21 +79,26 @@ src/summon_claude/
 ├── canvas_mcp.py          # Canvas MCP tools (standalone server)
 ├── daemon.py              # Daemon lifecycle, IPC framing, watchdog layers
 ├── event_dispatcher.py    # Slack event → session routing
+├── github_auth.py         # GitHub OAuth App device flow authentication
+├── mcp_untrusted_proxy.py # MCP stdio proxy for untrusted tool results
+├── security.py            # Prompt injection defense utilities
 ├── slack_browser.py       # External Slack monitoring via Playwright
 ├── summon_cli_mcp.py      # MCP tools for Claude agent session management
 ├── cli/
 │   ├── __init__.py        # CLI entry point, global flags, subcommands
+│   ├── auth.py            # Auth group: unified auth for GitHub, Google, Slack
 │   ├── config.py          # Config subcommand handlers
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
-│   ├── db.py              # DB maintenance commands (status, reset, vacuum, purge)
+│   ├── db.py              # DB maintenance commands (status, vacuum, purge)
 │   ├── formatting.py      # CLI output formatting helpers
 │   ├── helpers.py         # Session resolution, stop helpers
 │   ├── hooks.py           # Lifecycle hooks CLI
 │   ├── interactive.py     # TTY-aware interactive selection
 │   ├── preflight.py       # Claude CLI preflight checks
 │   ├── project.py         # Project subcommand implementations
+│   ├── reset.py           # Reset commands (data, config)
 │   ├── session.py         # Session subcommand logic (list, info, logs, cleanup)
-│   ├── slack_auth.py      # External Slack workspace auth
+│   ├── slack_auth.py      # External Slack workspace auth helpers
 │   ├── start.py           # Start command (auth code flow, daemon delegation)
 │   ├── stop.py            # Stop command logic
 │   └── update_check.py    # PyPI update checker (24h cache)

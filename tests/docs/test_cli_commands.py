@@ -77,11 +77,13 @@ def _command_prefix_of(ref: str, valid_names: set[str]) -> str | None:
 # Any ref whose first word is not in this set cannot be a real command.
 _VALID_FIRST_WORDS: frozenset[str] = frozenset(
     {
+        "auth",
         "config",
         "db",
         "hooks",
         "init",
         "project",
+        "reset",
         "session",
         "start",
         "stop",

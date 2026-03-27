@@ -75,7 +75,7 @@ Permission requests expire after **5 minutes**. If you do not respond:
 
 ## GitHub MCP permissions
 
-When `SUMMON_GITHUB_PAT` is configured, Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:
+When GitHub is authenticated (via `summon auth github login`), Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:
 
 **Auto-approved (read-only):** Any tool with a `get_`, `list_`, or `search_` prefix, plus `pull_request_read` and `get_file_contents`.
 

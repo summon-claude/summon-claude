@@ -97,7 +97,7 @@ Send messages, review tool permissions with buttons, and receive streaming respo
 
 === "Homebrew"
     ```bash
-    brew install wgordon17/summon/summon-claude
+    brew install summon-claude/summon/summon-claude
     ```
 
 Then run the interactive setup wizard:

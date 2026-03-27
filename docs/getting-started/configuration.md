@@ -28,11 +28,11 @@ Each credential is entered as a hidden input (like a password prompt). The wizar
 
 **Scribe** -- The wizard asks whether to enable the Scribe background agent. If you enable it, follow-up prompts appear for scan interval, working directory, model, importance keywords, and quiet hours. Sub-collectors for Google Workspace and Slack are offered if the required dependencies (`workspace-mcp`, `playwright`) are installed.
 
-**GitHub** -- An optional prompt for a GitHub Personal Access Token. If provided, all sessions get GitHub tools (search code, read PRs, etc.).
+**GitHub** -- An optional prompt to authenticate with GitHub via OAuth device flow. If configured, all sessions get GitHub tools (search code, read PRs, etc.).
 
 **Advanced settings** -- Finally, the wizard asks "Configure advanced settings?" If you decline (the default), it skips display and behavior tuning options. Most users can skip this.
 
-After all prompts, the wizard validates the full configuration, writes it to `~/.config/summon-claude/config.env` (permissions set to `600`), and automatically runs `summon config check` to verify everything works.
+After all prompts, the wizard validates the full configuration, writes it to `~/.config/summon/config.env` (permissions set to `600`), and automatically runs `summon config check` to verify everything works.
 
 ---
 
@@ -62,9 +62,9 @@ This validates credentials, checks token formats, tests database writability, an
   [INFO] Sessions: 24, Audit log: 59
   [PASS] Slack API reachable (team: my-workspace)
   [PASS] Slack bot scopes: all 16 required scopes granted
-  [INFO] GitHub PAT: not set — sessions won't have GitHub tools (summon config set SUMMON_GITHUB_PAT <token>)
+  [INFO] GitHub: not configured (run `summon auth github login`)
   Google: no credentials found
-  [INFO] Google Workspace: not configured (summon config google-auth)
+  [INFO] Google Workspace: not configured (summon auth google login)
   [INFO] workspace-mcp (Google): installed
   [INFO] playwright (Slack browser): installed
 
@@ -92,7 +92,6 @@ To change a single setting without re-running the full wizard:
 
 ```bash
 summon config set SUMMON_DEFAULT_MODEL claude-sonnet-4-20250514
-summon config set SUMMON_GITHUB_PAT ghp_xxxxxxxxxxxx
 ```
 
 This updates the config file in place. Use the `SUMMON_` environment variable name as the key.

@@ -30,6 +30,8 @@ _inject_terminal_block = docs_screenshots._inject_terminal_block
 _run_capture = docs_screenshots._run_capture
 _capture_cache = docs_screenshots._capture_cache
 _make_env = docs_screenshots._make_env
+_read_banner_from_proc = docs_screenshots._read_banner_from_proc
+_terminate_proc = docs_screenshots._terminate_proc
 _capture_summon_start_banner = docs_screenshots._capture_summon_start_banner
 run_terminal_section = docs_screenshots.run_terminal_section
 CaptureSpec = docs_screenshots.CaptureSpec
@@ -131,6 +133,44 @@ class TestValidateContent:
 
     def test_empty_content(self) -> None:
         assert _validate_content("", "foo") is None
+
+    def test_custom_prefix_rejects_opening_marker(self) -> None:
+        result = _validate_content("<!-- prompt:foo -->", "foo", prefix="prompt")
+        assert result is not None
+        assert "opening" in result
+
+    def test_custom_prefix_rejects_closing_marker(self) -> None:
+        result = _validate_content("<!-- /prompt:foo -->", "foo", prefix="prompt")
+        assert result is not None
+        assert "closing" in result
+
+    def test_custom_prefix_ignores_other_prefix_marker(self) -> None:
+        # With prefix="prompt", a terminal marker is not a conflict
+        assert _validate_content("<!-- terminal:foo -->", "foo", prefix="prompt") is None
+
+
+# ---------------------------------------------------------------------------
+# _terminate_proc / _read_banner_from_proc
+# ---------------------------------------------------------------------------
+
+
+class TestTerminateProc:
+    def test_terminates_normally(self) -> None:
+        proc = MagicMock()
+        proc.wait.return_value = 0
+        _terminate_proc(proc)
+        proc.terminate.assert_called_once()
+        proc.wait.assert_called_once_with(timeout=10)
+        proc.kill.assert_not_called()
+
+    def test_escalates_to_kill_on_timeout(self) -> None:
+        import subprocess as sp
+
+        proc = MagicMock()
+        proc.wait.side_effect = sp.TimeoutExpired(cmd=[], timeout=10)
+        _terminate_proc(proc)
+        proc.terminate.assert_called_once()
+        proc.kill.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

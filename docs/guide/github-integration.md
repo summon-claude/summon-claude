@@ -12,7 +12,7 @@ summon-claude can connect Claude sessions to the GitHub remote MCP server, givin
 Authenticate with GitHub using the device flow:
 
 ```bash
-summon config github-auth
+summon auth github login
 ```
 
 This opens a browser for GitHub OAuth consent. Once complete, the token is stored securely in summon's config directory.
@@ -31,7 +31,7 @@ Once authenticated, the GitHub MCP server is wired into **all** sessions automat
 To remove stored credentials:
 
 ```bash
-summon config github-logout
+summon auth github logout
 ```
 
 ---
@@ -92,7 +92,7 @@ These operations are routed through the standard summon HITL (human-in-the-loop)
 
 - `create_pull_request`
 - `create_issue`
-- `add_comment` (PR and issue comments)
+- `add_issue_comment` (PR and issue comments)
 - `pull_request_review_write`
 
 !!! tip "Why are comments in Tier 2?"
@@ -197,11 +197,11 @@ Check that GitHub credentials are configured:
 summon config check
 ```
 
-If GitHub shows as "not set", re-run `summon config github-auth`.
+If GitHub shows as "not set", re-run `summon auth github login`.
 
 **Permission denied errors from GitHub**
 
-The OAuth token may lack the required scopes. Re-run `summon config github-auth` to re-authenticate with the correct permissions.
+The OAuth token may lack the required scopes. Re-run `summon auth github login` to re-authenticate with the correct permissions.
 
 **Tool calls time out**
 

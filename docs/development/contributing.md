@@ -101,7 +101,8 @@ summon-claude follows [Conventional Commits](https://www.conventionalcommits.org
 | `permissions` | Permission handling and approval flow (`sessions/permissions.py`) |
 | `mcp` | MCP server and tools (`slack/mcp.py`) |
 | `registry` | Session storage and SQLite operations (`sessions/registry.py`) |
-| `db` | Database maintenance CLI (`summon db` group: status, reset, vacuum, purge) |
+| `db` | Database maintenance CLI (`summon db` group: status, vacuum, purge) |
+| `reset` | Reset commands for data and config clearing (`cli/reset.py`) |
 | `hooks` | Lifecycle hooks and Claude Code hook bridge (`sessions/hooks.py`, `cli/hooks.py`) |
 | `project` | Project lifecycle and management (`cli/project.py`) |
 | `scribe` | Scribe monitoring agent |
@@ -386,21 +387,26 @@ src/summon_claude/
 ├── config.py              # SummonConfig (pydantic-settings) with validation
 ├── daemon.py              # Unix daemon with PID/lock, IPC framing
 ├── event_dispatcher.py    # Routes Slack events to sessions by channel
+├── github_auth.py         # GitHub OAuth App device flow authentication
+├── mcp_untrusted_proxy.py # MCP stdio proxy that marks tool results as untrusted
+├── security.py            # Prompt injection defense utilities
 ├── slack_browser.py       # Playwright-based Slack WebSocket monitor for external workspaces
 ├── summon_cli_mcp.py      # MCP tools for session lifecycle (session_list, _info, _start, _stop)
 ├── cli/
 │   ├── __init__.py        # Click wiring, root group, setup_logging
-│   ├── config.py          # Config subcommands (show, set, path, edit, check, google-auth)
+│   ├── auth.py            # Auth group: unified auth commands for GitHub, Google, Slack
+│   ├── config.py          # Config subcommands (show, set, path, edit, check)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
-│   ├── db.py              # DB subcommand implementations (status, reset, vacuum, purge)
+│   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
 │   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
 │   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
 │   ├── preflight.py       # Claude CLI preflight check (version, path)
 │   ├── project.py         # Project lifecycle (add, remove, up, down, workflow)
+│   ├── reset.py           # Reset commands (data, config)
 │   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
-│   ├── slack_auth.py      # Slack browser auth CLI (slack-auth, slack-status)
+│   ├── slack_auth.py      # Slack browser auth CLI helpers
 │   ├── start.py           # async_start() implementation
 │   ├── stop.py            # async_stop() implementation
 │   └── update_check.py    # PyPI update checker with 24h cache

@@ -251,6 +251,6 @@ See [Contributing — Database Migrations](../development/contributing.md#databa
 | Command | Description |
 |---------|-------------|
 | `summon db status` | Show schema version, integrity check result, and row counts per table. Migrations apply automatically on connect. |
-| `summon db reset --yes` | Delete and recreate the registry database. All session history is lost. |
+| `summon reset data` | Delete and recreate the registry database. All session history is lost. |
 | `summon db vacuum` | Run `VACUUM` to compact the database and recheck integrity. |
 | `summon db purge --older-than N --yes` | Delete completed/errored sessions, audit logs, and expired tokens older than N days (default: 30). |

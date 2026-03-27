@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-serve docs-build docs-check docs-screenshots docs-terminal docs-test docs-test-full
+.PHONY: docs-serve docs-build docs-check docs-screenshots docs-terminal docs-test
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -90,10 +90,7 @@ docs-screenshots: ## Generate documentation screenshots (all sections)
 docs-terminal: ## Capture terminal output and inject into docs
 	uv run python scripts/docs-screenshots.py --section terminal
 
-docs-test: ## Run doc validation tests (guard tests, no bash, no credentials)
-	uv run pytest tests/docs/ -v -m docs -n0
-
-docs-test-full: ## Run all doc tests including bash CLI execution (needs credentials)
+docs-test: ## Run doc validation tests (guard tests, no credentials)
 	uv run pytest tests/docs/ -v -m docs -n0
 
 # ============================================================================

@@ -85,7 +85,7 @@ Disabled sections (e.g., Scribe Google when `scribe_google_enabled` is false) ar
   Scribe: disabled
 
   GitHub
-    SUMMON_GITHUB_PAT                        configured                     (set)
+    GitHub: configured (OAuth)
 ```
 <!-- /terminal:config-show -->
 
@@ -145,9 +145,6 @@ SUMMON_SLACK_SIGNING_SECRET=your-signing-secret
 SUMMON_DEFAULT_MODEL=claude-opus-4-6
 SUMMON_DEFAULT_EFFORT=high
 SUMMON_CHANNEL_PREFIX=ai
-
-# Optional: GitHub integration
-SUMMON_GITHUB_PAT=ghp_your-personal-access-token
 
 # Optional: disable update checks
 # SUMMON_NO_UPDATE_CHECK=true

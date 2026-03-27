@@ -80,7 +80,7 @@ def all_md_files(docs_dir: Path) -> list[Path]:
 def env_credentials() -> dict[str, str]:
     """Load SUMMON_* credentials from sibling repo .env or environment."""
     env_file = _REPO_ROOT.parent / "summon-claude" / ".env"
-    raw = dotenv_values(str(env_file)) if env_file.exists() else dict(os.environ)
+    raw = dotenv_values(str(env_file)) if env_file.exists() else {}
     return {k: v for k, v in raw.items() if k.startswith("SUMMON_") and v is not None}
 
 

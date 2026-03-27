@@ -77,9 +77,7 @@ Slack monitoring via browser automation. Requires the `slack-browser` optional e
 
 ## GitHub
 
-| Config Key | Type | Default | Description |
-|------------|------|---------|-------------|
-| `SUMMON_GITHUB_PAT` | secret | _(none)_ | GitHub Personal Access Token. Enables the GitHub remote MCP server for all sessions. Accepts classic (`ghp_*`) or fine-grained (`github_pat_*`) tokens. |
+GitHub integration uses OAuth device flow authentication — no environment variable needed. Run `summon auth github login` to authenticate.
 
 See [GitHub Integration](../guide/github-integration.md) for setup details.
 
