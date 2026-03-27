@@ -1,0 +1,179 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'mkdocs.yml'
+      - 'src/**/*.py'
+      - 'README.md'
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+# Permissions scoped per-job to prevent PR preview builds from getting write access (SEC-001)
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy docs
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Configure git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Deploy with mike
+        run: uv run mike deploy latest --push --update-aliases --strict
+
+  preview-build:
+    name: Build preview (PR)
+    if: github.event_name == 'pull_request' && github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Read-only: builds PR code but does NOT push to gh-pages (SEC-001)
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Build docs
+        run: uv run mkdocs build --strict -d site-pr/
+
+      - name: Upload preview artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: docs-preview-pr-${{ github.event.number }}
+          path: site-pr/
+          retention-days: 3
+
+  preview-deploy:
+    name: Deploy preview (PR)
+    needs: preview-build
+    # Only deploy previews for PRs from branches in the same repo (not forks)
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action != 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Download preview artifact
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          name: docs-preview-pr-${{ github.event.number }}
+          path: site-pr/
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: gh-pages
+          path: gh-pages-dir
+
+      - name: Copy preview to gh-pages
+        run: |
+          mkdir -p gh-pages-dir/_previews/pr-${{ github.event.number }}
+          cp -r site-pr/. gh-pages-dir/_previews/pr-${{ github.event.number }}/
+
+      - name: Push preview to gh-pages
+        run: |
+          cd gh-pages-dir
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add _previews/pr-${{ github.event.number }}
+          git commit -m "docs: preview for PR #${{ github.event.number }}" || true
+          git push origin gh-pages
+
+      - name: Post PR comment with preview URL
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const previewUrl = `https://summon-claude.github.io/summon-claude/_previews/pr-${{ github.event.number }}/`;
+            const marker = '<!-- docs-preview -->';
+            const body = `${marker}\n## Docs Preview\n\nPreview available at: ${previewUrl}\n\n_Updated by commit ${{ github.sha }}_`;
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.number }},
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: ${{ github.event.number }},
+                body,
+              });
+            }
+
+  preview-cleanup:
+    name: Cleanup preview (PR closed)
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.action == 'closed'
+      && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: gh-pages
+
+      - name: Remove preview directory
+        run: |
+          if [ -d "_previews/pr-${{ github.event.number }}" ]; then
+            rm -rf "_previews/pr-${{ github.event.number }}"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "docs: remove preview for PR #${{ github.event.number }}"
+            git push origin gh-pages
+          else
+            echo "No preview directory found, skipping."
+          fi

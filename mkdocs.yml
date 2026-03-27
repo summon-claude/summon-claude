@@ -1,0 +1,135 @@
+site_name: summon-claude
+site_url: https://summon-claude.github.io/summon-claude/
+repo_url: https://github.com/summon-claude/summon-claude
+repo_name: summon-claude/summon-claude
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.top
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.footer
+    - navigation.indexes
+    - navigation.path
+    - content.code.copy
+    - content.code.select
+    - content.code.annotate
+    - content.tabs.link
+    # - content.tooltips  # Enable when abbreviation definitions are added
+    - search.suggest
+    - search.highlight
+    - search.share
+    - header.autohide
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - mkdocs-click
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: false
+  - llmstxt:
+      sections:
+        Overview:
+          - index.md
+        Getting Started:
+          - getting-started/*.md
+        Guides:
+          - guide/*.md
+        Reference:
+          - reference/*.md
+        Concepts:
+          - concepts/*.md
+        Troubleshooting:
+          - troubleshooting.md
+        Development:
+          - development/*.md
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  version:
+    provider: mike
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - getting-started/index.md
+    - Installation: getting-started/installation.md
+    - Slack Setup: getting-started/slack-setup.md
+    - Quick Start: getting-started/quickstart.md
+    - Configuration: getting-started/configuration.md
+    - Upgrading: getting-started/upgrading.md
+  - Guides:
+    - guide/index.md
+    - Projects: guide/projects.md
+    - PM Agents: guide/pm-agents.md
+    - Scribe: guide/scribe.md
+    - GitHub Integration: guide/github-integration.md
+    - Scribe Integrations: guide/scribe-integrations.md
+    - Cron & Tasks: guide/cron-tasks.md
+    - Canvas: guide/canvas.md
+    - Lifecycle Hooks: guide/hooks.md
+    - Configuration: guide/configuration.md
+    - Sessions: guide/sessions.md
+  - Reference:
+    - reference/index.md
+    - CLI: reference/cli.md
+    - Configuration Reference: reference/environment-variables.md
+    - MCP Tools: reference/mcp-tools.md
+    - In-Session Commands: reference/commands.md
+    - Prompts: reference/prompts.md
+    - Agent Permissions: reference/permissions.md
+  - Concepts:
+    - concepts/index.md
+    - Overview: concepts/overview.md
+    - Threading & Streaming: concepts/threading.md
+    - Daemon: concepts/daemon.md
+    - Slack Integration: concepts/slack-integration.md
+    - Database: concepts/database.md
+    - Context Management: concepts/context.md
+    - Security: concepts/security.md
+  - Troubleshooting: troubleshooting.md
+  - Development:
+    - development/index.md
+    - Contributing: development/contributing.md
+    - Testing: development/testing.md
+    - Releasing: development/releasing.md

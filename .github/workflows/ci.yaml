@@ -17,7 +17,6 @@ concurrency:
 jobs:
   checks:
     name: Lint & Test
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -36,6 +35,27 @@ jobs:
 
       - name: Test
         run: make py-test
+
+      - name: Doc validation tests
+        run: make docs-test
+
+  docs:
+    name: Docs build check
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - uses: astral-sh/setup-uv@5a095e7a2014a4212f075830d4f7277575a9d098 # v7.3.1
+        with:
+          enable-cache: true
+
+      - name: Install docs dependencies
+        run: uv sync --group docs
+
+      - name: Build docs
+        run: uv run mkdocs build --strict
 
   slack-integration:
     name: Slack Integration Tests
@@ -57,3 +77,11 @@ jobs:
           SUMMON_TEST_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
           SUMMON_TEST_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
           SUMMON_TEST_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}
+
+      - name: Doc bash tests
+        if: hashFiles('tests/docs/test_bash_codeblocks.py') != ''
+        run: uv run pytest tests/docs/test_bash_codeblocks.py -v -m docs -n0
+        env:
+          SUMMON_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
+          SUMMON_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
+          SUMMON_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}

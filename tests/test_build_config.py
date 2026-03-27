@@ -11,6 +11,7 @@ Validates:
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
@@ -234,6 +235,52 @@ class TestWorkflowFiles:
         path = REPO_ROOT / ".github" / "workflows" / "ci.yaml"
         content = path.read_text()
         assert "contents: read" in content, "ci.yaml missing 'contents: read' permission"
+
+    def test_docs_yaml_exists(self) -> None:
+        """Verify docs.yaml exists."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        assert path.exists(), f"docs.yaml not found at {path}"
+        assert path.is_file(), "docs.yaml should be a file"
+
+    def test_docs_yaml_is_valid_yaml(self) -> None:
+        """docs.yaml parses as valid YAML."""
+        docs_path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = docs_path.read_text()
+        data = yaml.safe_load(content)
+        assert isinstance(data, dict)
+        assert "name" in data
+        assert True in data or "on" in data
+        assert "jobs" in data
+
+    def test_docs_yaml_deploy_has_concurrency_guard(self) -> None:
+        """Verify docs.yaml deploy job uses cancel-in-progress: false."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        data = yaml.safe_load(path.read_text())
+        deploy = data["jobs"]["deploy"]
+        assert "concurrency" in deploy, "deploy job missing concurrency block"
+        assert deploy["concurrency"].get("cancel-in-progress") is False, (
+            "deploy job concurrency must have cancel-in-progress: false"
+        )
+
+    def test_docs_yaml_preview_blocks_forks(self) -> None:
+        """Verify preview-deploy restricts to same-repo PRs (not forks)."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        data = yaml.safe_load(path.read_text())
+        preview_deploy = data["jobs"]["preview-deploy"]
+        condition = str(preview_deploy.get("if", ""))
+        assert "head.repo.full_name == github.repository" in condition, (
+            "docs.yaml preview-deploy job if-condition missing fork guard"
+        )
+
+    def test_docs_yaml_actions_are_pinned_by_sha(self) -> None:
+        """All action refs in docs.yaml must use full 40-char commit SHAs."""
+        path = REPO_ROOT / ".github" / "workflows" / "docs.yaml"
+        content = path.read_text()
+        uses_re = re.compile(r"uses:\s+\S+@(\S+)")
+        refs = uses_re.findall(content)
+        assert len(refs) > 0, "No action refs found in docs.yaml"
+        for ref in refs:
+            assert re.fullmatch(r"[0-9a-f]{40}", ref), f"Action ref '{ref}' is not a full SHA pin"
 
 
 class TestPrekToml:
