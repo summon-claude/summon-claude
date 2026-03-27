@@ -46,7 +46,7 @@ Some features require additional dependencies that are not included in the base 
 
 | Extra | Feature | Dependency |
 |-------|---------|------------|
-| `google` | Google Workspace integration (Gmail, Calendar, Drive) for the [scribe](../guide/scribe.md) agent | [workspace-mcp](https://github.com/nicholasgriffintn/workspace-mcp) |
+| `google` | Google Workspace integration (Gmail, Calendar, Drive) for the [scribe](../guide/scribe.md) agent | [workspace-mcp](https://github.com/taylorwilsdon/google_workspace_mcp) |
 | `slack-browser` | Slack browser monitoring for the [scribe](../guide/scribe.md) agent | [Playwright](https://playwright.dev/python/) |
 | `all` | All optional extras | Both of the above |
 
