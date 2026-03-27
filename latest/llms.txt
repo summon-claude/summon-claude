@@ -1,0 +1,61 @@
+# summon-claude
+
+## Overview
+
+- [Home](https://summon-claude.github.io/summon-claude/latest/index.md)
+
+## Getting Started
+
+- [Getting Started](https://summon-claude.github.io/summon-claude/latest/getting-started/index.md)
+- [Configuration](https://summon-claude.github.io/summon-claude/latest/getting-started/configuration/index.md)
+- [Installation](https://summon-claude.github.io/summon-claude/latest/getting-started/installation/index.md)
+- [Quick Start](https://summon-claude.github.io/summon-claude/latest/getting-started/quickstart/index.md)
+- [Slack Setup](https://summon-claude.github.io/summon-claude/latest/getting-started/slack-setup/index.md)
+- [Upgrading](https://summon-claude.github.io/summon-claude/latest/getting-started/upgrading/index.md)
+
+## Guides
+
+- [Guides](https://summon-claude.github.io/summon-claude/latest/guide/index.md)
+- [Canvas](https://summon-claude.github.io/summon-claude/latest/guide/canvas/index.md)
+- [Configuration](https://summon-claude.github.io/summon-claude/latest/guide/configuration/index.md)
+- [Cron & Tasks](https://summon-claude.github.io/summon-claude/latest/guide/cron-tasks/index.md)
+- [GitHub Integration](https://summon-claude.github.io/summon-claude/latest/guide/github-integration/index.md)
+- [Lifecycle Hooks](https://summon-claude.github.io/summon-claude/latest/guide/hooks/index.md)
+- [PM Agents](https://summon-claude.github.io/summon-claude/latest/guide/pm-agents/index.md)
+- [Projects](https://summon-claude.github.io/summon-claude/latest/guide/projects/index.md)
+- [Scribe Integrations](https://summon-claude.github.io/summon-claude/latest/guide/scribe-integrations/index.md)
+- [Scribe](https://summon-claude.github.io/summon-claude/latest/guide/scribe/index.md)
+- [Sessions](https://summon-claude.github.io/summon-claude/latest/guide/sessions/index.md)
+
+## Reference
+
+- [Reference](https://summon-claude.github.io/summon-claude/latest/reference/index.md)
+- [CLI](https://summon-claude.github.io/summon-claude/latest/reference/cli/index.md)
+- [In-Session Commands](https://summon-claude.github.io/summon-claude/latest/reference/commands/index.md)
+- [Configuration Reference](https://summon-claude.github.io/summon-claude/latest/reference/environment-variables/index.md)
+- [MCP Tools](https://summon-claude.github.io/summon-claude/latest/reference/mcp-tools/index.md)
+- [Agent Permissions](https://summon-claude.github.io/summon-claude/latest/reference/permissions/index.md)
+- [Prompts](https://summon-claude.github.io/summon-claude/latest/reference/prompts/index.md)
+
+## Concepts
+
+- [Concepts](https://summon-claude.github.io/summon-claude/latest/concepts/index.md)
+- [Context Management](https://summon-claude.github.io/summon-claude/latest/concepts/context/index.md)
+- [Daemon](https://summon-claude.github.io/summon-claude/latest/concepts/daemon/index.md)
+- [Database](https://summon-claude.github.io/summon-claude/latest/concepts/database/index.md)
+- [Overview](https://summon-claude.github.io/summon-claude/latest/concepts/overview/index.md)
+- [Security](https://summon-claude.github.io/summon-claude/latest/concepts/security/index.md)
+- [Slack Integration](https://summon-claude.github.io/summon-claude/latest/concepts/slack-integration/index.md)
+- [Threading & Streaming](https://summon-claude.github.io/summon-claude/latest/concepts/threading/index.md)
+
+## Troubleshooting
+
+- [Troubleshooting](https://summon-claude.github.io/summon-claude/latest/troubleshooting/index.md)
+
+## Development
+
+- [Development](https://summon-claude.github.io/summon-claude/latest/development/index.md)
+- [Contributing](https://summon-claude.github.io/summon-claude/latest/development/contributing/index.md)
+- [Releasing](https://summon-claude.github.io/summon-claude/latest/development/releasing/index.md)
+- [Testing](https://summon-claude.github.io/summon-claude/latest/development/testing/index.md)
+
