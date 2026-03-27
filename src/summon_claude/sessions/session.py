@@ -1059,7 +1059,7 @@ class SummonSession:
         5. Graceful shutdown on ``request_shutdown()`` or session end
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0915
         self,
         config: SummonConfig,
         options: SessionOptions,
@@ -1113,6 +1113,7 @@ class SummonSession:
 
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
+        self._external_shutdown = False  # True when stopped via request_shutdown()
         self._authenticated_event = asyncio.Event()
         self._authenticated_user_id: str | None = None
         self._parent_session_id: str | None = parent_session_id
@@ -1181,10 +1182,18 @@ class SummonSession:
         return self._name
 
     def request_shutdown(self) -> None:
-        """Signal this session to shut down gracefully."""
+        """Signal this session to shut down gracefully.
+
+        Aborts any in-flight SDK turn so the session stops promptly
+        instead of waiting for the current turn to complete naturally.
+        Without this, a PM mid-turn during ``project down`` would keep
+        running tool calls (e.g. ``session_stop``) until the turn finishes.
+        """
         if not self._shutdown_event.is_set():
             logger.info("Session %s: shutdown requested", self._session_id)
+            self._external_shutdown = True
             self._shutdown_event.set()
+            self._abort_current_turn()
             # Unblock the raw event queue poll
             try:
                 self._raw_event_queue.put_nowait(None)
@@ -2499,7 +2508,7 @@ class SummonSession:
                 except _SessionRestartError as e:
                     restart = e
                 finally:
-                    if restart is None and self._total_turns > 0:
+                    if restart is None and self._total_turns > 0 and not self._external_shutdown:
                         try:
                             await asyncio.wait_for(
                                 self._post_session_summary(router, claude),
@@ -2657,6 +2666,17 @@ class SummonSession:
         logger.info(
             "Processing turn (%d chars, pre_sent=%s)", len(pending.message), pending.pre_sent
         )
+
+        # If shutdown was signalled while this turn was queued, skip it
+        # entirely. Without this guard, _abort_event.clear() below would
+        # erase the abort signal set by request_shutdown().
+        if self._shutdown_event.is_set():
+            logger.info("Turn skipped: shutdown requested before turn start")
+            # Clean up inbox_tray emoji added by the preprocessor
+            if pending.message_ts:
+                with contextlib.suppress(Exception):
+                    await rt.client.unreact(pending.message_ts, "inbox_tray")
+            return
 
         # Reset abort event for this turn
         self._abort_event.clear()
