@@ -36,7 +36,7 @@ class TestSummonConfigDefaults:
 
     def test_default_permission_debounce(self):
         cfg = _make_config()
-        assert cfg.permission_debounce_ms == 500
+        assert cfg.permission_debounce_ms == 2000
 
     def test_default_max_inline_chars(self):
         cfg = _make_config()

@@ -424,7 +424,7 @@ class SummonConfig(BaseSettings):
     channel_prefix: str = "summon"
 
     # Permission handling
-    permission_debounce_ms: int = 500
+    permission_debounce_ms: int = 2000
 
     # Content display
     max_inline_chars: int = 2500
