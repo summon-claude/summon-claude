@@ -417,7 +417,8 @@ def google_setup() -> None:
                 click.echo(f"File not found: {json_path}")
                 continue
             try:
-                data = json_mod.loads(json_path.read_text())
+                raw_text = json_path.read_text()
+                data = json_mod.loads(raw_text)
                 inner = data.get("installed") or data.get("web") or data
                 client_id = inner["client_id"]
                 client_secret = inner["client_secret"]
@@ -429,13 +430,16 @@ def google_setup() -> None:
             dest.parent.mkdir(parents=True, exist_ok=True)
             fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as f:
-                f.write(json_path.read_text())
+                f.write(raw_text)
             click.echo(f"Copied {json_path.name} to {dest}")
         else:
-            # User pasted a Client ID directly
-            client_id = response
-            client_secret = click.prompt(
-                "Google OAuth Client Secret", default="", show_default=False
+            # User pasted a Client ID directly — strip newlines to prevent
+            # format injection into client_env file (matches config_set pattern)
+            client_id = response.replace("\n", "").replace("\r", "")
+            client_secret = (
+                click.prompt("Google OAuth Client Secret", default="", show_default=False)
+                .replace("\n", "")
+                .replace("\r", "")
             )
             if not client_secret:
                 click.echo("Client Secret is required.")
