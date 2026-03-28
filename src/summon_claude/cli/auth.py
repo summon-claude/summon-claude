@@ -142,7 +142,10 @@ def auth_google() -> None:
 @auth_google.command("setup")
 def auth_google_setup() -> None:
     """Interactive guided setup for Google OAuth credentials."""
-    google_setup()
+    try:
+        google_setup()
+    except KeyboardInterrupt:
+        click.echo("\nSetup cancelled.", err=True)
 
 
 @auth_google.command("login")

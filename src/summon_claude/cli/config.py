@@ -325,8 +325,8 @@ def google_setup() -> None:
             suggested = f"summon-claude-{secrets_mod.token_hex(3)[:5]}"
             project_id = click.prompt("Project ID", default=suggested).strip()
 
-        # Validate project ID format
-        _project_id_re = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")
+        # Validate project ID format (regex hoisted above loop)
+        _project_id_re = re.compile(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$")  # 6-30 chars
         while project_id and not _project_id_re.match(project_id):
             click.echo("Invalid project ID. Rules: 6-30 chars, lowercase letters/digits/hyphens,")
             click.echo("starts with a letter, cannot end with a hyphen.")
@@ -422,14 +422,12 @@ def google_setup() -> None:
             except (json_mod.JSONDecodeError, KeyError, TypeError) as e:
                 click.echo(f"Invalid client_secret.json: {e}")
                 continue
-            # Copy JSON to credentials dir for workspace-mcp
-            import shutil  # noqa: PLC0415
-
+            # Copy JSON to credentials dir for workspace-mcp (0o600 from creation)
             dest = get_google_credentials_dir() / "client_secret.json"
             dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(json_path), str(dest))
-            with contextlib.suppress(OSError):
-                dest.chmod(0o600)
+            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                f.write(json_path.read_text())
             click.echo(f"Copied {json_path.name} to {dest}")
         else:
             # User pasted a Client ID directly
@@ -443,15 +441,13 @@ def google_setup() -> None:
 
         break
 
-    # Save credentials
+    # Save credentials (atomic write with 0o600 from creation — no world-readable window)
     creds_dir = get_google_credentials_dir()
     creds_dir.mkdir(parents=True, exist_ok=True)
     secrets_file = creds_dir / "client_env"
-    secrets_file.write_text(
-        f"GOOGLE_OAUTH_CLIENT_ID={client_id}\nGOOGLE_OAUTH_CLIENT_SECRET={client_secret}\n"
-    )
-    with contextlib.suppress(OSError):
-        secrets_file.chmod(0o600)
+    fd = os.open(secrets_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"GOOGLE_OAUTH_CLIENT_ID={client_id}\nGOOGLE_OAUTH_CLIENT_SECRET={client_secret}\n")
     click.echo(f"\nCredentials saved to {secrets_file}")
     click.echo("\nSetup complete! Run `summon auth google login` to authenticate.")
 
