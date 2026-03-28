@@ -150,6 +150,7 @@ class _BatchState:
 
     events: dict[str, asyncio.Event] = field(default_factory=dict)
     decisions: dict[str, bool] = field(default_factory=dict)
+    message_ts: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -315,6 +316,9 @@ class PermissionHandler:
                 await batch_event.wait()
         except TimeoutError:
             approved = False
+            msg_ts = self._batch.message_ts.pop(batch_id, None)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
         else:
             approved = self._batch.decisions.get(batch_id, False)
 
@@ -326,6 +330,7 @@ class PermissionHandler:
         # Cleanup
         self._batch.events.pop(batch_id, None)
         self._batch.decisions.pop(batch_id, None)
+        self._batch.message_ts.pop(batch_id, None)
 
     async def _post_approval_message(self, batch_id: str, batch: dict[str, PendingRequest]) -> None:
         """Post the Slack interactive approval message for a batch of requests."""
@@ -372,20 +377,11 @@ class PermissionHandler:
         ]
 
         try:
-            # Ping user in main channel FIRST so the notification arrives
-            # before they open the app (ephemeral messages don't trigger notifications)
-            if self._authenticated_user_id:
-                try:
-                    await self._router.post_to_main(
-                        f"<@{self._authenticated_user_id}> Permission needed",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to post permission ping to main channel: %s", e)
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
+            ref = await self._router.client.post_interactive(
                 f"Permission required: {header_text[:100]}",
                 blocks=blocks,
             )
+            self._batch.message_ts[batch_id] = ref.ts
         except Exception as e:
             logger.error("Failed to post permission message: %s", e)
             # Auto-deny if we can't post
@@ -424,11 +420,13 @@ class PermissionHandler:
 
         self._batch.decisions[batch_id] = approved
 
-        # Dismiss the ephemeral message via response_url (the only reliable way)
-        if response_url:
-            await _dismiss_ephemeral(response_url)
+        # Delete the interactive message (replaces ephemeral dismiss)
+        msg_ts = self._batch.message_ts.pop(batch_id, None)
+        if msg_ts:
+            await self._router.client.delete_message(msg_ts)
 
-        # Post a persistent confirmation to the turn thread
+        # Post a persistent confirmation to the turn thread (SEC-D-007:
+        # include tool names since the interactive message is now deleted)
         status_text = ":white_check_mark: Approved" if approved else ":x: Denied"
         try:
             await self._router.post_to_active_thread(f"{status_text} by user")

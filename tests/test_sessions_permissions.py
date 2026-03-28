@@ -43,8 +43,8 @@ def make_handler(debounce_ms=10, authenticated_user_id="U_TEST"):
     return handler, client, router
 
 
-def _ephemeral_auto_approve(handler):
-    """Return a side effect for post_ephemeral that auto-approves all pending batches."""
+def _interactive_auto_approve(handler):
+    """Return a side effect for post_interactive that auto-approves all pending batches."""
 
     async def side_effect(*_args, **_kwargs):
         async def do():
@@ -54,12 +54,13 @@ def _ephemeral_auto_approve(handler):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(do())
+        return MagicMock(ts="mock_ts")
 
     return side_effect
 
 
-def _ephemeral_auto_deny(handler):
-    """Return a side effect for post_ephemeral that auto-denies all pending batches."""
+def _interactive_auto_deny(handler):
+    """Return a side effect for post_interactive that auto-denies all pending batches."""
 
     async def side_effect(*_args, **_kwargs):
         async def do():
@@ -69,6 +70,7 @@ def _ephemeral_auto_deny(handler):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(do())
+        return MagicMock(ts="mock_ts")
 
     return side_effect
 
@@ -111,13 +113,13 @@ class TestAutoApprove:
 
     async def test_bash_is_not_auto_approved(self):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "echo hi"}, None)
         assert isinstance(result, PermissionResultAllow)
 
     async def test_write_is_not_auto_approved(self):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/tmp/f.txt"}, None)
         assert isinstance(result, PermissionResultAllow)
 
@@ -125,21 +127,21 @@ class TestAutoApprove:
 class TestApprovalFlow:
     async def test_approval_returns_allow(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "rm -rf /"}, None)
         assert isinstance(result, PermissionResultAllow)
 
     async def test_denial_returns_deny(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_deny(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
         result = await handler.handle("Bash", {"command": "dangerous"}, None)
         assert isinstance(result, PermissionResultDeny)
 
-    async def test_approval_message_posted_ephemeral(self):
+    async def test_approval_message_posted_interactive(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
-        assert provider.post_ephemeral.call_count >= 1
+        assert provider.post_interactive.call_count >= 1
 
 
 class TestHandleAction:
@@ -295,14 +297,14 @@ class TestFormatRequestSummary:
 
 
 class TestPermissionEphemeral:
-    """Tests for ephemeral permission posting."""
+    """Tests for interactive permission posting."""
 
-    async def test_permissions_use_ephemeral(self):
-        """Permission requests should go through post_ephemeral."""
+    async def test_permissions_use_interactive(self):
+        """Permission requests should go through post_interactive."""
         handler, provider, router = make_handler(authenticated_user_id="U_TEST")
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     async def test_handle_action_posts_to_turn_thread(self):
         """handle_action should post confirmation to turn thread, not update."""
@@ -332,24 +334,17 @@ class TestPermissionEphemeral:
         with pytest.raises(TypeError, match="authenticated_user_id"):
             PermissionHandler(router, config)  # type: ignore[call-arg]
 
-    async def test_permission_ping_goes_to_main_channel(self):
-        """Permission notification ping should go to main channel, not thread."""
-        handler, provider, router = make_handler(authenticated_user_id="U_PING")
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        provider.post = AsyncMock(return_value=AsyncMock(ts="1234"))
+    async def test_no_separate_ping_for_normal_messages(self):
+        """Normal messages trigger notifications — no separate ping needed."""
+        handler, provider, _ = make_handler(authenticated_user_id="U_PING")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        provider.post = AsyncMock(return_value=MagicMock(ts="1234"))
 
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
 
-        # post() should have been called with the permission ping (no thread_ts)
-        ping_calls = [
-            c
-            for c in provider.post.call_args_list
-            if "Permission needed" in str(c) and "U_PING" in str(c)
-        ]
-        assert len(ping_calls) == 1
-        # Main channel post = no thread_ts kwarg
-        call_kwargs = ping_calls[0].kwargs
-        assert "thread_ts" not in call_kwargs or call_kwargs.get("thread_ts") is None
+        # No ping calls — post_interactive already generates notifications
+        ping_calls = [c for c in provider.post.call_args_list if "Permission needed" in str(c)]
+        assert len(ping_calls) == 0
 
 
 class TestPermissionSuggestions:
@@ -369,7 +364,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "ls"}, context)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
     async def test_suggestion_deny_returns_denied_without_slack(self):
         """When suggestion.behavior='deny', return PermissionResultDeny without Slack."""
@@ -385,14 +380,14 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "rm -rf /"}, context)
 
         assert isinstance(result, PermissionResultDeny)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
     async def test_suggestion_ask_falls_through_to_slack(self):
         """When suggestion.behavior='ask', fall through to Slack approval flow."""
         from unittest.mock import MagicMock
 
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
 
         suggestion = MagicMock()
         suggestion.behavior = "ask"
@@ -402,7 +397,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "test"}, context)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     async def test_no_suggestion_uses_auto_approve_fallback(self):
         """When context=None, still use _AUTO_APPROVE_TOOLS fallback."""
@@ -411,7 +406,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Read", {"file_path": "/tmp/f"}, None)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
 
 class TestGitHubMCPReadToolsAutoApproved:
@@ -432,7 +427,7 @@ class TestGitHubMCPReadToolsAutoApproved:
         handler, provider, _ = make_handler()
         result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
 
 class TestGitHubMCPToolsRequireApproval:
@@ -460,10 +455,10 @@ class TestGitHubMCPToolsRequireApproval:
     )
     async def test_requires_slack_approval(self, tool_name):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     @pytest.mark.parametrize(
         "tool_name",
@@ -475,7 +470,7 @@ class TestGitHubMCPToolsRequireApproval:
     async def test_ignores_sdk_allow_suggestion(self, tool_name):
         """Restricted tools must require Slack approval even when SDK suggests allow."""
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
 
         suggestion = MagicMock()
         suggestion.behavior = "allow"
@@ -484,7 +479,7 @@ class TestGitHubMCPToolsRequireApproval:
 
         result = await handler.handle(tool_name, {}, context)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
 
 class TestGitHubMCPGuardTests:
@@ -556,11 +551,11 @@ class TestSummonMCPAutoApprove:
 
     async def test_unknown_mcp_tool_not_auto_approved(self):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("mcp__unknown__foo", {}, None)
         # Falls through to HITL — not auto-approved by summon prefixes
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called_once()
+        provider.post_interactive.assert_called_once()
 
 
 class TestIdentityVerificationFailClosed:

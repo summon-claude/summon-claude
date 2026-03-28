@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
@@ -32,7 +32,7 @@ def make_handler(debounce_ms: int = 50):
 
 
 def _auto_approve_after_post(handler: PermissionHandler, delay: float = 0.05):
-    """Return a side_effect for post_ephemeral that auto-approves pending batches."""
+    """Return a side_effect for post_interactive that auto-approves pending batches."""
 
     async def _side_effect(*_args, **_kwargs):
         async def _do():
@@ -42,12 +42,13 @@ def _auto_approve_after_post(handler: PermissionHandler, delay: float = 0.05):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(_do())
+        return MagicMock(ts="mock_ts")
 
     return _side_effect
 
 
 def _auto_deny_after_post(handler: PermissionHandler, delay: float = 0.05):
-    """Return a side_effect for post_ephemeral that auto-denies pending batches."""
+    """Return a side_effect for post_interactive that auto-denies pending batches."""
 
     async def _side_effect(*_args, **_kwargs):
         async def _do():
@@ -57,6 +58,7 @@ def _auto_deny_after_post(handler: PermissionHandler, delay: float = 0.05):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(_do())
+        return MagicMock(ts="mock_ts")
 
     return _side_effect
 
@@ -66,7 +68,7 @@ class TestConcurrentRequestsBatchWithinDebounceWindow:
         """3 simultaneous requests within debounce window -> 1 ephemeral message posted."""
         debounce_ms = 100
         handler, provider, _ = make_handler(debounce_ms=debounce_ms)
-        provider.post_ephemeral = AsyncMock(
+        provider.post_interactive = AsyncMock(
             side_effect=_auto_approve_after_post(handler, delay=0.05)
         )
 
@@ -77,12 +79,12 @@ class TestConcurrentRequestsBatchWithinDebounceWindow:
         )
 
         assert all(isinstance(r, PermissionResultAllow) for r in results)
-        assert provider.post_ephemeral.call_count == 1
+        assert provider.post_interactive.call_count == 1
 
     async def test_all_concurrent_requests_resolve_allow(self):
         """All requests in a batch get Allow when approved."""
         handler, provider, _ = make_handler(debounce_ms=50)
-        provider.post_ephemeral = AsyncMock(
+        provider.post_interactive = AsyncMock(
             side_effect=_auto_approve_after_post(handler, delay=0.05)
         )
 
@@ -99,7 +101,7 @@ class TestTimeoutDeniesAllPending:
         """With a very short permission timeout, all pending requests are denied."""
         handler, provider, _ = make_handler(debounce_ms=10)
 
-        provider.post_ephemeral = AsyncMock()
+        provider.post_interactive = AsyncMock(return_value=MagicMock(ts="mock_ts"))
 
         # Patch the permission timeout to be very short
         import summon_claude.sessions.permissions as perm_module
@@ -123,7 +125,7 @@ class TestManyRequestsBatchApproved:
     async def test_ten_concurrent_requests_all_resolve_allow(self):
         """10 concurrent requests approved -> all 10 return Allow."""
         handler, provider, _ = make_handler(debounce_ms=80)
-        provider.post_ephemeral = AsyncMock(
+        provider.post_interactive = AsyncMock(
             side_effect=_auto_approve_after_post(handler, delay=0.05)
         )
 
@@ -132,7 +134,7 @@ class TestManyRequestsBatchApproved:
 
         assert len(results) == 10
         assert all(isinstance(r, PermissionResultAllow) for r in results)
-        assert provider.post_ephemeral.call_count == 1
+        assert provider.post_interactive.call_count == 1
 
 
 class TestApprovalWhileNewRequestQueuing:
@@ -154,8 +156,9 @@ class TestApprovalWhileNewRequestQueuing:
                     handler._batch.events[batch_id].set()
 
             asyncio.create_task(_do())
+            return MagicMock(ts="mock_ts")
 
-        provider.post_ephemeral = AsyncMock(side_effect=_counting_approve)
+        provider.post_interactive = AsyncMock(side_effect=_counting_approve)
 
         result_a = await handler.handle("Bash", {"command": "cmd1"}, None)
         await asyncio.sleep(debounce_ms / 1000.0 * 3)
@@ -170,7 +173,7 @@ class TestRapidApproveDenyRace:
     async def test_first_action_wins(self):
         """Whichever action fires first, the batch decision is set."""
         handler, provider, _ = make_handler(debounce_ms=30)
-        provider.post_ephemeral = AsyncMock(
+        provider.post_interactive = AsyncMock(
             side_effect=_auto_approve_after_post(handler, delay=0.02)
         )
         result = await handler.handle("Bash", {"command": "test"}, None)
@@ -179,7 +182,8 @@ class TestRapidApproveDenyRace:
     async def test_deny_before_approve_returns_deny(self):
         """If deny fires, the result is Deny."""
         handler, provider, _ = make_handler(debounce_ms=30)
-        provider.post_ephemeral = AsyncMock(side_effect=_auto_deny_after_post(handler, delay=0.02))
+        deny_effect = _auto_deny_after_post(handler, delay=0.02)
+        provider.post_interactive = AsyncMock(side_effect=deny_effect)
         result = await handler.handle("Edit", {"path": "/tmp/f"}, None)
         assert isinstance(result, PermissionResultDeny)
 
@@ -189,7 +193,7 @@ class TestDebounceWindowCollectsRequests:
         """Requests fired within the debounce window end up in a single batch."""
         debounce_ms = 200
         handler, provider, _ = make_handler(debounce_ms=debounce_ms)
-        provider.post_ephemeral = AsyncMock(
+        provider.post_interactive = AsyncMock(
             side_effect=_auto_approve_after_post(handler, delay=0.05)
         )
 
@@ -204,7 +208,7 @@ class TestDebounceWindowCollectsRequests:
         )
 
         assert all(isinstance(r, PermissionResultAllow) for r in results)
-        assert provider.post_ephemeral.call_count == 1
+        assert provider.post_interactive.call_count == 1
 
     async def test_request_outside_window_starts_new_batch(self):
         """A request after the debounce window starts a new batch."""
@@ -224,8 +228,9 @@ class TestDebounceWindowCollectsRequests:
                     handler._batch.events[batch_id].set()
 
             asyncio.create_task(_do())
+            return MagicMock(ts="mock_ts")
 
-        provider.post_ephemeral = AsyncMock(side_effect=_counting)
+        provider.post_interactive = AsyncMock(side_effect=_counting)
 
         r1 = await handler.handle("Bash", {"command": "first"}, None)
         await asyncio.sleep(debounce_ms / 1000.0 * 4)

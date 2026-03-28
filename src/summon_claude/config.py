@@ -1034,7 +1034,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         env_key="SUMMON_SAFE_WRITE_DIRS",
         group="Permissions",
         label="Safe Write Directories",
-        help_text="Dirs where writes skip worktree (comma-separated, e.g. hack/)",
+        help_text="Comma-separated dirs where writes are allowed without worktree (e.g. hack/)",
         input_type="text",
         advanced=True,
     ),
