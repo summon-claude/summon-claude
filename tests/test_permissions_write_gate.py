@@ -10,6 +10,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 from helpers import make_mock_slack_client
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.permissions import (
+    _AUTO_APPROVE_TOOLS,
     _WRITE_GATED_TOOLS,
     PermissionHandler,
     _is_in_safe_dir,
@@ -132,6 +133,11 @@ class TestWriteGateGuards:
             == _WRITE_GATED_TOOLS
         )
 
+    def test_write_gated_and_auto_approve_disjoint(self):
+        """SEC-008: no tool should be both write-gated and auto-approved."""
+        overlap = _WRITE_GATED_TOOLS & _AUTO_APPROVE_TOOLS
+        assert not overlap, f"Overlap: {overlap}"
+
 
 class TestWriteGateBehavior:
     """Tests for the write gate in PermissionHandler.handle()."""
@@ -193,3 +199,30 @@ class TestWriteGateBehavior:
         # Write/Edit/MultiEdit/NotebookEdit should be cached, Bash should not
         assert "Write" in handler._session_approved_tools
         assert "Bash" not in handler._session_approved_tools
+
+    async def test_safe_dir_write_auto_approved_e2e(self, tmp_path: Path):
+        """QA-003: end-to-end test for safe-dir write through handle()."""
+        safe = tmp_path / "hack"
+        safe.mkdir()
+        target = safe / "notes.md"
+        target.touch()
+        handler, client = _make_handler(
+            safe_write_dirs="hack/",
+            project_root=str(tmp_path),
+        )
+        result = await handler.handle("Write", {"file_path": str(target)}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should NOT reach HITL
+        client.post_interactive.assert_not_called()
+
+    async def test_safe_dir_write_outside_dir_denied(self, tmp_path: Path):
+        """Write outside safe-dir should be denied when not in worktree."""
+        (tmp_path / "hack").mkdir()
+        handler, _ = _make_handler(
+            safe_write_dirs="hack/",
+            project_root=str(tmp_path),
+        )
+        result = await handler.handle(
+            "Write", {"file_path": str(tmp_path / "src" / "main.py")}, None
+        )
+        assert isinstance(result, PermissionResultDeny)

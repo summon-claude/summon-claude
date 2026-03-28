@@ -66,19 +66,18 @@ _GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
     "mcp__github__search_",
 )
 
-# GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
-# even if SDK suggestions say "allow". Defense-in-depth against broad
-# allowedTools patterns in settings.json bypassing HITL.
 # Summon's own MCP tools — always auto-approved.
-# These are internal tools provided by the session's own MCP servers
-# (summon-cli, summon-slack, summon-canvas) and already scoped to
-# the session's permissions.
+# Internal tools from the session's own MCP servers (summon-cli,
+# summon-slack, summon-canvas), already scoped to session permissions.
 _SUMMON_MCP_AUTO_APPROVE_PREFIXES = (
     "mcp__summon-cli__",
     "mcp__summon-slack__",
     "mcp__summon-canvas__",
 )
 
+# GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
+# even if SDK suggestions say "allow". Defense-in-depth against broad
+# allowedTools patterns in settings.json bypassing HITL.
 _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     [
         # Destructive operations
@@ -319,19 +318,20 @@ class PermissionHandler:
     ) -> PermissionResultAllow | PermissionResultDeny | None:
         """Apply write gate — called for every tool in _WRITE_GATED_TOOLS.
 
-        Returns a result to short-circuit, or None to continue normal permission flow.
+        Returns a PermissionResult to short-circuit handle(), or None to
+        continue the normal permission flow (steps 1-4).
 
         Decision tree:
-        1. Safe-dir match → None (fall through to auto-approve via safe-dir logic)
-        2. Already approved + not Bash → PermissionResultAllow immediately
-        3. Not in worktree → PermissionResultDeny (informative message)
+        1. Safe-dir match → Allow immediately (user configured these dirs)
+        2. Already approved + not Bash → Allow immediately
+        3. Not in worktree → Deny with guidance to use EnterWorktree
         4. In worktree, first write → Slack approval; cache non-Bash on allow
         """
         # Safe-dir bypass: always takes precedence (even without worktree)
         file_path = input_data.get(_WRITE_TOOL_PATH_KEYS.get(tool_name, ""), "")
         if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
-            logger.debug("Safe-dir write auto-approved: %s → %s", tool_name, file_path)
-            return None
+            logger.debug("Safe-dir write allowed: %s → %s", tool_name, file_path)
+            return PermissionResultAllow()
         # Already approved session (Bash still requires HITL each time)
         if self._write_access_granted and tool_name != "Bash":
             return PermissionResultAllow()
