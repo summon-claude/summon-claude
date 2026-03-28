@@ -115,8 +115,8 @@ _WRITE_GATED_TOOLS = frozenset(
 # Bash has no reliable file path — always gate unless worktree entered.
 _WRITE_TOOL_PATH_KEYS: dict[str, str] = {
     "Write": "file_path",
-    "Edit": "file_path",
-    "MultiEdit": "file_path",
+    "Edit": "path",
+    "MultiEdit": "path",
     "NotebookEdit": "notebook_path",
     # Bash has no reliable file path — always gate unless worktree entered
 }
@@ -585,14 +585,6 @@ class PermissionHandler:
 
         blocks = _build_ask_user_blocks(request_id, questions)
         try:
-            # Ping user in main channel FIRST so the notification arrives
-            if self._authenticated_user_id:
-                try:
-                    await self._router.post_to_main(
-                        f"<@{self._authenticated_user_id}> Question from Claude",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to post ask-user ping to main channel: %s", e)
             ref = await self._router.client.post_interactive(
                 "Claude has a question for you",
                 blocks=blocks,
