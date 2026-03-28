@@ -45,9 +45,18 @@ INTERNAL_COMMANDS: frozenset[str] = frozenset(
     }
 )
 
+
 # Alias-derived commands (e.g., "p add", "s list") are not expected
 # in docs — only the canonical names are documented.
-_ALIAS_PREFIXES = ("p", "s")
+def _get_alias_prefixes() -> tuple[str, ...]:
+    from summon_claude.cli import AliasedGroup
+
+    if hasattr(AliasedGroup, "_ALIASES"):
+        return tuple(AliasedGroup._ALIASES.keys())
+    return ()
+
+
+_ALIAS_PREFIXES = _get_alias_prefixes()
 
 
 def _is_excluded(path: Path) -> bool:

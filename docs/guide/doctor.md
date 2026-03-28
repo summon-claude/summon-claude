@@ -14,9 +14,9 @@ All checks run in parallel and produce a status summary:
 
 ```
 [PASS] Environment: Python 3.12.8, claude found
-[PASS] Slack: auth.test passed
-[PASS] Database: Database OK
 [INFO] Daemon: Daemon not running (start with `summon start`)
+[PASS] Database: Database OK
+[PASS] Slack: auth.test passed
 [INFO] Logs: daemon.log and 3 session log(s) found
 [SKIP] Mcp Workspace: Scribe not enabled (skipping workspace MCP check)
 [SKIP] Mcp Github: No GitHub token stored (run `summon auth github login`)
@@ -104,17 +104,19 @@ Validates the stored GitHub OAuth token:
 
 ## Verbose output
 
-Pass the `-v` flag for detailed output including per-check details, suggestions, and log tails:
+Pass `-v` to the root `summon` command for detailed output including per-check details, suggestions, and log tails:
 
 ```bash
 summon -v doctor
 ```
 
+Note: `-v` is a global flag on `summon`, not on `doctor` — it must come before the subcommand.
+
 Verbose mode shows:
 
 - **Details** — itemized sub-findings for each check
 - **Suggestions** — actionable next steps when issues are found
-- **Collected logs** — the last 20 lines of relevant log files, redacted
+- **Collected logs** — the last 20 lines of each collected log (up to 100 lines are collected per log file), redacted
 
 ---
 
@@ -166,7 +168,7 @@ This requires the `gh` CLI to be installed and authenticated. The command:
 4. Asks for confirmation before submitting
 5. Creates an issue on the summon-claude repository
 
-`--submit` is blocked in non-interactive mode (`--no-interactive`) to prevent accidental submissions.
+`--submit` prints an error and skips submission in non-interactive mode (`--no-interactive`) to prevent accidental submissions.
 
 ---
 
@@ -174,7 +176,7 @@ This requires the `gh` CLI to be installed and authenticated. The command:
 
 All doctor output — terminal, exports, and submissions — is automatically redacted. The redactor strips:
 
-- **API tokens** — Slack (`xoxb-`, `xapp-`), Anthropic (`sk-ant-`), GitHub (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`)
+- **API tokens** — Slack (`xox*`, `xapp-*`), Anthropic (`sk-ant-*`), GitHub (`ghp_`, `gho_`, `ghu_`, `ghs_`, `ghr_`, `github_pat_`)
 - **File paths** — home directory replaced with `~`, data/config directories replaced with `[data_dir]`/`[config_dir]`
 - **Slack IDs** — user, channel, team, and bot IDs replaced with `U***`, `C***`, `T***`, `B***`
 - **Session UUIDs** — truncated to the first 8 characters
