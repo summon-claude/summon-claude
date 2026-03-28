@@ -21,7 +21,7 @@ All checks run in parallel and produce a status summary:
 [SKIP] Mcp Workspace: Scribe not enabled (skipping workspace MCP check)
 [SKIP] Mcp Github: No GitHub token stored (run `summon auth github login`)
 
-7 checks: 2 passed, 2 info, 2 skipped
+7 checks: 3 passed, 2 info, 2 skipped
 ```
 
 Each check produces one of five statuses:
