@@ -51,9 +51,7 @@ INTERNAL_COMMANDS: frozenset[str] = frozenset(
 def _get_alias_prefixes() -> tuple[str, ...]:
     from summon_claude.cli import AliasedGroup
 
-    if hasattr(AliasedGroup, "_ALIASES"):
-        return tuple(AliasedGroup._ALIASES.keys())
-    return ()
+    return tuple(AliasedGroup._ALIASES.keys())
 
 
 _ALIAS_PREFIXES = _get_alias_prefixes()
