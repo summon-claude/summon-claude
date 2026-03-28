@@ -111,14 +111,14 @@ _WRITE_GATED_TOOLS = frozenset(
     ]
 )
 
-# Primary file-path argument key per tool (for safe-dir lookup).
+# File-path argument keys per tool, in priority order (for safe-dir lookup).
+# Matches the tuple-fallback pattern in response.py's _TOOL_PATH_KEYS.
 # Bash has no reliable file path — always gate unless worktree entered.
-_WRITE_TOOL_PATH_KEYS: dict[str, str] = {
-    "Write": "file_path",
-    "Edit": "path",
-    "MultiEdit": "path",
-    "NotebookEdit": "notebook_path",
-    # Bash has no reliable file path — always gate unless worktree entered
+_WRITE_TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
+    "Write": ("file_path", "path"),
+    "Edit": ("file_path", "path"),
+    "MultiEdit": ("file_path", "path"),
+    "NotebookEdit": ("notebook_path",),
 }
 
 
@@ -195,16 +195,16 @@ class _AskUserState:
 
 
 class PermissionHandler:
-    """Handles tool permission requests with 500ms debouncing and Slack interactive buttons.
+    """Handles tool permission requests with debounced Slack interactive messages.
+
+    Read-only by default: write-gated tools (Write, Edit, Bash, etc.) are
+    denied until the agent enters a worktree. Safe-dir exceptions allow
+    configured directories to bypass the worktree requirement.
 
     Safe tools (Read, Grep, Glob, WebSearch, WebFetch) are auto-approved.
-    Risky tools (Write, Edit, Bash, etc.) are batched into a single Slack
-    message per debounce window and wait for user approval.
-
-    Permission messages are posted with reply_broadcast=True (when in a thread)
-    and <!channel> to notify all channel members. The 500ms debounce window
-    batches rapid permission requests into a single message, so <!channel>
-    fires once per batch — not once per individual tool request.
+    Permission messages are posted as normal messages and deleted after
+    the user clicks Approve/Deny/Approve-for-session. The debounce window
+    (default 2000ms, configurable) batches rapid requests into one message.
     """
 
     def __init__(
@@ -328,13 +328,19 @@ class PermissionHandler:
         4. In worktree, first write → Slack approval; cache non-Bash on allow
         """
         # Safe-dir bypass: always takes precedence (even without worktree)
-        file_path = input_data.get(_WRITE_TOOL_PATH_KEYS.get(tool_name, ""), "")
+        file_path = ""
+        for key in _WRITE_TOOL_PATH_KEYS.get(tool_name, ()):
+            file_path = input_data.get(key, "")
+            if file_path:
+                break
         if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
             logger.debug("Safe-dir write allowed: %s → %s", tool_name, file_path)
             return PermissionResultAllow()
-        # Already approved session (Bash still requires HITL each time)
-        if self._write_access_granted and tool_name != "Bash":
-            return PermissionResultAllow()
+        # Already approved — fall through to normal flow (steps 1-4).
+        # Non-Bash tools are session-cached at step 2e. Bash reaches step 2e
+        # (session-cacheable via "Approve for session") or step 4 (HITL).
+        if self._write_access_granted:
+            return None
         # No worktree: hard deny
         if not self._in_worktree:
             logger.info("Write gate: denying %s (no active worktree)", tool_name)

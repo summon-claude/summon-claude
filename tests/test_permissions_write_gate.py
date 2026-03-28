@@ -179,14 +179,18 @@ class TestWriteGateBehavior:
     async def test_subsequent_write_auto_approved(self):
         handler, _ = _make_handler()
         handler._write_access_granted = True
+        # After gate approval, non-Bash tools are session-cached (step 2e)
+        handler._session_approved_tools.add("Write")
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultAllow)
 
-    async def test_bash_not_session_cached_after_gate(self):
+    async def test_bash_not_auto_cached_by_gate_approval(self):
         handler, _ = _make_handler()
         handler._write_access_granted = True
-        # Bash should NOT be in session cache
+        # Gate approval caches Write/Edit/etc but NOT Bash
         assert "Bash" not in handler._session_approved_tools
+        assert "Write" not in handler._session_approved_tools  # not auto-cached here
+        # Bash can be session-cached via explicit "Approve for session" click
 
     async def test_write_tools_session_cached_after_gate(self):
         handler, _ = _make_handler()
