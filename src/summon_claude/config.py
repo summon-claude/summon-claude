@@ -610,9 +610,31 @@ class SummonConfig(BaseSettings):
 
     @classmethod
     def from_file(cls, config_path: str | None = None) -> SummonConfig:
-        if config_path:
-            return cls(_env_file=config_path)
-        return cls()
+        """Load config from env file, re-raising Pydantic errors with clean messages.
+
+        Pydantic's ``ValidationError`` includes ``input_value`` dumps that can
+        leak secret values.  This method catches those and re-raises a plain
+        ``ValueError`` listing only the field names and error types.
+        """
+        from pydantic import ValidationError  # noqa: PLC0415
+
+        try:
+            if config_path:
+                return cls(_env_file=config_path)
+            return cls()
+        except ValidationError as exc:
+            missing = [str(err["loc"][0]) for err in exc.errors() if err["type"] == "missing"]
+            if missing:
+                msg = f"{len(missing)} required field(s) missing: {', '.join(missing)}"
+            else:
+                parts = []
+                for err in exc.errors():
+                    field = ".".join(str(loc) for loc in err["loc"])
+                    parts.append(f"{field}: {err['msg']}")
+                msg = f"{exc.error_count()} validation error(s):\n" + "\n".join(
+                    f"  - {p}" for p in parts
+                )
+            raise ValueError(msg) from None
 
     def validate(self) -> None:
         """Validate required configuration fields and raise with clear errors."""

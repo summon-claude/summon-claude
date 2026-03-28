@@ -904,20 +904,13 @@ class TestDoctorCli:
         body = _build_submit_body(results)
         assert "```" in body
 
-    def test_format_config_error_pydantic_missing(self) -> None:
-        """ValidationError should list missing fields, not dump input_value."""
-        from pydantic import ValidationError
-
-        from summon_claude.cli.doctor import _format_config_error
-
-        # Construct a ValidationError with missing-field errors
-        try:
-            SummonConfig.model_validate({})
-        except ValidationError as e:
-            result = _format_config_error(e, lambda s: s)
-            assert "required field(s) missing" in result
-            assert "input_value" not in result
-            assert "slack_bot_token" in result
+    def test_from_file_sanitizes_pydantic_missing(self) -> None:
+        """from_file should raise ValueError with clean message, not Pydantic's input_value dump."""
+        with pytest.raises(ValueError, match=r"required field.*missing") as exc_info:
+            SummonConfig.from_file("/dev/null")
+        msg = str(exc_info.value)
+        assert "input_value" not in msg
+        assert "slack_bot_token" in msg
 
     def test_format_config_error_generic(self) -> None:
         """Non-ValidationError should redact via the provided function."""

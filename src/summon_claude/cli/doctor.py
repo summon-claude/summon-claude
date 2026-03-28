@@ -89,14 +89,7 @@ async def async_doctor(
 
 
 def _format_config_error(exc: Exception, redact_fn: Callable[[str], str]) -> str:
-    """Format a config loading error, avoiding Pydantic's verbose input_value dump."""
-    from pydantic import ValidationError  # noqa: PLC0415
-
-    if isinstance(exc, ValidationError):
-        missing = [err["loc"][0] for err in exc.errors() if err["type"] == "missing"]
-        if missing:
-            return f"{len(missing)} required field(s) missing: {', '.join(str(f) for f in missing)}"
-        return f"{exc.error_count()} validation error(s)"
+    """Format a config loading error for diagnostic output."""
     return redact_fn(str(exc))
 
 
