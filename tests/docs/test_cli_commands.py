@@ -73,29 +73,12 @@ def _command_prefix_of(ref: str, valid_names: set[str]) -> str | None:
     return None
 
 
-# Top-level command/group/alias first-words — used for fast prose filtering.
-# Any ref whose first word is not in this set cannot be a real command.
-_VALID_FIRST_WORDS: frozenset[str] = frozenset(
-    {
-        "auth",
-        "config",
-        "db",
-        "doctor",
-        "hooks",
-        "init",
-        "project",
-        "reset",
-        "session",
-        "start",
-        "stop",
-        "version",
-        "p",  # alias for project
-        "s",  # alias for session
-    }
-)
+def _extract_first_words(click_commands: set[str]) -> frozenset[str]:
+    """Derive valid first words from Click command paths."""
+    return frozenset(cmd.split()[0] for cmd in click_commands if cmd)
 
 
-def _is_prose_artifact(ref: str) -> bool:
+def _is_prose_artifact(ref: str, valid_first_words: frozenset[str]) -> bool:
     """
     Return True if the parsed ref is almost certainly a prose false-positive.
 
@@ -114,7 +97,7 @@ def _is_prose_artifact(ref: str) -> bool:
     if "summon" in words:
         return True
     # First word must be a known entry point
-    return bool(words and words[0] not in _VALID_FIRST_WORDS)
+    return bool(words and words[0] not in valid_first_words)
 
 
 # ---------------------------------------------------------------------------
@@ -124,6 +107,7 @@ def _is_prose_artifact(ref: str) -> bool:
 
 def test_documented_commands_exist(click_commands: set[str]) -> None:
     """Every 'summon <cmd>' reference in docs (non-auto-generated) must be a real command."""
+    valid_first_words = _extract_first_words(click_commands)
     fabricated: list[tuple[str, Path]] = []
 
     all_md = sorted(_DOCS_DIR.rglob("*.md"))
@@ -133,7 +117,7 @@ def test_documented_commands_exist(click_commands: set[str]) -> None:
         content = md_file.read_text(encoding="utf-8")
         refs = parse_cli_command_refs(content)
         for ref in refs:
-            if _is_prose_artifact(ref):
+            if _is_prose_artifact(ref, valid_first_words):
                 continue
             # Accept if any prefix of the ref words is a valid command/group/alias.
             # This handles "project remove my-api" -> "project remove".
@@ -157,6 +141,7 @@ def test_documented_commands_exist(click_commands: set[str]) -> None:
 
 def test_all_commands_are_documented(click_commands: set[str]) -> None:
     """Every Click command must appear in at least one human-authored guide doc."""
+    valid_first_words = _extract_first_words(click_commands)
     # Collect all command refs from human-authored docs.
     # Because parse_cli_command_refs may include trailing arguments (e.g.
     # "project remove my-api"), we use prefix matching: a click command is
@@ -167,7 +152,9 @@ def test_all_commands_are_documented(click_commands: set[str]) -> None:
             continue
         content = md_file.read_text(encoding="utf-8")
         documented_refs |= {
-            ref for ref in parse_cli_command_refs(content) if not _is_prose_artifact(ref)
+            ref
+            for ref in parse_cli_command_refs(content)
+            if not _is_prose_artifact(ref, valid_first_words)
         }
 
     def _is_documented(cmd: str) -> bool:
