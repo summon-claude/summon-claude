@@ -566,8 +566,7 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    ":lock: *Permission requested* <!channel>\n"
-                    "Claude wants to run:\n"
+                    "Permission required: Claude wants to run:\n"
                     "`Bash` — `./deploy.sh --env staging`"
                 ),
             },
@@ -584,6 +583,14 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
                 },
                 {
                     "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Approve for session",
+                    },
+                    "action_id": "permission_approve_session_mock",
+                },
+                {
+                    "type": "button",
                     "text": {"type": "plain_text", "text": "Deny"},
                     "style": "danger",
                     "action_id": "permission_deny_mock",
@@ -594,7 +601,7 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
 
     resp = client.chat_postMessage(
         channel=channel_id,
-        text="Permission requested: Bash — ./deploy.sh --env staging",
+        text="Permission required: Bash — ./deploy.sh --env staging",
         blocks=blocks,
     )
     ts = resp.get("ts")

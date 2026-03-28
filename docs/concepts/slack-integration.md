@@ -51,7 +51,9 @@ Output methods:
 | `react()` | Add a reaction emoji to a message |
 | `unreact()` | Remove a reaction emoji |
 | `upload_file()` | Upload a file snippet (for large outputs) |
-| `post_ephemeral()` | Post a message visible only to one user (for permission prompts) |
+| `post_ephemeral()` | Post a message visible only to one user |
+| `post_interactive()` | Post a message with interactive buttons (for permission prompts, deleted after interaction) |
+| `delete_message()` | Delete a message by timestamp (best-effort) |
 | `canvas_create()` | Create a channel canvas |
 | `canvas_sync()` | Replace canvas body content |
 | `canvas_rename()` | Update canvas title |
