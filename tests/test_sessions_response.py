@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from claude_agent_sdk import (
@@ -1161,3 +1161,47 @@ class TestFileChangeCallback:
         # Should not raise
         await streamer._handle_assistant_message(msg)
         await asyncio.sleep(0.05)
+
+
+class TestWorktreeDetectionCallback:
+    """Tests for EnterWorktree detection in ResponseStreamer."""
+
+    async def test_enter_worktree_triggers_callback(self):
+        """EnterWorktree ToolUseBlock should fire the on_worktree_entered callback."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        block = make_tool_use_block("EnterWorktree", {"name": "test-wt"})
+        msg = make_assistant_message([block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+
+        callback.assert_called_once()
+
+    async def test_other_tools_do_not_trigger_callback(self):
+        """Non-EnterWorktree tools should NOT fire the callback."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        block = make_tool_use_block("Read", {"file_path": "/f"})
+        msg = make_assistant_message([block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+
+        callback.assert_not_called()
+
+    async def test_no_callback_no_error(self):
+        """EnterWorktree without callback configured should not raise."""
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router)  # no on_worktree_entered
+
+        block = make_tool_use_block("EnterWorktree", {"name": "test"})
+        msg = make_assistant_message([block])
+        await streamer._handle_assistant_message(msg)
+        await asyncio.sleep(0.05)
+        # No error = pass

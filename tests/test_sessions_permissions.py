@@ -621,16 +621,19 @@ class TestSessionApprovalCaching:
         h1._session_approved_tools.add("Edit")
         assert "Edit" not in h2._session_approved_tools
 
-    def test_approve_session_button_in_blocks(self):
-        handler, _, _ = make_handler()
-        # Access the approval message construction indirectly
-        # by checking the button action_id is in the expected set
-        expected_actions = {
-            "permission_approve",
-            "permission_approve_session",
-            "permission_deny",
-        }
-        assert expected_actions  # placeholder — functional test above covers behavior
+    async def test_approve_session_button_in_blocks(self):
+        """Verify 'Approve for session' button appears in approval blocks."""
+        handler, provider, _ = make_handler()
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        await handler.handle("Bash", {"command": "echo hi"}, None)
+        call_kwargs = provider.post_interactive.call_args.kwargs
+        blocks = call_kwargs.get("blocks", [])
+        actions_block = next((b for b in blocks if b.get("type") == "actions"), None)
+        assert actions_block is not None
+        action_ids = {e["action_id"] for e in actions_block["elements"]}
+        assert "permission_approve_session" in action_ids
+        assert "permission_approve" in action_ids
+        assert "permission_deny" in action_ids
 
 
 class TestIdentityVerificationFailClosed:

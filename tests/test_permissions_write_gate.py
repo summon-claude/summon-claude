@@ -226,3 +226,61 @@ class TestWriteGateBehavior:
             "Write", {"file_path": str(tmp_path / "src" / "main.py")}, None
         )
         assert isinstance(result, PermissionResultDeny)
+
+
+class TestWriteGateFullFlow:
+    """End-to-end integration tests for the full permission flow with write gate."""
+
+    async def test_deny_then_worktree_then_approve(self):
+        """Full flow: Write denied → EnterWorktree → Write approved."""
+        handler, client = _make_handler()
+
+        # 1. Write before worktree → denied
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+        assert "worktree" in result.message.lower()
+
+        # 2. EnterWorktree detected
+        handler.notify_entered_worktree()
+        assert handler._in_worktree
+
+        # 3. Write after worktree → one-time approval prompt
+        from tests.test_sessions_permissions import _interactive_auto_approve
+
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        assert handler._write_access_granted
+
+        # 4. Subsequent Write → auto-approved (no HITL)
+        client.post_interactive.reset_mock()
+        result = await handler.handle("Edit", {"path": "/g"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should NOT have posted another interactive message
+        client.post_interactive.assert_not_called()
+
+        # 5. Bash still requires HITL even after gate approval
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called_once()
+
+    async def test_write_gate_denial_does_not_set_flag(self):
+        """User denying after worktree entry should NOT set _write_access_granted."""
+        handler, client = _make_handler()
+        handler.notify_entered_worktree()
+
+        from tests.test_sessions_permissions import _interactive_auto_deny
+
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+        assert not handler._write_access_granted
+
+    async def test_read_grep_glob_unaffected_by_gate(self):
+        """Read-only tools should work regardless of gate state."""
+        handler, _ = _make_handler()
+        # Not in worktree, no safe-dirs — gate active
+        for tool in ("Read", "Grep", "Glob", "WebSearch"):
+            result = await handler.handle(tool, {}, None)
+            assert isinstance(result, PermissionResultAllow), f"{tool} should be auto-approved"
