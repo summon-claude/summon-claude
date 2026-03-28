@@ -30,13 +30,23 @@ Install the Google extra if you haven't already:
     pipx inject summon-claude workspace-mcp
     ```
 
-First, run the guided setup to create Google OAuth credentials:
+Run the guided setup to create Google OAuth credentials:
 
 ```bash
 summon auth google setup
 ```
 
-This walks you through creating a GCP project, enabling the required APIs, configuring the OAuth consent screen, and downloading your credentials.
+The setup walks you through four steps:
+
+1. **Google Cloud Project** — create or select a GCP project. The wizard prints `gcloud` commands for copy-paste and provides console deep-links.
+2. **Enable APIs** — enable the Gmail, Calendar, and Drive APIs. Clickable deep-links open the API enablement page directly.
+3. **OAuth Consent Screen** — configure the consent screen branding and set publishing status to Production (avoids 7-day token expiry). You'll see an "unverified app" warning during login — this is normal for personal use.
+4. **Create OAuth Client** — create a "Desktop app" OAuth client and download `client_secret.json`. The wizard accepts either the JSON file path or a manually pasted Client ID + Secret.
+
+Each step can be skipped with `s` if you've already completed it. Step 4 is required to save credentials.
+
+!!! tip "Already have a GCP project with OAuth configured?"
+    You can skip steps 1-3 and go straight to step 4 to provide your existing `client_secret.json`.
 
 Then authenticate with Google:
 
