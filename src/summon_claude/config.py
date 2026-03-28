@@ -426,6 +426,9 @@ class SummonConfig(BaseSettings):
     # Permission handling
     permission_debounce_ms: int = 2000
 
+    # Write gate — directories where writes are allowed without worktree entry
+    safe_write_dirs: str = ""  # comma-separated relative paths (e.g. "hack/,.dev/")
+
     # Content display
     max_inline_chars: int = 2500
 
@@ -1023,6 +1026,16 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Disable Update Check",
         help_text="Disable automatic update checks on startup",
         input_type="flag",
+        advanced=True,
+    ),
+    # Permissions
+    ConfigOption(
+        field_name="safe_write_dirs",
+        env_key="SUMMON_SAFE_WRITE_DIRS",
+        group="Permissions",
+        label="Safe Write Directories",
+        help_text="Dirs where writes skip worktree (comma-separated, e.g. hack/)",
+        input_type="text",
         advanced=True,
     ),
     # Thinking

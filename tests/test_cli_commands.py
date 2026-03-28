@@ -117,6 +117,7 @@ class TestCmdInit:
                     "",  # max_inline_chars (accept default)
                     "",  # permission_debounce_ms (accept default)
                     "y",  # no_update_check (flag)
+                    "",  # safe_write_dirs (accept default)
                     "y",  # enable_thinking (flag)
                     "n",  # show_thinking (flag)
                 ]

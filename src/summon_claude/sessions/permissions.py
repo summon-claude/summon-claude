@@ -9,6 +9,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import aiohttp
@@ -84,6 +85,40 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
 )
 
 _PERMISSION_TIMEOUT_S = 300  # 5 minutes
+
+
+def _is_in_safe_dir(file_path: str, safe_dirs: list[str], project_root: Path | None) -> bool:
+    """Return True if file_path resolves to within any of the safe_dirs.
+
+    Security constraints:
+    - project_root must be an absolute path; if missing or relative, returns False (fail-closed).
+    - Both file_path and each safe dir are resolved via Path.resolve() before comparison
+      to prevent symlink escapes.
+    - project_root is used to resolve relative file paths only; it is not itself a safe dir.
+    """
+    if not project_root or not project_root.is_absolute():
+        return False
+
+    if not safe_dirs:
+        return False
+
+    try:
+        fp = Path(file_path)
+        resolved_file = (project_root / fp).resolve() if not fp.is_absolute() else fp.resolve()
+    except (ValueError, OSError):
+        return False
+
+    for safe_dir in safe_dirs:
+        if not safe_dir:
+            continue
+        try:
+            resolved_safe = (project_root / safe_dir).resolve()
+            if resolved_file.is_relative_to(resolved_safe):
+                return True
+        except (ValueError, OSError):
+            continue
+
+    return False
 
 
 async def _dismiss_ephemeral(response_url: str) -> None:
