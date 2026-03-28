@@ -151,6 +151,8 @@ class _BatchState:
     events: dict[str, asyncio.Event] = field(default_factory=dict)
     decisions: dict[str, bool] = field(default_factory=dict)
     message_ts: dict[str, str] = field(default_factory=dict)
+    # Tool names per batch — used to populate session-approve cache on approval
+    tool_names: dict[str, list[str]] = field(default_factory=dict)
 
 
 @dataclass
@@ -200,6 +202,9 @@ class PermissionHandler:
         # Per-batch tracking (events, decisions)
         self._batch = _BatchState()
 
+        # Session-lifetime per-tool approval cache
+        self._session_approved_tools: set[str] = set()
+
         # AskUserQuestion tracking
         self._ask_user = _AskUserState()
 
@@ -245,6 +250,15 @@ class PermissionHandler:
         # the session's permissions.
         if tool_name.startswith(_SUMMON_MCP_AUTO_APPROVE_PREFIXES):
             logger.debug("Auto-approving summon MCP tool: %s", tool_name)
+            return PermissionResultAllow()
+
+        # 2e. Session-lifetime cached approvals (SC-2/SEC-D-001: defense-in-depth
+        # check ensures GitHub require-approval tools are never session-cached)
+        if (
+            tool_name in self._session_approved_tools
+            and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
+        ):
+            logger.debug("Session-approved tool: %s", tool_name)
             return PermissionResultAllow()
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist
@@ -307,6 +321,7 @@ class PermissionHandler:
         batch_id = str(uuid.uuid4())
         batch_event = asyncio.Event()
         self._batch.events[batch_id] = batch_event
+        self._batch.tool_names[batch_id] = [req.tool_name for req in batch.values()]
 
         await self._post_approval_message(batch_id, batch)
 
@@ -331,6 +346,7 @@ class PermissionHandler:
         self._batch.events.pop(batch_id, None)
         self._batch.decisions.pop(batch_id, None)
         self._batch.message_ts.pop(batch_id, None)
+        self._batch.tool_names.pop(batch_id, None)
 
     async def _post_approval_message(self, batch_id: str, batch: dict[str, PendingRequest]) -> None:
         """Post the Slack interactive approval message for a batch of requests."""
@@ -347,6 +363,7 @@ class PermissionHandler:
             header_text = f"Claude wants to perform {len(requests)} actions:\n{summaries}"
 
         approve_value = f"approve:{batch_id}"
+        approve_session_value = f"approve_session:{batch_id}"
         deny_value = f"deny:{batch_id}"
 
         blocks = [
@@ -364,6 +381,15 @@ class PermissionHandler:
                         "style": "primary",
                         "action_id": "permission_approve",
                         "value": approve_value,
+                    },
+                    {
+                        "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Approve for session",
+                        },
+                        "action_id": "permission_approve_session",
+                        "value": approve_session_value,
                     },
                     {
                         "type": "button",
@@ -411,6 +437,14 @@ class PermissionHandler:
         if value.startswith("approve:"):
             batch_id = value[len("approve:") :]
             approved = True
+        elif value.startswith("approve_session:"):
+            batch_id = value[len("approve_session:") :]
+            approved = True
+            # Cache tool names for session lifetime
+            # (except GitHub require-approval — those always need HITL)
+            for name in self._batch.tool_names.get(batch_id, []):
+                if name not in _GITHUB_MCP_REQUIRE_APPROVAL:
+                    self._session_approved_tools.add(name)
         elif value.startswith("deny:"):
             batch_id = value[len("deny:") :]
             approved = False
@@ -425,11 +459,15 @@ class PermissionHandler:
         if msg_ts:
             await self._router.client.delete_message(msg_ts)
 
-        # Post a persistent confirmation to the turn thread (SEC-D-007:
+        # Post a persistent confirmation to the turn thread (SC-3/SEC-D-007:
         # include tool names since the interactive message is now deleted)
+        tool_names = self._batch.tool_names.get(batch_id, [])
+        tool_list = ", ".join(f"`{t}`" for t in tool_names) if tool_names else "tools"
+        session_suffix = " for session" if value.startswith("approve_session:") else ""
         status_text = ":white_check_mark: Approved" if approved else ":x: Denied"
         try:
-            await self._router.post_to_active_thread(f"{status_text} by user")
+            msg = f"{status_text}{session_suffix}: {tool_list}"
+            await self._router.post_to_active_thread(msg)
         except Exception as e:
             logger.warning("Failed to post permission confirmation: %s", e)
 
