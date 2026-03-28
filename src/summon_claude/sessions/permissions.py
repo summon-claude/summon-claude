@@ -115,8 +115,8 @@ _WRITE_GATED_TOOLS = frozenset(
 # Bash has no reliable file path — always gate unless worktree entered.
 _WRITE_TOOL_PATH_KEYS: dict[str, str] = {
     "Write": "file_path",
-    "Edit": "path",
-    "MultiEdit": "path",
+    "Edit": "file_path",
+    "MultiEdit": "file_path",
     "NotebookEdit": "notebook_path",
     # Bash has no reliable file path — always gate unless worktree entered
 }
