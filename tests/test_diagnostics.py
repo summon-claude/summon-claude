@@ -912,13 +912,6 @@ class TestDoctorCli:
         assert "input_value" not in msg
         assert "slack_bot_token" in msg
 
-    def test_format_config_error_generic(self) -> None:
-        """Non-ValidationError should redact via the provided function."""
-        from summon_claude.cli.doctor import _format_config_error
-
-        result = _format_config_error(RuntimeError("kaboom"), lambda s: s.upper())
-        assert result == "KABOOM"
-
     async def test_run_checks_crash_recovery(self) -> None:
         """A crashing check should produce a synthetic fail result."""
         from summon_claude.cli.doctor import _run_checks

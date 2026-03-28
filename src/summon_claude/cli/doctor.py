@@ -6,7 +6,6 @@ import asyncio
 import dataclasses
 import json
 import shutil
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -88,32 +87,26 @@ async def async_doctor(
         await _handle_submit(results, no_interactive)
 
 
-def _format_config_error(exc: Exception, redact_fn: Callable[[str], str]) -> str:
-    """Format a config loading error for diagnostic output."""
-    return redact_fn(str(exc))
-
-
 def _load_config(
     config_path: str | None,
     results: list[CheckResult],
 ) -> SummonConfig | None:
     """Try loading SummonConfig, append synthetic fail on error."""
     from summon_claude.config import SummonConfig as _Config  # noqa: PLC0415
-    from summon_claude.slack.client import (  # noqa: PLC0415
-        redact_secrets as _redact_err,
-    )
+    from summon_claude.slack.client import redact_secrets  # noqa: PLC0415
 
     try:
         return _Config.from_file(config_path)
     except Exception as e:
-        safe_err = _format_config_error(e, _redact_err)
         # Synthetic subsystem — not in KNOWN_SUBSYSTEMS/DIAGNOSTIC_REGISTRY
         # because it's produced inline, not by a registered check.
         results.append(
             CheckResult(
                 status="fail",
                 subsystem="config",
-                message=(f"Config failed to load: {safe_err}. Run `summon init` to set up."),
+                message=(
+                    f"Config failed to load: {redact_secrets(str(e))}. Run `summon init` to set up."
+                ),
             )
         )
         return None
