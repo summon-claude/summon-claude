@@ -55,6 +55,16 @@ _GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
 # GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
 # even if SDK suggestions say "allow". Defense-in-depth against broad
 # allowedTools patterns in settings.json bypassing HITL.
+# Summon's own MCP tools — always auto-approved.
+# These are internal tools provided by the session's own MCP servers
+# (summon-cli, summon-slack, summon-canvas) and already scoped to
+# the session's permissions.
+_SUMMON_MCP_AUTO_APPROVE_PREFIXES = (
+    "mcp__summon-cli__",
+    "mcp__summon-slack__",
+    "mcp__summon-canvas__",
+)
+
 _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     [
         # Destructive operations
@@ -191,6 +201,14 @@ class PermissionHandler:
             _GITHUB_MCP_AUTO_APPROVE_PREFIXES
         ):
             logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
+            return PermissionResultAllow()
+
+        # 2d. Summon's own MCP tools — always auto-approved.
+        # These are internal tools provided by the session's own MCP servers
+        # (summon-cli, summon-slack, summon-canvas) and already scoped to
+        # the session's permissions.
+        if tool_name.startswith(_SUMMON_MCP_AUTO_APPROVE_PREFIXES):
+            logger.debug("Auto-approving summon MCP tool: %s", tool_name)
             return PermissionResultAllow()
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist

@@ -14,6 +14,7 @@ from summon_claude.sessions.permissions import (
     _GITHUB_MCP_AUTO_APPROVE,
     _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
     _GITHUB_MCP_REQUIRE_APPROVAL,
+    _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -526,6 +527,40 @@ class TestGitHubMCPGuardTests:
             assert not tool.startswith(_GITHUB_MCP_AUTO_APPROVE_PREFIXES), (
                 f"{tool} matches an auto-approve prefix"
             )
+
+
+class TestSummonMCPAutoApprove:
+    """Guard + behavior tests for summon internal MCP auto-approval."""
+
+    def test_summon_mcp_prefixes_pinned(self):
+        assert _SUMMON_MCP_AUTO_APPROVE_PREFIXES == (
+            "mcp__summon-cli__",
+            "mcp__summon-slack__",
+            "mcp__summon-canvas__",
+        )
+
+    async def test_summon_cli_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-cli__session_list", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_summon_slack_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-slack__slack_read_history", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_summon_canvas_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-canvas__summon_canvas_read", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_unknown_mcp_tool_not_auto_approved(self):
+        handler, provider, _ = make_handler()
+        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        result = await handler.handle("mcp__unknown__foo", {}, None)
+        # Falls through to HITL — not auto-approved by summon prefixes
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_ephemeral.assert_called_once()
 
 
 class TestIdentityVerificationFailClosed:
