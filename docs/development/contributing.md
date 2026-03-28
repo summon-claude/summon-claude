@@ -107,6 +107,7 @@ summon-claude follows [Conventional Commits](https://www.conventionalcommits.org
 | `project` | Project lifecycle and management (`cli/project.py`) |
 | `scribe` | Scribe monitoring agent |
 | `canvas` | Canvas storage and MCP tools (`canvas_mcp.py`, `slack/canvas_store.py`) |
+| `diagnostics` | Diagnostic checks and doctor command (`diagnostics.py`, `cli/doctor.py`) |
 | `plugin` | Claude Code plugin skill and manifest (`.claude-plugin/`) |
 
 **Infrastructure scopes:**

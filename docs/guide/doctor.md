@@ -181,7 +181,7 @@ All doctor output — terminal, exports, and submissions — is automatically re
 - **Slack IDs** — user, channel, team, and bot IDs replaced with `U***`, `C***`, `T***`, `B***`
 - **Session UUIDs** — truncated to the first 8 characters
 
-This makes it safe to share diagnostic output or submit reports without leaking credentials or personally identifiable information.
+This removes credentials, well-known ID formats, and filesystem paths from output. Review exported or submitted reports before sharing — log content from third-party libraries may contain information not covered by these patterns.
 
 ---
 
