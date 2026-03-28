@@ -1,4 +1,18 @@
-"""Debounced permission handler — batches tool approval requests and posts to Slack."""
+"""Debounced permission handler — batches tool approval requests and posts to Slack.
+
+Permission check flow (handle() steps):
+  0.  AskUserQuestion  → intercepted, rendered as Slack interactive UI
+  0b. Write gate       → enforces read-only default; bypassed by worktree entry,
+                         safe-dir match, or prior session approval
+  1.  SDK deny         → always honored unconditionally
+  2.  Static allowlist → _AUTO_APPROVE_TOOLS (Read, Grep, Glob, …)
+  2b. GitHub deny-list → _GITHUB_MCP_REQUIRE_APPROVAL always sent to Slack
+  2c. GitHub allowlist → exact names and get_/list_/search_ prefixes
+  2d. Summon MCP       → summon-cli/summon-slack/summon-canvas tools
+  2e. Session cache    → tools approved for the session lifetime
+  3.  SDK allow        → secondary, after static lists
+  4.  Slack HITL       → interactive approve/deny/approve-for-session buttons
+"""
 
 # pyright: reportArgumentType=false, reportReturnType=false
 # claude_agent_sdk doesn't ship type stubs
@@ -84,6 +98,29 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
 )
 
 _PERMISSION_TIMEOUT_S = 300  # 5 minutes
+
+# Tools that write to the filesystem — gated until worktree entry.
+# MultiEdit is included defensively even though it's not currently in
+# the codebase (harmless if unused).
+_WRITE_GATED_TOOLS = frozenset(
+    [
+        "Write",
+        "Edit",
+        "MultiEdit",
+        "NotebookEdit",
+        "Bash",
+    ]
+)
+
+# Primary file-path argument key per tool (for safe-dir lookup).
+# Bash has no reliable file path — always gate unless worktree entered.
+_WRITE_TOOL_PATH_KEYS: dict[str, str] = {
+    "Write": "file_path",
+    "Edit": "path",
+    "MultiEdit": "path",
+    "NotebookEdit": "notebook_path",
+    # Bash has no reliable file path — always gate unless worktree entered
+}
 
 
 def _is_in_safe_dir(file_path: str, safe_dirs: list[str], project_root: Path | None) -> bool:
@@ -176,10 +213,19 @@ class PermissionHandler:
         router: ThreadRouter,
         config: SummonConfig,
         authenticated_user_id: str,
+        project_root: str = "",
     ) -> None:
         self._router = router
         self._authenticated_user_id = authenticated_user_id
         self._debounce_ms = config.permission_debounce_ms
+
+        # Write gate state
+        self._project_root: Path | None = Path(project_root) if project_root else None
+        self._safe_dirs: list[str] = [
+            d.strip() for d in config.safe_write_dirs.split(",") if d.strip()
+        ]
+        self._in_worktree = False
+        self._write_access_granted = False
 
         # Pending requests waiting for batched approval
         self._pending: dict[str, PendingRequest] = {}
@@ -206,12 +252,16 @@ class PermissionHandler:
         if tool_name == "AskUserQuestion":
             return await self._handle_ask_user_question(input_data)
 
+        # 0b. Write gate — enforce read-only default until worktree entry.
+        # Handles: worktree detection, safe-dir bypass, one-time approval caching.
+        if tool_name in _WRITE_GATED_TOOLS:
+            result = await self._check_write_gate(tool_name, input_data, context)
+            if result is not None:
+                return result
+
         # 1. Check SDK suggestions for deny — always honor denials unconditionally
-        if context is not None:
-            for suggestion in getattr(context, "suggestions", []) or []:
-                if getattr(suggestion, "behavior", None) == "deny":
-                    logger.info("SDK suggestion: denying %s", tool_name)
-                    return PermissionResultDeny(message="Denied by permission rules")
+        if _sdk_suggests_deny(context, tool_name):
+            return PermissionResultDeny(message="Denied by permission rules")
 
         # 2. Static auto-approve list is the primary gate for allowing tools
         if tool_name in _AUTO_APPROVE_TOOLS:
@@ -249,16 +299,59 @@ class PermissionHandler:
             return PermissionResultAllow()
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist
-        if context is not None:
-            for suggestion in getattr(context, "suggestions", []) or []:
-                if getattr(suggestion, "behavior", None) == "allow":
-                    logger.info("SDK suggestion: approving %s", tool_name)
-                    return PermissionResultAllow()
-                # behavior == "ask" or None falls through to Slack buttons
+        if _sdk_suggests_allow(context, tool_name):
+            return PermissionResultAllow()
 
         # 4. Request user approval via Slack
         logger.info("Permission required for tool: %s", tool_name)
         return await self._request_approval(tool_name, input_data, context)
+
+    def notify_entered_worktree(self) -> None:
+        """Called by response consumer when EnterWorktree tool use is detected."""
+        self._in_worktree = True
+        logger.info("Worktree entry detected — write gate can be unlocked")
+
+    async def _check_write_gate(
+        self,
+        tool_name: str,
+        input_data: dict[str, Any],
+        context: ToolPermissionContext | None,
+    ) -> PermissionResultAllow | PermissionResultDeny | None:
+        """Apply write gate — called for every tool in _WRITE_GATED_TOOLS.
+
+        Returns a result to short-circuit, or None to continue normal permission flow.
+
+        Decision tree:
+        1. Safe-dir match → None (fall through to auto-approve via safe-dir logic)
+        2. Already approved + not Bash → PermissionResultAllow immediately
+        3. Not in worktree → PermissionResultDeny (informative message)
+        4. In worktree, first write → Slack approval; cache non-Bash on allow
+        """
+        # Safe-dir bypass: always takes precedence (even without worktree)
+        file_path = input_data.get(_WRITE_TOOL_PATH_KEYS.get(tool_name, ""), "")
+        if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
+            logger.debug("Safe-dir write auto-approved: %s → %s", tool_name, file_path)
+            return None
+        # Already approved session (Bash still requires HITL each time)
+        if self._write_access_granted and tool_name != "Bash":
+            return PermissionResultAllow()
+        # No worktree: hard deny
+        if not self._in_worktree:
+            logger.info("Write gate: denying %s (no active worktree)", tool_name)
+            return PermissionResultDeny(
+                message="Write access requires a worktree. "
+                "Use EnterWorktree to create an isolated copy first."
+            )
+        # In worktree: one-time approval prompt
+        logger.info("Write gate: requiring approval for %s (in worktree)", tool_name)
+        result = await self._request_approval(tool_name, input_data, context)
+        if isinstance(result, PermissionResultAllow):
+            self._write_access_granted = True
+            # Cache all non-Bash gated tools (Bash must always go through HITL)
+            for name in _WRITE_GATED_TOOLS:
+                if name != "Bash":
+                    self._session_approved_tools.add(name)
+        return result
 
     async def _request_approval(
         self,
@@ -406,7 +499,6 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
-        response_url: str = "",
     ) -> None:
         """Handle a Slack interactive button click for permission approval/denial.
 
@@ -537,7 +629,6 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
-        response_url: str = "",
     ) -> None:
         """Handle a Slack button click for an AskUserQuestion option.
 
@@ -711,6 +802,28 @@ class PermissionHandler:
         # Clean up multi-select state for all questions in this request
         for i in range(len(questions)):
             self._ask_user.multi_selections.pop((request_id, i), None)
+
+
+def _sdk_suggests_deny(context: ToolPermissionContext | None, tool_name: str) -> bool:
+    """Return True if any SDK suggestion says to deny this tool."""
+    if context is None:
+        return False
+    for suggestion in getattr(context, "suggestions", []) or []:
+        if getattr(suggestion, "behavior", None) == "deny":
+            logger.info("SDK suggestion: denying %s", tool_name)
+            return True
+    return False
+
+
+def _sdk_suggests_allow(context: ToolPermissionContext | None, tool_name: str) -> bool:
+    """Return True if any SDK suggestion says to allow this tool."""
+    if context is None:
+        return False
+    for suggestion in getattr(context, "suggestions", []) or []:
+        if getattr(suggestion, "behavior", None) == "allow":
+            logger.info("SDK suggestion: approving %s", tool_name)
+            return True
+    return False
 
 
 def _parse_ask_user_value(value: str) -> tuple[str, int, str] | None:

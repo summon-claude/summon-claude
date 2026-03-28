@@ -3,8 +3,46 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
-from summon_claude.sessions.permissions import _is_in_safe_dir
+from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
+
+from helpers import make_mock_slack_client
+from summon_claude.config import SummonConfig
+from summon_claude.sessions.permissions import (
+    _WRITE_GATED_TOOLS,
+    PermissionHandler,
+    _is_in_safe_dir,
+)
+from summon_claude.slack.router import ThreadRouter
+
+
+def _make_config(safe_write_dirs: str = "", debounce_ms: int = 10):
+    return SummonConfig.model_validate(
+        {
+            "slack_bot_token": "xoxb-t",
+            "slack_app_token": "xapp-t",
+            "slack_signing_secret": "abcdef",
+            "permission_debounce_ms": debounce_ms,
+            "safe_write_dirs": safe_write_dirs,
+        }
+    )
+
+
+def _make_handler(
+    safe_write_dirs: str = "",
+    project_root: str = "/project",
+):
+    client = make_mock_slack_client()
+    router = ThreadRouter(client)
+    config = _make_config(safe_write_dirs=safe_write_dirs)
+    handler = PermissionHandler(
+        router,
+        config,
+        authenticated_user_id="U_TEST",
+        project_root=project_root,
+    )
+    return handler, client
 
 
 class TestIsSafeDir:
@@ -75,3 +113,83 @@ class TestIsSafeDir:
         target = safe / "notes.md"
         target.touch()
         assert _is_in_safe_dir(str(target), ["hack/"], tmp_path) is True
+
+
+class TestWriteGateGuards:
+    """Pin constants for the write gate."""
+
+    def test_write_gated_tools_pinned(self):
+        assert (
+            frozenset(
+                {
+                    "Write",
+                    "Edit",
+                    "MultiEdit",
+                    "NotebookEdit",
+                    "Bash",
+                }
+            )
+            == _WRITE_GATED_TOOLS
+        )
+
+
+class TestWriteGateBehavior:
+    """Tests for the write gate in PermissionHandler.handle()."""
+
+    async def test_write_denied_not_in_worktree(self):
+        handler, _ = _make_handler()
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+        assert "worktree" in result.message.lower()
+
+    async def test_bash_denied_not_in_worktree(self):
+        handler, _ = _make_handler()
+        result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultDeny)
+        assert "worktree" in result.message.lower()
+
+    async def test_read_not_gated(self):
+        handler, _ = _make_handler()
+        result = await handler.handle("Read", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_notify_worktree_sets_flag(self):
+        handler, _ = _make_handler()
+        assert not handler._in_worktree
+        handler.notify_entered_worktree()
+        assert handler._in_worktree
+
+    async def test_write_after_worktree_prompts_once(self):
+        handler, client = _make_handler()
+        handler.notify_entered_worktree()
+        # Mock post_interactive to auto-approve
+        from tests.test_sessions_permissions import _interactive_auto_approve
+
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        assert handler._write_access_granted
+
+    async def test_subsequent_write_auto_approved(self):
+        handler, _ = _make_handler()
+        handler._write_access_granted = True
+        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_bash_not_session_cached_after_gate(self):
+        handler, _ = _make_handler()
+        handler._write_access_granted = True
+        # Bash should NOT be in session cache
+        assert "Bash" not in handler._session_approved_tools
+
+    async def test_write_tools_session_cached_after_gate(self):
+        handler, _ = _make_handler()
+        handler.notify_entered_worktree()
+        from tests.test_sessions_permissions import _interactive_auto_approve
+
+        client = handler._router.client
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        await handler.handle("Write", {"file_path": "/f"}, None)
+        # Write/Edit/MultiEdit/NotebookEdit should be cached, Bash should not
+        assert "Write" in handler._session_approved_tools
+        assert "Bash" not in handler._session_approved_tools

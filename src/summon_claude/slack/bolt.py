@@ -777,6 +777,7 @@ class BoltRouter:
         app.event("message")(self._on_message)
         app.event("reaction_added")(self._on_reaction_added)
         app.action("permission_approve")(self._on_dispatch_action)
+        app.action("permission_approve_session")(self._on_dispatch_action)
         app.action("permission_deny")(self._on_dispatch_action)
         app.action(_ASK_USER_PATTERN)(self._on_dispatch_action)
 

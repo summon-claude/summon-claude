@@ -28,7 +28,10 @@ def make_handler(debounce_ms: int = 50):
     client = make_mock_slack_client()
     router = ThreadRouter(client)
     config = make_config(debounce_ms=debounce_ms)
-    return PermissionHandler(router, config, authenticated_user_id="U_TEST"), client, router
+    handler = PermissionHandler(router, config, authenticated_user_id="U_TEST")
+    # Bypass write gate entirely — stress tests exercise HITL batching, not the gate
+    handler._check_write_gate = AsyncMock(return_value=None)
+    return handler, client, router
 
 
 def _auto_approve_after_post(handler: PermissionHandler, delay: float = 0.05):

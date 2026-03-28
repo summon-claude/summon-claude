@@ -179,19 +179,21 @@ class ResponseStreamer:
     - StreamEvent with parent_tool_use_id -> subagent thread
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         router: ThreadRouter,
         user_id: str | None = None,
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
+        on_worktree_entered: Callable[[], None] | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
         self._show_thinking = show_thinking
         self._max_inline_chars = max_inline_chars
         self._on_file_change = on_file_change
+        self._on_worktree_entered = on_worktree_entered
 
         # Per-turn routing state (reset on each stream call)
         self._turn = _TurnState()
@@ -361,6 +363,9 @@ class ResponseStreamer:
         if block.name == "Task":
             description = _extract_task_description(block.input or {})
             await self._router.start_subagent_thread(block.id, description)
+
+        if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
+            self._on_worktree_entered()
 
         await self._post_tool_use(block, parent_id)
         # Set status AFTER posting — thread post auto-clears any previous status,

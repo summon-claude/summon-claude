@@ -35,11 +35,18 @@ def make_config(debounce_ms=10):
 
 
 def make_handler(debounce_ms=10, authenticated_user_id="U_TEST"):
-    """Create a PermissionHandler with a mocked ThreadRouter."""
+    """Create a PermissionHandler with a mocked ThreadRouter.
+
+    Sets _in_worktree=True so tests exercise the Slack approval flow for
+    write tools without hitting the write gate. Write gate behavior is
+    tested in test_permissions_write_gate.py.
+    """
     client = make_mock_slack_client()
     router = ThreadRouter(client)
     config = make_config(debounce_ms=debounce_ms)
     handler = PermissionHandler(router, config, authenticated_user_id=authenticated_user_id)
+    # Bypass write gate — these tests exercise HITL batching, not the gate
+    handler._check_write_gate = AsyncMock(return_value=None)
     return handler, client, router
 
 
