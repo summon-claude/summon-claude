@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-import aiohttp
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
 
 from summon_claude.config import SummonConfig
@@ -121,18 +120,6 @@ def _is_in_safe_dir(file_path: str, safe_dirs: list[str], project_root: Path | N
     return False
 
 
-async def _dismiss_ephemeral(response_url: str) -> None:
-    """Delete an ephemeral Slack message via its response_url."""
-    try:
-        async with aiohttp.ClientSession() as http:
-            await http.post(
-                response_url,
-                json={"delete_original": True},
-            )
-    except Exception as e:
-        logger.debug("Failed to dismiss ephemeral via response_url: %s", e)
-
-
 @dataclass
 class PendingRequest:
     """A single tool use permission request waiting for user approval."""
@@ -167,8 +154,8 @@ class _AskUserState:
     pending_other: tuple[str, int] | None = None
     # For multi-select: toggled selections per question keyed by (request_id, question_idx)
     multi_selections: dict[tuple[str, int], list[str]] = field(default_factory=dict)
-    # response_url for dismissing the ephemeral when all questions are answered
-    response_urls: dict[str, str] = field(default_factory=dict)
+    # ts of the interactive question message (for deletion on completion)
+    message_ts: dict[str, str] = field(default_factory=dict)
 
 
 class PermissionHandler:
@@ -514,11 +501,11 @@ class PermissionHandler:
                     )
                 except Exception as e:
                     logger.warning("Failed to post ask-user ping to main channel: %s", e)
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
+            ref = await self._router.client.post_interactive(
                 "Claude has a question for you",
                 blocks=blocks,
             )
+            self._ask_user.message_ts[request_id] = ref.ts
         except Exception as e:
             logger.error("Failed to post AskUserQuestion message: %s", e)
             self._cleanup_ask_user(request_id)
@@ -529,6 +516,10 @@ class PermissionHandler:
                 await event.wait()
         except TimeoutError:
             logger.warning("AskUserQuestion timed out")
+            # Delete the question message on timeout
+            msg_ts = self._ask_user.message_ts.get(request_id)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
             self._cleanup_ask_user(request_id)
             return PermissionResultDeny(message="Question timed out (5 minutes)")
 
@@ -569,10 +560,6 @@ class PermissionHandler:
         if request_id not in self._ask_user.events:
             return
 
-        # Store response_url for ephemeral dismissal on completion
-        if response_url and request_id not in self._ask_user.response_urls:
-            self._ask_user.response_urls[request_id] = response_url
-
         questions = self._ask_user.questions.get(request_id, [])
         if q_idx >= len(questions):
             return
@@ -590,15 +577,10 @@ class PermissionHandler:
         """Handle 'Other' button — set pending flag for free-text capture."""
         self._ask_user.pending_other = (request_id, q_idx)
         q_text = sanitize_for_mrkdwn(question.get("question", ""))
-        # Post as ephemeral to main channel so the user sees the prompt prominently
-        try:
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
-                f":pencil: Type your answer for: _{q_text}_",
-                blocks=[],
-            )
-        except Exception as e:
-            logger.debug("Failed to post 'Other' prompt: %s", e)
+        await _post_quietly(
+            self._router,
+            f":pencil: Type your answer for: _{q_text}_",
+        )
 
     async def _handle_ask_done(self, request_id: str, q_idx: int, question: dict) -> None:
         """Handle 'Done' button for multi-select — finalize toggled selections."""
@@ -705,14 +687,14 @@ class PermissionHandler:
         await self._check_ask_user_complete(request_id)
 
     async def _check_ask_user_complete(self, request_id: str) -> None:
-        """If all questions for a request are answered, dismiss ephemeral and signal."""
+        """If all questions for a request are answered, delete message and signal."""
         answers = self._ask_user.answers.get(request_id, {})
         expected = self._ask_user.expected.get(request_id, 0)
         if len(answers) >= expected:
-            # Dismiss the ephemeral message
-            url = self._ask_user.response_urls.get(request_id)
-            if url:
-                await _dismiss_ephemeral(url)
+            # Delete the interactive question message
+            msg_ts = self._ask_user.message_ts.get(request_id)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
             event = self._ask_user.events.get(request_id)
             if event:
                 event.set()
@@ -723,7 +705,7 @@ class PermissionHandler:
         questions = self._ask_user.questions.pop(request_id, [])
         self._ask_user.answers.pop(request_id, None)
         self._ask_user.expected.pop(request_id, None)
-        self._ask_user.response_urls.pop(request_id, None)
+        self._ask_user.message_ts.pop(request_id, None)
         if self._ask_user.pending_other and self._ask_user.pending_other[0] == request_id:
             self._ask_user.pending_other = None
         # Clean up multi-select state for all questions in this request

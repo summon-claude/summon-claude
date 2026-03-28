@@ -40,14 +40,7 @@ def _get_actions_block(blocks: list[dict], idx: int = 0) -> dict:
 
 def _extract_request_id(provider) -> str:
     """Extract the request_id from the last posted AskUserQuestion message."""
-    # Check ephemeral messages first (new path), then post_message (fallback)
-    for call in provider.post_ephemeral.call_args_list:
-        blocks = call.kwargs.get("blocks")
-        if blocks:
-            for b in blocks:
-                if b["type"] == "actions":
-                    return b["elements"][0]["value"].split("|")[0]
-    for call in provider.post.call_args_list:
+    for call in provider.post_interactive.call_args_list:
         blocks = call.kwargs.get("blocks")
         if blocks:
             for b in blocks:
@@ -424,9 +417,9 @@ class TestEdgeCases:
         ]
         task, req_id = await _start_ask(handler, provider, questions)
 
-        # Verify it posted question blocks, not permission buttons
+        # Verify it posted question blocks via post_interactive
         posted = False
-        for call in provider.post_ephemeral.call_args_list:
+        for call in provider.post_interactive.call_args_list:
             blocks = call.kwargs.get("blocks")
             if blocks and any(
                 b.get("type") == "section"
