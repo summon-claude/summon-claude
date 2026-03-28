@@ -93,14 +93,20 @@ This is defense-in-depth — deny-list precedence over prefix matching prevents 
 
 If the SDK provides an `allow` suggestion (from `settings.json` `allowedTools`), the tool is approved.
 
-### 6. Slack Approval Buttons (fallback)
+### 6. Write Gate (read-only default)
 
-All other tools — including `Write`, `Edit`, `Bash`, and any unknown tool — go through the Slack approval flow:
+Write-capable tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) are **denied by default** until the agent enters a worktree via `EnterWorktree`. This prevents accidental writes to the main working directory. Safe-dir exceptions (`SUMMON_SAFE_WRITE_DIRS`) allow configured directories to bypass the worktree requirement. Path validation uses `Path.resolve()` on both sides to prevent symlink escapes.
 
-1. Requests within the same 500ms debounce window are batched into a single Slack message (`SUMMON_PERMISSION_DEBOUNCE_MS`, default 500).
-2. The message posts as ephemeral (visible only to the authenticated user) with **Approve** and **Deny** buttons.
-3. A ping posts to the main channel to ensure the user gets a notification.
-4. If no response arrives within 5 minutes (`_PERMISSION_TIMEOUT_S = 300`), the request is automatically denied.
+### 7. Slack Approval Buttons (fallback)
+
+All other tools — and write-gated tools after worktree entry — go through the Slack approval flow:
+
+1. Requests within the same 2-second debounce window are batched into a single Slack message (`SUMMON_PERMISSION_DEBOUNCE_MS`, default 2000).
+2. The message posts as a normal message with **Approve**, **Approve for session**, and **Deny** buttons.
+3. After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.
+4. If no response arrives within 5 minutes (`_PERMISSION_TIMEOUT_S = 300`), the request is automatically denied and the message is deleted.
+
+"Approve for session" caches the tool name for the session lifetime — subsequent uses of the same tool are auto-approved. GitHub require-approval tools are never session-cached (defense-in-depth).
 
 Only the authenticated session owner (`authenticated_user_id`) can approve or deny — clicks from other users are logged and ignored.
 
@@ -141,7 +147,7 @@ Audit logs can be purged with `summon db purge`.
 
 `RedactingFormatter` wraps all log formatters as an additional safety net — log records are redacted before writing even if the application code forgets to call `redact_secrets()` explicitly.
 
-All `SlackClient` output methods (post, update, upload, ephemeral, canvas) call `redact_secrets()` at the Slack API boundary.
+All `SlackClient` output methods (post, update, upload, post_interactive, canvas) call `redact_secrets()` at the Slack API boundary.
 
 ## Session Isolation Model
 
@@ -162,7 +168,7 @@ Under normal single-tenant operation, this means only the session owner can inte
 
 These operations verify that the acting user matches the session's `authenticated_user_id`:
 
-- **Permission approvals** — Approve/Deny button clicks are checked in `PermissionHandler.handle_action`. Clicks from non-owners are logged and ignored. Permission messages are posted as ephemeral (visible only to the owner).
+- **Permission approvals** — Approve/Deny/Approve-for-session button clicks are checked in `PermissionHandler.handle_action`. Clicks from non-owners are logged and ignored. Permission messages are posted as normal messages in the private session channel and deleted after interaction.
 - **Reaction-based abort** — Only the owner's `:octagonal_sign:` reaction triggers a turn abort.
 - **`!summon start` / `!summon resume`** — Spawn and resume commands verify the requesting user.
 - **MCP tools** — `session_message`, `session_start`, `session_stop`, `session_info`, `session_list`, and `session_resume` all scope-guard by `authenticated_user_id`. Cross-channel canvas reads also verify ownership.

@@ -6,6 +6,30 @@ When Claude wants to run a tool that could modify files, execute commands, or ta
 
 ---
 
+## Read-only by default
+
+Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until the agent enters an isolated worktree.
+
+**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`
+
+When Claude tries to use a write-gated tool before entering a worktree, summon automatically denies the request with a message guiding Claude to use `EnterWorktree` first. Once Claude enters a worktree:
+
+1. The first write-gated tool triggers a **one-time Slack approval** prompt.
+2. After approval, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are approved for the rest of the session.
+3. `Bash` continues to require individual Slack approval on each use (reserved for future classifier integration).
+
+### Safe-dir exception
+
+You can configure directories where writes are allowed **without entering a worktree**:
+
+```bash
+summon config set safe_write_dirs "hack/,.dev/"
+```
+
+Files written to these directories bypass the worktree requirement entirely. Paths are resolved with symlink protection (`Path.resolve()` on both sides) to prevent escapes. Setting `safe_write_dirs=.` exempts the entire project directory for file-targeting tools (Bash remains gated regardless).
+
+---
+
 ## Auto-approved tools
 
 The following tools are always approved without prompting. They are read-only and cannot modify your system:
@@ -23,7 +47,7 @@ The following tools are always approved without prompting. They are read-only an
 | `FindSymbol` | Find a symbol definition |
 | `FindReferencingSymbols` | Find symbol references |
 
-All other tools — write operations (`Bash`, `Edit`, `Write`, `NotebookEdit`), network operations that send data, and any unknown tool — require Slack approval.
+Summon's own MCP tools (`summon-cli`, `summon-slack`, `summon-canvas`) are also auto-approved — they are internal tools already scoped to the session's permissions.
 
 ---
 
@@ -31,21 +55,27 @@ All other tools — write operations (`Bash`, `Edit`, `Write`, `NotebookEdit`), 
 
 When Claude requests a tool that needs approval:
 
-1. **Ping in the main channel** — summon posts `@you Permission needed` to notify you.
-2. **Ephemeral approval message** — an interactive message appears, visible only to you, describing what Claude wants to do.
-3. **You click Approve or Deny** — the ephemeral message disappears and a persistent confirmation is posted in the turn thread.
-4. **Claude continues** — if approved, Claude runs the tool; if denied, Claude is told the action was denied and adapts.
+1. **Interactive message** — summon posts a message in the session channel with the tool details and action buttons.
+2. **You click Approve, Approve for session, or Deny** — the interactive message is deleted and a persistent confirmation is posted in the turn thread.
+3. **Claude continues** — if approved, Claude runs the tool; if denied, Claude is told the action was denied and adapts.
 
 ```
 Claude wants to run:
 `Bash`: `npm run build`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 ```
+
+### Approve for session
+
+Clicking **Approve for session** caches the tool name for the remainder of the session. Subsequent uses of the same tool are auto-approved without a Slack prompt.
+
+!!! warning "GitHub write tools are never session-cached"
+    Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.
 
 ### Batched requests
 
-If Claude requests multiple tools within a 500ms window (configurable via `SUMMON_PERMISSION_DEBOUNCE_MS`), they are batched into a single approval message:
+If Claude requests multiple tools within a 2-second window (configurable via `SUMMON_PERMISSION_DEBOUNCE_MS`), they are batched into a single approval message:
 
 ```
 Claude wants to perform 3 actions:
@@ -53,13 +83,13 @@ Claude wants to perform 3 actions:
 2. `Write`: `src/auth/token.py`
 3. `Bash`: `python -m pytest tests/test_auth.py`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 ```
 
-Approve or Deny applies to all tools in the batch.
+Approve or Deny applies to all tools in the batch. "Approve for session" caches all tool names in the batch.
 
 !!! tip "Debounce tuning"
-    The default 500ms window catches most batches naturally. Lower it (e.g. `SUMMON_PERMISSION_DEBOUNCE_MS=200`) to reduce latency, or set it to `0` to get a separate message per tool.
+    The default 2000ms window catches most batches naturally. Lower it (e.g. `SUMMON_PERMISSION_DEBOUNCE_MS=500`) to reduce latency, or set it to `0` to get a separate message per tool.
 
 ---
 
@@ -68,6 +98,7 @@ Approve or Deny applies to all tools in the batch.
 Permission requests expire after **5 minutes**. If you do not respond:
 
 - The request is automatically denied.
+- The interactive message is deleted.
 - A timeout message is posted in the turn thread.
 - Claude is told the permission timed out and adapts (typically by reporting it could not complete the action).
 
@@ -104,7 +135,7 @@ Any GitHub MCP tool not on either list also requires Slack approval (fail-closed
 
 ## AskUserQuestion
 
-Claude can ask you structured questions mid-task using the `AskUserQuestion` tool. This appears as an ephemeral interactive message:
+Claude can ask you structured questions mid-task using the `AskUserQuestion` tool. This appears as an interactive message in the session channel:
 
 ```
 Claude has a question for you
@@ -117,7 +148,26 @@ Which database should I use for the session store?
 - **Multi-select:** toggle options, then click **Done**.
 - **Other:** click **Other** to type a free-text answer in the channel.
 
-Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered.
+Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered. The interactive message is deleted after all questions are answered.
+
+---
+
+## Permission flow (internal)
+
+The full permission evaluation order in `handle()`:
+
+| Step | Check | Result |
+|------|-------|--------|
+| 0 | AskUserQuestion intercept | Route to interactive UI |
+| 0b | Write gate (`_WRITE_GATED_TOOLS`) | Deny/Allow/prompt based on worktree + safe-dir state |
+| 1 | SDK deny suggestions | Deny |
+| 2 | Static auto-approve (`_AUTO_APPROVE_TOOLS`) | Allow |
+| 2b | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL |
+| 2c | GitHub auto-approve (prefix matching) | Allow |
+| 2d | Summon MCP auto-approve (prefix matching) | Allow |
+| 2e | Session-lifetime cached approvals | Allow (with GitHub deny-list guard) |
+| 3 | SDK allow suggestions | Allow |
+| 4 | Slack HITL (interactive message, deleted after) | User decides |
 
 ---
 
