@@ -429,9 +429,11 @@ class TestGoogleIntegration:
             fake_dir = Path(tmpdir) / "creds"
             # Skip sections 1-3 with "s", provide JSON path for section 4
             prompts = iter(["s", "s", "s", "", str(secret_file)])
+            env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
             with (
                 patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
                 patch("click.prompt", side_effect=prompts),
+                patch.dict("os.environ", env_patch),
             ):
                 google_setup()
 
@@ -449,7 +451,11 @@ class TestGoogleIntegration:
 
         runner = CliRunner()
         fake_dir = Path("/nonexistent")
-        with patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir):
+        env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
+        with (
+            patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+            patch.dict("os.environ", env_patch),
+        ):
             result = runner.invoke(cli, ["auth", "google", "login"])
         assert result.exit_code != 0
         assert "not configured" in result.output.lower() or "setup" in result.output.lower()

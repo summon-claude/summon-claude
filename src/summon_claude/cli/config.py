@@ -378,6 +378,8 @@ def google_setup() -> None:
         click.echo("     (avoids 7-day token expiry)\n")
         click.echo("Note: You'll see an 'unverified app' warning during login — this is")
         click.echo("normal for personal use.")
+        click.echo("If you already have a consent screen configured, you may see an edit")
+        click.echo("page instead — that's fine, just verify the settings.")
 
     # Section 4: Create OAuth Client & Download Credentials
     if not _setup_continue(4, "Create OAuth Client"):
@@ -419,7 +421,7 @@ def google_setup() -> None:
                 inner = data.get("installed") or data.get("web") or data
                 client_id = inner["client_id"]
                 client_secret = inner["client_secret"]
-            except (json_mod.JSONDecodeError, KeyError, TypeError) as e:
+            except (json_mod.JSONDecodeError, KeyError, TypeError, OSError) as e:
                 click.echo(f"Invalid client_secret.json: {e}")
                 continue
             # Copy JSON to credentials dir for workspace-mcp (0o600 from creation)

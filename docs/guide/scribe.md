@@ -41,6 +41,14 @@ The scribe has two data collectors, each with its own enable flag. Enable at lea
 summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
 ```
 
+First, run the guided setup to create Google OAuth credentials:
+
+```bash
+summon auth google setup
+```
+
+This walks you through creating a GCP project, enabling the required APIs, configuring the OAuth consent screen, and downloading your credentials.
+
 Then authenticate with Google:
 
 ```{ .bash .notest }
@@ -115,7 +123,7 @@ summon config set SUMMON_SCRIBE_GOOGLE_SERVICES gmail,calendar
 ```
 
 !!! note "Requires workspace-mcp"
-    The Google collector requires the `google` extra: `uv tool install "summon-claude[google]"`. Google OAuth credentials must also be configured via `summon auth google login`.
+    The Google collector requires the `google` extra: `uv tool install "summon-claude[google]"`. Google OAuth credentials must also be configured via `summon auth google setup` and `summon auth google login`.
 
 ### Slack channel monitoring
 

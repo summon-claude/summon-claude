@@ -312,13 +312,15 @@ This page covers common problems and their solutions. Issues are grouped by cate
     **Cause:** Missing or invalid `client_secret.json`, or the OAuth redirect URI is not configured.
 
     **Fix:**
-    1. Download `client_secret.json` from the Google Cloud Console for your OAuth app.
-    2. Place it in your summon data directory (check `summon config path` for the location).
-    3. Run the auth flow:
+    1. Run the guided setup to create and configure credentials:
+    ```{ .bash .notest }
+    summon auth google setup
+    ```
+    2. Then run the auth flow:
     ```{ .bash .notest }
     summon auth google login
     ```
-    4. Complete the browser-based consent flow.
+    3. Complete the browser-based consent flow.
 
 ???+ tip "Google scope validation fails"
     **Symptom:** summon reports that required Google scopes are missing even after authorizing.
@@ -340,7 +342,7 @@ This page covers common problems and their solutions. Issues are grouped by cate
     ```bash
     summon version
     ```
-    The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon auth google login`.
+    The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon auth google setup`.
 
 ---
 
