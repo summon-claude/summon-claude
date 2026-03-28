@@ -1388,8 +1388,13 @@ def main(
     This is a LOCAL developer tool — requires Claude CLI, summon config,
     and Slack browser credentials. Cannot run in CI.
 
-    Requires: SUMMON_TEST_SLACK_BOT_TOKEN.
+    Requires: SUMMON_TEST_SLACK_BOT_TOKEN (from .env or environment).
     """
+    # Load .env so credentials work without manual export
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     output_dir.mkdir(parents=True, exist_ok=True)
     all_sections = ["slack-setup", "session-ux", "terminal", "prompts", "schema"]
     sections = [section] if section else all_sections
