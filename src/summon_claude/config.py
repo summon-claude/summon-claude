@@ -963,7 +963,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         input_type="text",
         visible=_scribe_slack_enabled,
     ),
-    # Global PM (env-var-only — no wizard entries for M5)
+    # Global PM
     ConfigOption(
         field_name="global_pm_scan_interval_minutes",
         env_key="SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES",
@@ -971,7 +971,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Scan Interval (minutes)",
         help_text="How often the Global PM scans all projects",
         input_type="int",
-        visible=lambda _c: False,
+        advanced=True,
         validate_fn=_validate_scan_interval_minutes,
     ),
     ConfigOption(
@@ -981,7 +981,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Global PM Working Directory",
         help_text="Working directory for the Global PM (default: XDG data dir)",
         input_type="text",
-        visible=lambda _c: False,
+        advanced=True,
         validate_fn=lambda v: (
             None if not v or Path(v).is_absolute() else "Must be an absolute path"
         ),
@@ -993,7 +993,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Global PM Model",
         help_text="Claude model for the Global PM (default: inherits default_model)",
         input_type="text",
-        visible=lambda _c: False,
+        advanced=True,
     ),
     # Advanced options below this point
     # Display

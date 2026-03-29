@@ -85,7 +85,8 @@ See [GitHub Integration](../guide/github-integration.md) for setup details.
 
 ## Global PM
 
-These variables configure the Global Project Manager agent. They are not shown in `summon init` — set them directly with `summon config set`.
+!!! note "Advanced"
+    These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
 
 | Config Key | Type | Default | Description |
 |------------|------|---------|-------------|
