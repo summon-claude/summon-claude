@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
@@ -12,6 +12,7 @@ from summon_claude.config import SummonConfig
 from summon_claude.sessions.permissions import (
     _AUTO_APPROVE_TOOLS,
     _WRITE_GATED_TOOLS,
+    _WRITE_TOOL_PATH_KEYS,
     PermissionHandler,
     _is_in_safe_dir,
 )
@@ -126,6 +127,7 @@ class TestWriteGateGuards:
                 {
                     "Write",
                     "Edit",
+                    "str_replace_editor",
                     "MultiEdit",
                     "NotebookEdit",
                     "Bash",
@@ -133,6 +135,15 @@ class TestWriteGateGuards:
             )
             == _WRITE_GATED_TOOLS
         )
+
+    def test_write_tool_path_keys_pinned(self):
+        assert _WRITE_TOOL_PATH_KEYS == {
+            "Write": ("file_path", "path"),
+            "Edit": ("file_path", "path"),
+            "str_replace_editor": ("path", "file_path"),
+            "MultiEdit": ("file_path", "path"),
+            "NotebookEdit": ("notebook_path",),
+        }
 
     def test_write_gated_and_auto_approve_disjoint(self):
         """No tool should be both write-gated and auto-approved."""
@@ -153,7 +164,17 @@ class TestWriteGateBehavior:
         handler, _ = _make_handler()
         result = await handler.handle("Bash", {"command": "ls"}, None)
         assert isinstance(result, PermissionResultDeny)
-        assert "worktree" in result.message.lower()
+
+    async def test_sdk_deny_inside_gate_honored(self):
+        """SDK deny should fire even for safe-dir files."""
+        handler, _ = _make_handler()
+        suggestion = MagicMock()
+        suggestion.behavior = "deny"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+        result = await handler.handle("Write", {"file_path": "/f"}, context)
+        assert isinstance(result, PermissionResultDeny)
+        assert "permission rules" in result.message.lower()
 
     async def test_read_not_gated(self):
         handler, _ = _make_handler()
@@ -163,43 +184,53 @@ class TestWriteGateBehavior:
     async def test_notify_worktree_sets_flag(self):
         handler, _ = _make_handler()
         assert not handler._in_worktree
-        handler.notify_entered_worktree()
+        handler.notify_entered_worktree("test-wt")
         assert handler._in_worktree
+
+    async def test_notify_worktree_computes_root(self):
+        handler, _ = _make_handler(project_root="/project")
+        handler.notify_entered_worktree("feature-x")
+        assert handler._worktree_root is not None
+        assert str(handler._worktree_root).endswith(".claude/worktrees/feature-x")
+
+    async def test_notify_worktree_rejects_path_traversal(self):
+        """Worktree name with ../ should fail-closed (no CWD auto-approve)."""
+        handler, _ = _make_handler(project_root="/project")
+        handler.notify_entered_worktree("../../")
+        # Fail-closed: _worktree_root stays None, all writes require HITL
+        assert handler._worktree_root is None
+        assert handler._in_worktree is True  # gate can still be unlocked
+
+    async def test_notify_worktree_rejects_slash_in_name(self):
+        """Worktree name with / should fail-closed."""
+        handler, _ = _make_handler(project_root="/project")
+        handler.notify_entered_worktree("foo/bar")
+        assert handler._worktree_root is None
+
+    async def test_notify_worktree_no_name_stays_none(self):
+        """Empty worktree name should leave _worktree_root None (fail-closed)."""
+        handler, _ = _make_handler(project_root="/project")
+        handler.notify_entered_worktree("")
+        assert handler._worktree_root is None
 
     async def test_write_after_worktree_prompts_once(self):
         handler, client = _make_handler()
-        handler.notify_entered_worktree()
+        handler.notify_entered_worktree("test-wt")
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultAllow)
         assert handler._write_access_granted
 
-    async def test_subsequent_write_auto_approved(self):
+    async def test_gate_approval_does_not_blanket_cache_tools(self):
+        """Gate approval should NOT add write tools to _session_approved_tools."""
         handler, _ = _make_handler()
-        handler._write_access_granted = True
-        # After gate approval, non-Bash tools are session-cached (step 2e)
-        handler._session_approved_tools.add("Write")
-        result = await handler.handle("Write", {"file_path": "/f"}, None)
-        assert isinstance(result, PermissionResultAllow)
-
-    async def test_bash_not_auto_cached_by_gate_approval(self):
-        """Gate approval caches Write/Edit/etc but NOT Bash."""
-        handler, _ = _make_handler()
-        handler.notify_entered_worktree()
+        handler.notify_entered_worktree("test-wt")
         client = handler._router.client
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Write", {"file_path": "/f"}, None)
-        assert "Write" in handler._session_approved_tools
-        assert "Bash" not in handler._session_approved_tools
-
-    async def test_write_tools_session_cached_after_gate(self):
-        handler, _ = _make_handler()
-        handler.notify_entered_worktree()
-        client = handler._router.client
-        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
-        await handler.handle("Write", {"file_path": "/f"}, None)
-        # Write/Edit/MultiEdit/NotebookEdit should be cached, Bash should not
-        assert "Write" in handler._session_approved_tools
+        # No blanket caching — CWD containment handles it
+        assert "Write" not in handler._session_approved_tools
+        assert "Edit" not in handler._session_approved_tools
         assert "Bash" not in handler._session_approved_tools
 
     async def test_safe_dir_write_auto_approved_e2e(self, tmp_path: Path):
@@ -233,9 +264,11 @@ class TestWriteGateBehavior:
 class TestWriteGateFullFlow:
     """End-to-end integration tests for the full permission flow with write gate."""
 
-    async def test_deny_then_worktree_then_approve(self):
-        """Full flow: Write denied → EnterWorktree → Write approved."""
-        handler, client = _make_handler()
+    async def test_deny_then_worktree_then_approve(self, tmp_path: Path):
+        """Full flow: Write denied → EnterWorktree → Write within CWD approved."""
+        handler, client = _make_handler(project_root=str(tmp_path))
+        wt_dir = tmp_path / ".claude" / "worktrees" / "test-wt"
+        wt_dir.mkdir(parents=True)
 
         # 1. Write before worktree → denied
         result = await handler.handle("Write", {"file_path": "/f"}, None)
@@ -243,23 +276,28 @@ class TestWriteGateFullFlow:
         assert "worktree" in result.message.lower()
 
         # 2. EnterWorktree detected
-        handler.notify_entered_worktree()
+        handler.notify_entered_worktree("test-wt")
         assert handler._in_worktree
 
-        # 3. Write after worktree → one-time approval prompt
+        # 3. First write after worktree → one-time gate approval
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
-        result = await handler.handle("Write", {"file_path": "/f"}, None)
+        result = await handler.handle("Write", {"file_path": str(wt_dir / "f.py")}, None)
         assert isinstance(result, PermissionResultAllow)
         assert handler._write_access_granted
 
-        # 4. Subsequent Write → auto-approved (no HITL)
+        # 4. Subsequent Write within worktree → auto-approved (CWD containment)
         client.post_interactive.reset_mock()
-        result = await handler.handle("Edit", {"path": "/g"}, None)
+        result = await handler.handle("Edit", {"path": str(wt_dir / "g.py")}, None)
         assert isinstance(result, PermissionResultAllow)
-        # Should NOT have posted another interactive message
         client.post_interactive.assert_not_called()
 
-        # 5. Bash still requires HITL even after gate approval
+        # 5. Write OUTSIDE worktree → requires HITL
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Edit", {"file_path": "/etc/hosts"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called_once()
+
+        # 6. Bash still requires HITL even after gate approval
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "ls"}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -268,7 +306,7 @@ class TestWriteGateFullFlow:
     async def test_write_gate_denial_does_not_set_flag(self):
         """User denying after worktree entry should NOT set _write_access_granted."""
         handler, client = _make_handler()
-        handler.notify_entered_worktree()
+        handler.notify_entered_worktree("test-wt")
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultDeny)
@@ -281,3 +319,140 @@ class TestWriteGateFullFlow:
         for tool in ("Read", "Grep", "Glob", "WebSearch"):
             result = await handler.handle(tool, {}, None)
             assert isinstance(result, PermissionResultAllow), f"{tool} should be auto-approved"
+
+
+class TestCWDContainment:
+    """Tests for CWD-based write containment after gate approval."""
+
+    async def test_write_within_worktree_auto_approved(self, tmp_path: Path):
+        """Write to a path within the worktree should be auto-approved."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        result = await handler.handle("Write", {"file_path": str(wt_dir / "main.py")}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_write_outside_worktree_requires_hitl(self, tmp_path: Path):
+        """Write to a path outside the worktree should fall through to HITL."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Edit", {"file_path": "/etc/hosts"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_edit_with_dotdot_escape_requires_hitl(self, tmp_path: Path):
+        """Path traversal via .. should NOT be treated as within worktree."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        # This resolves outside the worktree
+        escape_path = str(wt_dir / ".." / ".." / ".." / "etc" / "passwd")
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Edit", {"file_path": escape_path}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_bash_always_falls_through(self, tmp_path: Path):
+        """Bash should never be auto-approved by CWD check (no file path to check)."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_sdk_allow_does_not_bypass_cwd_containment(self, tmp_path: Path):
+        """SDK allow suggestions must NOT bypass CWD containment for write tools."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+
+        # SDK says "allow Edit" (user configured allowedTools)
+        suggestion = MagicMock()
+        suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+
+        # Edit to /etc/hosts is outside worktree — must go to HITL
+        # even though SDK suggests allow
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Edit", {"file_path": "/etc/hosts"}, context)
+        assert isinstance(result, PermissionResultAllow)
+        # MUST have gone through HITL, not auto-approved by SDK
+        client.post_interactive.assert_called()
+
+    async def test_sdk_allow_still_works_for_non_write_tools(self):
+        """SDK allow should still work normally for non-write-gated tools."""
+        handler, client = _make_handler()
+        suggestion = MagicMock()
+        suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [suggestion]
+
+        result = await handler.handle("CustomTool", {"key": "val"}, context)
+        assert isinstance(result, PermissionResultAllow)
+        # Should NOT go to HITL — SDK allow works for non-write tools
+        client.post_interactive.assert_not_called()
+
+    async def test_no_worktree_root_falls_through(self):
+        """If worktree root is unknown, CWD check should fail-closed."""
+        handler, client = _make_handler(project_root="")
+        handler._in_worktree = True
+        handler._write_access_granted = True
+        # No worktree root → can't determine containment → falls through
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": "/some/file"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_relative_path_resolved_against_worktree(self, tmp_path: Path):
+        """Relative paths should be resolved against worktree root."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        # Relative path within worktree
+        result = await handler.handle("Write", {"file_path": "src/main.py"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_empty_path_not_auto_approved(self, tmp_path: Path):
+        """Empty file_path must NOT auto-approve via CWD containment."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": ""}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should go to HITL, not CWD auto-approve
+        client.post_interactive.assert_called()
+
+    async def test_whitespace_path_not_auto_approved(self, tmp_path: Path):
+        """Whitespace-only file_path must NOT auto-approve via CWD containment."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": "  "}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Whitespace-only should NOT pass CWD containment
+        client.post_interactive.assert_called()

@@ -10,13 +10,14 @@ When Claude wants to run a tool that could modify files, execute commands, or ta
 
 Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until the agent enters an isolated worktree.
 
-**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`
+**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` (and the SDK alias `str_replace_editor`)
 
 When Claude tries to use a write-gated tool before entering a worktree, summon automatically denies the request with a message guiding Claude to use `EnterWorktree` first. Once Claude enters a worktree:
 
 1. The first write-gated tool triggers a **one-time Slack approval** prompt.
-2. After approval, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are approved for the rest of the session.
-3. `Bash` always requires individual Slack approval — it cannot be session-cached. Future: command-pattern matching will allow per-command approval.
+2. After approval, writes **within the worktree** are auto-approved — CWD containment ensures file-targeting tools (Edit, Write, etc.) can only modify files inside the worktree without additional prompts.
+3. Writes **outside the worktree** still require Slack approval, with per-path session caching available.
+4. `Bash` always requires HITL on first use, with per-command session caching (exact match).
 
 ### Safe-dir exception
 
@@ -68,10 +69,23 @@ Claude wants to run:
 
 ### Approve for session
 
-Clicking **Approve for session** caches the tool name for the remainder of the session. Subsequent uses of the same tool are auto-approved without a Slack prompt.
+Clicking **Approve for session** caches the tool for the remainder of the session:
 
-!!! warning "Bash and GitHub write tools are never session-cached"
-    `Bash` and tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure. Future: command-pattern matching will allow per-command Bash approval.
+- **Write-gated tools** (Edit, Write, Bash, etc.) — the specific **argument** is cached: the file path for file tools, the command string for Bash. This prevents blanket `Edit(*)` or `Bash(*)` approval. Writes within the worktree are already auto-approved by CWD containment, so this mainly applies to writes outside the worktree and all Bash commands.
+- **Other tools** — the tool name is cached; all subsequent uses are auto-approved.
+
+The confirmation message shows what was cached:
+
+```
+✅ Approved for session: `Bash`: `git status`
+✅ Approved for session: `Edit`: `/etc/config.ini`
+```
+
+!!! warning "GitHub write tools are never session-cached"
+    Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.
+
+!!! info "CWD containment and `allowedTools`"
+    Write-gated tools that target paths outside the worktree always require Slack approval, even if your `~/.claude/settings.json` includes them in `allowedTools`. This is the same defense-in-depth principle used for GitHub tools — `allowedTools` cannot override CWD containment.
 
 ### Batched requests
 
@@ -86,7 +100,7 @@ Claude wants to perform 3 actions:
 [Approve]  [Approve for session]  [Deny]
 ```
 
-Approve or Deny applies to all tools in the batch. "Approve for session" caches all tool names in the batch.
+Approve or Deny applies to all tools in the batch. "Approve for session" caches each tool's primary argument (file path or command).
 
 !!! tip "Debounce tuning"
     The default 2000ms window catches most batches naturally. Lower it (e.g. `SUMMON_PERMISSION_DEBOUNCE_MS=500`) to reduce latency, or set it to `0` to get a separate message per tool.
@@ -159,14 +173,15 @@ The full permission evaluation order in `handle()`:
 | Step | Check | Result |
 |------|-------|--------|
 | 0 | AskUserQuestion intercept | Route to interactive UI |
-| 0b | Write gate (`_WRITE_GATED_TOOLS`) | Safe-dir → Allow; gate-approved → fall through; SDK deny → Deny; no worktree → Deny; in worktree → HITL |
+| 0b | Write gate (`_WRITE_GATED_TOOLS`) | SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through |
 | 1 | SDK deny suggestions | Deny |
 | 2 | Static auto-approve (`_AUTO_APPROVE_TOOLS`) | Allow |
 | 2b | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL |
 | 2c | GitHub auto-approve (prefix matching) | Allow |
 | 2d | Summon MCP auto-approve (prefix matching) | Allow |
-| 2e | Session-lifetime cached approvals | Allow (Bash and GitHub deny-list excluded) |
-| 3 | SDK allow suggestions | Allow |
+| 2e | Session-lifetime cached approvals | Allow (GitHub deny-list excluded) |
+| 2f | Per-argument cache (exact match on primary arg) | Allow if arg matches (GitHub deny-list excluded) |
+| 3 | SDK allow suggestions | Allow (write-gated tools excluded — CWD containment cannot be overridden) |
 | 4 | Slack HITL (interactive message, deleted after) | User decides |
 
 ---

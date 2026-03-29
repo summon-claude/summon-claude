@@ -568,23 +568,25 @@ class TestSummonMCPAutoApprove:
 class TestSessionApprovalCaching:
     """Tests for 'Approve for session' button and per-tool caching."""
 
-    async def test_approve_session_caches_tool_name(self):
-        handler, provider, _ = make_handler()
+    async def test_approve_session_caches_non_write_tool_by_name(self):
+        """Non-write-gated tools are cached by bare tool name."""
+        handler, _, _ = make_handler()
         batch_id = "test-batch"
         event = asyncio.Event()
         handler._batch.events[batch_id] = event
-        handler._batch.tool_names[batch_id] = ["Edit"]
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
 
         await handler.handle_action(
             value=f"approve_session:{batch_id}",
             user_id="U_TEST",
         )
-        assert "Edit" in handler._session_approved_tools
+        assert "CustomTool" in handler._session_approved_tools
 
     async def test_cached_tool_auto_approved(self):
         handler, provider, _ = make_handler()
-        handler._session_approved_tools.add("Edit")
-        result = await handler.handle("Edit", {"path": "/tmp/f"}, None)
+        handler._session_approved_tools.add("CustomTool")
+        result = await handler.handle("CustomTool", {"key": "val"}, None)
         assert isinstance(result, PermissionResultAllow)
         # Should not reach HITL
         provider.post_interactive.assert_not_called()
@@ -595,31 +597,34 @@ class TestSessionApprovalCaching:
         event = asyncio.Event()
         handler._batch.events[batch_id] = event
         handler._batch.tool_names[batch_id] = ["mcp__github__merge_pull_request"]
+        handler._batch.tool_inputs[batch_id] = [{}]
 
         await handler.handle_action(
             value=f"approve_session:{batch_id}",
             user_id="U_TEST",
         )
         assert "mcp__github__merge_pull_request" not in handler._session_approved_tools
+        assert "mcp__github__merge_pull_request" not in handler._session_approved_tool_args
 
     async def test_regular_approve_does_not_cache(self):
         handler, _, _ = make_handler()
         batch_id = "test-batch"
         event = asyncio.Event()
         handler._batch.events[batch_id] = event
-        handler._batch.tool_names[batch_id] = ["Edit"]
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
 
         await handler.handle_action(
             value=f"approve:{batch_id}",
             user_id="U_TEST",
         )
-        assert "Edit" not in handler._session_approved_tools
+        assert "CustomTool" not in handler._session_approved_tools
 
     async def test_session_cache_per_instance(self):
         h1, _, _ = make_handler()
         h2, _, _ = make_handler()
-        h1._session_approved_tools.add("Edit")
-        assert "Edit" not in h2._session_approved_tools
+        h1._session_approved_tools.add("CustomTool")
+        assert "CustomTool" not in h2._session_approved_tools
 
     async def test_approve_session_button_in_blocks(self):
         """Verify 'Approve for session' button appears in approval blocks."""
@@ -635,13 +640,14 @@ class TestSessionApprovalCaching:
         assert "permission_approve" in action_ids
         assert "permission_deny" in action_ids
 
-    async def test_bash_never_session_cached(self):
-        """Bash must not be session-cached even via explicit approve_session click."""
+    async def test_bash_never_session_cached_as_bare_tool(self):
+        """Bash must not appear in _session_approved_tools (bare tool cache)."""
         handler, _, _ = make_handler()
         batch_id = "test-batch"
         event = asyncio.Event()
         handler._batch.events[batch_id] = event
         handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
 
         await handler.handle_action(
             value=f"approve_session:{batch_id}",
@@ -671,6 +677,7 @@ class TestSessionApprovalCaching:
         event = asyncio.Event()
         handler._batch.events[batch_id] = event
         handler._batch.tool_names[batch_id] = ["Edit", "Write"]
+        handler._batch.tool_inputs[batch_id] = [{"path": "/f"}, {"file_path": "/g"}]
         handler._batch.message_ts[batch_id] = "1234.5678"
         handler._router.post_to_active_thread = AsyncMock()
 
@@ -682,6 +689,239 @@ class TestSessionApprovalCaching:
         assert "for session" in posted
         assert "`Edit`" in posted
         assert "`Write`" in posted
+
+
+class TestArgBasedCaching:
+    """Tests for per-argument session caching (Bash commands, file paths, etc.)."""
+
+    async def test_approve_session_caches_bash_command(self):
+        """approve_session should cache the exact Bash command."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "git status" in handler._session_approved_tool_args.get("Bash", set())
+
+    async def test_cached_bash_command_auto_approved(self):
+        """A Bash command in the arg cache should be auto-approved."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        result = await handler.handle("Bash", {"command": "git status"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+
+    async def test_different_bash_command_still_requires_hitl(self):
+        """A different Bash command should still require HITL."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "rm -rf /"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_called()
+
+    async def test_empty_bash_command_not_cached(self):
+        """Empty command strings should not be cached."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": ""}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tool_args
+
+    async def test_empty_bash_command_not_matched(self):
+        """An empty command should never match cached args."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": ""}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should have gone to HITL, not cache
+        provider.post_interactive.assert_called()
+
+    async def test_bash_command_exact_match_required(self):
+        """Bash commands must match exactly — no prefix matching."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "git status --short"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Different command → HITL
+        provider.post_interactive.assert_called()
+
+    async def test_mixed_batch_caches_write_tools_by_arg(self):
+        """A batch with write-gated tools caches all by primary arg."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"path": "/f"}, {"command": "make lint"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        # Both Edit and Bash use arg-based caching (write-gated)
+        assert "Edit" not in handler._session_approved_tools
+        assert "Bash" not in handler._session_approved_tools
+        assert "/f" in handler._session_approved_tool_args.get("Edit", set())
+        assert "make lint" in handler._session_approved_tool_args.get("Bash", set())
+
+    async def test_non_write_tool_cached_by_name(self):
+        """Non-write-gated tools are still cached by bare tool name."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "CustomTool" in handler._session_approved_tools
+
+    async def test_mixed_write_and_non_write_batch(self):
+        """Batch with write-gated and non-write-gated tools caches correctly."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "CustomTool", "Bash"]
+        handler._batch.tool_inputs[batch_id] = [
+            {"path": "/f"},
+            {"key": "val"},
+            {"command": "make lint"},
+        ]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        # Write-gated: cached by arg
+        assert "/f" in handler._session_approved_tool_args.get("Edit", set())
+        assert "make lint" in handler._session_approved_tool_args.get("Bash", set())
+        # Non-write-gated: cached by name
+        assert "CustomTool" in handler._session_approved_tools
+        # Write-gated tools must NOT be in bare name cache
+        assert "Edit" not in handler._session_approved_tools
+        assert "Bash" not in handler._session_approved_tools
+
+    async def test_confirmation_shows_primary_arg_for_write_tools(self):
+        """Session-approve confirmation for write tools should show the primary arg."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" in posted
+        assert "`Bash`" in posted
+        assert "`git status`" in posted
+
+    async def test_regular_approve_does_not_show_arg_in_confirmation(self):
+        """Regular approve should not show arg details in confirmation."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" not in posted
+        assert "`Bash`" in posted
+
+    async def test_arg_cache_per_instance(self):
+        """Arg caches should be per handler instance."""
+        h1, _, _ = make_handler()
+        h2, _, _ = make_handler()
+        h1._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        assert "Bash" not in h2._session_approved_tool_args
+
+    async def test_bash_no_command_key_not_cached(self):
+        """Bash with no 'command' key in input should not cache anything."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"description": "some desc"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tool_args
+
+    async def test_edit_path_cached_as_arg(self):
+        """Edit outside CWD should be cached by file path, not tool name."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit"]
+        handler._batch.tool_inputs[batch_id] = [{"file_path": "/etc/config.ini"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Edit" not in handler._session_approved_tools
+        assert "/etc/config.ini" in handler._session_approved_tool_args.get("Edit", set())
+
+    async def test_cached_edit_path_auto_approved(self):
+        """An Edit path in the arg cache should be auto-approved at step 2f."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Edit", set()).add("/etc/config.ini")
+        result = await handler.handle("Edit", {"file_path": "/etc/config.ini"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+
+    async def test_long_bash_commands_no_truncation_collision(self):
+        """Two long commands sharing first 120 chars must NOT collide in cache."""
+        handler, provider, _ = make_handler()
+        prefix = "x" * 120
+        cmd_a = prefix + "_command_a"
+        cmd_b = prefix + "_command_b"
+        handler._session_approved_tool_args.setdefault("Bash", set()).add(cmd_a)
+        # cmd_a should match
+        result = await handler.handle("Bash", {"command": cmd_a}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+        # cmd_b should NOT match (different full command)
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": cmd_b}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_called()
 
 
 class TestIdentityVerificationFailClosed:

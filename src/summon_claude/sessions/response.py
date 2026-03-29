@@ -44,9 +44,10 @@ _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
     "Read": ("file_path", "path"),
     "Cat": ("file_path", "path"),
-    "Edit": ("path", "file_path"),
+    "Edit": ("file_path", "path"),
     "str_replace_editor": ("path", "file_path"),
     "Write": ("file_path", "path"),
+    "MultiEdit": ("file_path", "path"),
     "Glob": ("pattern",),
     "Grep": ("pattern",),
     "NotebookEdit": ("notebook_path",),
@@ -155,8 +156,8 @@ class _TurnState:
     turn_thread_ts: str | None = None
     thinking_buffer: str = ""
     md_rendered_paths: set[str] = field(default_factory=set)
-    # Track EnterWorktree tool_use_ids so we can verify success on ToolResultBlock
-    pending_worktree_ids: set[str] = field(default_factory=set)
+    # Track EnterWorktree tool_use_ids → worktree name for callback
+    pending_worktree_names: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -188,7 +189,7 @@ class ResponseStreamer:
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
-        on_worktree_entered: Callable[[], None] | None = None,
+        on_worktree_entered: Callable[[str], None] | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
@@ -367,7 +368,8 @@ class ResponseStreamer:
             await self._router.start_subagent_thread(block.id, description)
 
         if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
-            self._turn.pending_worktree_ids.add(block.id)
+            wt_name = (block.input or {}).get("name", "")
+            self._turn.pending_worktree_names[block.id] = wt_name
 
         await self._post_tool_use(block, parent_id)
         # Set status AFTER posting — thread post auto-clears any previous status,
@@ -378,13 +380,9 @@ class ResponseStreamer:
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
-        if (
-            block.tool_use_id in self._turn.pending_worktree_ids
-            and not block.is_error
-            and self._on_worktree_entered is not None
-        ):
-            self._turn.pending_worktree_ids.discard(block.tool_use_id)
-            self._on_worktree_entered()
+        wt_name = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
+        if wt_name is not None and not block.is_error and self._on_worktree_entered is not None:
+            self._on_worktree_entered(wt_name)
         await self._post_tool_result(block, parent_id)
         # No _set_status — thread post auto-clears "Running {tool}...",
         # and the next block (tool use or text) arrives quickly.
