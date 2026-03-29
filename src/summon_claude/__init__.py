@@ -3,6 +3,6 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("summon-claude") or "unknown"
+    __version__ = version("summon-claude")
 except PackageNotFoundError:
     __version__ = "unknown"

@@ -822,72 +822,73 @@ def google_setup() -> None:
     else:
         readline.parse_and_bind("tab: complete")
 
-    while True:
-        # Scan Downloads on every iteration (catches newly downloaded files)
-        _detected = _scan_downloads()
-        if _detected:
-            _selected = _offer_detected(_detected)
-            if _selected:
-                response = _selected
+    try:
+        while True:
+            # Scan Downloads on every iteration (catches newly downloaded files)
+            _detected = _scan_downloads()
+            if _detected:
+                _selected = _offer_detected(_detected)
+                if _selected:
+                    response = _selected
+                else:
+                    # User declined detected files — fall through to manual input
+                    try:
+                        response = input("Path to client_secret.json (or paste Client ID): ")
+                    except EOFError:
+                        response = ""
             else:
-                # User declined detected files — fall through to manual input
                 try:
-                    response = input("Path to client_secret.json (or paste Client ID): ")
+                    response = input("Path or Client ID (Enter to re-scan ~/Downloads): ")
                 except EOFError:
                     response = ""
-        else:
-            try:
-                response = input("Path or Client ID (Enter to re-scan ~/Downloads): ")
-            except EOFError:
-                response = ""
 
-        if not response:
-            # Empty input = re-scan Downloads on next iteration
-            click.secho("  Scanning ~/Downloads...", dim=True)
-            continue
-
-        response = response.strip()
-        json_path = Path(response).expanduser()
-
-        if json_path.suffix == ".json" or json_path.exists():
-            # JSON file path
-            if not json_path.exists():
-                click.echo(f"File not found: {json_path}")
-                continue
-            try:
-                raw_text = json_path.read_text()
-                data = json_mod.loads(raw_text)
-                inner = data.get("installed") or data.get("web") or data
-                client_id = inner["client_id"]
-                client_secret = inner["client_secret"]
-            except (json_mod.JSONDecodeError, KeyError, TypeError, OSError) as e:
-                click.echo(f"Invalid client_secret.json: {e}")
-                continue
-            # Copy JSON to credentials dir for workspace-mcp (0o600 from creation)
-            dest = get_google_credentials_dir() / "client_secret.json"
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as f:
-                f.write(raw_text)
-            click.secho(f"  ✓ Copied {json_path.name} to {dest}", fg="green")
-        else:
-            # User pasted a Client ID directly — strip newlines to prevent
-            # format injection into client_env file (matches config_set pattern)
-            client_id = response.replace("\n", "").replace("\r", "")
-            client_secret = (
-                click.prompt("Google OAuth Client Secret", default="", show_default=False)
-                .replace("\n", "")
-                .replace("\r", "")
-            )
-            if not client_secret:
-                click.echo("Client Secret is required.")
+            if not response:
+                # Empty input = re-scan Downloads on next iteration
+                click.secho("  Scanning ~/Downloads...", dim=True)
                 continue
 
-        break
+            response = response.strip()
+            json_path = Path(response).expanduser()
 
-    # Restore readline state
-    readline.set_completer(_prev_completer)
-    readline.set_completer_delims(_prev_delims)
+            if json_path.suffix == ".json" or json_path.exists():
+                # JSON file path
+                if not json_path.exists():
+                    click.echo(f"File not found: {json_path}")
+                    continue
+                try:
+                    raw_text = json_path.read_text()
+                    data = json_mod.loads(raw_text)
+                    inner = data.get("installed") or data.get("web") or data
+                    client_id = inner["client_id"].replace("\n", "").replace("\r", "")
+                    client_secret = inner["client_secret"].replace("\n", "").replace("\r", "")
+                except (json_mod.JSONDecodeError, KeyError, TypeError, OSError) as e:
+                    click.echo(f"Invalid client_secret.json: {e}")
+                    continue
+                # Copy JSON to credentials dir for workspace-mcp (0o600 from creation)
+                dest = get_google_credentials_dir() / "client_secret.json"
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(raw_text)
+                click.secho(f"  ✓ Copied {json_path.name} to {dest}", fg="green")
+            else:
+                # User pasted a Client ID directly — strip newlines to prevent
+                # format injection into client_env file (matches config_set pattern)
+                client_id = response.replace("\n", "").replace("\r", "")
+                client_secret = (
+                    click.prompt("Google OAuth Client Secret", default="", show_default=False)
+                    .replace("\n", "")
+                    .replace("\r", "")
+                )
+                if not client_secret:
+                    click.echo("Client Secret is required.")
+                    continue
+
+            break
+    finally:
+        # Restore readline state even on KeyboardInterrupt
+        readline.set_completer(_prev_completer)
+        readline.set_completer_delims(_prev_delims)
 
     # Save credentials (atomic write with 0o600 from creation — no world-readable window)
     creds_dir = get_google_credentials_dir()
@@ -1154,7 +1155,7 @@ def google_auth() -> None:
         click.echo("  summon project up")
     else:
         click.echo("To use Google tools, enable the scribe agent:")
-        click.echo("  summon config set SUMMON_SCRIBE_ENABLED=true")
+        click.echo("  summon config set SUMMON_SCRIBE_ENABLED true")
         click.echo("  summon project up")
 
 
@@ -1240,7 +1241,6 @@ def _check_google_status(
     *,
     prefix: str = "",
     quiet: bool = False,
-    **_kw: str,
 ) -> bool | None:
     """Check Google Workspace authentication status.
 
@@ -1251,27 +1251,27 @@ def _check_google_status(
         from auth.credential_store import LocalDirectoryCredentialStore  # noqa: PLC0415
     except ImportError:
         if not quiet:
-            click.echo(f"{prefix}Google: not installed (install summon-claude[google])")
+            click.echo(f"{prefix}[INFO] Google: not installed (install summon-claude[google])")
         return None
 
     creds_dir = get_google_credentials_dir()
     if not creds_dir.exists():
         if not quiet:
-            click.echo(f"{prefix}Google: not configured (run `summon auth google setup`)")
+            click.echo(f"{prefix}[INFO] Google: not configured (run `summon auth google setup`)")
         return None
 
     store = LocalDirectoryCredentialStore(str(creds_dir))
     users = store.list_users()
     if not users:
         if not quiet:
-            click.echo(f"{prefix}Google: no credentials found")
+            click.echo(f"{prefix}[INFO] Google: no credentials found")
         return None
 
     all_ok = True
     for user in users:
         cred = store.get_credential(user)
         if not cred:
-            click.echo(f"{prefix}Google: invalid credential file ({user})")
+            click.echo(f"{prefix}[FAIL] Google: invalid credential file ({user})")
             all_ok = False
             continue
 
@@ -1280,7 +1280,9 @@ def _check_google_status(
         elif cred.expired and cred.refresh_token:
             status = "expired (will refresh on next use)"
         else:
-            click.echo(f"{prefix}Google: invalid — re-run `summon auth google login` ({user})")
+            click.echo(
+                f"{prefix}[FAIL] Google: invalid — re-run `summon auth google login` ({user})"
+            )
             all_ok = False
             continue
 
@@ -1288,7 +1290,7 @@ def _check_google_status(
             # Summarise granted access level per service.
             granted = set(cred.scopes or [])
             access = _describe_granted_scopes(granted)
-            click.echo(f"{prefix}Google: {status} ({user})")
+            click.echo(f"{prefix}[PASS] Google: {status} ({user})")
             if access:
                 click.echo(f"{prefix}  Access: {access}")
 
@@ -1515,19 +1517,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         all_pass = False
 
     # Google Workspace (optional, only if credentials exist)
-    google_result = _check_google_status(
-        prefix="  ", quiet=quiet, google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", "")
-    )
-    if google_result is not None:
-        # Credentials exist — report pass/fail
-        if google_result:
-            if not quiet:
-                click.echo("  [PASS] Google Workspace credentials valid")
-        else:
-            click.echo("  [FAIL] Google Workspace credentials have issues")
-            all_pass = False
-    elif not quiet:
-        click.echo("  [INFO] Google Workspace: not configured (summon auth google setup)")
+    google_result = _check_google_status(prefix="  ", quiet=quiet)
+    if google_result is False:
+        all_pass = False
 
     # Optional extras availability (informational)
     if not quiet:

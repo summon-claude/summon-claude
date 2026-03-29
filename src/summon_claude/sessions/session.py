@@ -211,7 +211,7 @@ _WORKTREE_DISALLOWED_TOOLS = frozenset(
 #
 # NOTE: disallowed_tools bare names don't match MCP-namespaced tool names
 # (mcp__server__tool). MCP tools are primarily defended by:
-# - workspace-mcp: --read-only flag (write tools never registered)
+# - workspace-mcp: OAuth scope gating (write access requires explicit grant at login)
 # - Slack/Canvas MCP: can_use_tool callback requires Slack button approval
 # - summon-cli: registered with is_pm=False (excludes session_start/stop/message/resume/log_status)
 # The bare names below are defense-in-depth for built-in tools (Cron*, Task*)

@@ -28,7 +28,6 @@ from summon_claude.cli.config import (
     google_auth,
     google_setup,
     google_status,
-    parse_env_file,
 )
 from summon_claude.cli.slack_auth import (
     _check_existing_slack_auth,
@@ -37,7 +36,7 @@ from summon_claude.cli.slack_auth import (
     slack_remove,
     slack_status,
 )
-from summon_claude.config import get_config_file, get_workspace_config_path
+from summon_claude.config import get_workspace_config_path
 
 # ---------------------------------------------------------------------------
 # summon auth
@@ -54,7 +53,6 @@ def cmd_auth() -> None:
 def auth_status(ctx: click.Context) -> None:
     """Show authentication status for all configured providers."""
     quiet = ctx.obj.get("quiet", False) if ctx.obj else False
-    values = parse_env_file(get_config_file(ctx.obj.get("config_path") if ctx.obj else None))
 
     any_configured = False
 
@@ -64,9 +62,7 @@ def auth_status(ctx: click.Context) -> None:
         any_configured = True
 
     # Google
-    google_result = _check_google_status(
-        prefix="  ", quiet=quiet, google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", "")
-    )
+    google_result = _check_google_status(prefix="  ", quiet=quiet)
     if google_result is not None:
         any_configured = True
 
