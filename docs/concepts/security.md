@@ -106,7 +106,7 @@ All other tools — and write-gated tools after worktree entry — go through th
 3. After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.
 4. If no response arrives within 5 minutes (`_PERMISSION_TIMEOUT_S = 300`), the request is automatically denied and the message is deleted.
 
-"Approve for session" caches the tool name for the session lifetime — subsequent uses of the same tool are auto-approved. GitHub require-approval tools are never session-cached (defense-in-depth).
+"Approve for session" caches the tool name for the session lifetime — subsequent uses of the same tool are auto-approved. `Bash` and GitHub require-approval tools are never session-cached (defense-in-depth).
 
 Only the authenticated session owner (`authenticated_user_id`) can approve or deny — clicks from other users are logged and ignored.
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
 
@@ -16,6 +16,7 @@ from summon_claude.sessions.permissions import (
     _is_in_safe_dir,
 )
 from summon_claude.slack.router import ThreadRouter
+from tests.test_sessions_permissions import _interactive_auto_approve, _interactive_auto_deny
 
 
 def _make_config(safe_write_dirs: str = "", debounce_ms: int = 10):
@@ -134,7 +135,7 @@ class TestWriteGateGuards:
         )
 
     def test_write_gated_and_auto_approve_disjoint(self):
-        """SEC-008: no tool should be both write-gated and auto-approved."""
+        """No tool should be both write-gated and auto-approved."""
         overlap = _WRITE_GATED_TOOLS & _AUTO_APPROVE_TOOLS
         assert not overlap, f"Overlap: {overlap}"
 
@@ -168,9 +169,6 @@ class TestWriteGateBehavior:
     async def test_write_after_worktree_prompts_once(self):
         handler, client = _make_handler()
         handler.notify_entered_worktree()
-        # Mock post_interactive to auto-approve
-        from tests.test_sessions_permissions import _interactive_auto_approve
-
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -185,18 +183,18 @@ class TestWriteGateBehavior:
         assert isinstance(result, PermissionResultAllow)
 
     async def test_bash_not_auto_cached_by_gate_approval(self):
+        """Gate approval caches Write/Edit/etc but NOT Bash."""
         handler, _ = _make_handler()
-        handler._write_access_granted = True
-        # Gate approval caches Write/Edit/etc but NOT Bash
+        handler.notify_entered_worktree()
+        client = handler._router.client
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        await handler.handle("Write", {"file_path": "/f"}, None)
+        assert "Write" in handler._session_approved_tools
         assert "Bash" not in handler._session_approved_tools
-        assert "Write" not in handler._session_approved_tools  # not auto-cached here
-        # Bash can be session-cached via explicit "Approve for session" click
 
     async def test_write_tools_session_cached_after_gate(self):
         handler, _ = _make_handler()
         handler.notify_entered_worktree()
-        from tests.test_sessions_permissions import _interactive_auto_approve
-
         client = handler._router.client
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Write", {"file_path": "/f"}, None)
@@ -205,7 +203,7 @@ class TestWriteGateBehavior:
         assert "Bash" not in handler._session_approved_tools
 
     async def test_safe_dir_write_auto_approved_e2e(self, tmp_path: Path):
-        """QA-003: end-to-end test for safe-dir write through handle()."""
+        """End-to-end test for safe-dir write through handle()."""
         safe = tmp_path / "hack"
         safe.mkdir()
         target = safe / "notes.md"
@@ -249,8 +247,6 @@ class TestWriteGateFullFlow:
         assert handler._in_worktree
 
         # 3. Write after worktree → one-time approval prompt
-        from tests.test_sessions_permissions import _interactive_auto_approve
-
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -273,9 +269,6 @@ class TestWriteGateFullFlow:
         """User denying after worktree entry should NOT set _write_access_granted."""
         handler, client = _make_handler()
         handler.notify_entered_worktree()
-
-        from tests.test_sessions_permissions import _interactive_auto_deny
-
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultDeny)

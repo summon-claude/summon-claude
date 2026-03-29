@@ -436,9 +436,8 @@ class SlackClient:
     ) -> MessageRef:
         """Post an interactive (button-bearing) message to the channel.
 
-        Functionally identical to post() — the separate method signals intent:
-        this message will have interactive elements and its ts will be tracked
-        for later deletion via delete_message().
+        Functionally identical to post(). Callers should store the returned
+        ``MessageRef.ts`` for later deletion via ``delete_message()``.
         """
         return await self.post(text, thread_ts=thread_ts, blocks=blocks)
 

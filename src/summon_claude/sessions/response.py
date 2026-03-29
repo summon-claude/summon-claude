@@ -155,6 +155,8 @@ class _TurnState:
     turn_thread_ts: str | None = None
     thinking_buffer: str = ""
     md_rendered_paths: set[str] = field(default_factory=set)
+    # Track EnterWorktree tool_use_ids so we can verify success on ToolResultBlock
+    pending_worktree_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -365,7 +367,7 @@ class ResponseStreamer:
             await self._router.start_subagent_thread(block.id, description)
 
         if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
-            self._on_worktree_entered()
+            self._turn.pending_worktree_ids.add(block.id)
 
         await self._post_tool_use(block, parent_id)
         # Set status AFTER posting — thread post auto-clears any previous status,
@@ -376,6 +378,13 @@ class ResponseStreamer:
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
+        if (
+            block.tool_use_id in self._turn.pending_worktree_ids
+            and not block.is_error
+            and self._on_worktree_entered is not None
+        ):
+            self._turn.pending_worktree_ids.discard(block.tool_use_id)
+            self._on_worktree_entered()
         await self._post_tool_result(block, parent_id)
         # No _set_status — thread post auto-clears "Running {tool}...",
         # and the next block (tool use or text) arrives quickly.

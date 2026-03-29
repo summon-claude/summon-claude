@@ -16,14 +16,14 @@ When Claude tries to use a write-gated tool before entering a worktree, summon a
 
 1. The first write-gated tool triggers a **one-time Slack approval** prompt.
 2. After approval, `Write`, `Edit`, `MultiEdit`, and `NotebookEdit` are approved for the rest of the session.
-3. `Bash` continues to require individual Slack approval on each use (reserved for future classifier integration).
+3. `Bash` always requires individual Slack approval — it cannot be session-cached. Future: command-pattern matching will allow per-command approval.
 
 ### Safe-dir exception
 
 You can configure directories where writes are allowed **without entering a worktree**:
 
 ```bash
-summon config set safe_write_dirs "hack/,.dev/"
+summon config set SUMMON_SAFE_WRITE_DIRS "hack/,.dev/"
 ```
 
 Files written to these directories bypass the worktree requirement entirely. Paths are resolved with symlink protection (`Path.resolve()` on both sides) to prevent escapes. Setting `safe_write_dirs=.` exempts the entire project directory for file-targeting tools (Bash remains gated regardless).
@@ -70,8 +70,8 @@ Claude wants to run:
 
 Clicking **Approve for session** caches the tool name for the remainder of the session. Subsequent uses of the same tool are auto-approved without a Slack prompt.
 
-!!! warning "GitHub write tools are never session-cached"
-    Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.
+!!! warning "Bash and GitHub write tools are never session-cached"
+    `Bash` and tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure. Future: command-pattern matching will allow per-command Bash approval.
 
 ### Batched requests
 
@@ -159,13 +159,13 @@ The full permission evaluation order in `handle()`:
 | Step | Check | Result |
 |------|-------|--------|
 | 0 | AskUserQuestion intercept | Route to interactive UI |
-| 0b | Write gate (`_WRITE_GATED_TOOLS`) | Deny/Allow/prompt based on worktree + safe-dir state |
+| 0b | Write gate (`_WRITE_GATED_TOOLS`) | Safe-dir → Allow; gate-approved → fall through; SDK deny → Deny; no worktree → Deny; in worktree → HITL |
 | 1 | SDK deny suggestions | Deny |
 | 2 | Static auto-approve (`_AUTO_APPROVE_TOOLS`) | Allow |
 | 2b | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL |
 | 2c | GitHub auto-approve (prefix matching) | Allow |
 | 2d | Summon MCP auto-approve (prefix matching) | Allow |
-| 2e | Session-lifetime cached approvals | Allow (with GitHub deny-list guard) |
+| 2e | Session-lifetime cached approvals | Allow (Bash and GitHub deny-list excluded) |
 | 3 | SDK allow suggestions | Allow |
 | 4 | Slack HITL (interactive message, deleted after) | User decides |
 

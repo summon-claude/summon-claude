@@ -303,7 +303,7 @@ class TestFormatRequestSummary:
         assert "CustomTool" in summary
 
 
-class TestPermissionEphemeral:
+class TestPermissionInteractive:
     """Tests for interactive permission posting."""
 
     async def test_permissions_use_interactive(self):
@@ -634,6 +634,54 @@ class TestSessionApprovalCaching:
         assert "permission_approve_session" in action_ids
         assert "permission_approve" in action_ids
         assert "permission_deny" in action_ids
+
+    async def test_bash_never_session_cached(self):
+        """Bash must not be session-cached even via explicit approve_session click."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tools
+
+    async def test_handle_action_deletes_interactive_message(self):
+        """handle_action should delete the interactive message after user clicks."""
+        handler, provider, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._batch.tool_names[batch_id] = ["Edit"]
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_TEST",
+        )
+        provider.delete_message.assert_awaited_once_with("1234.5678")
+
+    async def test_approve_session_confirmation_includes_tool_names(self):
+        """Confirmation message for approve_session should include 'for session' and tool names."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "Write"]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" in posted
+        assert "`Edit`" in posted
+        assert "`Write`" in posted
 
 
 class TestIdentityVerificationFailClosed:

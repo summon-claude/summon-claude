@@ -2,8 +2,8 @@
 
 Permission check flow (handle() steps):
   0.  AskUserQuestion  → intercepted, rendered as Slack interactive UI
-  0b. Write gate       → enforces read-only default; bypassed by worktree entry,
-                         safe-dir match, or prior session approval
+  0b. Write gate       → enforces read-only default; safe-dir bypass,
+                         gate-approved fall-through, SDK deny, worktree check
   1.  SDK deny         → always honored unconditionally
   2.  Static allowlist → _AUTO_APPROVE_TOOLS (Read, Grep, Glob, …)
   2b. GitHub deny-list → _GITHUB_MCP_REQUIRE_APPROVAL always sent to Slack
@@ -288,8 +288,8 @@ class PermissionHandler:
             logger.debug("Auto-approving summon MCP tool: %s", tool_name)
             return PermissionResultAllow()
 
-        # 2e. Session-lifetime cached approvals (SC-2/SEC-D-001: defense-in-depth
-        # check ensures GitHub require-approval tools are never session-cached)
+        # 2e. Session-lifetime cached approvals (defense-in-depth:
+        # GitHub require-approval tools are never session-cached)
         if (
             tool_name in self._session_approved_tools
             and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
@@ -323,9 +323,10 @@ class PermissionHandler:
 
         Decision tree:
         1. Safe-dir match → Allow immediately (user configured these dirs)
-        2. Already approved + not Bash → Allow immediately
-        3. Not in worktree → Deny with guidance to use EnterWorktree
-        4. In worktree, first write → Slack approval; cache non-Bash on allow
+        2. Already gate-approved → fall through (non-Bash cached at 2e, Bash to HITL)
+        3. SDK deny → honored before HITL prompt
+        4. Not in worktree → Deny with guidance to use EnterWorktree
+        5. In worktree, first write → Slack approval; cache non-Bash on allow
         """
         # Safe-dir bypass: always takes precedence (even without worktree)
         file_path = ""
@@ -337,10 +338,12 @@ class PermissionHandler:
             logger.debug("Safe-dir write allowed: %s → %s", tool_name, file_path)
             return PermissionResultAllow()
         # Already approved — fall through to normal flow (steps 1-4).
-        # Non-Bash tools are session-cached at step 2e. Bash reaches step 2e
-        # (session-cacheable via "Approve for session") or step 4 (HITL).
+        # Non-Bash tools are session-cached at step 2e. Bash goes to HITL.
         if self._write_access_granted:
             return None
+        # SDK deny — honor before prompting user
+        if _sdk_suggests_deny(context, tool_name):
+            return PermissionResultDeny(message="Denied by permission rules")
         # No worktree: hard deny
         if not self._in_worktree:
             logger.info("Write gate: denying %s (no active worktree)", tool_name)
@@ -526,9 +529,10 @@ class PermissionHandler:
             batch_id = value[len("approve_session:") :]
             approved = True
             # Cache tool names for session lifetime
-            # (except GitHub require-approval — those always need HITL)
+            # Bash is excluded — requires per-invocation approval (future: command-pattern matching)
+            # GitHub require-approval tools are also excluded (defense-in-depth)
             for name in self._batch.tool_names.get(batch_id, []):
-                if name not in _GITHUB_MCP_REQUIRE_APPROVAL:
+                if name != "Bash" and name not in _GITHUB_MCP_REQUIRE_APPROVAL:
                     self._session_approved_tools.add(name)
         elif value.startswith("deny:"):
             batch_id = value[len("deny:") :]
@@ -544,8 +548,8 @@ class PermissionHandler:
         if msg_ts:
             await self._router.client.delete_message(msg_ts)
 
-        # Post a persistent confirmation to the turn thread (SC-3/SEC-D-007:
-        # include tool names since the interactive message is now deleted)
+        # Post a persistent confirmation to the turn thread
+        # (include tool names since the interactive message is now deleted)
         tool_names = self._batch.tool_names.get(batch_id, [])
         tool_list = ", ".join(f"`{t}`" for t in tool_names) if tool_names else "tools"
         session_suffix = " for session" if value.startswith("approve_session:") else ""

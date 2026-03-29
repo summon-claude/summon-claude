@@ -11,6 +11,7 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ThinkingBlock,
+    ToolResultBlock,
     ToolUseBlock,
 )
 
@@ -1166,19 +1167,46 @@ class TestFileChangeCallback:
 class TestWorktreeDetectionCallback:
     """Tests for EnterWorktree detection in ResponseStreamer."""
 
-    async def test_enter_worktree_triggers_callback(self):
-        """EnterWorktree ToolUseBlock should fire the on_worktree_entered callback."""
+    async def test_enter_worktree_triggers_callback_on_success(self):
+        """Callback fires on successful ToolResultBlock, not on ToolUseBlock."""
         callback = MagicMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
 
-        block = make_tool_use_block("EnterWorktree", {"name": "test-wt"})
-        msg = make_assistant_message([block])
-        await streamer._handle_assistant_message(msg)
+        use_block = make_tool_use_block("EnterWorktree", {"name": "test-wt"})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
         await asyncio.sleep(0.05)
+        # Not yet — callback should NOT fire on ToolUseBlock
+        callback.assert_not_called()
 
+        # Now simulate the successful result
+        result_block = ToolResultBlock(tool_use_id=use_block.id, content="Worktree created")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
         callback.assert_called_once()
+
+    async def test_enter_worktree_does_not_trigger_on_error(self):
+        """Callback must NOT fire when EnterWorktree fails."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        use_block = make_tool_use_block("EnterWorktree", {"name": "bad-wt"})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
+
+        # Error result
+        result_block = ToolResultBlock(
+            tool_use_id=use_block.id, content="Permission denied", is_error=True
+        )
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
+        callback.assert_not_called()
 
     async def test_other_tools_do_not_trigger_callback(self):
         """Non-EnterWorktree tools should NOT fire the callback."""
@@ -1187,11 +1215,14 @@ class TestWorktreeDetectionCallback:
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
 
-        block = make_tool_use_block("Read", {"file_path": "/f"})
-        msg = make_assistant_message([block])
-        await streamer._handle_assistant_message(msg)
-        await asyncio.sleep(0.05)
+        use_block = make_tool_use_block("Read", {"file_path": "/f"})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
 
+        result_block = ToolResultBlock(tool_use_id=use_block.id, content="file contents")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
         callback.assert_not_called()
 
     async def test_no_callback_no_error(self):
@@ -1200,8 +1231,12 @@ class TestWorktreeDetectionCallback:
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router)  # no on_worktree_entered
 
-        block = make_tool_use_block("EnterWorktree", {"name": "test"})
-        msg = make_assistant_message([block])
-        await streamer._handle_assistant_message(msg)
+        use_block = make_tool_use_block("EnterWorktree", {"name": "test"})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
+
+        result_block = ToolResultBlock(tool_use_id=use_block.id, content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         # No error = pass
