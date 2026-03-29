@@ -152,7 +152,7 @@ class TestGlobalPMSystemPrompt:
     def test_prompt_scribe_awareness(self):
         prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
         assert "Scribe agent" in prompt["append"]
-        assert "0-summon-scribe" in prompt["append"]
+        assert "0-scribe" in prompt["append"]
 
     def test_prompt_zzz_channel_awareness(self):
         prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
@@ -389,9 +389,9 @@ class TestGlobalPMAutoCreate:
         assert session.is_global_pm
 
     def test_gpm_channel_name(self):
-        """Global PM uses hardcoded channel name 0-summon-global-pm."""
+        """Global PM uses hardcoded channel name 0-global-pm."""
         prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
-        assert "0-summon-global-pm" in prompt["append"]
+        assert "0-global-pm" in prompt["append"]
 
     def test_resolve_gpm_cwd(self):
         """_resolve_gpm_cwd uses config, fallback, and creates directory."""
@@ -422,15 +422,13 @@ class TestGPMChannelCreatorCheck:
         # Channel exists but was created by a different user
         mock_web.conversations_list = AsyncMock(
             return_value={
-                "channels": [
-                    {"id": "C_HIJACK", "name": "0-summon-global-pm", "creator": "U_ATTACKER"}
-                ],
+                "channels": [{"id": "C_HIJACK", "name": "0-global-pm", "creator": "U_ATTACKER"}],
                 "response_metadata": {},
             }
         )
         # After skipping the hijacked channel, should create a new one
         mock_web.conversations_create = AsyncMock(
-            return_value={"channel": {"id": "C_NEW", "name": "0-summon-global-pm"}}
+            return_value={"channel": {"id": "C_NEW", "name": "0-global-pm"}}
         )
 
         channel_id, channel_name = await session._get_or_create_global_pm_channel(mock_web)
@@ -445,7 +443,7 @@ class TestGPMChannelCreatorCheck:
         # Channel was created by the bot
         mock_web.conversations_list = AsyncMock(
             return_value={
-                "channels": [{"id": "C_OURS", "name": "0-summon-global-pm", "creator": "B001"}],
+                "channels": [{"id": "C_OURS", "name": "0-global-pm", "creator": "B001"}],
                 "response_metadata": {},
             }
         )

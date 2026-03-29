@@ -683,7 +683,7 @@ _SCRIBE_SYSTEM_PROMPT_APPEND = (
     "- Include: key emails received, meetings attended/upcoming, docs shared\n"
     "- Include: highlights from external Slack (important conversations, decisions)\n"
     "- Include: notes and action items taken today\n"
-    "- Include: agent work summary — read the Global PM channel (#0-summon-global-pm)\n"
+    "- Include: agent work summary — read the Global PM channel (#0-global-pm)\n"
     "  for recent activity and incorporate what agents accomplished today\n"
     "- Include: count of items triaged and how many were flagged as important\n"
     "- Do NOT predict when the day ends — summarize when asked or when quiet\n"
@@ -860,10 +860,10 @@ _GLOBAL_PM_SYSTEM_PROMPT_APPEND = (
     "- Channels prefixed with `zzz-` are disconnected sessions (shutdown, error, "
     "or project down). The `zzz-` prefix sinks them in the Slack sidebar. If you see "
     "a `zzz-` channel, the session is NOT running -- check if it should be resumed.\n"
-    "- `0-summon-global-pm` is your channel (prefixed `0-` to sort to top)\n"
-    "- `0-summon-scribe` is the Scribe agent's channel\n"
+    "- `0-global-pm` is your channel (prefixed `0-` to sort to top)\n"
+    "- `0-scribe` is the Scribe agent's channel\n"
     "- PM channels use the project's channel_prefix\n\n"
-    "You also monitor the Scribe agent (channel: #0-summon-scribe). "
+    "You also monitor the Scribe agent (channel: #0-scribe). "
     "The Scribe is a passive monitor -- it does not orchestrate sessions. "
     "Check that it is scanning on schedule and not erroring. "
     "If the Scribe appears stuck, report it in your channel.\n\n"
@@ -2042,8 +2042,8 @@ class SummonSession:
         return new_id, cname
 
     async def _get_or_create_scribe_channel(self, web_client: AsyncWebClient) -> tuple[str, str]:
-        """Reuse or create the persistent ``0-summon-scribe`` channel."""
-        scribe_channel_name = "0-summon-scribe"
+        """Reuse or create the persistent ``0-scribe`` channel."""
+        scribe_channel_name = "0-scribe"
         # Try to find and join the existing channel
         cursor: str | None = None
         max_pages = 50
@@ -2070,8 +2070,8 @@ class SummonSession:
         return channel_id, channel_name
 
     async def _get_or_create_global_pm_channel(self, web_client: AsyncWebClient) -> tuple[str, str]:
-        """Reuse or create the persistent ``0-summon-global-pm`` channel."""
-        gpm_channel_name = "0-summon-global-pm"
+        """Reuse or create the persistent ``0-global-pm`` channel."""
+        gpm_channel_name = "0-global-pm"
         zzz_gpm_name = f"{ZZZ_PREFIX}{gpm_channel_name}"
         # Try to find and join the existing channel (including zzz- prefixed variant)
         cursor: str | None = None
