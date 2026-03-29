@@ -112,10 +112,7 @@ class TestMarkToolResult:
 
     def test_rewrites_scope_error_in_text(self):
         """Scope error needle in tool result text is replaced with CLI guidance."""
-        from summon_claude.mcp_untrusted_proxy import (
-            _SCOPE_ERROR_NEEDLE,
-            _SCOPE_ERROR_REPLACEMENT,
-        )
+        from summon_claude.mcp_untrusted_proxy import _SCOPE_ERROR_NEEDLE
 
         msg = {
             "jsonrpc": "2.0",

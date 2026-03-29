@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import fcntl
 import logging
 import os
 import secrets
@@ -230,8 +231,31 @@ class EventConsumer:
         return events
 
 
+_SOCKET_MODE_LOCK = Path(__file__).resolve().parents[2] / ".cache" / "slack-test.lock"
+
+
+@pytest.fixture(scope="session")
+def _slack_socket_lock():
+    """Exclusive file lock for Socket Mode tests.
+
+    Slack distributes Socket Mode events across all connected consumers
+    for the same app token.  Concurrent test runs (e.g. overlapping
+    ``git push`` hooks) would steal each other's events, causing
+    non-deterministic timeouts.  This lock serialises access so only
+    one process holds a Socket Mode connection at a time.
+    """
+    _SOCKET_MODE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    fd = _SOCKET_MODE_LOCK.open("w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        fd.close()
+
+
 @pytest.fixture
-async def slack_harness():
+async def slack_harness(_slack_socket_lock):
     """Harness — skips if credentials not set."""
     if not os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN"):
         pytest.skip("SUMMON_TEST_SLACK_BOT_TOKEN not set")

@@ -1271,7 +1271,8 @@ def _check_google_status(
     for user in users:
         cred = store.get_credential(user)
         if not cred:
-            click.echo(f"{prefix}[FAIL] Google: invalid credential file ({user})")
+            if not quiet:
+                click.echo(f"{prefix}[FAIL] Google: invalid credential file ({user})")
             all_ok = False
             continue
 
@@ -1280,9 +1281,10 @@ def _check_google_status(
         elif cred.expired and cred.refresh_token:
             status = "expired (will refresh on next use)"
         else:
-            click.echo(
-                f"{prefix}[FAIL] Google: invalid — re-run `summon auth google login` ({user})"
-            )
+            if not quiet:
+                click.echo(
+                    f"{prefix}[FAIL] Google: invalid — re-run `summon auth google login` ({user})"
+                )
             all_ok = False
             continue
 
