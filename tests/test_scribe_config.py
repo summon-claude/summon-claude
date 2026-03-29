@@ -1118,3 +1118,56 @@ class TestScribeDisallowedTools:
             creds.mkdir()
             with patch("summon_claude.config.get_google_credentials_dir", return_value=creds):
                 assert _google_credentials_exist() is False
+
+    def test_google_credentials_exist_no_dir(self):
+        """_google_credentials_exist returns False when credentials directory doesn't exist."""
+        from pathlib import Path
+
+        from summon_claude.config import _google_credentials_exist
+
+        with patch(
+            "summon_claude.config.get_google_credentials_dir",
+            return_value=Path("/nonexistent/google-credentials"),
+        ):
+            assert _google_credentials_exist() is False
+
+    def test_google_enabled_explicit_true_no_mcp(self):
+        """Explicit GOOGLE_ENABLED=true still requires workspace-mcp."""
+        from summon_claude.config import _scribe_google_enabled
+
+        with (
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=True),
+        ):
+            result = _scribe_google_enabled(
+                {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_GOOGLE_ENABLED": "true"}
+            )
+        assert result is False
+
+    def test_load_google_client_credentials_from_file(self):
+        """_load_google_client_credentials reads from client_env file."""
+        import tempfile
+        from pathlib import Path
+
+        from summon_claude.cli.config import _load_google_client_credentials
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            creds_dir = Path(tmpdir) / "creds"
+            creds_dir.mkdir()
+            client_env = creds_dir / "client_env"
+            client_env.write_text(
+                "GOOGLE_OAUTH_CLIENT_ID=file-id\nGOOGLE_OAUTH_CLIENT_SECRET=file-secret\n"
+            )
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
+                ),
+                patch(
+                    "summon_claude.cli.config.get_google_credentials_dir",
+                    return_value=creds_dir,
+                ),
+            ):
+                cid, csecret = _load_google_client_credentials()
+            assert cid == "file-id"
+            assert csecret == "file-secret"
