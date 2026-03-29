@@ -2029,6 +2029,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documentation-validation-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Validation Tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Validation Tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#running-doc-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running doc tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test categories
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notest-markers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        notest markers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ci-testing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2309,6 +2370,67 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documentation-validation-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Validation Tests
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Validation Tests">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#running-doc-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Running doc tests
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#test-categories" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Test categories
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#notest-markers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        notest markers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CI integration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#ci-testing" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2398,34 +2520,34 @@
 <hr />
 <h2 id="running-tests">Running Tests<a class="headerlink" href="#running-tests" title="Permanent link">&para;</a></h2>
 <h3 id="full-suite">Full suite<a class="headerlink" href="#full-suite" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">test</span>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">test</span>
 <span class="c1"># or</span>
 uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="quick-skip-slow-slack-fail-fast">Quick (skip slow + slack, fail-fast)<a class="headerlink" href="#quick-skip-slow-slack-fail-fast" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span>py-test-quick
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>py-test-quick
 <span class="c1"># or</span>
 uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slow and not slack&quot;</span>
 </code></pre></div>
 <h3 id="single-module">Single module<a class="headerlink" href="#single-module" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_auth.py<span class="w"> </span>-v
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_auth.py<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="by-name-pattern">By name pattern<a class="headerlink" href="#by-name-pattern" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;test_session_cleanup&quot;</span><span class="w"> </span>-v
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;test_session_cleanup&quot;</span><span class="w"> </span>-v
 </code></pre></div>
 <h3 id="serial-mode-disable-parallel">Serial mode (disable parallel)<a class="headerlink" href="#serial-mode-disable-parallel" title="Permanent link">&para;</a></h3>
-<p><div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-n0
+<p><div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-n0
 </code></pre></div>
 Useful when debugging — parallel workers can obscure output and interleave logs.</p>
 <hr />
 <h2 id="integration-tests">Integration Tests<a class="headerlink" href="#integration-tests" title="Permanent link">&para;</a></h2>
 <p>Slack integration tests hit the real Slack API. They require live workspace credentials set as environment variables:</p>
-<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">SUMMON_TEST_SLACK_BOT_TOKEN</span><span class="o">=</span>xoxb-...
+<div class="notest highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">SUMMON_TEST_SLACK_BOT_TOKEN</span><span class="o">=</span>xoxb-...
 <span class="nb">export</span><span class="w"> </span><span class="nv">SUMMON_TEST_SLACK_APP_TOKEN</span><span class="o">=</span>xapp-...
 <span class="nb">export</span><span class="w"> </span><span class="nv">SUMMON_TEST_SLACK_CHANNEL_ID</span><span class="o">=</span>C...
 </code></pre></div>
 <p>Run with:
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span>py-test-slack
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>py-test-slack
 <span class="c1"># or</span>
 uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/integration/<span class="w"> </span>-v<span class="w"> </span>-m<span class="w"> </span>slack<span class="w"> </span>-n0
 </code></pre></div></p>
@@ -2473,7 +2595,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <li>Integration tests: <code>tests/integration/test_&lt;feature&gt;.py</code>, marked with <code>@pytest.mark.slack</code></li>
 </ul>
 <h3 id="async-test-pattern">Async test pattern<a class="headerlink" href="#async-test-pattern" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<div class="notest highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">unittest.mock</span><span class="w"> </span><span class="kn">import</span> <span class="n">AsyncMock</span><span class="p">,</span> <span class="n">MagicMock</span>
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_session_starts</span><span class="p">():</span>
@@ -2485,7 +2607,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 </code></pre></div>
 <p>No <code>@pytest.mark.asyncio</code> decorator needed — <code>asyncio_mode = "auto"</code> handles it.</p>
 <h3 id="fixture-patterns">Fixture patterns<a class="headerlink" href="#fixture-patterns" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+<div class="notest highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">mock_registry</span><span class="p">():</span>
@@ -2505,7 +2627,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <p>Shared fixtures live in <code>tests/conftest.py</code>. The <code>pythonpath = ["tests"]</code> setting means <code>from helpers import ...</code> works in test files without relative imports.</p>
 <h3 id="testing-database-migrations">Testing database migrations<a class="headerlink" href="#testing-database-migrations" title="Permanent link">&para;</a></h3>
 <p>Migration tests use a real SQLite database (not in-memory) to test the migration path:</p>
-<div class="highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_migration_adds_column</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
+<div class="notest highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_migration_adds_column</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
     <span class="n">db_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;test.db&quot;</span><span class="p">)</span>
     <span class="n">registry</span> <span class="o">=</span> <span class="n">SessionRegistry</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">registry</span><span class="o">.</span><span class="n">_connect</span><span class="p">()</span>
@@ -2515,19 +2637,79 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 </code></pre></div>
 <h3 id="xdist-group-isolation">xdist group isolation<a class="headerlink" href="#xdist-group-isolation" title="Permanent link">&para;</a></h3>
 <p>If multiple tests share a resource (e.g., a named socket), group them so they run serially on the same worker:</p>
-<div class="highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
+<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_daemon_connects</span><span class="p">():</span> <span class="o">...</span>
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_daemon_disconnects</span><span class="p">():</span> <span class="o">...</span>
 </code></pre></div>
 <h3 id="marking-slow-tests">Marking slow tests<a class="headerlink" href="#marking-slow-tests" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">slow</span>
+<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">slow</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_full_session_lifecycle</span><span class="p">():</span>
     <span class="c1"># takes several seconds</span>
     <span class="o">...</span>
 </code></pre></div>
 <p>Excluded from quick runs: <code>make py-test-quick</code> passes <code>-m "not slow and not slack"</code>.</p>
+<hr />
+<h2 id="documentation-validation-tests">Documentation Validation Tests<a class="headerlink" href="#documentation-validation-tests" title="Permanent link">&para;</a></h2>
+<p>Documentation tests (<code>pytest.mark.docs</code>) verify that docs stay in sync with the codebase and that code examples are valid.</p>
+<h3 id="running-doc-tests">Running doc tests<a class="headerlink" href="#running-doc-tests" title="Permanent link">&para;</a></h3>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>docs-test<span class="w">       </span><span class="c1"># Guard tests + Python blocks (fast, no credentials)</span>
+make<span class="w"> </span>docs-test-full<span class="w">  </span><span class="c1"># All doc tests including link validation (slower)</span>
+</code></pre></div>
+<h3 id="test-categories">Test categories<a class="headerlink" href="#test-categories" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Test file</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_cli_commands.py</code></td>
+<td>CLI commands in docs match Click definitions</td>
+</tr>
+<tr>
+<td><code>test_env_vars.py</code></td>
+<td><code>SUMMON_*</code> env vars in docs match <code>SummonConfig</code> fields</td>
+</tr>
+<tr>
+<td><code>test_mcp_tools.py</code></td>
+<td>MCP tool docs match source tool schemas and counts</td>
+</tr>
+<tr>
+<td><code>test_bash_codeblocks.py</code></td>
+<td><code>summon</code> commands in bash blocks execute successfully</td>
+</tr>
+<tr>
+<td><code>test_links.py</code></td>
+<td>External URLs in docs return 2xx/3xx (rejects redirects)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="notest-markers"><code>notest</code> markers<a class="headerlink" href="#notest-markers" title="Permanent link">&para;</a></h3>
+<p>Non-executable code blocks are marked with <code>notest</code> after the language identifier:</p>
+<div class="highlight"><pre><span></span><code>```{ .bash .notest }
+<span class="gh"># This block is skipped by the test executor</span>
+summon start --model opus
+```
+</code></pre></div>
+<p>Add <code>notest</code> to blocks that:</p>
+<ul>
+<li>Show command <strong>output</strong> (not commands to run)</li>
+<li>Show file contents, config examples, or environment variables</li>
+<li>Contain interactive or daemon-dependent commands (<code>summon start</code>, <code>summon init</code>, etc.)</li>
+<li>Contain only non-<code>summon</code> commands (git, brew, make, npm) — these are already ignored by the executor but <code>notest</code> makes intent explicit</li>
+</ul>
+<p>The <code>notest</code> attribute is invisible to documentation readers — markdown renderers ignore unknown attributes after the language identifier.</p>
+<h3 id="ci-integration">CI integration<a class="headerlink" href="#ci-integration" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong><code>checks</code> job (PRs):</strong> Runs <code>make docs-test</code> — guard tests and Tier 1 bash commands (<code>summon --version</code>, <code>summon --help</code>)</li>
+<li><strong><code>slack-integration</code> job:</strong> Runs bash CLI tests with real credentials (Tier 2 commands like <code>summon config show</code>)</li>
+<li><strong><code>make py-test</code>:</strong> Includes doc guard tests (excludes <code>slow</code> link tests)</li>
+<li><strong><code>make py-test-quick</code>:</strong> Excludes all doc tests for speed</li>
+</ul>
 <hr />
 <h2 id="ci-testing">CI Testing<a class="headerlink" href="#ci-testing" title="Permanent link">&para;</a></h2>
 <p>The <code>ci.yaml</code> workflow runs on every PR to <code>main</code>:</p>

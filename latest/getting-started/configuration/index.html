@@ -2081,7 +2081,7 @@
 <p>After creating your Slack app and collecting credentials, configure summon-claude using the interactive setup wizard or manual commands.</p>
 <h2 id="running-summon-init">Running <code>summon init</code><a class="headerlink" href="#running-summon-init" title="Permanent link">&para;</a></h2>
 <p>The fastest way to configure summon-claude is the interactive setup wizard:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>init
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>init
 </code></pre></div>
 <p>The wizard walks through configuration options in groups, prompting for each value. If an existing config file is found, current values are shown as defaults -- press Enter to keep them.</p>
 <p><strong>Slack Credentials</strong> (required) -- The wizard asks for your three Slack credentials in order:</p>
@@ -2146,7 +2146,7 @@ Getting started:
 <hr />
 <h2 id="setting-individual-values">Setting individual values<a class="headerlink" href="#setting-individual-values" title="Permanent link">&para;</a></h2>
 <p>To change a single setting without re-running the full wizard:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_DEFAULT_MODEL<span class="w"> </span>claude-sonnet-4-20250514
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_DEFAULT_MODEL<span class="w"> </span>claude-sonnet-4-20250514
 </code></pre></div>
 <p>This updates the config file in place. Use the <code>SUMMON_</code> environment variable name as the key.</p>
 <hr />

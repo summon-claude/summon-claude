@@ -204,12 +204,63 @@ Excluded from quick runs: `make py-test-quick` passes `-m "not slow and not slac
 
 ______________________________________________________________________
 
+## Documentation Validation Tests
+
+Documentation tests (`pytest.mark.docs`) verify that docs stay in sync with the codebase and that code examples are valid.
+
+### Running doc tests
+
+```
+make docs-test       # Guard tests + Python blocks (fast, no credentials)
+make docs-test-full  # All doc tests including link validation (slower)
+```
+
+### Test categories
+
+| Test file                 | What it checks                                           |
+| ------------------------- | -------------------------------------------------------- |
+| `test_cli_commands.py`    | CLI commands in docs match Click definitions             |
+| `test_env_vars.py`        | `SUMMON_*` env vars in docs match `SummonConfig` fields  |
+| `test_mcp_tools.py`       | MCP tool docs match source tool schemas and counts       |
+| `test_bash_codeblocks.py` | `summon` commands in bash blocks execute successfully    |
+| `test_links.py`           | External URLs in docs return 2xx/3xx (rejects redirects) |
+
+### `notest` markers
+
+Non-executable code blocks are marked with `notest` after the language identifier:
+
+````
+```{ .bash .notest }
+# This block is skipped by the test executor
+summon start --model opus
+````
+
+````
+
+Add `notest` to blocks that:
+
+- Show command **output** (not commands to run)
+- Show file contents, config examples, or environment variables
+- Contain interactive or daemon-dependent commands (`summon start`, `summon init`, etc.)
+- Contain only non-`summon` commands (git, brew, make, npm) — these are already ignored by the executor but `notest` makes intent explicit
+
+The `notest` attribute is invisible to documentation readers — markdown renderers ignore unknown attributes after the language identifier.
+
+### CI integration
+
+- **`checks` job (PRs):** Runs `make docs-test` — guard tests and Tier 1 bash commands (`summon --version`, `summon --help`)
+- **`slack-integration` job:** Runs bash CLI tests with real credentials (Tier 2 commands like `summon config show`)
+- **`make py-test`:** Includes doc guard tests (excludes `slow` link tests)
+- **`make py-test-quick`:** Excludes all doc tests for speed
+
+---
+
 ## CI Testing
 
 The `ci.yaml` workflow runs on every PR to `main`:
 
 1. `make py-lint` — ruff check + format (fails if files were modified by auto-fix)
-1. `make py-test` — full pytest suite (4 parallel workers)
+2. `make py-test` — full pytest suite (4 parallel workers)
 
 Lint runs first; tests only run if lint passes.
 
@@ -220,4 +271,5 @@ Lint runs first; tests only run if lint passes.
 - **Asyncio fixture scope error:** Check `asyncio_default_fixture_loop_scope` — function scope means fixtures cannot be session/module scoped unless they manage their own loop
 - **Import error in tests:** Verify `pythonpath = ["tests"]` is set and the import is from a file in `tests/`, not a package import that should use `summon_claude.*`
 
-Type checking is a separate target (`make py-typecheck`) and is not currently enforced in CI — it can be run locally during development.
+Type checking is a separate target (`make py-typecheck`) and is not currently enforced in CI — it can be run locally during development.```
+````

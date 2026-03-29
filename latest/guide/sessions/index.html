@@ -2269,7 +2269,7 @@
 <p>A summon session is a Claude Code process connected to a Slack channel. Each session has its own channel, conversation history, and working directory.</p>
 <hr />
 <h2 id="starting-a-session">Starting a session<a class="headerlink" href="#starting-a-session" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>start
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>start
 </code></pre></div>
 <p>summon registers the session with the background daemon, creates a Slack channel, and prints an auth code to your terminal:</p>
 <!-- terminal:summon-start -->
@@ -2313,7 +2313,7 @@
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="c1"># Start in a specific directory with a memorable name</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Start in a specific directory with a memorable name</span>
 summon<span class="w"> </span>start<span class="w"> </span>--cwd<span class="w"> </span>~/projects/myapp<span class="w"> </span>--name<span class="w"> </span>myapp
 
 <span class="c1"># Start with a specific model and effort level</span>
@@ -2342,7 +2342,7 @@ summon<span class="w"> </span>start<span class="w"> </span>--resume<span class="
 <p>If the daemon is not running, <code>summon start</code> will start it. If the daemon is already running, the new session is registered with the existing daemon.</p>
 <hr />
 <h2 id="listing-sessions">Listing sessions<a class="headerlink" href="#listing-sessions" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
 </code></pre></div>
 <p>Alias: <code>summon s list</code></p>
 <p>By default, only active sessions are shown. Options:</p>
@@ -2368,7 +2368,7 @@ summon<span class="w"> </span>start<span class="w"> </span>--resume<span class="
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="c1"># Show all sessions</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Show all sessions</span>
 summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"> </span>--all
 
 <span class="c1"># Filter by name</span>
@@ -2379,7 +2379,7 @@ summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"
 </code></pre></div>
 <hr />
 <h2 id="inspecting-a-session">Inspecting a session<a class="headerlink" href="#inspecting-a-session" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>SESSION
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>SESSION
 </code></pre></div>
 <p><code>SESSION</code> can be a session name or session ID (prefix match accepted). Shows:</p>
 <ul>
@@ -2391,18 +2391,18 @@ summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"
 <li>Start time and uptime</li>
 <li>Cost and turn count</li>
 </ul>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>myapp-a3f9c1
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>myapp-a3f9c1
 summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>a3f9c1<span class="w">     </span><span class="c1"># ID prefix also works</span>
 </code></pre></div>
 <p>Use <code>-o json</code> for structured output:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>myapp-a3f9c1<span class="w"> </span>-o<span class="w"> </span>json
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>info<span class="w"> </span>myapp-a3f9c1<span class="w"> </span>-o<span class="w"> </span>json
 </code></pre></div>
 <hr />
 <h2 id="stopping-a-session">Stopping a session<a class="headerlink" href="#stopping-a-session" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>SESSION
 </code></pre></div>
 <p>Sends a shutdown signal to the session via the daemon. Claude completes its current turn before stopping.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Stop a specific session</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Stop a specific session</span>
 summon<span class="w"> </span>stop<span class="w"> </span>myapp-a3f9c1
 
 <span class="c1"># Stop all active sessions</span>
@@ -2415,13 +2415,13 @@ summon<span class="w"> </span>stop<span class="w"> </span>--all
 <hr />
 <h2 id="resuming-a-session">Resuming a session<a class="headerlink" href="#resuming-a-session" title="Permanent link">&para;</a></h2>
 <p>Claude Code maintains conversation history across sessions using session IDs. To pick up where you left off:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>start<span class="w"> </span>--resume<span class="w"> </span>SESSION_ID
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>start<span class="w"> </span>--resume<span class="w"> </span>SESSION_ID
 </code></pre></div>
 <p>The session ID is shown in <code>summon session info</code> output. You can also find it in the Slack channel (Claude reports its session ID when it starts).</p>
 <p>Resuming connects to the existing Claude Code conversation transcript — context, tool history, and prior messages are all available to Claude.</p>
 <hr />
 <h2 id="session-logs">Session logs<a class="headerlink" href="#session-logs" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>SESSION
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>SESSION
 </code></pre></div>
 <p>Shows the last 50 log lines for a session. If <code>SESSION</code> is omitted, lists available log files.</p>
 <table>
@@ -2438,7 +2438,7 @@ summon<span class="w"> </span>stop<span class="w"> </span>--all
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="c1"># Show last 100 lines</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Show last 100 lines</span>
 summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>myapp-a3f9c1<span class="w"> </span>--tail<span class="w"> </span><span class="m">100</span>
 
 <span class="c1"># List available log files</span>
@@ -2457,10 +2457,10 @@ DB path:     ~/.local/share/summon/registry.db
 
 <hr />
 <h2 id="cleaning-up-stale-sessions">Cleaning up stale sessions<a class="headerlink" href="#cleaning-up-stale-sessions" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup
 </code></pre></div>
 <p>Scans active sessions and marks any with dead processes as <code>errored</code>. This handles cases where a session crashed without updating its status.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Clean up stale sessions, archive their Slack channels</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Clean up stale sessions, archive their Slack channels</span>
 summon<span class="w"> </span>session<span class="w"> </span>cleanup<span class="w"> </span>--archive
 </code></pre></div>
 <p>By default, the associated Slack channels are preserved (left in the workspace). Pass <code>--archive</code> to archive them.</p>
@@ -2485,7 +2485,7 @@ summon<span class="w"> </span>session<span class="w"> </span>cleanup<span class=
 </tr>
 </tbody>
 </table>
-<div class="highlight"><pre><span></span><code><span class="c1"># Get session list as JSON</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Get session list as JSON</span>
 summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"> </span>-o<span class="w"> </span>json<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.[].name&#39;</span>
 
 <span class="c1"># Get session info as JSON</span>

@@ -36,7 +36,7 @@ Python version mismatch
 python3 --version
 ```
 
-Install Python 3.12+ via your package manager or from [python.org](https://python.org). If using `uv`, it manages Python versions for you:
+Install Python 3.12+ via your package manager or from [python.org](https://www.python.org/). If using `uv`, it manages Python versions for you:
 
 ```
 uv python install 3.12

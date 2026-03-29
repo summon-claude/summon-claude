@@ -2173,10 +2173,10 @@
 <p><strong>Symptom:</strong> <code>summon start</code> fails with "claude: command not found" or similar error.</p>
 <p><strong>Cause:</strong> The Claude Code CLI is not installed or not on your <code>PATH</code>.</p>
 <p><strong>Fix:</strong> Install the Claude Code CLI globally:
-<div class="highlight"><pre><span></span><code>npm<span class="w"> </span>install<span class="w"> </span>-g<span class="w"> </span>@anthropic-ai/claude-code
+<div class="notest highlight"><pre><span></span><code>npm<span class="w"> </span>install<span class="w"> </span>-g<span class="w"> </span>@anthropic-ai/claude-code
 </code></pre></div>
 Then verify:
-<div class="highlight"><pre><span></span><code>claude<span class="w"> </span>--version
+<div class="notest highlight"><pre><span></span><code>claude<span class="w"> </span>--version
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
@@ -2184,20 +2184,20 @@ Then verify:
 <p><strong>Symptom:</strong> Installation fails with "requires Python &gt;=3.12" or similar.</p>
 <p><strong>Cause:</strong> summon-claude requires Python 3.12 or later.</p>
 <p><strong>Fix:</strong> Check your Python version and upgrade if needed:
-<div class="highlight"><pre><span></span><code>python3<span class="w"> </span>--version
+<div class="notest highlight"><pre><span></span><code>python3<span class="w"> </span>--version
 </code></pre></div>
-Install Python 3.12+ via your package manager or from <a href="https://python.org">python.org</a>. If using <code>uv</code>, it manages Python versions for you:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>python<span class="w"> </span>install<span class="w"> </span><span class="m">3</span>.12
+Install Python 3.12+ via your package manager or from <a href="https://www.python.org/">python.org</a>. If using <code>uv</code>, it manages Python versions for you:
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>python<span class="w"> </span>install<span class="w"> </span><span class="m">3</span>.12
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
 <summary>Should I use uv or pip?</summary>
 <p><strong>Use <code>uv</code>.</strong> summon-claude is tested and distributed with <code>uv</code>. The recommended install is:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>summon-claude
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>summon-claude
 </code></pre></div>
 If you install with pip and encounter import or dependency issues, try switching to <code>uv tool install</code>.</p>
 <p>To upgrade:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>upgrade<span class="w"> </span>summon-claude
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>upgrade<span class="w"> </span>summon-claude
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
@@ -2205,7 +2205,7 @@ If you install with pip and encounter import or dependency issues, try switching
 <p><strong>Symptom:</strong> <code>ImportError</code> for <code>workspace_mcp</code> or <code>playwright</code>.</p>
 <p><strong>Cause:</strong> Optional extras were not installed.</p>
 <p><strong>Fix:</strong> Install with the appropriate extra:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span><span class="w">        </span><span class="c1"># Google Workspace integration</span>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span><span class="w">        </span><span class="c1"># Google Workspace integration</span>
 uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span><span class="w"> </span><span class="c1"># Slack browser-based auth</span>
 uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[all]&quot;</span><span class="w">           </span><span class="c1"># All extras</span>
 </code></pre></div></p>
@@ -2250,7 +2250,7 @@ uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </
 1. In your Slack app settings, go to <strong>Basic Information → App-Level Tokens</strong>.
 2. Create or select a token — it must have the <code>connections:write</code> scope.
 3. Set it in your config:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SLACK_APP_TOKEN<span class="w"> </span>xapp-...
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SLACK_APP_TOKEN<span class="w"> </span>xapp-...
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
@@ -2297,10 +2297,10 @@ uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </
 <p><strong>Symptom:</strong> <code>summon start</code> fails or sessions aren't working despite config being valid.</p>
 <p><strong>Cause:</strong> A stale daemon process from a previous crash. The daemon starts automatically with <code>summon start</code> and stops when all sessions end.</p>
 <p><strong>Fix:</strong>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>--all
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>--all
 </code></pre></div>
 If that fails, find and kill the daemon process manually:
-<div class="highlight"><pre><span></span><code><span class="c1"># Find the daemon process</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Find the daemon process</span>
 pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;summon.*start&quot;</span>
 </code></pre></div>
 Then start a fresh session with <code>summon start</code>.</p>
@@ -2310,7 +2310,7 @@ Then start a fresh session with <code>summon start</code>.</p>
 <p><strong>Symptom:</strong> <code>summon session list</code> shows sessions that are no longer running (status stuck at "active").</p>
 <p><strong>Cause:</strong> Sessions from a previous daemon instance were not cleaned up when the daemon stopped or crashed.</p>
 <p><strong>Fix:</strong> Run the cleanup command:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup
 </code></pre></div>
 This marks orphaned sessions (present in the database but not tracked by the current daemon) as errored.</p>
 </details>
@@ -2319,11 +2319,11 @@ This marks orphaned sessions (present in the database but not tracked by the cur
 <p><strong>Symptom:</strong> A session shows "active" but the Claude process is not responding.</p>
 <p><strong>Cause:</strong> The Claude subprocess may have crashed without the daemon detecting it.</p>
 <p><strong>Fix:</strong>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup<span class="w">   </span><span class="c1"># Mark orphaned sessions</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>cleanup<span class="w">   </span><span class="c1"># Mark orphaned sessions</span>
 summon<span class="w"> </span>session<span class="w"> </span>list<span class="w">      </span><span class="c1"># Verify status updated</span>
 </code></pre></div>
 If the session persists, stop it explicitly:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>&lt;session-name&gt;
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>&lt;session-name&gt;
 </code></pre></div></p>
 </details>
 <hr />
@@ -2342,7 +2342,7 @@ If the session persists, stop it explicitly:
 <p><strong>Symptom:</strong> A pending permission request disappears after a while without being acted on, and Claude proceeds or aborts.</p>
 <p><strong>Cause:</strong> Permission requests have a timeout. After the timeout, summon defaults to denying the request (fail-safe).</p>
 <p><strong>Fix:</strong> Respond to permission requests promptly. The debounce interval can be adjusted via <code>SUMMON_PERMISSION_DEBOUNCE_MS</code> (default: 500ms):
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_PERMISSION_DEBOUNCE_MS<span class="w"> </span><span class="m">1000</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_PERMISSION_DEBOUNCE_MS<span class="w"> </span><span class="m">1000</span>
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
@@ -2369,7 +2369,7 @@ If the session persists, stop it explicitly:
 <p><strong>Fix:</strong>
 - Wait up to 60 seconds for the next sync cycle.
 - If it has been longer than a few minutes, check for errors in the session logs:
-  <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>&lt;session-name&gt;
+  <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>&lt;session-name&gt;
 </code></pre></div>
 - After 3 consecutive sync failures, the sync interval increases to 5 minutes. Check for Slack API errors in the logs.</p>
 </details>
@@ -2384,14 +2384,14 @@ If the session persists, stop it explicitly:
 <details class="tip" open="open">
 <summary>Checking daemon status and health</summary>
 <p>The daemon starts automatically with <code>summon start</code> and stops when all sessions end. To check if it's running:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
 </code></pre></div>
 This shows whether the daemon is running, its PID, uptime, and all active sessions.</p>
 </details>
 <details class="tip" open="open">
 <summary>Finding logs</summary>
 <p>Session logs are stored in the data directory (typically <code>~/.local/share/summon/logs/</code>). To view logs for a specific session:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>&lt;session-name&gt;
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>logs<span class="w"> </span>&lt;session-name&gt;
 </code></pre></div></p>
 <p>The daemon log is at <code>&lt;data-dir&gt;/logs/daemon.log</code>. Check the data directory with:
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span>check
@@ -2400,7 +2400,7 @@ This shows whether the daemon is running, its PID, uptime, and all active sessio
 <details class="tip" open="open">
 <summary>Enabling verbose logging for debugging</summary>
 <p>Pass <code>-v</code> as a top-level flag:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>-v<span class="w"> </span>start<span class="w"> </span>--name<span class="w"> </span>my-session
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>-v<span class="w"> </span>start<span class="w"> </span>--name<span class="w"> </span>my-session
 </code></pre></div>
 Verbose logs include SDK events, Slack API calls, and permission flow details.</p>
 </details>
@@ -2409,7 +2409,7 @@ Verbose logs include SDK events, Slack API calls, and permission flow details.</
 <p><strong>Symptom:</strong> <code>summon stop --all</code> hangs or the daemon process remains after stopping.</p>
 <p><strong>Cause:</strong> Active sessions may be taking time to shut down gracefully, or the daemon is waiting for in-flight Slack API calls.</p>
 <p><strong>Fix:</strong> Wait a few seconds — the daemon performs a graceful shutdown that stops all active sessions first. If it hangs for more than 30 seconds, kill the daemon process directly:
-<div class="highlight"><pre><span></span><code>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;summon.*start&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span>
+<div class="notest highlight"><pre><span></span><code>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;summon.*start&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span>
 </code></pre></div></p>
 </details>
 <hr />
@@ -2422,7 +2422,7 @@ Verbose logs include SDK events, Slack API calls, and permission flow details.</
 1. Download <code>client_secret.json</code> from the Google Cloud Console for your OAuth app.
 2. Place it in your summon data directory (check <code>summon config path</code> for the location).
 3. Run the auth flow:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
 4. Complete the browser-based consent flow.</p>
 </details>
@@ -2431,7 +2431,7 @@ Verbose logs include SDK events, Slack API calls, and permission flow details.</
 <p><strong>Symptom:</strong> summon reports that required Google scopes are missing even after authorizing.</p>
 <p><strong>Cause:</strong> The OAuth consent was granted with insufficient scopes, or the stored credentials don't include all required scopes.</p>
 <p><strong>Fix:</strong> Re-run the auth flow — it will request all required scopes:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
 If scope issues persist, revoke the app's access in your Google account settings and re-authorize.</p>
 </details>
@@ -2452,10 +2452,10 @@ The <code>Data dir</code> line shows the base path. Google credentials are store
 <p><strong>Cause:</strong> Scribe is disabled by default and must be explicitly enabled.</p>
 <p><strong>Fix:</strong>
 1. Enable scribe in your config:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 2. Scribe auto-starts with <code>summon project up</code>. Verify it's running:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list
 </code></pre></div>
 Look for a scribe session in the output.</p>
 </details>
@@ -2465,16 +2465,16 @@ Look for a scribe session in the output.</p>
 <p><strong>Cause:</strong> The Google collector requires separate enablement and authentication.</p>
 <p><strong>Fix:</strong>
 1. Enable the Google collector:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 2. Verify Google authentication status:
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
 </code></pre></div>
 3. If not authenticated, run the auth flow:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
 4. Ensure the <code>workspace-mcp</code> binary is available. If missing, install the Google extra:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span>
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">
@@ -2483,16 +2483,16 @@ Look for a scribe session in the output.</p>
 <p><strong>Cause:</strong> The Slack browser monitor requires separate enablement, Playwright, and browser authentication.</p>
 <p><strong>Fix:</strong>
 1. Enable the Slack browser monitor:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 2. Check Slack browser authentication status:
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>status
 </code></pre></div>
 3. If not authenticated, run the interactive auth flow:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>login<span class="w"> </span>WORKSPACE_NAME
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>login<span class="w"> </span>WORKSPACE_NAME
 </code></pre></div>
 4. Ensure Playwright is installed:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span>
 </code></pre></div>
 5. The browser-authenticated user must be a member of the channels you want to monitor. Invite the user to any missing channels in the external workspace.</p>
 </details>
@@ -2515,7 +2515,7 @@ Look for a scribe session in the output.</p>
 <p><strong>Symptom:</strong> Running <code>summon project up</code> starts new PM sessions but does not resume previously running child sessions.</p>
 <p><strong>Cause:</strong> Only sessions in <code>suspended</code> status are eligible for automatic resume. Sessions that completed normally (<code>completed</code>) or failed (<code>errored</code>) are not resumed.</p>
 <p><strong>Fix:</strong> Check the status of your sessions:
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"> </span>--all
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>session<span class="w"> </span>list<span class="w"> </span>--all
 </code></pre></div>
 Sessions must show <code>suspended</code> status to be resumed by <code>project up</code>. If sessions are <code>completed</code> or <code>errored</code>, they will not auto-resume — start new sessions instead.</p>
 </details>

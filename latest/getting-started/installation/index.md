@@ -21,7 +21,7 @@ uv tool install summon-claude
 
 uv is the recommended method because it handles Python version management automatically and produces the fastest install times.
 
-[pipx](https://pipx.pypa.io/) installs summon-claude in an isolated virtualenv and exposes the `summon` command globally.
+[pipx](https://pipx.pypa.io/stable/) installs summon-claude in an isolated virtualenv and exposes the `summon` command globally.
 
 ```
 pipx install summon-claude

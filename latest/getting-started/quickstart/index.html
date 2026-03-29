@@ -2154,14 +2154,14 @@
 <hr />
 <h2 id="step-1-register-a-project">Step 1: Register a project<a class="headerlink" href="#step-1-register-a-project" title="Permanent link">&para;</a></h2>
 <p>Navigate to your project directory and register it:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>~/code/my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>~/code/my-api
 </code></pre></div>
 <p>This creates a named project that summon-claude tracks. You can optionally set <a href="../../guide/projects/#managing-workflow-instructions">workflow instructions</a> that guide every session:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>workflow<span class="w"> </span><span class="nb">set</span><span class="w"> </span>my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>workflow<span class="w"> </span><span class="nb">set</span><span class="w"> </span>my-api
 </code></pre></div>
 <hr />
 <h2 id="step-2-start-your-project-manager-agent">Step 2: Start your Project Manager agent<a class="headerlink" href="#step-2-start-your-project-manager-agent" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
 </code></pre></div>
 <p>This starts PM agents for all registered projects. The PM prints an authentication code:</p>
 <!-- terminal:project-up -->
@@ -2269,7 +2269,7 @@
 <hr />
 <h2 id="step-6-end-the-session">Step 6: End the session<a class="headerlink" href="#step-6-end-the-session" title="Permanent link">&para;</a></h2>
 <p>When you're done, stop all project sessions:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>down
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>down
 </code></pre></div>
 <p>Or end just the PM session from Slack:</p>
 <div class="highlight"><pre><span></span><code>!end
@@ -2279,7 +2279,7 @@
 <details class="tip">
 <summary>Quick ad-hoc sessions (no project setup)</summary>
 <p>For one-off tasks that don't need a PM, use <code>summon start</code> directly:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>start
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>start
 </code></pre></div>
 <p>This creates a single session. Authenticate in Slack with <code>/summon CODE</code>, interact, and end with <code>!end</code> or <code>summon stop</code>.</p>
 <p>See <a href="../../guide/sessions/">Sessions</a> for details.</p>

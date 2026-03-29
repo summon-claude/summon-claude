@@ -2301,10 +2301,10 @@
 </div>
 <h3 id="summon-project-add"><code>summon project add</code><a class="headerlink" href="#summon-project-add" title="Permanent link">&para;</a></h3>
 <p>Register a new project:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>NAME<span class="w"> </span><span class="o">[</span>DIR<span class="o">]</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>NAME<span class="w"> </span><span class="o">[</span>DIR<span class="o">]</span>
 </code></pre></div>
 <p><code>DIR</code> defaults to the current working directory if omitted.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Register the current directory as a project</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Register the current directory as a project</span>
 summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api
 
 <span class="c1"># Register a different directory</span>
@@ -2320,7 +2320,7 @@ summon<span class="w"> </span>project<span class="w"> </span>add<span class="w">
 </code></pre></div>
 <h3 id="summon-project-up"><code>summon project up</code><a class="headerlink" href="#summon-project-up" title="Permanent link">&para;</a></h3>
 <p>Start PM agents for all registered projects:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
 </code></pre></div>
 <p>Each project gets one PM session. If a PM is already running for a project, <code>up</code> skips it. There is no per-project syntax — <code>project up</code> always starts PMs for all projects that need one.</p>
 <div class="admonition note">
@@ -2329,16 +2329,16 @@ summon<span class="w"> </span>project<span class="w"> </span>add<span class="w">
 </div>
 <h3 id="summon-project-down"><code>summon project down</code><a class="headerlink" href="#summon-project-down" title="Permanent link">&para;</a></h3>
 <p>Stop all sessions associated with a project:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>down<span class="w"> </span>my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>down<span class="w"> </span>my-api
 </code></pre></div>
 <p><code>down</code> stops the PM and all child sessions it manages. All sessions (PM and children) are marked <strong>suspended</strong> rather than completed — this lets <code>project up</code> restart them deterministically later (cascade restart). Each session's Slack channel is renamed with a <code>zzz-</code> prefix on disconnect (e.g., <code>my-api-worker-a1b2c3</code> becomes <code>zzz-my-api-worker-a1b2c3</code>), making it easy to visually identify inactive sessions in the Slack sidebar.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Stop all projects (omit NAME to stop all)</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Stop all projects (omit NAME to stop all)</span>
 summon<span class="w"> </span>project<span class="w"> </span>down
 </code></pre></div>
 <p><strong>Cascade restart:</strong> When you run <code>summon project up</code> after a <code>down</code>, summon-claude finds all suspended sessions for the project and resumes them with full transcript continuity. Rather than creating fresh sessions, it creates new summon sessions that bind to the <strong>existing</strong> Slack channels — the <code>zzz-</code> prefix is removed, and the original channel name is restored. Canvas content, conversation history, and the Claude Code session transcript all carry over. The resumed sessions keep the same <code>cwd</code> and model they had before, so you can pause and resume an entire multi-session workflow without reconfiguring anything or losing context.</p>
 <h3 id="summon-project-remove"><code>summon project remove</code><a class="headerlink" href="#summon-project-remove" title="Permanent link">&para;</a></h3>
 <p>Remove a project from the registry:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>remove<span class="w"> </span>my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>remove<span class="w"> </span>my-api
 <span class="c1"># or by project ID</span>
 summon<span class="w"> </span>project<span class="w"> </span>remove<span class="w"> </span>proj-a1b2c3
 </code></pre></div>
@@ -2356,7 +2356,7 @@ summon<span class="w"> </span>project<span class="w"> </span>remove<span class="
 </ul>
 <p>No default workflows ship with summon-claude — workflow instructions are entirely yours to define. They encode whatever your project needs: coding standards, tool preferences, repository conventions, review checklists, or operational guardrails.</p>
 <p>After registering a project, set its workflow instructions:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>~/code/my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>~/code/my-api
 summon<span class="w"> </span>project<span class="w"> </span>workflow<span class="w"> </span><span class="nb">set</span><span class="w"> </span>my-api
 </code></pre></div>
 <p>This opens <code>$EDITOR</code> where you can write your instructions. For example:</p>
@@ -2402,7 +2402,7 @@ Cross-service API changes require updating the OpenAPI spec in api-specs/.
 </ul>
 <h3 id="managing-workflow-instructions">Managing workflow instructions<a class="headerlink" href="#managing-workflow-instructions" title="Permanent link">&para;</a></h3>
 <p>Use <code>summon project workflow</code> to view, edit, and clear workflow instructions after a project is registered:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Show global workflow defaults</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Show global workflow defaults</span>
 summon<span class="w"> </span>project<span class="w"> </span>workflow<span class="w"> </span>show
 
 <span class="c1"># Show workflow for a specific project</span>

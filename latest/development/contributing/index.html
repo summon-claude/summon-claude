@@ -2608,12 +2608,12 @@
 <li><strong><a href="https://github.com/arxanas/git-branchless">git-branchless</a></strong> (optional) — commit history cleanup tools (<code>git sl</code>, <code>git reword</code>, <code>git branchless move</code>)</li>
 </ul>
 <p>Install git-branchless:
-<div class="highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>git-branchless<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>branchless<span class="w"> </span>init
+<div class="notest highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>git-branchless<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>branchless<span class="w"> </span>init
 </code></pre></div></p>
 <hr />
 <h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Clone and install</span>
-git<span class="w"> </span>clone<span class="w"> </span>https://github.com/summon-claude/summon-claude.git
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Clone and install</span>
+git<span class="w"> </span>clone<span class="w"> </span>git@github.com:summon-claude/summon-claude.git
 <span class="nb">cd</span><span class="w"> </span>summon-claude
 uv<span class="w"> </span>sync
 
@@ -2622,7 +2622,7 @@ make<span class="w"> </span>all<span class="w">  </span><span class="c1"># insta
 </code></pre></div>
 <hr />
 <h2 id="common-commands">Common Commands<a class="headerlink" href="#common-commands" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span>install<span class="w">         </span><span class="c1"># Install all dependencies (uv sync + git hooks)</span>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>install<span class="w">         </span><span class="c1"># Install all dependencies (uv sync + git hooks)</span>
 make<span class="w"> </span>lint<span class="w">            </span><span class="c1"># Run ruff check + format (auto-fix, fails if files changed)</span>
 make<span class="w"> </span><span class="nb">test</span><span class="w">            </span><span class="c1"># Run full pytest suite</span>
 make<span class="w"> </span>all<span class="w">             </span><span class="c1"># Complete workflow: install → lint → test</span>
@@ -2638,7 +2638,7 @@ make<span class="w"> </span>docs-serve<span class="w">      </span><span class="
 make<span class="w"> </span>docs-build<span class="w">      </span><span class="c1"># Build docs in strict mode</span>
 </code></pre></div>
 <p>Full reference:
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">help</span><span class="w">  </span><span class="c1"># Lists all targets with descriptions</span>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">help</span><span class="w">  </span><span class="c1"># Lists all targets with descriptions</span>
 </code></pre></div></p>
 <hr />
 <h2 id="commit-message-guidelines">Commit Message Guidelines<a class="headerlink" href="#commit-message-guidelines" title="Permanent link">&para;</a></h2>
@@ -2861,10 +2861,10 @@ BREAKING CHANGE: create_session now requires EventDispatcher reference.
 <h2 id="git-workflow">Git Workflow<a class="headerlink" href="#git-workflow" title="Permanent link">&para;</a></h2>
 <p>Use feature branches for all work. Don't commit directly to main.</p>
 <p><strong>One-time setup:</strong>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>push.autoSetupRemote<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>push.autoSetupRemote<span class="w"> </span><span class="nb">true</span>
 </code></pre></div></p>
 <p><strong>Feature workflow:</strong>
-<div class="highlight"><pre><span></span><code><span class="c1"># Create feature branch from latest upstream</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Create feature branch from latest upstream</span>
 git<span class="w"> </span>fetch<span class="w"> </span>upstream
 git<span class="w"> </span>switch<span class="w"> </span>-c<span class="w"> </span>feature/your-feature<span class="w"> </span>upstream/main
 
@@ -2896,7 +2896,7 @@ gh<span class="w"> </span>pr<span class="w"> </span>create
 - Does each commit add value independently?</p>
 <p>If commits are just iterations toward a solution, squash them. If commits represent distinct logical changes, keep them separate.</p>
 <h3 id="commit-cleanup-with-git-branchless">Commit cleanup with git-branchless<a class="headerlink" href="#commit-cleanup-with-git-branchless" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Review your commits</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Review your commits</span>
 git<span class="w"> </span>log<span class="w"> </span>--oneline<span class="w"> </span>-10
 git<span class="w"> </span>sl<span class="w">  </span><span class="c1"># Visual commit graph</span>
 
@@ -2945,12 +2945,12 @@ Migrated CLI framework
 <hr />
 <h2 id="code-style">Code Style<a class="headerlink" href="#code-style" title="Permanent link">&para;</a></h2>
 <h3 id="linting-and-formatting">Linting and formatting<a class="headerlink" href="#linting-and-formatting" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>.<span class="w"> </span>--fix<span class="w">     </span><span class="c1"># Auto-fix lint issues</span>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>.<span class="w"> </span>--fix<span class="w">     </span><span class="c1"># Auto-fix lint issues</span>
 uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>format<span class="w"> </span>.<span class="w">          </span><span class="c1"># Auto-format</span>
 uv<span class="w"> </span>run<span class="w"> </span>pyright<span class="w">                </span><span class="c1"># Type checking</span>
 </code></pre></div>
 <p>Or via make:
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span>lint<span class="w">       </span><span class="c1"># ruff check + format</span>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>lint<span class="w">       </span><span class="c1"># ruff check + format</span>
 make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1"># pyright only</span>
 </code></pre></div></p>
 <p><strong>Ruff configuration</strong> (from <code>pyproject.toml</code>):
@@ -2974,7 +2974,7 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <li>Write an async migration function that takes <code>db: aiosqlite.Connection</code></li>
 <li>Add it to <code>_MIGRATIONS</code> keyed by the version it migrates <em>from</em></li>
 </ol>
-<div class="highlight"><pre><span></span><code><span class="n">CURRENT_SCHEMA_VERSION</span> <span class="o">=</span> <span class="mi">15</span>  <span class="c1"># was 14</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">CURRENT_SCHEMA_VERSION</span> <span class="o">=</span> <span class="mi">15</span>  <span class="c1"># was 14</span>
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_migrate_14_to_15</span><span class="p">(</span><span class="n">db</span><span class="p">:</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">Connection</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
     <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;ALTER TABLE sessions ADD COLUMN tags TEXT&quot;</span><span class="p">)</span>
@@ -3003,7 +3003,7 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <ol>
 <li>
 <p>Create a class implementing <code>DiagnosticCheck</code> in <code>diagnostics.py</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySubsystemCheck</span><span class="p">:</span>
+<div class="notest highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySubsystemCheck</span><span class="p">:</span>
     <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my_subsystem&quot;</span>
     <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;Checks something important&quot;</span>
 
@@ -3029,13 +3029,13 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 </li>
 <li>
 <p>Register it and add the subsystem name:</p>
-<div class="highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
 </code></pre></div>
 <p>Add <code>"my_subsystem"</code> to the <code>KNOWN_SUBSYSTEMS</code> frozenset at the top of the file.</p>
 </li>
 <li>
 <p>Add guard test mappings in <code>tests/test_diagnostics_guard.py</code>:</p>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_diagnostics_guard.py<span class="w"> </span>-v
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_diagnostics_guard.py<span class="w"> </span>-v
 </code></pre></div>
 <p>The guard tests verify that every registered check is in <code>KNOWN_SUBSYSTEMS</code> and vice versa. Add MCP server names, binary paths, or credential references to the appropriate mapping dicts if your check validates external integrations.</p>
 </li>

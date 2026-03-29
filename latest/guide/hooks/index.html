@@ -2315,17 +2315,17 @@
 <hr />
 <h2 id="setting-hooks">Setting hooks<a class="headerlink" href="#setting-hooks" title="Permanent link">&para;</a></h2>
 <h3 id="interactive-editor">Interactive (editor)<a class="headerlink" href="#interactive-editor" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span>
 </code></pre></div>
 <p>Opens <code>$EDITOR</code> with the current hooks as JSON. Save and close to apply.</p>
 <h3 id="inline-json">Inline JSON<a class="headerlink" href="#inline-json" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;uv sync&quot;, &quot;make setup&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;uv sync&quot;, &quot;make setup&quot;]}&#39;</span>
 </code></pre></div>
 <h3 id="per-project-hooks">Per-project hooks<a class="headerlink" href="#per-project-hooks" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;npm install&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;npm install&quot;]}&#39;</span>
 </code></pre></div>
 <p>Per-project hooks override global hooks for that project. To include the global hooks as well, use <code>$INCLUDE_GLOBAL</code>:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;$INCLUDE_GLOBAL&quot;, &quot;npm install&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;$INCLUDE_GLOBAL&quot;, &quot;npm install&quot;]}&#39;</span>
 </code></pre></div>
 <p>This runs the global <code>worktree_create</code> hooks first, then <code>npm install</code>.</p>
 <hr />
@@ -2337,21 +2337,21 @@
 </code></pre></div>
 <hr />
 <h2 id="clearing-hooks">Clearing hooks<a class="headerlink" href="#clearing-hooks" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>clear
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>clear
 </code></pre></div>
 <p>Removes global hooks (resets to NULL). For a specific project:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>clear<span class="w"> </span>--project<span class="w"> </span>my-api
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>clear<span class="w"> </span>--project<span class="w"> </span>my-api
 </code></pre></div>
 <p>Clearing a project's hooks causes it to fall back to the global hooks.</p>
 <hr />
 <h2 id="hook-bridge">Hook bridge<a class="headerlink" href="#hook-bridge" title="Permanent link">&para;</a></h2>
 <p>The hook bridge connects summon's lifecycle hooks to Claude Code's hook system. When installed, Claude Code automatically notifies summon when worktrees are created.</p>
 <h3 id="install">Install<a class="headerlink" href="#install" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>install
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>install
 </code></pre></div>
 <p>This writes shell wrappers to <code>~/.claude/hooks/</code> and registers them in <code>~/.claude/settings.json</code>. The command is idempotent — safe to run multiple times.</p>
 <h3 id="uninstall">Uninstall<a class="headerlink" href="#uninstall" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>uninstall
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span>uninstall
 </code></pre></div>
 <p>Removes the shell wrappers and their entries from <code>settings.json</code>.</p>
 <h3 id="what-the-bridge-does">What the bridge does<a class="headerlink" href="#what-the-bridge-does" title="Permanent link">&para;</a></h3>

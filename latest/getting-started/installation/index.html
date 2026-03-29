@@ -2137,18 +2137,18 @@
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p><a href="https://docs.astral.sh/uv/">uv</a> installs summon-claude as an isolated tool with its own managed Python environment.</p>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>summon-claude
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span>summon-claude
 </code></pre></div>
 <p>uv is the recommended method because it handles Python version management automatically and produces the fastest install times.</p>
 </div>
 <div class="tabbed-block">
-<p><a href="https://pipx.pypa.io/">pipx</a> installs summon-claude in an isolated virtualenv and exposes the <code>summon</code> command globally.</p>
-<div class="highlight"><pre><span></span><code>pipx<span class="w"> </span>install<span class="w"> </span>summon-claude
+<p><a href="https://pipx.pypa.io/stable/">pipx</a> installs summon-claude in an isolated virtualenv and exposes the <code>summon</code> command globally.</p>
+<div class="notest highlight"><pre><span></span><code>pipx<span class="w"> </span>install<span class="w"> </span>summon-claude
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <p>Install via the summon-claude tap:</p>
-<div class="highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>summon-claude/summon/summon-claude
+<div class="notest highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>summon-claude/summon/summon-claude
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
@@ -2189,7 +2189,7 @@
 <div class="tabbed-set tabbed-alternate" data-tabs="2:3"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><input id="__tabbed_2_3" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">uv</label><label for="__tabbed_2_2">pipx</label><label for="__tabbed_2_3">Homebrew</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><span class="c1"># Google Workspace integration (for scribe)</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Google Workspace integration (for scribe)</span>
 uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span>
 
 <span class="c1"># Slack browser monitoring (for scribe)</span>
@@ -2200,7 +2200,7 @@ uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><span class="c1"># Google Workspace integration (for scribe)</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Google Workspace integration (for scribe)</span>
 pipx<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span>
 
 <span class="c1"># Slack browser monitoring (for scribe)</span>
@@ -2212,7 +2212,7 @@ pipx<span class="w"> </span>install<span class="w"> </span><span class="s2">&quo
 </div>
 <div class="tabbed-block">
 <p>No extras needed — the Homebrew formula includes all dependencies.</p>
-<div class="highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>summon-claude/summon/summon-claude
+<div class="notest highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>summon-claude/summon/summon-claude
 </code></pre></div>
 </div>
 </div>
@@ -2243,7 +2243,7 @@ DB path:     ~/.local/share/summon/registry.db
 <div class="tabbed-content">
 <div class="tabbed-block">
 <p>Add to <code>~/.bashrc</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="nb">eval</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nv">_SUMMON_COMPLETE</span><span class="o">=</span>bash_source<span class="w"> </span>summon<span class="k">)</span><span class="s2">&quot;</span>
+<div class="notest highlight"><pre><span></span><code><span class="nb">eval</span><span class="w"> </span><span class="s2">&quot;</span><span class="k">$(</span><span class="nv">_SUMMON_COMPLETE</span><span class="o">=</span>bash_source<span class="w"> </span>summon<span class="k">)</span><span class="s2">&quot;</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
@@ -2286,7 +2286,7 @@ DB path:     ~/.local/share/summon/registry.db
 <hr />
 <h2 id="disabling-update-checks">Disabling update checks<a class="headerlink" href="#disabling-update-checks" title="Permanent link">&para;</a></h2>
 <p>summon-claude checks for new versions on startup. To disable this:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_NO_UPDATE_CHECK<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_NO_UPDATE_CHECK<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 <p>Or set <code>SUMMON_NO_UPDATE_CHECK=true</code> in your config file (<code>~/.config/summon/config.env</code>).</p>
 

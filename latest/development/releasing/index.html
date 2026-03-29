@@ -2286,7 +2286,7 @@
 <hr />
 <h2 id="how-to-release">How to Release<a class="headerlink" href="#how-to-release" title="Permanent link">&para;</a></h2>
 <p>The <code>make release</code> target handles the full flow interactively:</p>
-<div class="highlight"><pre><span></span><code>make<span class="w"> </span>release
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>release
 </code></pre></div>
 <p>This script:
 1. Verifies you are on <code>main</code> and not in a worktree
@@ -2296,7 +2296,7 @@
 5. Creates and pushes an annotated git tag (<code>v&lt;version&gt;</code>)
 6. Creates a GitHub Release with auto-generated notes</p>
 <p>Alternatively, use the GitHub CLI directly:
-<div class="highlight"><pre><span></span><code>gh<span class="w"> </span>release<span class="w"> </span>create<span class="w"> </span>v0.2.0<span class="w"> </span>--generate-notes
+<div class="notest highlight"><pre><span></span><code>gh<span class="w"> </span>release<span class="w"> </span>create<span class="w"> </span>v0.2.0<span class="w"> </span>--generate-notes
 </code></pre></div></p>
 <p>Or via the GitHub UI: <strong>Releases → Draft a new release → Create tag → Publish release</strong>.</p>
 <hr />
@@ -2334,7 +2334,7 @@
 <p>Optional: add deployment protection rules (e.g. required reviewers) on the <code>pypi</code> environment for extra safety.</p>
 <h3 id="2-configure-trusted-publishers-on-pypi">2. Configure Trusted Publishers on PyPI<a class="headerlink" href="#2-configure-trusted-publishers-on-pypi" title="Permanent link">&para;</a></h3>
 <p>OIDC trusted publishers allow publishing without storing API tokens as secrets.</p>
-<p><strong>PyPI (production):</strong> Go to <a href="https://pypi.org/manage/account/publishing/">pypi.org/manage/account/publishing/</a></p>
+<p><strong>PyPI (production):</strong> Log in to <a href="https://pypi.org">pypi.org</a>, then navigate to Account Settings → Publishing → Add a new publisher.</p>
 <ul>
 <li>Project name: <code>summon-claude</code></li>
 <li>GitHub owner: <code>summon-claude</code></li>
@@ -2342,7 +2342,7 @@
 <li>Workflow: <code>publish.yaml</code></li>
 <li>Environment: <code>pypi</code></li>
 </ul>
-<p><strong>TestPyPI:</strong> Go to <a href="https://test.pypi.org/manage/account/publishing/">test.pypi.org/manage/account/publishing/</a></p>
+<p><strong>TestPyPI:</strong> Log in to <a href="https://test.pypi.org">test.pypi.org</a>, then navigate to Account Settings → Publishing → Add a new publisher.</p>
 <ul>
 <li>Project name: <code>summon-claude</code></li>
 <li>GitHub owner: <code>summon-claude</code></li>
@@ -2369,7 +2369,7 @@
 <h2 id="homebrew-formula">Homebrew Formula<a class="headerlink" href="#homebrew-formula" title="Permanent link">&para;</a></h2>
 <p>The Homebrew formula lives in a separate tap repository: <a href="https://github.com/summon-claude/homebrew-summon">summon-claude/homebrew-summon</a>.</p>
 <p>After each PyPI release, the <code>publish.yaml</code> workflow sends a <code>repository_dispatch</code> event to <code>homebrew-summon</code> with the release version:</p>
-<div class="highlight"><pre><span></span><code>gh<span class="w"> </span>api<span class="w"> </span>repos/summon-claude/homebrew-summon/dispatches<span class="w"> </span><span class="se">\</span>
+<div class="notest highlight"><pre><span></span><code>gh<span class="w"> </span>api<span class="w"> </span>repos/summon-claude/homebrew-summon/dispatches<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--method<span class="w"> </span>POST<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-f<span class="w"> </span><span class="nv">event_type</span><span class="o">=</span>pypi-release<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-f<span class="w"> </span><span class="s1">&#39;client_payload[version]=v1.2.3&#39;</span>

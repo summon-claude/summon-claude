@@ -2225,7 +2225,7 @@
 <p>summon-claude is configured entirely through environment variables with the <code>SUMMON_</code> prefix. You can set them in a config file, a <code>.env</code> file in your working directory, or directly in your shell environment.</p>
 <hr />
 <h2 id="config-file-location">Config file location<a class="headerlink" href="#config-file-location" title="Permanent link">&para;</a></h2>
-<p>summon follows the <a href="https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html">XDG Base Directory spec</a>:</p>
+<p>summon follows the <a href="https://specifications.freedesktop.org/basedir/basedir-spec-latest.html">XDG Base Directory spec</a>:</p>
 <table>
 <thead>
 <tr>
@@ -2262,7 +2262,7 @@
 <hr />
 <h2 id="initial-setup">Initial setup<a class="headerlink" href="#initial-setup" title="Permanent link">&para;</a></h2>
 <p>Use the interactive setup wizard to create your configuration:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>init
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>init
 </code></pre></div>
 <p>See <a href="../../getting-started/configuration/">Configuring Summon</a> for the full wizard walkthrough and credential setup details.</p>
 <p>The three required Slack credentials are covered in <a href="../../getting-started/slack-setup/">Slack Setup</a>.</p>
@@ -2305,14 +2305,14 @@
 </code></pre></div>
 <p>Prints the absolute path to the config file in use.</p>
 <h3 id="summon-config-set">summon config set<a class="headerlink" href="#summon-config-set" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_DEFAULT_MODEL<span class="w"> </span>claude-opus-4-6
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_DEFAULT_MODEL<span class="w"> </span>claude-opus-4-6
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_CHANNEL_PREFIX<span class="w"> </span>my-team
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 <p>Sets a single key in the config file. Creates the file if it does not exist. The key must be a valid <code>SUMMON_*</code> configuration variable — unknown keys are rejected with an error listing all valid options.</p>
 <p>Boolean values are normalized: <code>true</code>, <code>false</code>, <code>yes</code>, <code>no</code>, <code>on</code>, <code>off</code>, <code>1</code>, and <code>0</code> are all accepted and stored as <code>true</code> or <code>false</code>. Choice-type options (like <code>SUMMON_DEFAULT_EFFORT</code>) are validated against their allowed values.</p>
 <h3 id="summon-config-edit">summon config edit<a class="headerlink" href="#summon-config-edit" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span>edit
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span>edit
 </code></pre></div>
 <p>Opens the config file in <code>$EDITOR</code>. If <code>$EDITOR</code> is not set, falls back to <code>vi</code>.</p>
 <h3 id="summon-config-check">summon config check<a class="headerlink" href="#summon-config-check" title="Permanent link">&para;</a></h3>
@@ -2323,7 +2323,7 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <p>For external Slack workspace commands (browser-based monitoring), see <a href="../scribe/#slack-browser-monitoring">Scribe</a>.</p>
 <hr />
 <h2 id="example-config-file">Example config file<a class="headerlink" href="#example-config-file" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env</span>
 
 <span class="c1"># Required: Slack credentials</span>
 <span class="nv">SUMMON_SLACK_BOT_TOKEN</span><span class="o">=</span>xoxb-your-bot-token

@@ -2442,15 +2442,15 @@
 <hr />
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
 <h3 id="step-1-enable-the-scribe">Step 1: Enable the scribe<a class="headerlink" href="#step-1-enable-the-scribe" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 <h3 id="step-2-enable-data-sources">Step 2: Enable data sources<a class="headerlink" href="#step-2-enable-data-sources" title="Permanent link">&para;</a></h3>
 <p>The scribe has two data collectors, each with its own enable flag. Enable at least one.</p>
 <h4 id="google-workspace">Google Workspace<a class="headerlink" href="#google-workspace" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 <p>Then authenticate with Google:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
 <p>This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Once complete, credentials are stored in summon's config directory.</p>
 <p>To verify authentication status:</p>
@@ -2460,7 +2460,7 @@
 <p>See <a href="../scribe-integrations/#slack-browser-monitoring">Scribe Integrations — Slack Browser Monitoring</a> for full setup instructions.</p>
 <h3 id="step-3-start-the-scribe">Step 3: Start the scribe<a class="headerlink" href="#step-3-start-the-scribe" title="Permanent link">&para;</a></h3>
 <p>The scribe auto-spawns when you run:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
 </code></pre></div>
 <p>It creates (or reuses) a persistent private channel called <code>#0-summon-scribe</code>. No manual start or <code>/summon CODE</code> authentication is needed — the scribe inherits the authenticated user from <code>project up</code>.</p>
 <p>If the scribe was previously suspended by <code>project down</code>, <code>project up</code> resumes it with transcript continuity.</p>
@@ -2522,7 +2522,7 @@
 </tbody>
 </table>
 <p><strong>Example with keyword filtering and quiet hours:</strong></p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_IMPORTANCE_KEYWORDS<span class="w"> </span>urgent,outage,deploy,PagerDuty
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_IMPORTANCE_KEYWORDS<span class="w"> </span>urgent,outage,deploy,PagerDuty
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_QUIET_HOURS<span class="w"> </span><span class="m">23</span>:00-07:00
 </code></pre></div>
 <h3 id="google-workspace_1">Google Workspace<a class="headerlink" href="#google-workspace_1" title="Permanent link">&para;</a></h3>
@@ -2548,7 +2548,7 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 </tbody>
 </table>
 <p>The default services are <code>gmail</code>, <code>calendar</code>, <code>drive</code>. The full set of supported services is: <code>gmail</code>, <code>calendar</code>, <code>drive</code>, <code>docs</code>, <code>sheets</code>, <code>chat</code>, <code>forms</code>, <code>slides</code>, <code>tasks</code>, <code>contacts</code>, <code>search</code>, <code>appscript</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_SERVICES<span class="w"> </span>gmail,calendar
 </code></pre></div>
 <div class="admonition note">
@@ -2665,7 +2665,7 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <p>The canvas is updated after each scan cycle. See <a href="../canvas/">Canvas Integration</a> for how the canvas sync works.</p>
 <hr />
 <h2 id="full-configuration-example">Full configuration example<a class="headerlink" href="#full-configuration-example" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env (or environment variables)</span>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env (or environment variables)</span>
 
 <span class="c1"># Enable scribe</span>
 <span class="nv">SUMMON_SCRIBE_ENABLED</span><span class="o">=</span><span class="nb">true</span>

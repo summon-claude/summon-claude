@@ -2084,7 +2084,7 @@
 Run: uv tool upgrade summon-claude
 </code></pre></div>
 <p>The check is non-blocking and does not delay session startup. To disable it permanently:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_NO_UPDATE_CHECK<span class="w"> </span><span class="nb">true</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_NO_UPDATE_CHECK<span class="w"> </span><span class="nb">true</span>
 </code></pre></div>
 <hr />
 <h2 id="checking-your-current-version">Checking your current version<a class="headerlink" href="#checking-your-current-version" title="Permanent link">&para;</a></h2>
@@ -2137,7 +2137,7 @@ summon<span class="w"> </span>version
 <h2 id="upgrading-active-sessions">Upgrading active sessions<a class="headerlink" href="#upgrading-active-sessions" title="Permanent link">&para;</a></h2>
 <p>Upgrading summon-claude while sessions are running is safe — existing sessions continue using the version they started with. The new version takes effect for sessions started after the upgrade.</p>
 <p>To apply an upgrade to all sessions:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>--all
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>stop<span class="w"> </span>--all
 uv<span class="w"> </span>tool<span class="w"> </span>upgrade<span class="w"> </span>summon-claude
 summon<span class="w"> </span>start
 </code></pre></div>

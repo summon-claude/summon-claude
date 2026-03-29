@@ -2477,14 +2477,14 @@
 <p>If the Claude SDK provides a <code>deny</code> suggestion for a tool, it is denied immediately and unconditionally. SDK deny suggestions represent the user's own <code>settings.json</code> rules and are always respected.</p>
 <h3 id="3-static-auto-approve-list">3. Static Auto-Approve List<a class="headerlink" href="#3-static-auto-approve-list" title="Permanent link">&para;</a></h3>
 <p>The following tools are auto-approved without any Slack prompt:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_AUTO_APPROVE_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">_AUTO_APPROVE_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
     <span class="s2">&quot;Read&quot;</span><span class="p">,</span> <span class="s2">&quot;Cat&quot;</span><span class="p">,</span> <span class="s2">&quot;Grep&quot;</span><span class="p">,</span> <span class="s2">&quot;Glob&quot;</span><span class="p">,</span> <span class="s2">&quot;WebSearch&quot;</span><span class="p">,</span> <span class="s2">&quot;WebFetch&quot;</span><span class="p">,</span>
     <span class="s2">&quot;LSP&quot;</span><span class="p">,</span> <span class="s2">&quot;ListFiles&quot;</span><span class="p">,</span> <span class="s2">&quot;GetSymbolsOverview&quot;</span><span class="p">,</span> <span class="s2">&quot;FindSymbol&quot;</span><span class="p">,</span>
     <span class="s2">&quot;FindReferencingSymbols&quot;</span><span class="p">,</span>
 <span class="p">])</span>
 </code></pre></div>
 <p>GitHub MCP read operations are also auto-approved by exact name or prefix:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_AUTO_APPROVE_PREFIXES</span> <span class="o">=</span> <span class="p">(</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_AUTO_APPROVE_PREFIXES</span> <span class="o">=</span> <span class="p">(</span>
     <span class="s2">&quot;mcp__github__get_&quot;</span><span class="p">,</span>
     <span class="s2">&quot;mcp__github__list_&quot;</span><span class="p">,</span>
     <span class="s2">&quot;mcp__github__search_&quot;</span><span class="p">,</span>
@@ -2492,7 +2492,7 @@
 </code></pre></div>
 <h3 id="4-github-mcp-require-approval-list-checked-before-prefix-auto-approve">4. GitHub MCP Require-Approval List (checked before prefix auto-approve)<a class="headerlink" href="#4-github-mcp-require-approval-list-checked-before-prefix-auto-approve" title="Permanent link">&para;</a></h3>
 <p>Destructive and externally-visible GitHub operations <strong>always</strong> require Slack approval, even if the SDK suggests allow or they match a read prefix:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_REQUIRE_APPROVAL</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_REQUIRE_APPROVAL</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
     <span class="s2">&quot;mcp__github__merge_pull_request&quot;</span><span class="p">,</span>
     <span class="s2">&quot;mcp__github__delete_branch&quot;</span><span class="p">,</span>
     <span class="s2">&quot;mcp__github__close_pull_request&quot;</span><span class="p">,</span>
@@ -2653,7 +2653,7 @@
 <p>The daemon socket is restricted to mode <code>0600</code> (owner-only) so other OS users on the same machine cannot issue IPC commands. The SQLite database file is also <code>0600</code>.</p>
 <h2 id="cwd-constraints-for-spawn-sessions">CWD Constraints for Spawn Sessions<a class="headerlink" href="#cwd-constraints-for-spawn-sessions" title="Permanent link">&para;</a></h2>
 <p>When a session spawns a child via the MCP <code>session_start</code> tool, the child's <code>cwd</code> must be at or beneath the parent's <code>cwd</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">resolved_parent</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">parent_cwd</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">resolved_parent</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">parent_cwd</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
 <span class="n">resolved_child</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cwd</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
 <span class="k">if</span> <span class="ow">not</span> <span class="n">resolved_child</span><span class="o">.</span><span class="n">is_relative_to</span><span class="p">(</span><span class="n">resolved_parent</span><span class="p">):</span>
     <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
@@ -2662,7 +2662,7 @@
 <p>The <code>MAX_SPAWN_DEPTH = 2</code> constant caps session nesting at three levels deep (root → child → grandchild). Spawn attempts beyond this depth are rejected.</p>
 <h2 id="worktree-lockdown">Worktree Lockdown<a class="headerlink" href="#worktree-lockdown" title="Permanent link">&para;</a></h2>
 <p>All sessions pass a <code>disallowed_tools</code> list to the Claude SDK subprocess that blocks raw git worktree commands:</p>
-<div class="highlight"><pre><span></span><code><span class="n">_WORKTREE_DISALLOWED_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">_WORKTREE_DISALLOWED_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
     <span class="s2">&quot;Bash(git worktree add*)&quot;</span><span class="p">,</span>
     <span class="s2">&quot;Bash(git worktree move*)&quot;</span><span class="p">,</span>
 <span class="p">})</span>
