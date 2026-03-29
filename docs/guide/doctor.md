@@ -6,7 +6,7 @@
 
 ## Running diagnostics
 
-```bash
+```{ .bash .notest }
 summon doctor
 ```
 
@@ -106,7 +106,7 @@ Validates the stored GitHub OAuth token:
 
 Pass `-v` to the root `summon` command for detailed output including per-check details, suggestions, and log tails:
 
-```bash
+```{ .bash .notest }
 summon -v doctor
 ```
 
@@ -124,7 +124,7 @@ Verbose mode shows:
 
 Export the full diagnostic report as a JSON file:
 
-```bash
+```{ .bash .notest }
 summon doctor --export report.json
 ```
 
@@ -156,7 +156,7 @@ The JSON structure:
 
 Submit a redacted diagnostic report directly as a GitHub issue:
 
-```bash
+```{ .bash .notest }
 summon doctor --submit
 ```
 

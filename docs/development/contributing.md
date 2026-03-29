@@ -388,7 +388,7 @@ The `summon doctor` command uses a registry pattern in `diagnostics.py`. Each ch
 
 1. Create a class implementing `DiagnosticCheck` in `diagnostics.py`:
 
-    ```python
+    ```{ .python .notest }
     class MySubsystemCheck:
         name = "my_subsystem"
         description = "Checks something important"
@@ -415,7 +415,7 @@ The `summon doctor` command uses a registry pattern in `diagnostics.py`. Each ch
 
 2. Register it and add the subsystem name:
 
-    ```python
+    ```{ .python .notest }
     DIAGNOSTIC_REGISTRY["my_subsystem"] = MySubsystemCheck()
     ```
 
@@ -423,7 +423,7 @@ The `summon doctor` command uses a registry pattern in `diagnostics.py`. Each ch
 
 3. Add guard test mappings in `tests/test_diagnostics_guard.py`:
 
-    ```bash
+    ```{ .bash .notest }
     uv run pytest tests/test_diagnostics_guard.py -v
     ```
 
