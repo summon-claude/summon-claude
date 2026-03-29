@@ -14,6 +14,7 @@ from pathlib import Path
 
 import click
 
+from summon_claude.cli.formatting import format_tag
 from summon_claude.config import (
     _BOOL_FALSE,
     _BOOL_TRUE,
@@ -441,28 +442,31 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
         validate_token,
     )
 
+    def _out(tag: str, msg: str) -> None:
+        click.echo(f"{prefix}{format_tag(tag)} {msg}")
+
     token = load_token()
     if not token:
         if not quiet:
-            click.echo(f"{prefix}[INFO] GitHub: not configured (run `summon auth github login`)")
+            _out("INFO", "GitHub: not configured (run `summon auth github login`)")
         return None
 
     try:
         result = asyncio.run(validate_token(token))
     except (OSError, aiohttp.ClientError, GitHubAuthError):
         if not quiet:
-            click.echo(f"{prefix}[WARN] GitHub: token found (validation skipped — network error)")
+            _out("WARN", "GitHub: token found (validation skipped — network error)")
         return True
 
     if result is None:
         if not quiet:
-            click.echo(f"{prefix}[FAIL] GitHub: token invalid — run `summon auth github login`")
+            _out("FAIL", "GitHub: token invalid — run `summon auth github login`")
         return False
 
     if not quiet:
         login = re.sub(r"[^a-zA-Z0-9-]", "", result["login"]) or "unknown"
         scopes = re.sub(r"[^\x20-\x7e]", "", result["scopes"])
-        click.echo(f"{prefix}[PASS] GitHub: authenticated as {login} (scopes: {scopes})")
+        _out("PASS", f"GitHub: authenticated as {login} (scopes: {scopes})")
     return True
 
 
@@ -474,26 +478,30 @@ def _check_google_status(
     Returns True if valid, False if credentials exist but are broken,
     or None if Google isn't configured (not an error, just absent).
     """
+
+    def _out(tag: str, msg: str) -> None:
+        click.echo(f"{prefix}{format_tag(tag)} {msg}")
+
     try:
         from auth.credential_store import LocalDirectoryCredentialStore  # noqa: PLC0415
         from auth.google_auth import has_required_scopes  # noqa: PLC0415
         from auth.scopes import get_scopes_for_tools  # noqa: PLC0415
     except ImportError:
         if not quiet:
-            click.echo(f"{prefix}Google: not installed (install summon-claude[google])")
+            _out("INFO", "Google: not installed (install summon-claude[google])")
         return None
 
     creds_dir = get_google_credentials_dir()
     if not creds_dir.exists():
         if not quiet:
-            click.echo(f"{prefix}Google: not configured (run `summon auth google login`)")
+            _out("INFO", "Google: not configured (run `summon auth google login`)")
         return None
 
     store = LocalDirectoryCredentialStore(str(creds_dir))
     users = store.list_users()
     if not users:
         if not quiet:
-            click.echo(f"{prefix}Google: no credentials found")
+            _out("INFO", "Google: no credentials found")
         return None
 
     # Read configured services once, outside the per-user loop.
@@ -507,7 +515,7 @@ def _check_google_status(
     for user in users:
         cred = store.get_credential(user)
         if not cred:
-            click.echo(f"{prefix}Google: invalid credential file ({user})")
+            _out("FAIL", f"Google: invalid credential file ({user})")
             all_ok = False
             continue
 
@@ -516,7 +524,7 @@ def _check_google_status(
         elif cred.expired and cred.refresh_token:
             status = "expired (will refresh on next use)"
         else:
-            click.echo(f"{prefix}Google: invalid — re-run `summon auth google login` ({user})")
+            _out("FAIL", f"Google: invalid — re-run `summon auth google login` ({user})")
             all_ok = False
             continue
 
@@ -524,13 +532,13 @@ def _check_google_status(
         granted = set(cred.scopes or [])
         if granted and not has_required_scopes(granted, required):
             missing = required - granted
-            click.echo(f"{prefix}Google: {status} but missing scopes ({user})")
+            _out("WARN", f"Google: {status} but missing scopes ({user})")
             if not quiet:
                 click.echo(f"{prefix}  Missing: {', '.join(sorted(missing)[:3])}...")
                 click.echo(f"{prefix}  Re-run `summon auth google login` to grant scopes")
             all_ok = False
         elif not quiet:
-            click.echo(f"{prefix}Google: {status} ({user})")
+            _out("PASS", f"Google: {status} ({user})")
 
     return all_ok
 
@@ -584,6 +592,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     """Check config validity. Returns True if all checks pass."""
     from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
 
+    def _out(tag: str, msg: str) -> None:
+        click.echo(f"  {format_tag(tag)} {msg}")
+
     config_file = get_config_file(config_path)
     all_pass = True
 
@@ -592,9 +603,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     if cli_status.found:
         if not quiet:
             version_str = f" ({cli_status.version})" if cli_status.version else ""
-            click.echo(f"  [PASS] Claude CLI found{version_str}")
+            _out("PASS", f"Claude CLI found{version_str}")
     else:
-        click.echo("  [FAIL] Claude CLI not found — install from https://claude.ai/code")
+        _out("FAIL", "Claude CLI not found — install from https://claude.ai/code")
         all_pass = False
 
     # Parse the config file into a dict
@@ -606,9 +617,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         present = bool(values.get(key))
         if present:
             if not quiet:
-                click.echo(f"  [PASS] {key} is set")
+                _out("PASS", f"{key} is set")
         else:
-            click.echo(f"  [FAIL] {key} is missing")
+            _out("FAIL", f"{key} is missing")
             all_pass = False
 
     # Token format
@@ -619,25 +630,25 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     if bot_token:
         if bot_token.startswith("xoxb-"):
             if not quiet:
-                click.echo("  [PASS] Bot token format is valid (xoxb-)")
+                _out("PASS", "Bot token format is valid (xoxb-)")
         else:
-            click.echo("  [FAIL] Bot token must start with 'xoxb-'")
+            _out("FAIL", "Bot token must start with 'xoxb-'")
             all_pass = False
 
     if app_token:
         if app_token.startswith("xapp-"):
             if not quiet:
-                click.echo("  [PASS] App token format is valid (xapp-)")
+                _out("PASS", "App token format is valid (xapp-)")
         else:
-            click.echo("  [FAIL] App token must start with 'xapp-'")
+            _out("FAIL", "App token must start with 'xapp-'")
             all_pass = False
 
     if signing_secret:
         if re.match(r"^[0-9a-f]+$", signing_secret):
             if not quiet:
-                click.echo("  [PASS] Signing secret format looks valid (hex)")
+                _out("PASS", "Signing secret format looks valid (hex)")
         else:
-            click.echo("  [FAIL] Signing secret should be a hex string")
+            _out("FAIL", "Signing secret should be a hex string")
             all_pass = False
 
     # Pydantic validation — catches @field_validator rules (effort, quiet_hours,
@@ -657,9 +668,9 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
                 }
             )
             if not quiet:
-                click.echo("  [PASS] Config values pass validation")
+                _out("PASS", "Config values pass validation")
         except Exception as e:
-            click.echo(f"  [FAIL] Config validation: {e}")
+            _out("FAIL", f"Config validation: {e}")
             all_pass = False
 
     # DB writable
@@ -669,12 +680,12 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         db_path.touch()
         if os.access(db_path, os.W_OK):
             if not quiet:
-                click.echo(f"  [PASS] DB path is writable: {db_path}")
+                _out("PASS", f"DB path is writable: {db_path}")
         else:
-            click.echo(f"  [FAIL] DB path is not writable: {db_path}")
+            _out("FAIL", f"DB path is not writable: {db_path}")
             all_pass = False
     except OSError as e:
-        click.echo(f"  [FAIL] DB path error: {e}")
+        _out("FAIL", f"DB path error: {e}")
         all_pass = False
 
     # Schema version, integrity, and row counts
@@ -684,32 +695,32 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         # Schema version
         if version == CURRENT_SCHEMA_VERSION:
             if not quiet:
-                click.echo(f"  [PASS] Schema version {version} (current)")
+                _out("PASS", f"Schema version {version} (current)")
         elif version > CURRENT_SCHEMA_VERSION:
             click.echo(
-                f"  [WARN] Schema version {version} is ahead of this release"
+                f"  {format_tag('WARN')} Schema version {version} is ahead of this release"
                 f" (expects {CURRENT_SCHEMA_VERSION}) — upgrade summon-claude"
             )
         else:
             # Should not happen — _connect() auto-migrates
-            click.echo(f"  [FAIL] Schema version {version} (expected {CURRENT_SCHEMA_VERSION})")
+            _out("FAIL", f"Schema version {version} (expected {CURRENT_SCHEMA_VERSION})")
             all_pass = False
 
         # Integrity
         if integrity == "ok":
             if not quiet:
-                click.echo("  [PASS] Database integrity OK")
+                _out("PASS", "Database integrity OK")
         else:
-            click.echo(f"  [FAIL] Database integrity error: {integrity}")
+            _out("FAIL", f"Database integrity error: {integrity}")
             all_pass = False
 
         # Row counts (informational only)
         if not quiet:
-            click.echo(f"  [INFO] Sessions: {sessions_count}, Audit log: {audit_count}")
+            _out("INFO", f"Sessions: {sessions_count}, Audit log: {audit_count}")
 
     except Exception:
         logger.debug("Database validation error", exc_info=True)
-        click.echo("  [FAIL] Database validation error")
+        _out("FAIL", "Database validation error")
         all_pass = False
 
     # Slack API reachable + scope verification (optional, best-effort)
@@ -721,7 +732,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
             resp = client.auth_test()
             if resp["ok"]:
                 if not quiet:
-                    click.echo(f"  [PASS] Slack API reachable (team: {resp.get('team')})")
+                    _out("PASS", f"Slack API reachable (team: {resp.get('team')})")
                 # Check bot scopes via x-oauth-scopes response header.
                 # Header name casing varies by HTTP library, so do a
                 # case-insensitive lookup.
@@ -731,9 +742,8 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
                     granted = {s.strip() for s in granted_str.split(",") if s.strip()}
                     missing = _REQUIRED_SLACK_SCOPES - granted
                     if missing:
-                        click.echo(
-                            f"  [FAIL] Slack bot missing scopes: {', '.join(sorted(missing))}"
-                        )
+                        scope_list = ", ".join(sorted(missing))
+                        _out("FAIL", f"Slack bot missing scopes: {scope_list}")
                         click.echo(
                             "  Update at: api.slack.com/apps → your app"
                             " → OAuth & Permissions → Scopes"
@@ -741,14 +751,14 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
                         all_pass = False
                     elif not quiet:
                         click.echo(
-                            f"  [PASS] Slack bot scopes:"
+                            f"  {format_tag('PASS')} Slack bot scopes:"
                             f" all {len(_REQUIRED_SLACK_SCOPES)} required scopes granted"
                         )
             else:
-                click.echo(f"  [FAIL] Slack API auth.test failed: {resp.get('error')}")
+                _out("FAIL", f"Slack API auth.test failed: {resp.get('error')}")
                 all_pass = False
         except Exception as e:
-            click.echo(f"  [WARN] Slack API check skipped: {e}")
+            _out("WARN", f"Slack API check skipped: {e}")
 
     # GitHub OAuth (optional, with connectivity check)
     github_result = _check_github_status(prefix="  ", quiet=quiet)
@@ -759,16 +769,8 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     google_result = _check_google_status(
         prefix="  ", quiet=quiet, google_services=values.get("SUMMON_SCRIBE_GOOGLE_SERVICES", "")
     )
-    if google_result is not None:
-        # Credentials exist — report pass/fail
-        if google_result:
-            if not quiet:
-                click.echo("  [PASS] Google Workspace credentials valid")
-        else:
-            click.echo("  [FAIL] Google Workspace credentials have issues")
-            all_pass = False
-    elif not quiet:
-        click.echo("  [INFO] Google Workspace: not configured (summon auth google login)")
+    if google_result is False:
+        all_pass = False
 
     # Optional extras availability (informational)
     if not quiet:
@@ -780,7 +782,7 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         ]
         for label, installed in extras:
             status = "installed" if installed else "not installed"
-            click.echo(f"  [INFO] {label}: {status}")
+            _out("INFO", f"{label}: {status}")
 
     # Event health check — only when daemon is running
     from summon_claude.daemon import is_daemon_running  # noqa: PLC0415
@@ -798,19 +800,19 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
             if healthy is True:
                 if not quiet:
-                    click.echo("\r  [PASS] Event health: OK")
+                    click.echo(f"\r  {format_tag('PASS')} Event health: OK")
             elif healthy is None:
                 if not quiet:
-                    click.echo(f"\r  [INFO] Event health: {details}")
+                    click.echo(f"\r  {format_tag('INFO')} Event health: {details}")
             else:
-                click.echo(f"\r  [FAIL] Event health: {details}")
+                click.echo(f"\r  {format_tag('FAIL')} Event health: {details}")
                 if remediation_url and not quiet:
                     click.echo(f"         Fix at: {remediation_url}")
                 all_pass = False
         except Exception as e:
-            click.echo(f"\r  [WARN] Event health check failed: {e}")
+            click.echo(f"\r  {format_tag('WARN')} Event health check failed: {e}")
     elif not quiet:
-        click.echo("  [INFO] Event health: skipped (daemon not running)")
+        _out("INFO", "Event health: skipped (daemon not running)")
 
     # Feature inventory — surface external flows so users know they exist
     if not quiet:
@@ -823,6 +825,10 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
 
 def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> None:
     """Print discoverable status of external setup flows."""
+
+    def _out(tag: str, msg: str) -> None:
+        click.echo(f"  {format_tag(tag)} {msg}")
+
     project_count: int | None = None
 
     try:
@@ -830,19 +836,19 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
 
         # Projects — the primary workflow
         if project_count:
-            click.echo(f"  [PASS] Projects: {project_count} registered")
+            _out("PASS", f"Projects: {project_count} registered")
         else:
-            click.echo("  [INFO] Projects: none registered (summon project add)")
+            _out("INFO", "Projects: none registered (summon project add)")
 
         if has_workflow:
-            click.echo("  [PASS] Workflow instructions: configured")
+            _out("PASS", "Workflow instructions: configured")
         else:
-            click.echo("  [INFO] Workflow instructions: not set (summon project workflow set)")
+            _out("INFO", "Workflow instructions: not set (summon project workflow set)")
 
         if has_hooks:
-            click.echo("  [PASS] Lifecycle hooks: configured")
+            _out("PASS", "Lifecycle hooks: configured")
         else:
-            click.echo("  [INFO] Lifecycle hooks: not set (summon hooks set)")
+            _out("INFO", "Lifecycle hooks: not set (summon hooks set)")
 
     except Exception:
         logging.getLogger(__name__).debug("Feature inventory DB error", exc_info=True)
@@ -858,9 +864,9 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
             "summon-pre-worktree" in str(h) or "summon-post-worktree" in str(h) for h in hooks_list
         )
         if has_bridge:
-            click.echo("  [PASS] Hook bridge: installed")
+            _out("PASS", "Hook bridge: installed")
         else:
-            click.echo("  [INFO] Hook bridge: not installed (summon hooks install)")
+            _out("INFO", "Hook bridge: not installed (summon hooks install)")
     except Exception:
         logging.getLogger(__name__).debug("Hook bridge check error", exc_info=True)
 
@@ -873,9 +879,7 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         except OSError:
             has_creds = False
         if not has_creds:
-            click.echo(
-                "  [INFO] Scribe enabled but Google not configured (summon auth google login)"
-            )
+            _out("INFO", "Scribe enabled but Google not configured (summon auth google login)")
 
     # Getting started nudge (only when count is confirmed 0, not on DB failure)
     if project_count == 0:

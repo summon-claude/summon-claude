@@ -107,6 +107,7 @@ summon-claude follows [Conventional Commits](https://www.conventionalcommits.org
 | `project` | Project lifecycle and management (`cli/project.py`) |
 | `scribe` | Scribe monitoring agent |
 | `canvas` | Canvas storage and MCP tools (`canvas_mcp.py`, `slack/canvas_store.py`) |
+| `diagnostics` | Diagnostic checks and doctor command (`diagnostics.py`, `cli/doctor.py`) |
 | `plugin` | Claude Code plugin skill and manifest (`.claude-plugin/`) |
 
 **Infrastructure scopes:**
@@ -379,6 +380,77 @@ summon db status   # Shows current schema version and migration state
 
 ---
 
+## Diagnostic Checks
+
+The `summon doctor` command uses a registry pattern in `diagnostics.py`. Each check is a class that implements the `DiagnosticCheck` protocol and is registered in `DIAGNOSTIC_REGISTRY`.
+
+### Adding a check
+
+1. Create a class implementing `DiagnosticCheck` in `diagnostics.py`:
+
+    ```python
+    class MySubsystemCheck:
+        name = "my_subsystem"
+        description = "Checks something important"
+
+        async def run(self, config: SummonConfig | None) -> CheckResult:
+            # Return early with "skip" if prerequisites are missing
+            if config is None:
+                return CheckResult(
+                    status="skip",
+                    subsystem="my_subsystem",
+                    message="Config not available",
+                )
+
+            details: list[str] = []
+            # ... perform checks, append to details ...
+
+            return CheckResult(
+                status="pass",
+                subsystem="my_subsystem",
+                message="Everything looks good",
+                details=details,
+            )
+    ```
+
+2. Register it and add the subsystem name:
+
+    ```python
+    DIAGNOSTIC_REGISTRY["my_subsystem"] = MySubsystemCheck()
+    ```
+
+    Add `"my_subsystem"` to the `KNOWN_SUBSYSTEMS` frozenset at the top of the file.
+
+3. Add guard test mappings in `tests/test_diagnostics_guard.py`:
+
+    ```bash
+    uv run pytest tests/test_diagnostics_guard.py -v
+    ```
+
+    The guard tests verify that every registered check is in `KNOWN_SUBSYSTEMS` and vice versa. Add MCP server names, binary paths, or credential references to the appropriate mapping dicts if your check validates external integrations.
+
+### CheckResult fields
+
+| Field | Type | Purpose |
+|-------|------|---------|
+| `status` | `"pass"` / `"fail"` / `"warn"` / `"info"` / `"skip"` | Overall result |
+| `subsystem` | `str` | Identifier (must match `KNOWN_SUBSYSTEMS` entry) |
+| `message` | `str` | One-line summary shown in default output |
+| `details` | `list[str]` | Itemized findings (shown with `-v`) |
+| `suggestion` | `str \| None` | Actionable next step (shown with `-v`) |
+| `collected_logs` | `dict[str, list[str]]` | Log tails keyed by filename (shown with `-v`, included in exports) |
+
+### Guidelines
+
+- **All checks run in parallel** — do not depend on results from other checks
+- **Use `config: SummonConfig | None`** — config may be `None` if it failed to load; return `skip` in that case
+- **Return `skip` when prerequisites are missing** — not `fail` (e.g., scribe not enabled, no GitHub token)
+- **Keep checks fast** — use timeouts for network calls (10s for API calls, 5s for CLI version checks)
+- **Never log secrets** — use the `redactor` singleton to sanitize any user-specific data in details or messages
+- **Match SEC-003** — don't include workspace names, usernames, or Slack team names in results
+
+---
+
 ## Project Architecture
 
 ```
@@ -386,6 +458,7 @@ src/summon_claude/
 ├── canvas_mcp.py          # Canvas MCP server (read, write, update_section tools)
 ├── config.py              # SummonConfig (pydantic-settings) with validation
 ├── daemon.py              # Unix daemon with PID/lock, IPC framing
+├── diagnostics.py         # DiagnosticCheck protocol, CheckResult, Redactor, all check implementations
 ├── event_dispatcher.py    # Routes Slack events to sessions by channel
 ├── github_auth.py         # GitHub OAuth App device flow authentication
 ├── mcp_untrusted_proxy.py # MCP stdio proxy that marks tool results as untrusted
@@ -398,6 +471,7 @@ src/summon_claude/
 │   ├── config.py          # Config subcommands (show, set, path, edit, check)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
 │   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
+│   ├── doctor.py          # Doctor command logic (check runner, output formatting, export, submit)
 │   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)

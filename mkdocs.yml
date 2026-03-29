@@ -110,6 +110,7 @@ nav:
     - Lifecycle Hooks: guide/hooks.md
     - Configuration: guide/configuration.md
     - Sessions: guide/sessions.md
+    - Diagnostics: guide/doctor.md
   - Reference:
     - reference/index.md
     - CLI: reference/cli.md

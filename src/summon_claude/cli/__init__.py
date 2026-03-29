@@ -34,6 +34,7 @@ from summon_claude.cli.config import (
     config_show,
 )
 from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
+from summon_claude.cli.doctor import async_doctor
 from summon_claude.cli.formatting import echo
 from summon_claude.cli.hooks import (
     async_clear_hooks,
@@ -155,6 +156,7 @@ def cli(
         ctx.color = False
 
     ctx.ensure_object(dict)
+    ctx.obj["verbose"] = verbose
     ctx.obj["quiet"] = quiet
     ctx.obj["config_path"] = config_path
     ctx.obj["no_interactive"] = no_interactive
@@ -959,6 +961,26 @@ def hooks_run_post_worktree() -> None:
     EnterWorktree. Always exits 0 — hook failures are warnings only.
     """
     run_post_worktree_cli()
+
+
+@cli.command("doctor")
+@click.option(
+    "--export",
+    "export_path",
+    type=click.Path(dir_okay=False),
+    default=None,
+    help="Export results as JSON to this file path",
+)
+@click.option(
+    "--submit",
+    is_flag=True,
+    default=False,
+    help="Submit a redacted report as a GitHub issue (requires gh CLI)",
+)
+@click.pass_context
+def cmd_doctor(ctx: click.Context, export_path: str | None, submit: bool) -> None:
+    """Run comprehensive diagnostics and display pass/fail results."""
+    asyncio.run(async_doctor(ctx, export_path, submit))
 
 
 def main() -> None:

@@ -444,9 +444,15 @@ This page covers common problems and their solutions. Issues are grouped by cate
 
 If your issue isn't covered here:
 
-1. Check the session logs: `summon session logs <session-name>`
-2. Enable verbose logging: `summon -v start --name my-session`
-3. Run config validation: `summon config check`
-4. Check auth status across all providers: `summon auth status`
-5. Reset data or config if things are corrupted: `summon reset data` or `summon reset config`
-6. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)
+1. Run diagnostics: `summon doctor` (checks environment, daemon, database, Slack, logs, and MCP integrations)
+2. Run with verbose output: `summon -v doctor` (shows detailed findings and log tails)
+3. Check the session logs: `summon session logs <session-name>`
+4. Enable verbose logging: `summon -v start --name my-session`
+5. Run config validation: `summon config check`
+6. Check auth status across all providers: `summon auth status`
+7. Export a diagnostic report: `summon doctor --export report.json`
+8. Submit a report: `summon doctor --submit` (creates a redacted GitHub issue — requires `gh` CLI)
+9. Reset data or config if things are corrupted: `summon reset data` or `summon reset config`
+10. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)
+
+See [Diagnostics](guide/doctor.md) for full details on `summon doctor`.
