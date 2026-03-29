@@ -6,7 +6,7 @@
 
 ## Running diagnostics
 
-```{ .bash .notest }
+```bash
 summon doctor
 ```
 
@@ -106,7 +106,7 @@ Validates the stored GitHub OAuth token:
 
 Pass `-v` to the root `summon` command for detailed output including per-check details, suggestions, and log tails:
 
-```{ .bash .notest }
+```bash
 summon -v doctor
 ```
 
