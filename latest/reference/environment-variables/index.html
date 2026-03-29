@@ -1343,6 +1343,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-pm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global PM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#display" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2088,6 +2099,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#global-pm" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Global PM
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#display" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2387,6 +2409,42 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <h2 id="github">GitHub<a class="headerlink" href="#github" title="Permanent link">&para;</a></h2>
 <p>GitHub integration uses OAuth device flow authentication — no environment variable needed. Run <code>summon auth github login</code> to authenticate.</p>
 <p>See <a href="../../guide/github-integration/">GitHub Integration</a> for setup details.</p>
+<hr />
+<h2 id="global-pm">Global PM<a class="headerlink" href="#global-pm" title="Permanent link">&para;</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Advanced</p>
+<p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
+</div>
+<table>
+<thead>
+<tr>
+<th>Config Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES</code></td>
+<td>integer</td>
+<td><code>15</code></td>
+<td>How often the Global PM scans all projects (minutes, minimum 1).</td>
+</tr>
+<tr>
+<td><code>SUMMON_GLOBAL_PM_CWD</code></td>
+<td>text</td>
+<td><em>(data dir)</em></td>
+<td>Working directory for the Global PM. Must be an absolute path. Defaults to <code>&lt;data-dir&gt;/global-pm</code>.</td>
+</tr>
+<tr>
+<td><code>SUMMON_GLOBAL_PM_MODEL</code></td>
+<td>text</td>
+<td><em>(inherit)</em></td>
+<td>Claude model for the Global PM. Defaults to <code>SUMMON_DEFAULT_MODEL</code>.</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="display">Display<a class="headerlink" href="#display" title="Permanent link">&para;</a></h2>
 <div class="admonition note">

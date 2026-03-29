@@ -81,6 +81,20 @@ See [GitHub Integration](https://summon-claude.github.io/summon-claude/latest/gu
 
 ______________________________________________________________________
 
+## Global PM
+
+Advanced
+
+These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
+
+| Config Key                               | Type    | Default      | Description                                                                                        |
+| ---------------------------------------- | ------- | ------------ | -------------------------------------------------------------------------------------------------- |
+| `SUMMON_GLOBAL_PM_SCAN_INTERVAL_MINUTES` | integer | `15`         | How often the Global PM scans all projects (minutes, minimum 1).                                   |
+| `SUMMON_GLOBAL_PM_CWD`                   | text    | *(data dir)* | Working directory for the Global PM. Must be an absolute path. Defaults to `<data-dir>/global-pm`. |
+| `SUMMON_GLOBAL_PM_MODEL`                 | text    | *(inherit)*  | Claude model for the Global PM. Defaults to `SUMMON_DEFAULT_MODEL`.                                |
+
+______________________________________________________________________
+
 ## Display
 
 Advanced
