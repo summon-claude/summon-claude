@@ -219,8 +219,7 @@ make docs-test-full  # All doc tests including link validation (slower)
 | `test_env_vars.py` | `SUMMON_*` env vars in docs match `SummonConfig` fields |
 | `test_mcp_tools.py` | MCP tool docs match source tool schemas and counts |
 | `test_bash_codeblocks.py` | `summon` commands in bash blocks execute successfully |
-| `test_python_codeblocks.py` | Python code blocks (via `pytest-markdown-docs`) |
-| `test_links.py` | External URLs in docs return 2xx/3xx |
+| `test_links.py` | External URLs in docs return 2xx/3xx (rejects redirects) |
 
 ### `notest` markers
 
