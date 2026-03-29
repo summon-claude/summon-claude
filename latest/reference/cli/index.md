@@ -397,6 +397,24 @@ summon db vacuum [OPTIONS]
 | -------------- | ------- | --------------------------- | ------- |
 | `-h`, `--help` | boolean | Show this message and exit. | `False` |
 
+#### summon doctor
+
+Run comprehensive diagnostics and display pass/fail results.
+
+**Usage:**
+
+```
+summon doctor [OPTIONS]
+```
+
+**Options:**
+
+| Name           | Type    | Description                                                  | Default |
+| -------------- | ------- | ------------------------------------------------------------ | ------- |
+| `--export`     | file    | Export results as JSON to this file path                     | None    |
+| `--submit`     | boolean | Submit a redacted report as a GitHub issue (requires gh CLI) | `False` |
+| `-h`, `--help` | boolean | Show this message and exit.                                  | `False` |
+
 #### summon hooks
 
 Manage lifecycle hooks and the Claude Code hook bridge.

@@ -19,6 +19,7 @@
 - [Canvas](https://summon-claude.github.io/summon-claude/latest/guide/canvas/index.md)
 - [Configuration](https://summon-claude.github.io/summon-claude/latest/guide/configuration/index.md)
 - [Cron & Tasks](https://summon-claude.github.io/summon-claude/latest/guide/cron-tasks/index.md)
+- [Diagnostics](https://summon-claude.github.io/summon-claude/latest/guide/doctor/index.md)
 - [GitHub Integration](https://summon-claude.github.io/summon-claude/latest/guide/github-integration/index.md)
 - [Lifecycle Hooks](https://summon-claude.github.io/summon-claude/latest/guide/hooks/index.md)
 - [PM Agents](https://summon-claude.github.io/summon-claude/latest/guide/pm-agents/index.md)

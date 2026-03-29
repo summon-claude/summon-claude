@@ -721,6 +721,8 @@
       
         
       
+        
+      
     
     
     
@@ -1042,6 +1044,34 @@
     
   
     Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
   
 
     
@@ -2493,13 +2523,18 @@ Sessions must show <code>suspended</code> status to be resumed by <code>project 
 <h2 id="getting-more-help">Getting More Help<a class="headerlink" href="#getting-more-help" title="Permanent link">&para;</a></h2>
 <p>If your issue isn't covered here:</p>
 <ol>
+<li>Run diagnostics: <code>summon doctor</code> (checks environment, daemon, database, Slack, logs, and MCP integrations)</li>
+<li>Run with verbose output: <code>summon -v doctor</code> (shows detailed findings and log tails)</li>
 <li>Check the session logs: <code>summon session logs &lt;session-name&gt;</code></li>
 <li>Enable verbose logging: <code>summon -v start --name my-session</code></li>
 <li>Run config validation: <code>summon config check</code></li>
 <li>Check auth status across all providers: <code>summon auth status</code></li>
+<li>Export a diagnostic report: <code>summon doctor --export report.json</code></li>
+<li>Submit a report: <code>summon doctor --submit</code> (creates a redacted GitHub issue — requires <code>gh</code> CLI)</li>
 <li>Reset data or config if things are corrupted: <code>summon reset data</code> or <code>summon reset config</code></li>
 <li>Open an issue at <a href="https://github.com/summon-claude/summon-claude/issues">github.com/summon-claude/summon-claude/issues</a></li>
 </ol>
+<p>See <a href="../guide/doctor/">Diagnostics</a> for full details on <code>summon doctor</code>.</p>
 
 
 

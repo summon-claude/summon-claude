@@ -721,6 +721,8 @@
       
         
       
+        
+      
     
     
     
@@ -1042,6 +1044,34 @@
     
   
     Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
   
 
     
@@ -1510,6 +1540,17 @@
         
       </ul>
     </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon-doctor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doctor
+      
+    </span>
+  </a>
   
 </li>
         
@@ -2815,6 +2856,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#summon-doctor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        doctor
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#summon-hooks" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -3851,6 +3903,42 @@ or full URL (https://myteam.slack.com).</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
+<td>boolean</td>
+<td>Show this message and exit.</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="summon-doctor">summon doctor<a class="headerlink" href="#summon-doctor" title="Permanent link">&para;</a></h4>
+<p>Run comprehensive diagnostics and display pass/fail results.</p>
+<p><strong>Usage:</strong></p>
+<div class="highlight"><pre><span></span><code>summon doctor [OPTIONS]
+</code></pre></div>
+<p><strong>Options:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--export</code></td>
+<td>file</td>
+<td>Export results as JSON to this file path</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>--submit</code></td>
+<td>boolean</td>
+<td>Submit a redacted report as a GitHub issue (requires gh CLI)</td>
+<td><code>False</code></td>
+</tr>
 <tr>
 <td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>

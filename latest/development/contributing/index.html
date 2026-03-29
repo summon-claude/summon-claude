@@ -721,6 +721,8 @@
       
         
       
+        
+      
     
     
     
@@ -1042,6 +1044,34 @@
     
   
     Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
   
 
     
@@ -2027,6 +2057,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#diagnostic-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic Checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostic Checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkresult-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CheckResult fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#project-architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2391,6 +2471,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#diagnostic-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic Checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostic Checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkresult-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CheckResult fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#project-architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2638,6 +2768,10 @@ make<span class="w"> </span>docs-build<span class="w">      </span><span class="
 <td>Canvas storage and MCP tools (<code>canvas_mcp.py</code>, <code>slack/canvas_store.py</code>)</td>
 </tr>
 <tr>
+<td><code>diagnostics</code></td>
+<td>Diagnostic checks and doctor command (<code>diagnostics.py</code>, <code>cli/doctor.py</code>)</td>
+</tr>
+<tr>
 <td><code>plugin</code></td>
 <td>Claude Code plugin skill and manifest (<code>.claude-plugin/</code>)</td>
 </tr>
@@ -2863,11 +2997,107 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>db<span class="w"> </span>status<span class="w">   </span><span class="c1"># Shows current schema version and migration state</span>
 </code></pre></div>
 <hr />
+<h2 id="diagnostic-checks">Diagnostic Checks<a class="headerlink" href="#diagnostic-checks" title="Permanent link">&para;</a></h2>
+<p>The <code>summon doctor</code> command uses a registry pattern in <code>diagnostics.py</code>. Each check is a class that implements the <code>DiagnosticCheck</code> protocol and is registered in <code>DIAGNOSTIC_REGISTRY</code>.</p>
+<h3 id="adding-a-check">Adding a check<a class="headerlink" href="#adding-a-check" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p>Create a class implementing <code>DiagnosticCheck</code> in <code>diagnostics.py</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySubsystemCheck</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my_subsystem&quot;</span>
+    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;Checks something important&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">SummonConfig</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CheckResult</span><span class="p">:</span>
+        <span class="c1"># Return early with &quot;skip&quot; if prerequisites are missing</span>
+        <span class="k">if</span> <span class="n">config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
+                <span class="n">status</span><span class="o">=</span><span class="s2">&quot;skip&quot;</span><span class="p">,</span>
+                <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Config not available&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">details</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># ... perform checks, append to details ...</span>
+
+        <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
+            <span class="n">status</span><span class="o">=</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span>
+            <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Everything looks good&quot;</span><span class="p">,</span>
+            <span class="n">details</span><span class="o">=</span><span class="n">details</span><span class="p">,</span>
+        <span class="p">)</span>
+</code></pre></div>
+</li>
+<li>
+<p>Register it and add the subsystem name:</p>
+<div class="highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
+</code></pre></div>
+<p>Add <code>"my_subsystem"</code> to the <code>KNOWN_SUBSYSTEMS</code> frozenset at the top of the file.</p>
+</li>
+<li>
+<p>Add guard test mappings in <code>tests/test_diagnostics_guard.py</code>:</p>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_diagnostics_guard.py<span class="w"> </span>-v
+</code></pre></div>
+<p>The guard tests verify that every registered check is in <code>KNOWN_SUBSYSTEMS</code> and vice versa. Add MCP server names, binary paths, or credential references to the appropriate mapping dicts if your check validates external integrations.</p>
+</li>
+</ol>
+<h3 id="checkresult-fields">CheckResult fields<a class="headerlink" href="#checkresult-fields" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td><code>"pass"</code> / <code>"fail"</code> / <code>"warn"</code> / <code>"info"</code> / <code>"skip"</code></td>
+<td>Overall result</td>
+</tr>
+<tr>
+<td><code>subsystem</code></td>
+<td><code>str</code></td>
+<td>Identifier (must match <code>KNOWN_SUBSYSTEMS</code> entry)</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>str</code></td>
+<td>One-line summary shown in default output</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td><code>list[str]</code></td>
+<td>Itemized findings (shown with <code>-v</code>)</td>
+</tr>
+<tr>
+<td><code>suggestion</code></td>
+<td><code>str \| None</code></td>
+<td>Actionable next step (shown with <code>-v</code>)</td>
+</tr>
+<tr>
+<td><code>collected_logs</code></td>
+<td><code>dict[str, list[str]]</code></td>
+<td>Log tails keyed by filename (shown with <code>-v</code>, included in exports)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="guidelines">Guidelines<a class="headerlink" href="#guidelines" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>All checks run in parallel</strong> — do not depend on results from other checks</li>
+<li><strong>Use <code>config: SummonConfig | None</code></strong> — config may be <code>None</code> if it failed to load; return <code>skip</code> in that case</li>
+<li><strong>Return <code>skip</code> when prerequisites are missing</strong> — not <code>fail</code> (e.g., scribe not enabled, no GitHub token)</li>
+<li><strong>Keep checks fast</strong> — use timeouts for network calls (10s for API calls, 5s for CLI version checks)</li>
+<li><strong>Never log secrets</strong> — use the <code>redactor</code> singleton to sanitize any user-specific data in details or messages</li>
+<li><strong>Match SEC-003</strong> — don't include workspace names, usernames, or Slack team names in results</li>
+</ul>
+<hr />
 <h2 id="project-architecture">Project Architecture<a class="headerlink" href="#project-architecture" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>src/summon_claude/
 ├── canvas_mcp.py          # Canvas MCP server (read, write, update_section tools)
 ├── config.py              # SummonConfig (pydantic-settings) with validation
 ├── daemon.py              # Unix daemon with PID/lock, IPC framing
+├── diagnostics.py         # DiagnosticCheck protocol, CheckResult, Redactor, all check implementations
 ├── event_dispatcher.py    # Routes Slack events to sessions by channel
 ├── github_auth.py         # GitHub OAuth App device flow authentication
 ├── mcp_untrusted_proxy.py # MCP stdio proxy that marks tool results as untrusted
@@ -2880,6 +3110,7 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 │   ├── config.py          # Config subcommands (show, set, path, edit, check)
 │   ├── daemon_client.py   # Typed async client for daemon Unix socket API
 │   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
+│   ├── doctor.py          # Doctor command logic (check runner, output formatting, export, submit)
 │   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
 │   ├── helpers.py         # Session resolution (resolve_session, pick_session)
 │   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
