@@ -19,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -451,8 +451,11 @@ class SummonConfig(BaseSettings):
     scribe_importance_keywords: str = ""  # comma-separated: "urgent,action required,deadline"
     scribe_quiet_hours: str = ""  # "22:00-07:00" — only level-5 alerts during this window
 
-    # Google Workspace data collector (requires workspace-mcp optional dep)
-    scribe_google_enabled: bool = False
+    # Google Workspace data collector (requires workspace-mcp optional dep).
+    # Auto-detected: enabled when workspace-mcp is installed AND a user
+    # credential exists (from ``summon auth google login``).  Can be
+    # explicitly disabled with SUMMON_SCRIBE_GOOGLE_ENABLED=false.
+    scribe_google_enabled: bool | None = None  # None = auto-detect
     scribe_google_services: str = "gmail,calendar,drive"  # comma-separated service list
 
     # External Slack data collector
@@ -476,6 +479,13 @@ class SummonConfig(BaseSettings):
     auto_mode_environment: str = ""
     auto_mode_deny: str = ""
     auto_mode_allow: str = ""
+
+    @model_validator(mode="after")
+    def _auto_detect_google(self) -> SummonConfig:
+        """Resolve scribe_google_enabled=None to auto-detected value."""
+        if self.scribe_google_enabled is None:
+            self.scribe_google_enabled = _workspace_mcp_installed() and _google_credentials_exist()
+        return self
 
     @classmethod
     def for_test(cls, **overrides: object) -> SummonConfig:
@@ -746,12 +756,20 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
     return _is_truthy(cfg.get("SUMMON_SCRIBE_ENABLED", ""))
 
 
+def _google_credentials_exist() -> bool:
+    """Check if a user has completed Google OAuth (credential file exists)."""
+    creds_dir = get_google_credentials_dir()
+    return any(f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json"))
+
+
 def _scribe_google_enabled(cfg: dict[str, str]) -> bool:
-    return (
-        _scribe_enabled(cfg)
-        and _is_truthy(cfg.get("SUMMON_SCRIBE_GOOGLE_ENABLED", ""))
-        and _workspace_mcp_installed()
-    )
+    # Explicit config takes precedence.  If unset, auto-detect from
+    # credentials: if workspace-mcp is installed AND a user credential
+    # file exists, Google is enabled automatically.
+    explicit = cfg.get("SUMMON_SCRIBE_GOOGLE_ENABLED", "")
+    if explicit:
+        return _scribe_enabled(cfg) and _is_truthy(explicit) and _workspace_mcp_installed()
+    return _scribe_enabled(cfg) and _workspace_mcp_installed() and _google_credentials_exist()
 
 
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:

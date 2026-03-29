@@ -427,14 +427,27 @@ class TestGoogleIntegration:
             )
 
             fake_dir = Path(tmpdir) / "creds"
-            # Skip sections 1-3 with "s", provide JSON path for section 4
-            prompts = iter(["s", "s", "s", "", str(secret_file)])
+            # Non-interactive, no gcloud: 3 choices (no current project option)
+            # select "3" (skip step 1); JSON path goes to builtins.input
+            prompts = iter([3])
+            # Step 2: "Open all?"(F), Step 3: "Already configured?"(T),
+            # Step 4: "Open?"(F)
+            confirms = iter([False, True, False])
+            _no_downloads = Path(tmpdir) / "fakehome"
             env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
             with (
                 patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+                patch("summon_claude.cli.config.Path.home", return_value=_no_downloads),
                 patch("click.prompt", side_effect=prompts),
+                patch("click.confirm", side_effect=confirms),
+                patch("click.pause"),
+                patch("click.clear"),
+                patch("builtins.input", return_value=str(secret_file)),
+                patch("summon_claude.cli.config.shutil.which", return_value=None),
+                patch("summon_claude.cli.config.sys.stdin") as mock_stdin,
                 patch.dict("os.environ", env_patch),
             ):
+                mock_stdin.isatty.return_value = False
                 google_setup()
 
             client_env = fake_dir / "client_env"
@@ -482,6 +495,179 @@ class TestGoogleIntegration:
                 google_setup()
             # File should be unchanged (no new credentials written)
             assert "existing-id" in client_env.read_text()
+
+    @staticmethod
+    def _setup_gcloud_mock(**project_map):
+        """Build a _run_gcloud side_effect that resolves projects from a map.
+
+        Keys are project identifiers (ID, number, name), values are the
+        canonical project ID returned by ``projects describe``.  A value of
+        ``None`` means "not found".
+        """
+        from subprocess import CompletedProcess
+
+        def _mock(_gcloud_bin, args, *, timeout=30):
+            if args[0] == "config":
+                # "config get-value project" — return first map entry or "(unset)"
+                val = next(iter(project_map.values()), None) if project_map else None
+                # Caller may pass __current__ key for explicit current project
+                val = project_map.get("__current__", "(unset)")
+                return CompletedProcess(args=[], returncode=0, stdout=f"{val}\n", stderr="")
+            if args[:2] == ["projects", "describe"]:
+                proj = args[2]
+                resolved = project_map.get(proj)
+                if resolved:
+                    return CompletedProcess(
+                        args=[], returncode=0, stdout=f"{resolved}\n", stderr=""
+                    )
+                return CompletedProcess(args=[], returncode=1, stdout="", stderr="NOT_FOUND")
+            if args[:2] == ["projects", "create"]:
+                return CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            if args[:2] == ["services", "enable"]:
+                return CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            return CompletedProcess(args=[], returncode=1, stdout="", stderr="unknown")
+
+        return _mock
+
+    @staticmethod
+    def _run_wizard(*, prompts, confirms, gcloud_bin=None, gcloud_mock=None):
+        """Run google_setup with mocked I/O.  Returns the credentials dir."""
+        import contextlib
+        import json
+        import tempfile
+        from pathlib import Path
+
+        from summon_claude.cli.config import google_setup
+
+        tmpdir = tempfile.mkdtemp()
+        fake_dir = Path(tmpdir) / "creds"
+        secret_file = Path(tmpdir) / "client_secret.json"
+        secret_file.write_text(
+            json.dumps(
+                {
+                    "installed": {
+                        "client_id": "test-id.apps.googleusercontent.com",
+                        "client_secret": "test-secret",
+                    }
+                }
+            )
+        )
+        # Split prompts: __SECRET__ goes to builtins.input (readline-enabled),
+        # everything else goes to click.prompt
+        click_prompts = [v for v in prompts if v != "__SECRET__"]
+        input_responses = iter([str(secret_file)])
+
+        env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
+        # Prevent auto-detection of real ~/Downloads/client_secret*.json
+        _no_downloads = Path(tmpdir) / "fakehome"
+        with (
+            patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+            patch("summon_claude.cli.config.Path.home", return_value=_no_downloads),
+            patch("click.prompt", side_effect=iter(click_prompts)),
+            patch("click.confirm", side_effect=iter(confirms)),
+            patch("click.pause"),
+            patch("click.clear"),
+            patch("click.launch"),
+            patch("builtins.input", side_effect=input_responses),
+            patch("summon_claude.cli.config.shutil.which", return_value=gcloud_bin),
+            patch("summon_claude.cli.config.sys.stdin") as mock_stdin,
+            patch.dict("os.environ", env_patch),
+            patch("summon_claude.cli.config._run_gcloud", side_effect=gcloud_mock)
+            if gcloud_mock
+            else contextlib.nullcontext(),
+        ):
+            mock_stdin.isatty.return_value = False
+            google_setup()
+
+        return fake_dir
+
+    def test_google_setup_rejects_nonexistent_project(self):
+        """Wizard rejects a project that gcloud cannot verify."""
+        mock = self._setup_gcloud_mock(__current__="(unset)")
+        # Iter 1: existing(1), browse open(F), enter bad project → rejected
+        # Iter 2: skip(3)
+        # Step2: run(F)+openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[1, "fake-nonexistent", 3, "__SECRET__"],
+            confirms=[False, False, False, True, False],
+            gcloud_bin="/usr/bin/gcloud",
+            gcloud_mock=mock,
+        )
+        assert (fake_dir / "client_env").exists()
+        assert "test-id.apps.googleusercontent.com" in (fake_dir / "client_env").read_text()
+
+    def test_google_setup_resolves_project_number(self):
+        """Wizard resolves a project number to canonical ID via gcloud."""
+        mock = self._setup_gcloud_mock(
+            __current__="(unset)",
+            **{"123456789": "resolved-proj-id", "resolved-proj-id": "resolved-proj-id"},
+        )
+        # existing(1), browse(F), confirm(T)
+        # Step2: run(F)+openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[1, "123456789", "__SECRET__"],
+            confirms=[False, True, False, False, True, False],
+            gcloud_bin="/usr/bin/gcloud",
+            gcloud_mock=mock,
+        )
+        assert (fake_dir / "client_env").exists()
+
+    def test_google_setup_uses_current_gcloud_project(self):
+        """Wizard offers current gcloud project and verifies it."""
+        mock = self._setup_gcloud_mock(
+            __current__="my-current-proj",
+            **{"my-current-proj": "my-current-proj"},
+        )
+        # current(1), confirm(T)
+        # Step2: run(F)+openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[1, "__SECRET__"],
+            confirms=[True, False, False, True, False],
+            gcloud_bin="/usr/bin/gcloud",
+            gcloud_mock=mock,
+        )
+        assert (fake_dir / "client_env").exists()
+
+    def test_google_setup_new_project_validates_format(self):
+        """Wizard rejects invalid project IDs for new projects."""
+        # No gcloud — [existing=1, new=2, skip=3]
+        # new(2), "BAD" → fail, skip(3)
+        # Step2: openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[2, "BAD", 3, "__SECRET__"],
+            confirms=[False, True, False],
+        )
+        assert (fake_dir / "client_env").exists()
+
+    def test_google_setup_new_project_verifies_creation(self):
+        """Wizard rejects new project that was never created."""
+        mock = self._setup_gcloud_mock(__current__="(unset)")
+        # new(2), valid ID, create-run(F), create-browser(F)
+        # verify fails → skip(3)
+        # Step2: run(F)+openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[2, "summon-claude-test1", 3, "__SECRET__"],
+            confirms=[False, False, False, False, True, False],
+            gcloud_bin="/usr/bin/gcloud",
+            gcloud_mock=mock,
+        )
+        assert (fake_dir / "client_env").exists()
+
+    def test_google_setup_confirm_loops_back(self):
+        """Declining confirm loops back to project selection."""
+        mock = self._setup_gcloud_mock(
+            __current__="(unset)",
+            **{"real-project-id": "real-project-id"},
+        )
+        # existing(1), browse(F), confirm(F) → loops back, skip(3)
+        # Step2: run(F)+openAll(F), Step3: already?(T), Step4: open(F)
+        fake_dir = self._run_wizard(
+            prompts=[1, "real-project-id", 3, "__SECRET__"],
+            confirms=[False, False, False, False, True, False],
+            gcloud_bin="/usr/bin/gcloud",
+            gcloud_mock=mock,
+        )
+        assert (fake_dir / "client_env").exists()
 
     def test_workspace_mcp_cli_lists_tools(self):
         """workspace-mcp --cli (no args) lists available tools without error."""
@@ -643,9 +829,7 @@ class TestScribeDisallowedTools:
         """Guard: pin the Scribe's disallowed tools set."""
         from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
 
-        # Write tools must be blocked
-        assert "send_gmail_message" in _SCRIBE_DISALLOWED_TOOLS
-        assert "manage_event" in _SCRIBE_DISALLOWED_TOOLS
+        # Summon/Slack/Canvas write tools must be blocked
         assert "session_start" in _SCRIBE_DISALLOWED_TOOLS
         assert "slack_upload_file" in _SCRIBE_DISALLOWED_TOOLS
         assert "CronCreate" in _SCRIBE_DISALLOWED_TOOLS
@@ -656,6 +840,12 @@ class TestScribeDisallowedTools:
         assert "Bash" in _SCRIBE_DISALLOWED_TOOLS
         assert "WebSearch" in _SCRIBE_DISALLOWED_TOOLS
         assert "WebFetch" in _SCRIBE_DISALLOWED_TOOLS
+
+        # Google Workspace write tools are NOT blocked — write access
+        # is gated by OAuth scopes granted at `summon auth google login`.
+        assert "send_gmail_message" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "manage_event" not in _SCRIBE_DISALLOWED_TOOLS
+        assert "create_drive_file" not in _SCRIBE_DISALLOWED_TOOLS
 
         # Read-only tools must NOT be blocked
         assert "search_gmail_messages" not in _SCRIBE_DISALLOWED_TOOLS
@@ -669,11 +859,6 @@ class TestScribeDisallowedTools:
         """Invariant: disallowed set must not include read-only tools."""
         from summon_claude.sessions.session import _SCRIBE_DISALLOWED_TOOLS
 
-        # These "get_" tools have write side-effects despite their names
-        write_action_get_tools = {
-            "get_drive_shareable_link",  # modifies sharing permissions
-            "get_drive_file_download_url",  # writes file to local disk
-        }
         read_prefixes = (
             "search_",
             "get_",
@@ -686,8 +871,6 @@ class TestScribeDisallowedTools:
             "summon_canvas_read",
         )
         for tool_name in _SCRIBE_DISALLOWED_TOOLS:
-            if tool_name in write_action_get_tools:
-                continue
             assert not any(tool_name.startswith(p) for p in read_prefixes), (
                 f"Read-only tool '{tool_name}' must not be in disallowed set"
             )
@@ -701,7 +884,7 @@ class TestScribeDisallowedTools:
 
         combined = _WORKTREE_DISALLOWED_TOOLS | _SCRIBE_DISALLOWED_TOOLS
         assert "Bash(git worktree add*)" in combined
-        assert "send_gmail_message" in combined
+        assert "session_start" in combined
 
     def test_pm_prompt_includes_instruction_priority(self):
         """PM prompt must include instruction priority hierarchy."""
@@ -754,7 +937,8 @@ class TestScribeDisallowedTools:
         assert "--source" in result["args"]
         assert "Google Workspace" in result["args"]
         assert "--" in result["args"]
-        assert "--read-only" in result["args"]
+        # Write access is gated by OAuth scopes, not --read-only.
+        assert "--read-only" not in result["args"]
 
     def test_scribe_disallowed_workspace_tools_exist(self):
         """Guard: workspace-mcp write tools in disallowed set must exist in package."""
