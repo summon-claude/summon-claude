@@ -120,147 +120,6 @@ class TestGlobalPMConfig:
 
 
 # ---------------------------------------------------------------------------
-# C2: Cross-channel posting tests
-# ---------------------------------------------------------------------------
-
-
-class TestCrossChannelPosting:
-    @pytest.mark.asyncio
-    async def test_slack_client_post_to_channel(self):
-        from summon_claude.slack.client import SlackClient
-
-        mock_web = AsyncMock()
-        mock_web.chat_postMessage = AsyncMock(return_value={"channel": "C999", "ts": "1234.5678"})
-        client = SlackClient(mock_web, "C001")
-
-        ref = await client.post_to_channel("C999", "Hello cross-channel")
-        assert ref.channel_id == "C999"
-        assert ref.ts == "1234.5678"
-        mock_web.chat_postMessage.assert_called_once_with(
-            channel="C999", text="Hello cross-channel"
-        )
-
-    @pytest.mark.asyncio
-    async def test_post_to_channel_redacts_secrets(self):
-        from summon_claude.slack.client import SlackClient
-
-        mock_web = AsyncMock()
-        mock_web.chat_postMessage = AsyncMock(return_value={"channel": "C999", "ts": "1234.5678"})
-        client = SlackClient(mock_web, "C001")
-
-        await client.post_to_channel("C999", "token: xoxb-secret-123")
-        call_text = mock_web.chat_postMessage.call_args[1]["text"]
-        assert "[REDACTED]" in call_text
-        assert "xoxb-secret" not in call_text
-
-    @pytest.mark.asyncio
-    async def test_mcp_tool_not_registered_for_regular_sessions(self):
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        client = MagicMock()
-        tools = create_summon_mcp_tools(
-            client, allowed_channels=AsyncMock(return_value={"C001"}), is_global_pm=False
-        )
-        tool_names = [t.name for t in tools]
-        assert "slack_post_to_channel" not in tool_names
-
-    @pytest.mark.asyncio
-    async def test_mcp_tool_not_registered_for_project_pm(self):
-        """Guard: project PMs must NOT get slack_post_to_channel (GPM-only)."""
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        client = MagicMock()
-        tools = create_summon_mcp_tools(
-            client, allowed_channels=AsyncMock(return_value={"C001"}), is_global_pm=False
-        )
-        tool_names = [t.name for t in tools]
-        assert "slack_post_to_channel" not in tool_names
-
-    @pytest.mark.asyncio
-    async def test_mcp_tool_registered_for_global_pm(self):
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        client = MagicMock()
-        tools = create_summon_mcp_tools(
-            client, allowed_channels=AsyncMock(return_value={"C001"}), is_global_pm=True
-        )
-        tool_names = [t.name for t in tools]
-        assert "slack_post_to_channel" in tool_names
-
-    @pytest.mark.asyncio
-    async def test_post_to_channel_adds_attribution_prefix(self):
-        """[SEC-004] Cross-channel posts must be prefixed with [Global PM]."""
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        mock_client = MagicMock()
-        mock_client.post_to_channel = AsyncMock(
-            return_value=MagicMock(channel_id="C999", ts="1234.5678")
-        )
-        mock_client.channel_id = "C001"
-
-        async def _allow_all() -> set[str]:
-            return {"C001", "C999"}
-
-        tools = create_summon_mcp_tools(mock_client, allowed_channels=_allow_all, is_global_pm=True)
-        post_tool = next(t for t in tools if t.name == "slack_post_to_channel")
-        result = await post_tool.handler({"channel_id": "C999", "text": "Fix session X"})
-        assert not result.get("is_error")
-        call_text = mock_client.post_to_channel.call_args[0][1]
-        from summon_claude.slack.mcp import _GPM_ATTRIBUTION
-
-        assert call_text.startswith(f"{_GPM_ATTRIBUTION} ")
-        assert "Fix session X" in call_text
-
-    @pytest.mark.asyncio
-    async def test_post_to_channel_rejects_unauthorized_channel(self):
-        """Channel scope enforcement: disallowed channels must be rejected."""
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        mock_client = MagicMock()
-        mock_client.post_to_channel = AsyncMock()
-        mock_client.channel_id = "C001"
-
-        async def _limited_scope() -> set[str]:
-            return {"C001"}
-
-        tools = create_summon_mcp_tools(
-            mock_client, allowed_channels=_limited_scope, is_global_pm=True
-        )
-        post_tool = next(t for t in tools if t.name == "slack_post_to_channel")
-        result = await post_tool.handler({"channel_id": "C_FORBIDDEN", "text": "Hello"})
-        assert result.get("is_error") is True
-        mock_client.post_to_channel.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_post_to_channel_missing_channel_id(self):
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        mock_client = MagicMock()
-        mock_client.channel_id = "C001"
-        tools = create_summon_mcp_tools(
-            mock_client, allowed_channels=AsyncMock(return_value={"C001"}), is_global_pm=True
-        )
-        post_tool = next(t for t in tools if t.name == "slack_post_to_channel")
-        result = await post_tool.handler({})
-        assert result.get("is_error") is True
-
-    @pytest.mark.asyncio
-    async def test_post_to_channel_missing_text(self):
-        from summon_claude.slack.mcp import create_summon_mcp_tools
-
-        mock_client = MagicMock()
-        mock_client.channel_id = "C001"
-
-        async def _allow_all() -> set[str]:
-            return {"C001", "C999"}
-
-        tools = create_summon_mcp_tools(mock_client, allowed_channels=_allow_all, is_global_pm=True)
-        post_tool = next(t for t in tools if t.name == "slack_post_to_channel")
-        result = await post_tool.handler({"channel_id": "C999", "text": ""})
-        assert result.get("is_error") is True
-
-
-# ---------------------------------------------------------------------------
 # C3: System prompt tests
 # ---------------------------------------------------------------------------
 
@@ -305,7 +164,7 @@ class TestGlobalPMSystemPrompt:
         assert "session_list" in text
         assert "session_info" in text
         assert "session_stop" in text
-        assert "slack_post_to_channel" in text
+        assert "session_message" in text
         assert "summon_canvas_read" in text
         assert "TaskList" in text
         assert "CronList" in text
@@ -357,7 +216,7 @@ class TestGlobalPMProfile:
         )
         tool_names = [t.name for t in tools]
         assert "session_start" not in tool_names
-        assert "session_message" not in tool_names
+        assert "session_message" in tool_names
         assert "session_stop" in tool_names
         assert "session_resume" in tool_names
 
@@ -595,91 +454,6 @@ class TestGPMChannelCreatorCheck:
         channel_id, channel_name = await session._get_or_create_global_pm_channel(mock_web)
         assert channel_id == "C_OURS"
         mock_web.conversations_join.assert_called_once_with(channel="C_OURS")
-
-
-# ---------------------------------------------------------------------------
-# C6: CLI command tests
-# ---------------------------------------------------------------------------
-
-
-class TestGlobalPMCLI:
-    @pytest.mark.asyncio
-    async def test_global_status_running(self):
-        from summon_claude.cli.project import async_global_status
-
-        mock_registry = AsyncMock()
-        mock_registry.list_active = AsyncMock(
-            return_value=[
-                {"session_id": "gpm-1234", "session_name": "global-pm", "project_id": None}
-            ]
-        )
-        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
-        mock_registry.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_registry),
-            patch("summon_claude.cli.project.click") as mock_click,
-            patch("summon_claude.cli.formatting.print_session_detail"),
-        ):
-            await async_global_status()
-            mock_click.echo.assert_any_call("Global PM: running")
-
-    @pytest.mark.asyncio
-    async def test_global_status_not_running(self):
-        from summon_claude.cli.project import async_global_status
-
-        mock_registry = AsyncMock()
-        mock_registry.list_active = AsyncMock(return_value=[])
-        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
-        mock_registry.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_registry),
-            patch("summon_claude.cli.project.click") as mock_click,
-        ):
-            await async_global_status()
-            mock_click.echo.assert_called_with("Global PM: not running")
-
-    @pytest.mark.asyncio
-    async def test_global_down_suspends(self):
-        """global down must mark GPM as suspended for resume."""
-        from summon_claude.cli.project import async_global_down
-
-        mock_registry = AsyncMock()
-        mock_registry.list_active = AsyncMock(
-            return_value=[
-                {"session_id": "gpm-abcd1234", "session_name": "global-pm", "project_id": None}
-            ]
-        )
-        mock_registry.update_status = AsyncMock()
-        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
-        mock_registry.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_registry),
-            patch("summon_claude.cli.project.daemon_client") as mock_dc,
-            patch("summon_claude.cli.project.click"),
-        ):
-            mock_dc.stop_session = AsyncMock(return_value=True)
-            await async_global_down()
-            mock_dc.stop_session.assert_called_once_with("gpm-abcd1234")
-            mock_registry.update_status.assert_called_once_with("gpm-abcd1234", "suspended")
-
-    @pytest.mark.asyncio
-    async def test_global_down_not_running(self):
-        from summon_claude.cli.project import async_global_down
-
-        mock_registry = AsyncMock()
-        mock_registry.list_active = AsyncMock(return_value=[])
-        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
-        mock_registry.__aexit__ = AsyncMock(return_value=False)
-
-        with (
-            patch("summon_claude.cli.project.SessionRegistry", return_value=mock_registry),
-            patch("summon_claude.cli.project.click") as mock_click,
-        ):
-            await async_global_down()
-            mock_click.echo.assert_called_with("Global PM is not running.")
 
 
 # ---------------------------------------------------------------------------

@@ -105,7 +105,7 @@ def _setup_logging(verbose: bool = False) -> None:
 class AliasedGroup(click.Group):
     """Click group with command alias support."""
 
-    _ALIASES: dict[str, str] = {"s": "session", "p": "project", "g": "global"}
+    _ALIASES: dict[str, str] = {"s": "session", "p": "project"}
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         rv = click.Group.get_command(self, ctx, cmd_name)
@@ -540,34 +540,6 @@ def workflow_set(project_name: str | None) -> None:
 def workflow_clear(project_name: str | None) -> None:
     """Clear workflow instructions. Without PROJECT_NAME, clears global defaults."""
     asyncio.run(async_workflow_clear(project_name))
-
-
-# ---------------------------------------------------------------------------
-# Global PM commands
-# ---------------------------------------------------------------------------
-
-
-@cli.group("global")
-def cmd_global() -> None:
-    """Manage the Global PM agent."""
-
-
-@cmd_global.command("status")
-@click.pass_context
-def global_status(ctx: click.Context) -> None:
-    """Show Global PM session status."""
-    from summon_claude.cli.project import async_global_status  # noqa: PLC0415
-
-    asyncio.run(async_global_status())
-
-
-@cmd_global.command("down")
-@click.pass_context
-def global_down(ctx: click.Context) -> None:
-    """Stop the Global PM agent."""
-    from summon_claude.cli.project import async_global_down  # noqa: PLC0415
-
-    asyncio.run(async_global_down())
 
 
 # ---------------------------------------------------------------------------

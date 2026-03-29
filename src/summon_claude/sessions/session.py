@@ -837,9 +837,9 @@ _GLOBAL_PM_SYSTEM_PROMPT_APPEND = (
     "- `session_log_status`: Log audit events for session activity tracking\n"
     "- `slack_read_history`: Read recent messages from any PM or sub-session channel\n"
     "- `slack_fetch_thread`: Read a specific conversation thread for detailed inspection\n"
-    "- `slack_post_to_channel`: Post corrective messages to PM channels. "
-    "This is your PRIMARY tool for corrective actions -- it posts visibly in the channel "
-    "and gives the PM context about what was observed.\n"
+    "- `session_message`: Send a message to any running session. The message is injected "
+    "into the session's processing queue as a new turn AND posted to the session's Slack "
+    "channel for observability. This is your PRIMARY tool for corrective actions.\n"
     "- `summon_canvas_read`: Read a session's canvas for work-tracking summaries\n"
     "- `summon_canvas_write`: Update your own canvas with project health overview\n"
     "- `summon_canvas_update_section`: Update a specific section of your canvas\n"
@@ -867,15 +867,12 @@ _GLOBAL_PM_SYSTEM_PROMPT_APPEND = (
     "The Scribe is a passive monitor -- it does not orchestrate sessions. "
     "Check that it is scanning on schedule and not erroring. "
     "If the Scribe appears stuck, report it in your channel.\n\n"
-    "When correcting a PM, use `slack_post_to_channel` to post visibly in their channel. "
-    "This is the primary corrective tool -- it creates an observable audit trail. "
-    "Example messages:\n"
+    "When correcting a PM, use `session_message` to inject a message into their session. "
+    "The message is processed as a new turn AND posted to their Slack channel for "
+    "observability. Example messages:\n"
     "- 'Session X has been errored for 30 minutes -- investigate and clean up'\n"
     "- 'Session Y appears stuck -- 0 turns in the last hour'\n"
     "- 'Session Z seems complete -- consider stopping it to free resources'\n\n"
-    "Note: `session_message` is NOT available to you. It requires a parent-child "
-    "relationship, which GPM does not have with project PMs. Use `slack_post_to_channel` "
-    "for all corrective communication.\n\n"
     "Daily summaries: When activity has been quiet for an extended period, or "
     "when a user asks, generate a daily summary. Do NOT try to predict whether "
     "the current scan is the 'last' one -- you cannot know that. Instead, generate "
@@ -2375,7 +2372,6 @@ class SummonSession:
             rt.client,
             allowed_channels=channel_scope,
             cwd=self._cwd,
-            is_global_pm=self._global_pm_profile,
         )
         mcp_servers: dict = {"summon-slack": slack_mcp}
 

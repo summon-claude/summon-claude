@@ -106,12 +106,6 @@ class SlackClient:
         resp = await self._web.chat_postMessage(**kwargs)
         return MessageRef(channel_id=resp["channel"], ts=resp["ts"])
 
-    async def post_to_channel(self, channel_id: str, text: str) -> MessageRef:
-        """Post a message to a specific channel (cross-channel posting)."""
-        text = redact_secrets(text)
-        resp = await self._web.chat_postMessage(channel=channel_id, text=text)
-        return MessageRef(channel_id=resp["channel"], ts=resp["ts"])
-
     async def post_ephemeral(
         self,
         user_id: str,

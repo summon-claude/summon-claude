@@ -255,49 +255,6 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
 
 
 # ---------------------------------------------------------------------------
-# Global PM helpers
-# ---------------------------------------------------------------------------
-
-
-async def async_global_status() -> None:
-    """Show Global PM session status."""
-    async with SessionRegistry() as registry:
-        active = await registry.list_active()
-        gpm = [
-            s for s in active if s.get("session_name") == "global-pm" and not s.get("project_id")
-        ]
-        if gpm:
-            from summon_claude.cli.formatting import print_session_detail  # noqa: PLC0415
-
-            click.echo("Global PM: running")
-            print_session_detail(gpm[0])
-        else:
-            click.echo("Global PM: not running")
-
-
-async def async_global_down() -> None:
-    """Stop the Global PM agent and mark as suspended for resume."""
-    async with SessionRegistry() as registry:
-        active = await registry.list_active()
-        gpm = [
-            s for s in active if s.get("session_name") == "global-pm" and not s.get("project_id")
-        ]
-        if not gpm:
-            click.echo("Global PM is not running.")
-            return
-        sid = gpm[0]["session_id"]
-        try:
-            found = await daemon_client.stop_session(sid)
-            if found:
-                await registry.update_status(sid, "suspended")
-                click.echo(f"Global PM suspended ({sid[:8]}...).")
-            else:
-                click.echo("Global PM session not found in daemon.")
-        except Exception as e:
-            click.echo(f"Failed to stop Global PM: {e}", err=True)
-
-
-# ---------------------------------------------------------------------------
 # Workflow instruction helpers
 # ---------------------------------------------------------------------------
 

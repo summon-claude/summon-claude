@@ -594,7 +594,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 }
 
             # Parent-child scope guard: caller must be the parent
-            if target.get("parent_session_id") != session_id:
+            # Global PM is exempt — it supervises all sessions without spawning them
+            if not is_global_pm and target.get("parent_session_id") != session_id:
                 return {
                     "content": [
                         {
@@ -1141,11 +1142,10 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             session_log_status,
             session_resume,
         ]
-        # GPM: no session_start (oversight, not spawner) or session_message
-        # (requires parent-child relationship GPM doesn't have with PMs)
+        # GPM: no session_start (oversight, not spawner)
         if not is_global_pm:
             pm_tools.insert(0, session_start)
-            pm_tools.append(session_message)
+        pm_tools.append(session_message)
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
