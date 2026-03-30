@@ -146,7 +146,7 @@ class SessionScheduler:
         job.task = asyncio.create_task(self._run_job(job))
         self._jobs[job.id] = job
 
-        if self._should_persist(job):
+        if self._registry is not None and self._session_id is not None and not internal:
             try:
                 await self._registry.save_scheduled_job(
                     session_id=self._session_id,
