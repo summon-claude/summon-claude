@@ -3256,7 +3256,10 @@ class TestFinalizeEscalatingWarnings:
                 "summon_claude.sessions.session.derive_transcript_path",
                 return_value=Path("/fake"),
             ),
-            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+            patch(
+                "summon_claude.sessions.session._detect_git",
+                return_value=(False, None),
+            ),
         ):
             await session._finalize_turn_result(rt, streamer, sr)
 
@@ -3285,7 +3288,10 @@ class TestFinalizeEscalatingWarnings:
                 "summon_claude.sessions.session.derive_transcript_path",
                 return_value=Path("/fake"),
             ),
-            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+            patch(
+                "summon_claude.sessions.session._detect_git",
+                return_value=(False, None),
+            ),
         ):
             await session._finalize_turn_result(
                 rt, self._make_streamer(), self._make_stream_result()

@@ -334,22 +334,30 @@ def _make_channel_name(prefix: str, session_name: str) -> str:
     return name[:_MAX_CHANNEL_NAME_LEN].lower()
 
 
-async def _get_git_branch(cwd: str) -> str | None:
-    """Return the current git branch for the given directory, or None if not in a repo.
+async def _detect_git(cwd: str) -> tuple[bool, str | None]:
+    """Detect whether cwd is inside a git repo and return the current branch.
+
+    Returns ``(is_git, branch)`` where *branch* is None if detached HEAD
+    or not a git repo.
 
     Uses ``asyncio.create_subprocess_exec`` to avoid blocking the event loop.
-    Uses GIT_CEILING_DIRECTORIES to prevent git from discovering
-    repositories in parent directories above cwd.
+    Preserves GIT_CEILING_DIRECTORIES and scrubs GIT_DIR/GIT_WORK_TREE to
+    prevent git from discovering repositories in parent directories (SC-03).
     """
     if not os.path.isabs(cwd) or not os.path.isdir(cwd):  # noqa: ASYNC240, PTH117, PTH112
-        return None
+        return False, None
     resolved = os.path.realpath(cwd)  # noqa: ASYNC240
     env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE")}
-    env["GIT_CEILING_DIRECTORIES"] = resolved
+    # Preserve caller's GIT_CEILING_DIRECTORIES if set; extend with resolved cwd
+    existing_ceiling = env.get("GIT_CEILING_DIRECTORIES", "")
+    env["GIT_CEILING_DIRECTORIES"] = (
+        f"{existing_ceiling}:{resolved}" if existing_ceiling else resolved
+    )
     try:
         proc = await asyncio.create_subprocess_exec(
             "git",
             "rev-parse",
+            "--is-inside-work-tree",
             "--abbrev-ref",
             "HEAD",
             cwd=resolved,
@@ -359,11 +367,16 @@ async def _get_git_branch(cwd: str) -> str | None:
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
         if proc.returncode == 0:
-            branch = stdout.decode().strip()
-            return branch if branch != "HEAD" else None
+            lines = stdout.decode().strip().splitlines()
+            if len(lines) < 2:
+                return False, None
+            is_git = lines[0].strip() == "true"
+            branch_raw = lines[1].strip()
+            branch = branch_raw if branch_raw and branch_raw != "HEAD" else None
+            return is_git, branch
     except Exception as e:
-        logger.debug("Git branch detection failed: %s", e)
-    return None
+        logger.warning("Git detection failed: %s", e)
+    return False, None
 
 
 def _format_topic(
@@ -402,10 +415,9 @@ def _format_topic(
 
 
 async def _post_session_header(
-    client: SlackClient, cwd: str, model: str | None, session_id: str
+    client: SlackClient, cwd: str, model: str | None, session_id: str, git_branch: str | None
 ) -> None:
     """Post the initial session header block."""
-    git_branch = await _get_git_branch(cwd)
 
     safe_cwd = cwd.replace("`", "'")
     fields = [
@@ -642,6 +654,7 @@ class SummonSession:
         self._last_topic_model: str | None = None
         self._last_topic_branch: str | None = None
         self._auto_mode_label: str | None = None  # set after worktree entry
+        self._is_git_repo: bool = True  # set at startup by _detect_git
         self._claude_session_id: str | None = None
         self._available_models: list[dict[str, str]] = []
 
@@ -1055,6 +1068,11 @@ class SummonSession:
             except Exception as e:
                 logger.debug("Failed to post channel registration warning: %s", e)
 
+        # Detect git once — result is used for the session header, topic, and
+        # permission handler setup. Non-git sessions skip per-turn git detection.
+        is_git, git_branch = await _detect_git(self._cwd)
+        self._is_git_repo = is_git
+
         if self._channel_id_option:
             # Resume banner instead of full header
             try:
@@ -1065,7 +1083,7 @@ class SummonSession:
             except Exception as e:
                 logger.debug("Failed to post resume banner: %s", e)
         else:
-            await _post_session_header(client, self._cwd, self._model, self._session_id)
+            await _post_session_header(client, self._cwd, self._model, self._session_id, git_branch)
 
         # PM-specific: welcome message, pinned status, and PM topic
         if self._pm_profile and not self._global_pm_profile:
@@ -1095,7 +1113,6 @@ class SummonSession:
             except Exception:
                 logger.debug("Failed to post scribe welcome message")
 
-        git_branch = await _get_git_branch(self._cwd)
         self._last_topic_model = self._model
         self._last_topic_branch = git_branch
         if self._global_pm_profile:
@@ -1166,6 +1183,11 @@ class SummonSession:
             classifier=classifier,
             classifier_configured=self._config.auto_classifier_enabled,
         )
+        if not is_git:
+            permission_handler.notify_containment_active(
+                containment_root=Path(self._cwd),
+                is_git_repo=False,
+            )
 
         rt = _SessionRuntime(
             registry=registry,
@@ -1191,7 +1213,7 @@ class SummonSession:
 
         heartbeat_task = asyncio.create_task(self._heartbeat_loop(rt))
         try:
-            await self._run_session_tasks(rt, router)
+            await self._run_session_tasks(rt, router, is_git_repo=is_git)
         finally:
             heartbeat_task.cancel()
             try:
@@ -1690,11 +1712,12 @@ class SummonSession:
         return store
 
     async def _run_session_tasks(  # noqa: PLR0912, PLR0915
-        self, rt: _SessionRuntime, router: ThreadRouter
+        self, rt: _SessionRuntime, router: ThreadRouter, *, is_git_repo: bool = True
     ) -> None:
         """Create SDK client, then run preprocessor + response consumer concurrently."""
         is_pm = self._pm_profile
         is_scribe = self._scribe_profile
+        is_git = is_git_repo
 
         # Channel scoping: every session type gets an explicit async resolver.
         # Regular sessions: own channel only.
@@ -1995,6 +2018,7 @@ class SummonSession:
                     cwd=self._cwd,
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
+                    is_git_repo=is_git,
                 )
                 # PM prompt is built separately — inject compaction context if present
                 if restart_count > 0 and system_prompt_append != base_prompt:
@@ -2480,7 +2504,6 @@ class SummonSession:
         if not self._pm_profile and not self._scribe_profile:
             try:
                 current_model = self._last_model_seen or self._model
-                git_branch = await _get_git_branch(self._cwd)
                 # Derive mode label from live classifier state so fallback-disabled
                 # state is reflected. Only show after worktree entry and only
                 # when the classifier feature is configured.
@@ -2489,11 +2512,16 @@ class SummonSession:
                     if rt.permission_handler.in_worktree and self._config.auto_classifier_enabled
                     else None
                 )
-                if (
+                needs_update = (
                     current_model != self._last_topic_model
-                    or git_branch != self._last_topic_branch
                     or live_mode != self._auto_mode_label
-                ):
+                )
+                if needs_update:
+                    # Skip subprocess for non-git sessions — branch is always None
+                    if self._is_git_repo:
+                        _, git_branch = await _detect_git(self._cwd)
+                    else:
+                        git_branch = self._last_topic_branch
                     self._auto_mode_label = live_mode
                     topic = _format_topic(
                         model=current_model,
@@ -3123,7 +3151,7 @@ class SummonSession:
             else:
                 self._auto_mode_label = None
             try:
-                git_branch = await _get_git_branch(self._cwd)
+                _, git_branch = await _detect_git(self._cwd)
                 topic = _format_topic(
                     model=self._model,
                     cwd=self._cwd,
@@ -3638,7 +3666,13 @@ class SummonSession:
                     model=self._model,
                     effort=self._effort,
                     session_id=self._session_id,
-                    metadata={"models": self._available_models},
+                    auto_enabled=rt.permission_handler.classifier_enabled,
+                    in_worktree=rt.permission_handler.in_worktree,
+                    metadata={
+                        "models": self._available_models,
+                        "auto_mode_deny": self._config.auto_mode_deny,
+                        "auto_mode_allow": self._config.auto_mode_allow,
+                    },
                 )
                 try:
                     result = await dispatch_command(match.name, match.args, ctx)
