@@ -1697,6 +1697,57 @@ class TestGPMPrompt:
         assert "errored for" in result
 
 
+class TestPromptPresetGuard:
+    """Guard: all prompt builders return preset claude_code dicts."""
+
+    @pytest.mark.parametrize(
+        "builder,kwargs",
+        [
+            ("build_pm_system_prompt", {"cwd": "/test", "scan_interval_s": 900}),
+            ("build_global_pm_system_prompt", {"reports_dir": "/tmp/reports"}),
+            (
+                "build_scribe_system_prompt",
+                {
+                    "scan_interval": 15,
+                    "user_mention": "<@U123>",
+                    "google_enabled": True,
+                    "slack_enabled": False,
+                },
+            ),
+        ],
+        ids=["pm", "gpm", "scribe"],
+    )
+    def test_all_prompt_builders_return_preset(self, builder, kwargs):
+        import summon_claude.sessions.session as mod
+
+        fn = getattr(mod, builder)
+        result = fn(**kwargs)
+        assert result["type"] == "preset"
+        assert result["preset"] == "claude_code"
+        assert isinstance(result["append"], str)
+        assert len(result["append"]) > 50
+
+
+class TestNoRedundantHeadless:
+    """Guard: shared boilerplate isn't duplicated in role-specific text."""
+
+    def test_no_redundant_headless_in_role_specific_text(self):
+        from summon_claude.sessions.session import (
+            _GLOBAL_PM_SYSTEM_PROMPT_APPEND,
+            _HEADLESS_BOILERPLATE,
+            _PM_SYSTEM_PROMPT_APPEND,
+            _SCRIBE_SYSTEM_PROMPT_APPEND,
+        )
+
+        for name, const in [
+            ("PM", _PM_SYSTEM_PROMPT_APPEND),
+            ("GPM", _GLOBAL_PM_SYSTEM_PROMPT_APPEND),
+            ("Scribe", _SCRIBE_SYSTEM_PROMPT_APPEND),
+        ]:
+            role_text = const[len(_HEADLESS_BOILERPLATE) :]
+            assert "running headlessly" not in role_text, f"{name} has redundant boilerplate"
+
+
 class TestPmScanPrompt:
     """Guard tests for the PM periodic scan prompt builder."""
 
