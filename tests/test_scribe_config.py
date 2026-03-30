@@ -10,6 +10,9 @@ from click.testing import CliRunner
 
 from summon_claude.config import SummonConfig
 
+# Shortened patch target for google_auth module (keeps lines under 100 chars)
+_GA = "summon_claude.cli.google_auth"
+
 
 def _make_config(**overrides) -> SummonConfig:
     """Create a SummonConfig isolated from env vars and .env files."""
@@ -200,14 +203,17 @@ class TestGoogleWorkspaceMCP:
 class TestGoogleAuthCLI:
     """Tests for auth google login/status CLI commands."""
 
-    def test_google_auth_missing_binary(self):
-        from pathlib import Path
-
+    def test_google_auth_exits_without_google_package(self):
         from summon_claude.cli import cli
 
         runner = CliRunner()
-        mock_path = Path("/nonexistent/workspace-mcp")
-        with patch("summon_claude.cli.config.find_workspace_mcp_bin", return_value=mock_path):
+        # Block the workspace-mcp auth package import that google_auth() needs
+        mocked = {
+            "auth": None,
+            "auth.credential_store": None,
+            "auth.google_auth": None,
+        }
+        with patch.dict(sys.modules, mocked):
             result = runner.invoke(cli, ["auth", "google", "login"])
         assert result.exit_code != 0
         assert "google" in result.output.lower()
@@ -233,7 +239,7 @@ class TestGoogleAuthCLI:
 
         runner = CliRunner()
         fake_dir = Path("/nonexistent")
-        with patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir):
+        with patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir):
             result = runner.invoke(cli, ["auth", "google", "status"])
         assert "not configured" in result.output
 
@@ -435,7 +441,7 @@ class TestGoogleIntegration:
         runner = CliRunner()
         # Point to a temp dir with no credentials
         fake_dir = Path("/nonexistent")
-        with patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir):
+        with patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir):
             result = runner.invoke(cli, ["auth", "google", "status"])
         assert result.exit_code == 0
         assert "not configured" in result.output.lower()
@@ -446,7 +452,7 @@ class TestGoogleIntegration:
         import tempfile
         from pathlib import Path
 
-        from summon_claude.cli.config import google_setup
+        from summon_claude.cli.google_auth import google_setup
 
         with tempfile.TemporaryDirectory() as tmpdir:
             secret_file = Path(tmpdir) / "client_secret.json"
@@ -471,15 +477,15 @@ class TestGoogleIntegration:
             _no_downloads = Path(tmpdir) / "fakehome"
             env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
             with (
-                patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
-                patch("summon_claude.cli.config.Path.home", return_value=_no_downloads),
+                patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir),
+                patch(f"{_GA}.Path.home", return_value=_no_downloads),
                 patch("click.prompt", side_effect=prompts),
                 patch("click.confirm", side_effect=confirms),
                 patch("click.pause"),
                 patch("click.clear"),
                 patch("builtins.input", return_value=str(secret_file)),
-                patch("summon_claude.cli.config.shutil.which", return_value=None),
-                patch("summon_claude.cli.config.sys.stdin") as mock_stdin,
+                patch(f"{_GA}.shutil.which", return_value=None),
+                patch(f"{_GA}.sys.stdin") as mock_stdin,
                 patch.dict("os.environ", env_patch),
             ):
                 mock_stdin.isatty.return_value = False
@@ -501,7 +507,7 @@ class TestGoogleIntegration:
         fake_dir = Path("/nonexistent")
         env_patch = {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""}
         with (
-            patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+            patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir),
             patch.dict("os.environ", env_patch),
         ):
             result = runner.invoke(cli, ["auth", "google", "login"])
@@ -513,7 +519,7 @@ class TestGoogleIntegration:
         import tempfile
         from pathlib import Path
 
-        from summon_claude.cli.config import google_setup
+        from summon_claude.cli.google_auth import google_setup
 
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_dir = Path(tmpdir) / "creds"
@@ -524,7 +530,7 @@ class TestGoogleIntegration:
             )
 
             with (
-                patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
+                patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir),
                 patch("click.confirm", return_value=False),
             ):
                 google_setup()
@@ -569,7 +575,7 @@ class TestGoogleIntegration:
         import tempfile
         from pathlib import Path
 
-        from summon_claude.cli.config import google_setup
+        from summon_claude.cli.google_auth import google_setup
 
         tmpdir = tempfile.mkdtemp()
         fake_dir = Path(tmpdir) / "creds"
@@ -593,18 +599,18 @@ class TestGoogleIntegration:
         # Prevent auto-detection of real ~/Downloads/client_secret*.json
         _no_downloads = Path(tmpdir) / "fakehome"
         with (
-            patch("summon_claude.cli.config.get_google_credentials_dir", return_value=fake_dir),
-            patch("summon_claude.cli.config.Path.home", return_value=_no_downloads),
+            patch(f"{_GA}.get_google_credentials_dir", return_value=fake_dir),
+            patch(f"{_GA}.Path.home", return_value=_no_downloads),
             patch("click.prompt", side_effect=iter(click_prompts)),
             patch("click.confirm", side_effect=iter(confirms)),
             patch("click.pause"),
             patch("click.clear"),
             patch("click.launch"),
             patch("builtins.input", side_effect=input_responses),
-            patch("summon_claude.cli.config.shutil.which", return_value=gcloud_bin),
-            patch("summon_claude.cli.config.sys.stdin") as mock_stdin,
+            patch(f"{_GA}.shutil.which", return_value=gcloud_bin),
+            patch(f"{_GA}.sys.stdin") as mock_stdin,
             patch.dict("os.environ", env_patch),
-            patch("summon_claude.cli.config._run_gcloud", side_effect=gcloud_mock)
+            patch(f"{_GA}._run_gcloud", side_effect=gcloud_mock)
             if gcloud_mock
             else contextlib.nullcontext(),
         ):
@@ -747,7 +753,7 @@ class TestGoogleScopeHelpers:
 
     def test_google_scopes_readonly(self):
         """Read-only service specs produce only .readonly scopes."""
-        from summon_claude.cli.config import _google_scopes_for_services
+        from summon_claude.cli.google_auth import _google_scopes_for_services
 
         scopes = _google_scopes_for_services(["gmail", "calendar", "drive"])
         scope_names = {s.rsplit("/", 1)[-1] for s in scopes if "googleapis" in s}
@@ -759,7 +765,7 @@ class TestGoogleScopeHelpers:
 
     def test_google_scopes_readwrite(self):
         """Read-write service specs produce write scopes."""
-        from summon_claude.cli.config import _google_scopes_for_services
+        from summon_claude.cli.google_auth import _google_scopes_for_services
 
         scopes = _google_scopes_for_services(["gmail:rw", "calendar", "drive:rw"])
         scope_names = {s.rsplit("/", 1)[-1] for s in scopes if "googleapis" in s}
@@ -771,14 +777,14 @@ class TestGoogleScopeHelpers:
 
     def test_google_scopes_unknown_service_skipped(self):
         """Unknown services are silently skipped."""
-        from summon_claude.cli.config import _GOOGLE_BASE_SCOPES, _google_scopes_for_services
+        from summon_claude.cli.google_auth import _GOOGLE_BASE_SCOPES, _google_scopes_for_services
 
         scopes = _google_scopes_for_services(["nonexistent"])
         assert scopes == list(_GOOGLE_BASE_SCOPES)
 
     def test_describe_granted_scopes(self):
         """_describe_granted_scopes produces human-readable summaries."""
-        from summon_claude.cli.config import (
+        from summon_claude.cli.google_auth import (
             _GOOGLE_SCOPE_PREFIX,
             _describe_granted_scopes,
         )
@@ -793,7 +799,7 @@ class TestGoogleScopeHelpers:
 
     def test_load_google_client_credentials_from_env(self):
         """_load_google_client_credentials reads from environment variables."""
-        from summon_claude.cli.config import _load_google_client_credentials
+        from summon_claude.cli.google_auth import _load_google_client_credentials
 
         with patch.dict(
             "os.environ",
@@ -807,7 +813,7 @@ class TestGoogleScopeHelpers:
         """_load_google_client_credentials exits when no credentials are available."""
         from pathlib import Path
 
-        from summon_claude.cli.config import _load_google_client_credentials
+        from summon_claude.cli.google_auth import _load_google_client_credentials
 
         with (
             patch.dict(
@@ -815,7 +821,7 @@ class TestGoogleScopeHelpers:
                 {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
             ),
             patch(
-                "summon_claude.cli.config.get_google_credentials_dir",
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
                 return_value=Path("/nonexistent"),
             ),
             pytest.raises(SystemExit),
@@ -827,7 +833,7 @@ class TestGoogleScopeHelpers:
         import tempfile
         from pathlib import Path
 
-        from summon_claude.cli.config import _load_google_client_credentials
+        from summon_claude.cli.google_auth import _load_google_client_credentials
 
         with tempfile.TemporaryDirectory() as tmpdir:
             creds_dir = Path(tmpdir) / "creds"
@@ -842,7 +848,7 @@ class TestGoogleScopeHelpers:
                     {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
                 ),
                 patch(
-                    "summon_claude.cli.config.get_google_credentials_dir",
+                    "summon_claude.cli.google_auth.get_google_credentials_dir",
                     return_value=creds_dir,
                 ),
             ):

@@ -22,9 +22,11 @@ import click
 
 from summon_claude.cli.config import (
     _check_github_status,
-    _check_google_status,
     github_auth_cmd,
     github_logout,
+)
+from summon_claude.cli.google_auth import (
+    _check_google_status,
     google_auth,
     google_setup,
     google_status,

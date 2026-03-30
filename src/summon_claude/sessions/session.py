@@ -211,16 +211,16 @@ _WORKTREE_DISALLOWED_TOOLS = frozenset(
 #
 # NOTE: disallowed_tools bare names don't match MCP-namespaced tool names
 # (mcp__server__tool). MCP tools are primarily defended by:
-# - workspace-mcp: OAuth scope gating (write access requires explicit grant at login)
+# - workspace-mcp: PermissionHandler gates all non-read tools via Slack HITL
+#   (see _GOOGLE_MCP_AUTO_APPROVE_PREFIXES in permissions.py)
 # - Slack/Canvas MCP: can_use_tool callback requires Slack button approval
 # - summon-cli: registered with is_pm=False (excludes session_start/stop/message/resume/log_status)
 # The bare names below are defense-in-depth for built-in tools (Cron*, Task*)
 # and in case the CLI ever changes to match bare names.
 _SCRIBE_DISALLOWED_TOOLS: frozenset[str] = frozenset(
     {
-        # Google Workspace write tools are NOT blocked here — write access
-        # is gated by the OAuth scopes granted at `summon auth google login`.
-        # workspace-mcp validates scopes at tool invocation time.
+        # Google Workspace write tools (send_gmail_message, manage_event, etc.)
+        # are gated by PermissionHandler — always require Slack approval.
         #
         # Slack MCP write tools (from slack/mcp.py)
         "slack_upload_file",
