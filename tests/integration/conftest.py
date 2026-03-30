@@ -316,43 +316,6 @@ async def fresh_channel(slack_harness):
 
 
 @pytest.fixture
-async def event_consumer(slack_harness, test_channel):
-    """Socket Mode consumer — connects, verifies pipeline, disconnects.
-
-    Each test gets a fresh connection. A canary message verifies the
-    event pipeline is live before the test starts — this both proves
-    Socket Mode delivery works AND naturally drains stale events from
-    other tests that accumulated while no consumer was connected.
-    """
-    consumer = EventConsumer(
-        bot_token=slack_harness.bot_token,
-        app_token=slack_harness.app_token,
-        signing_secret=slack_harness.signing_secret,
-    )
-    try:
-        await asyncio.wait_for(consumer.start(), timeout=15.0)
-    except TimeoutError:
-        pytest.skip("Socket Mode connection timed out (15s)")
-    except Exception as exc:
-        pytest.skip(f"Socket Mode connection failed: {exc}")
-    # Canary: post a message and verify it arrives via Socket Mode.
-    # Proves the pipeline is live and drains stale events in the process.
-    canary = f"canary-{secrets.token_hex(4)}"
-    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
-    try:
-        await consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-            timeout=10.0,
-        )
-    except TimeoutError:
-        await consumer.stop()
-        pytest.skip("Socket Mode canary failed — events not flowing")
-    consumer.drain()  # clear any remaining stale events after canary
-    yield consumer
-    await consumer.stop()
-
-
-@pytest.fixture
 async def registry(tmp_path):
     """SessionRegistry backed by a temp SQLite DB."""
     db_path = tmp_path / "test.db"
