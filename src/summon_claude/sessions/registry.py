@@ -783,7 +783,8 @@ class SessionRegistry:
             cursor = await db.execute(
                 "DELETE FROM scheduled_jobs "
                 "WHERE session_id = ? AND max_lifetime_s > 0 "
-                "AND datetime(created_at, '+' || max_lifetime_s || ' seconds') <= datetime('now')",
+                "AND datetime(created_at, '+' || CAST(max_lifetime_s AS INTEGER)"
+                " || ' seconds') <= datetime('now')",
                 (session_id,),
             )
             await db.commit()

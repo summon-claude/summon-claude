@@ -869,6 +869,8 @@ class TestSchemaVersioning:
             assert "schema_version" in tables
             assert "workflow_defaults" in tables
             assert "projects" in tables
+            assert "session_tasks" in tables
+            assert "scheduled_jobs" in tables
 
     async def test_migration_preserves_existing_data(self, tmp_path):
         """Migrations must not destroy existing rows."""

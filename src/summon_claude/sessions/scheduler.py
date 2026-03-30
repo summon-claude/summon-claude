@@ -178,11 +178,8 @@ class SessionScheduler:
             job.task.cancel()
         self._jobs.pop(job_id, None)
 
-        if self._registry is not None and self._session_id is not None:
-            try:
-                await self._registry.delete_scheduled_job(self._session_id, job_id)
-            except Exception:
-                logger.warning("Failed to delete cron job %s from DB", job_id, exc_info=True)
+        if self._should_persist(job):
+            await self._delete_job_from_db(job_id, "user-deleted")
 
         if self.on_change:
             await self.on_change()
@@ -386,10 +383,12 @@ class SessionScheduler:
                 CronSim(row["cron_expr"], datetime.now().astimezone())
                 # Parse created_at from ISO 8601
                 created_at = datetime.fromisoformat(row["created_at"])
+                # Re-sanitize prompt (defense-in-depth for pre-strip DB rows)
+                prompt = re.sub(r"\[+(?:SYSTEM|CRON):", "", row["prompt"], flags=re.IGNORECASE)
                 job = ScheduledJob(
                     id=job_id,
                     cron_expr=row["cron_expr"],
-                    prompt=row["prompt"],
+                    prompt=prompt,
                     recurring=row["recurring"],
                     internal=False,
                     max_lifetime_s=row["max_lifetime_s"],
