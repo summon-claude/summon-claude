@@ -17,6 +17,7 @@ import os
 import secrets
 
 import pytest
+import pytest_asyncio
 
 from summon_claude.slack.client import SlackClient
 from tests.integration.conftest import EventConsumer, SlackTestHarness
@@ -34,7 +35,7 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def slack_harness(_slack_socket_lock):
     """Module-scoped harness — skips if credentials not set."""
     if not os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN"):
@@ -44,7 +45,7 @@ async def slack_harness(_slack_socket_lock):
     yield harness
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def test_channel(slack_harness):
     """Module-scoped test channel for event delivery tests."""
     channel_id = await slack_harness.create_test_channel(prefix="events")
@@ -68,7 +69,7 @@ def slack_client(slack_harness, test_channel):
     return SlackClient(slack_harness.client, test_channel)
 
 
-@pytest.fixture(scope="module")
+@pytest_asyncio.fixture(scope="module", loop_scope="module")
 async def event_consumer(slack_harness, test_channel):
     """Module-scoped Socket Mode consumer — connects once for all tests.
 
