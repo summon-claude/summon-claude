@@ -165,6 +165,7 @@ _EXCLUDED_FIELDS = frozenset(
         "scribe_google_services",  # config value, not a credential
         "scribe_slack_browser",  # config value, not a credential
         "scribe_slack_monitored_channels",  # config value, not a credential
+        "auto_classifier_enabled",  # feature flag, not a credential
     }
 )
 

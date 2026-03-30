@@ -120,6 +120,10 @@ class TestCmdInit:
                     "",  # safe_write_dirs (accept default)
                     "y",  # enable_thinking (flag)
                     "n",  # show_thinking (flag)
+                    "y",  # auto_classifier_enabled (flag)
+                    "",  # auto_mode_environment (accept default)
+                    "",  # auto_mode_deny (accept default)
+                    "",  # auto_mode_allow (accept default)
                 ]
             )
             + "\n"

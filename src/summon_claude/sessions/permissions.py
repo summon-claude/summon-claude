@@ -11,6 +11,7 @@ Permission check flow (handle() steps):
   2d. Summon MCP       → summon-cli/summon-slack/summon-canvas tools
   2e. Session cache    → tools approved for the session lifetime
   2f. Arg cache        → per-argument exact-match (Bash cmd, file path, etc.)
+  2g. Auto-classifier  → Sonnet classifier (only active after worktree entry)
   3.  SDK allow        → secondary, after static lists
   4.  Slack HITL       → interactive approve/deny/approve-for-session buttons
 """
@@ -23,16 +24,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
 
 from summon_claude.config import SummonConfig
+from summon_claude.sessions.classifier import extract_classifier_context
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.slack.client import sanitize_for_mrkdwn
 from summon_claude.slack.router import ThreadRouter
+
+if TYPE_CHECKING:
+    from summon_claude.sessions.classifier import SummonAutoClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -212,12 +218,14 @@ class PermissionHandler:
     (default 2000ms, configurable) batches rapid requests into one message.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         router: ThreadRouter,
         config: SummonConfig,
         authenticated_user_id: str,
         project_root: str = "",
+        classifier: SummonAutoClassifier | None = None,
+        classifier_configured: bool = False,
     ) -> None:
         self._router = router
         self._authenticated_user_id = authenticated_user_id
@@ -250,7 +258,48 @@ class PermissionHandler:
         # AskUserQuestion tracking
         self._ask_user = _AskUserState()
 
-    async def handle(
+        # Auto-mode classifier — starts disabled, activates on worktree entry
+        # if classifier_configured is True.
+        self._classifier = classifier
+        self._classifier_configured = classifier_configured
+        self._classifier_enabled = False
+        self._context_history: deque[dict[str, Any]] = deque(maxlen=20)
+        self._recent_approved: deque[str] = deque(maxlen=20)
+
+    def record_context(
+        self,
+        role: str,
+        content: str,
+        tool_name: str | None = None,
+        tool_input: dict[str, Any] | None = None,
+    ) -> None:
+        """Record conversation context for classifier evaluation."""
+        entry: dict[str, Any] = {"role": role, "content": content}
+        if tool_name is not None:
+            entry["tool_name"] = tool_name
+        if tool_input is not None:
+            entry["tool_input"] = tool_input
+        self._context_history.append(entry)
+
+    @property
+    def in_worktree(self) -> bool:
+        """Whether the session is in a worktree."""
+        return self._in_worktree
+
+    @property
+    def classifier_enabled(self) -> bool:
+        """Whether the auto-mode classifier is active."""
+        return self._classifier_enabled
+
+    def set_classifier_enabled(self, enabled: bool) -> None:
+        """Toggle classifier on/off. Resets fallback counters when enabling."""
+        if enabled and not self._in_worktree:
+            return  # Cannot enable classifier before worktree entry
+        self._classifier_enabled = enabled
+        if enabled and self._classifier is not None:
+            self._classifier.reset_counters()
+
+    async def handle(  # noqa: PLR0912
         self,
         tool_name: str,
         input_data: dict[str, Any],
@@ -320,6 +369,39 @@ class PermissionHandler:
             logger.debug("Session-approved %s arg: %s", tool_name, cacheable_arg)
             return PermissionResultAllow()
 
+        # 2g. Auto-mode classifier (only active after worktree entry)
+        if self._classifier_enabled and self._classifier is not None and self._in_worktree:
+            context_text = extract_classifier_context(self._context_history)
+            classify_result = await self._classifier.classify(
+                tool_name,
+                input_data,
+                context_text,
+                recent_approvals=list(self._recent_approved),
+            )
+            if classify_result.decision == "allow":
+                logger.info("Classifier approved %s", tool_name)
+                self._recent_approved.append(tool_name)
+                return PermissionResultAllow()
+            if classify_result.decision == "block":
+                logger.info("Classifier blocked %s: %s", tool_name, classify_result.reason)
+                # Generic message — don't leak classifier reasoning to outer Claude
+                return PermissionResultDeny(message="Blocked by auto-mode policy")
+            if classify_result.decision == "fallback_exceeded":
+                self._classifier_enabled = False
+                logger.warning("Classifier fallback threshold exceeded, pausing")
+                try:
+                    await self._router.post_to_main(
+                        ":warning: Auto-mode classifier paused (too many blocks). "
+                        "Falling back to manual approval. Use `!auto on` to re-enable."
+                    )
+                except Exception:
+                    logger.debug("Failed to post classifier fallback notice")
+            # "uncertain" falls through to SDK suggestions → Slack HITL
+
+        # Record tool call context (after classifier, before HITL — avoids
+        # duplicating the pending tool in the classifier's own context window)
+        self.record_context("tool_call", "", tool_name=tool_name, tool_input=input_data)
+
         # 3. Check SDK suggestions for allow — secondary, after static allowlist.
         # Defense-in-depth: write-gated tools that fell through CWD containment
         # (outside worktree or Bash) must go to HITL, not SDK allow.  This
@@ -360,6 +442,12 @@ class PermissionHandler:
                         "Worktree path escaped expected parent: %s — CWD containment disabled",
                         candidate,
                     )
+        # Activate auto-classifier if configured
+        if self._classifier_configured and self._classifier is not None:
+            self._classifier_enabled = True
+            self._classifier.reset_counters()
+            logger.info("Auto-mode classifier activated on worktree entry")
+
         logger.info(
             "Worktree entry detected — write gate can be unlocked (root=%s)",
             self._worktree_root,

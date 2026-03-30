@@ -468,6 +468,15 @@ class SummonConfig(BaseSettings):
     global_pm_cwd: str | None = None  # None -> get_data_dir() / "global-pm"
     global_pm_model: str | None = None  # None -> inherit default_model
 
+    # ------------------------------------------------------------------
+    # Auto-mode classifier
+    # ------------------------------------------------------------------
+
+    auto_classifier_enabled: bool = True
+    auto_mode_environment: str = ""
+    auto_mode_deny: str = ""
+    auto_mode_allow: str = ""
+
     @classmethod
     def for_test(cls, **overrides: object) -> SummonConfig:
         """Create a config instance isolated from env vars and .env files.
@@ -1055,6 +1064,43 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         label="Show Thinking",
         help_text="Route thinking blocks to the Slack turn thread",
         input_type="flag",
+        advanced=True,
+    ),
+    # Auto Mode
+    ConfigOption(
+        field_name="auto_classifier_enabled",
+        env_key="SUMMON_AUTO_CLASSIFIER_ENABLED",
+        group="Auto Mode",
+        label="Auto Classifier",
+        help_text="Enable Sonnet classifier for automatic tool approval",
+        input_type="flag",
+        advanced=True,
+    ),
+    ConfigOption(
+        field_name="auto_mode_environment",
+        env_key="SUMMON_AUTO_MODE_ENVIRONMENT",
+        group="Auto Mode",
+        label="Environment Context",
+        help_text="Environment description for the classifier (e.g. 'production server')",
+        input_type="text",
+        advanced=True,
+    ),
+    ConfigOption(
+        field_name="auto_mode_deny",
+        env_key="SUMMON_AUTO_MODE_DENY",
+        group="Auto Mode",
+        label="Deny Rules",
+        help_text="Custom deny rules (newline-separated, overrides defaults)",
+        input_type="text",
+        advanced=True,
+    ),
+    ConfigOption(
+        field_name="auto_mode_allow",
+        env_key="SUMMON_AUTO_MODE_ALLOW",
+        group="Auto Mode",
+        label="Allow Rules",
+        help_text="Custom allow rules (newline-separated, overrides defaults)",
+        input_type="text",
         advanced=True,
     ),
 ]

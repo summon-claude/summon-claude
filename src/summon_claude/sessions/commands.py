@@ -34,6 +34,8 @@ class CommandContext:
     model: str | None = None
     effort: str = "high"
     session_id: str = ""
+    auto_enabled: bool = False
+    in_worktree: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -251,6 +253,41 @@ async def _handle_changes(_args: list[str], _ctx: CommandContext) -> CommandResu
     return CommandResult(text=None, metadata={"show_changes": True})
 
 
+async def _handle_auto(args: list[str], ctx: CommandContext) -> CommandResult:
+    if not args:
+        status = "enabled" if ctx.auto_enabled else "disabled"
+        return CommandResult(
+            text=f"*Auto-mode classifier:* `{status}`\n"
+            f"Use `!auto on` or `!auto off` to toggle.\n"
+            f"Use `!auto rules` to see effective rules."
+        )
+    action = args[0].lower()
+    if action == "on":
+        if not ctx.in_worktree:
+            return CommandResult(
+                text=":warning: Auto-mode requires write access. "
+                "Enter a worktree first (`EnterWorktree`)."
+            )
+        return CommandResult(
+            text=":gear: Enabling auto-mode classifier...",
+            metadata={"set_auto": True},
+        )
+    if action == "off":
+        return CommandResult(
+            text=":gear: Disabling auto-mode classifier. Tool calls will require Slack approval.",
+            metadata={"set_auto": False},
+        )
+    if action == "rules":
+        deny = ctx.metadata.get("deny_rules", "(unavailable)")
+        allow = ctx.metadata.get("allow_rules", "(unavailable)")
+        return CommandResult(
+            text=f"*Block rules:*\n```\n{deny}\n```\n\n*Allow rules:*\n```\n{allow}\n```"
+        )
+    return CommandResult(
+        text=f":warning: Unknown auto-mode action `{action}`. Use `on`, `off`, or `rules`."
+    )
+
+
 # ------------------------------------------------------------------
 # Shared block-reason constant
 # ------------------------------------------------------------------
@@ -299,6 +336,13 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         description="Switch or display the effort level",
         handler=_handle_effort,
         max_args=1,
+    ),
+    "auto": CommandDef(
+        description="Toggle or inspect auto-mode classifier",
+        handler=_handle_auto,
+        max_args=1,
+        aliases=["automode"],
+        argument_hint="[on|off|rules]",
     ),
     "compact": CommandDef(
         description="Compact conversation context",
