@@ -566,8 +566,7 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    ":lock: *Permission requested* <!channel>\n"
-                    "Claude wants to run:\n"
+                    "Permission required: Claude wants to run:\n"
                     "`Bash` — `./deploy.sh --env staging`"
                 ),
             },
@@ -584,6 +583,14 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
                 },
                 {
                     "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Approve for session",
+                    },
+                    "action_id": "permission_approve_session_mock",
+                },
+                {
+                    "type": "button",
                     "text": {"type": "plain_text", "text": "Deny"},
                     "style": "danger",
                     "action_id": "permission_deny_mock",
@@ -594,7 +601,7 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
 
     resp = client.chat_postMessage(
         channel=channel_id,
-        text="Permission requested: Bash — ./deploy.sh --env staging",
+        text="Permission required: Bash — ./deploy.sh --env staging",
         blocks=blocks,
     )
     ts = resp.get("ts")
@@ -1381,8 +1388,13 @@ def main(
     This is a LOCAL developer tool — requires Claude CLI, summon config,
     and Slack browser credentials. Cannot run in CI.
 
-    Requires: SUMMON_TEST_SLACK_BOT_TOKEN.
+    Requires: SUMMON_TEST_SLACK_BOT_TOKEN (from .env or environment).
     """
+    # Load .env so credentials work without manual export
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
     output_dir.mkdir(parents=True, exist_ok=True)
     all_sections = ["slack-setup", "session-ux", "terminal", "prompts", "schema"]
     sections = [section] if section else all_sections

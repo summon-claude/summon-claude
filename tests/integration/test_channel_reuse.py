@@ -953,7 +953,6 @@ class TestEventDispatcherRouting:
         mock_handler.handle_action.assert_awaited_once_with(
             value="tool_123",
             user_id="U_OWNER",
-            response_url="https://hooks.slack.com/actions/...",
         )
 
     async def test_dispatch_action_ask_user_routes_correctly(self):
@@ -990,7 +989,6 @@ class TestEventDispatcherRouting:
         mock_handler.handle_ask_user_action.assert_awaited_once_with(
             value="Yes",
             user_id="U_OWNER",
-            response_url="https://hooks.slack.com/actions/...",
         )
 
     async def test_dispatch_action_unregistered_channel_ignored(self):

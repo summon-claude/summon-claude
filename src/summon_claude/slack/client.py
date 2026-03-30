@@ -416,6 +416,31 @@ class SlackClient:
             logger.debug("canvas_rename failed for %s: %s", canvas_id, e)
             return False
 
+    async def delete_message(self, ts: str) -> None:
+        """Delete a message by timestamp (best-effort, never raises).
+
+        Uses chat.delete. Failures are logged at debug level and swallowed
+        so callers never need to handle errors from cleanup operations.
+        """
+        try:
+            await self._web.chat_delete(channel=self.channel_id, ts=ts)
+        except Exception as e:
+            logger.debug("Failed to delete message %s: %s", ts, e)
+
+    async def post_interactive(
+        self,
+        text: str,
+        *,
+        thread_ts: str | None = None,
+        blocks: list[dict[str, Any]] | None = None,
+    ) -> MessageRef:
+        """Post an interactive (button-bearing) message to the channel.
+
+        Functionally identical to post(). Callers should store the returned
+        ``MessageRef.ts`` for later deletion via ``delete_message()``.
+        """
+        return await self.post(text, thread_ts=thread_ts, blocks=blocks)
+
     async def get_canvas_id(self) -> str | None:
         """Discover an existing canvas in the channel via files.list.
 

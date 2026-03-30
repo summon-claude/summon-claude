@@ -1757,7 +1757,12 @@ class SummonSession:
             raise RuntimeError(
                 f"Session {self._session_id}: cannot build runtime without authenticated_user_id"
             )
-        permission_handler = PermissionHandler(router, self._config, self._authenticated_user_id)
+        permission_handler = PermissionHandler(
+            router,
+            self._config,
+            self._authenticated_user_id,
+            project_root=self._cwd,
+        )
 
         rt = _SessionRuntime(
             registry=registry,
@@ -2493,6 +2498,7 @@ class SummonSession:
             show_thinking=self._config.show_thinking,
             max_inline_chars=self._config.max_inline_chars,
             on_file_change=self._on_file_change,
+            on_worktree_entered=rt.permission_handler.notify_entered_worktree,
         )
 
         # Disable auto-compaction — we handle compaction via !compact

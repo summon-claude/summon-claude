@@ -332,6 +332,34 @@ class TestSlackClient:
         result = await client.get_canvas_id()
         assert result is None
 
+    async def test_delete_message_calls_chat_delete(self):
+        client, web = self._make_client()
+        web.chat_delete = AsyncMock(return_value={})
+        await client.delete_message("1234567890.123")
+        web.chat_delete.assert_called_once()
+        call_kwargs = web.chat_delete.call_args.kwargs
+        assert call_kwargs["channel"] == "C123"
+        assert call_kwargs["ts"] == "1234567890.123"
+
+    async def test_delete_message_swallows_errors(self):
+        client, web = self._make_client()
+        web.chat_delete = AsyncMock(side_effect=Exception("cant_delete_message"))
+        # Should not raise
+        await client.delete_message("1234567890.123")
+
+    async def test_post_interactive_returns_message_ref(self):
+        client, web = self._make_client()
+        blocks = [{"type": "actions", "elements": []}]
+        ref = await client.post_interactive("Click a button", blocks=blocks)
+        assert ref == MessageRef(channel_id="C123", ts="1.0")
+        web.chat_postMessage.assert_called_once()
+
+    async def test_post_interactive_with_thread_ts(self):
+        client, web = self._make_client()
+        await client.post_interactive("text", thread_ts="9999.0")
+        call_kwargs = web.chat_postMessage.call_args.kwargs
+        assert call_kwargs["thread_ts"] == "9999.0"
+
     async def test_get_canvas_id_returns_none_on_error(self):
         client, web = self._make_client()
         web.files_list = AsyncMock(side_effect=Exception("api error"))

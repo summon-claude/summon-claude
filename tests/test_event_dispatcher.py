@@ -142,7 +142,6 @@ class TestDispatchAction:
         ph.handle_action.assert_awaited_once_with(
             value="approve:batch-1",
             user_id="U001",
-            response_url="https://hooks.slack.com/actions/...",
         )
 
     async def test_permission_deny_calls_handle_action(self):
@@ -158,7 +157,21 @@ class TestDispatchAction:
         ph.handle_action.assert_awaited_once_with(
             value="deny:batch-2",
             user_id="U001",
-            response_url="",
+        )
+
+    async def test_permission_approve_session_calls_handle_action(self):
+        """dispatch_action routes permission_approve_session to handle_action."""
+        dispatcher = EventDispatcher()
+        ph = AsyncMock()
+        dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
+
+        action = {"action_id": "permission_approve_session", "value": "approve_session:batch-3"}
+        body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
+        await dispatcher.dispatch_action(action, body)
+
+        ph.handle_action.assert_awaited_once_with(
+            value="approve_session:batch-3",
+            user_id="U001",
         )
 
     async def test_ask_user_action_calls_handle_ask_user_action(self):
@@ -174,7 +187,6 @@ class TestDispatchAction:
         ph.handle_ask_user_action.assert_awaited_once_with(
             value="req-1|0|0",
             user_id="U001",
-            response_url="",
         )
 
     async def test_ask_user_other_action_routes_correctly(self):

@@ -14,6 +14,7 @@ from summon_claude.sessions.permissions import (
     _GITHUB_MCP_AUTO_APPROVE,
     _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
     _GITHUB_MCP_REQUIRE_APPROVAL,
+    _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -34,16 +35,23 @@ def make_config(debounce_ms=10):
 
 
 def make_handler(debounce_ms=10, authenticated_user_id="U_TEST"):
-    """Create a PermissionHandler with a mocked ThreadRouter."""
+    """Create a PermissionHandler with a mocked ThreadRouter.
+
+    Sets _in_worktree=True so tests exercise the Slack approval flow for
+    write tools without hitting the write gate. Write gate behavior is
+    tested in test_permissions_write_gate.py.
+    """
     client = make_mock_slack_client()
     router = ThreadRouter(client)
     config = make_config(debounce_ms=debounce_ms)
     handler = PermissionHandler(router, config, authenticated_user_id=authenticated_user_id)
+    # Bypass write gate — these tests exercise HITL batching, not the gate
+    handler._check_write_gate = AsyncMock(return_value=None)
     return handler, client, router
 
 
-def _ephemeral_auto_approve(handler):
-    """Return a side effect for post_ephemeral that auto-approves all pending batches."""
+def _interactive_auto_approve(handler):
+    """Return a side effect for post_interactive that auto-approves all pending batches."""
 
     async def side_effect(*_args, **_kwargs):
         async def do():
@@ -53,12 +61,13 @@ def _ephemeral_auto_approve(handler):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(do())
+        return MagicMock(ts="mock_ts")
 
     return side_effect
 
 
-def _ephemeral_auto_deny(handler):
-    """Return a side effect for post_ephemeral that auto-denies all pending batches."""
+def _interactive_auto_deny(handler):
+    """Return a side effect for post_interactive that auto-denies all pending batches."""
 
     async def side_effect(*_args, **_kwargs):
         async def do():
@@ -68,6 +77,7 @@ def _ephemeral_auto_deny(handler):
                 handler._batch.events[batch_id].set()
 
         asyncio.create_task(do())
+        return MagicMock(ts="mock_ts")
 
     return side_effect
 
@@ -110,13 +120,13 @@ class TestAutoApprove:
 
     async def test_bash_is_not_auto_approved(self):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "echo hi"}, None)
         assert isinstance(result, PermissionResultAllow)
 
     async def test_write_is_not_auto_approved(self):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/tmp/f.txt"}, None)
         assert isinstance(result, PermissionResultAllow)
 
@@ -124,21 +134,21 @@ class TestAutoApprove:
 class TestApprovalFlow:
     async def test_approval_returns_allow(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "rm -rf /"}, None)
         assert isinstance(result, PermissionResultAllow)
 
     async def test_denial_returns_deny(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_deny(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
         result = await handler.handle("Bash", {"command": "dangerous"}, None)
         assert isinstance(result, PermissionResultDeny)
 
-    async def test_approval_message_posted_ephemeral(self):
+    async def test_approval_message_posted_interactive(self):
         handler, provider, _ = make_handler(debounce_ms=10)
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
-        assert provider.post_ephemeral.call_count >= 1
+        assert provider.post_interactive.call_count >= 1
 
 
 class TestHandleAction:
@@ -293,15 +303,15 @@ class TestFormatRequestSummary:
         assert "CustomTool" in summary
 
 
-class TestPermissionEphemeral:
-    """Tests for ephemeral permission posting."""
+class TestPermissionInteractive:
+    """Tests for interactive permission posting."""
 
-    async def test_permissions_use_ephemeral(self):
-        """Permission requests should go through post_ephemeral."""
+    async def test_permissions_use_interactive(self):
+        """Permission requests should go through post_interactive."""
         handler, provider, router = make_handler(authenticated_user_id="U_TEST")
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     async def test_handle_action_posts_to_turn_thread(self):
         """handle_action should post confirmation to turn thread, not update."""
@@ -331,24 +341,17 @@ class TestPermissionEphemeral:
         with pytest.raises(TypeError, match="authenticated_user_id"):
             PermissionHandler(router, config)  # type: ignore[call-arg]
 
-    async def test_permission_ping_goes_to_main_channel(self):
-        """Permission notification ping should go to main channel, not thread."""
-        handler, provider, router = make_handler(authenticated_user_id="U_PING")
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
-        provider.post = AsyncMock(return_value=AsyncMock(ts="1234"))
+    async def test_no_separate_ping_for_normal_messages(self):
+        """Normal messages trigger notifications — no separate ping needed."""
+        handler, provider, _ = make_handler(authenticated_user_id="U_PING")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        provider.post = AsyncMock(return_value=MagicMock(ts="1234"))
 
         await handler.handle("Edit", {"path": "/tmp/f.py"}, None)
 
-        # post() should have been called with the permission ping (no thread_ts)
-        ping_calls = [
-            c
-            for c in provider.post.call_args_list
-            if "Permission needed" in str(c) and "U_PING" in str(c)
-        ]
-        assert len(ping_calls) == 1
-        # Main channel post = no thread_ts kwarg
-        call_kwargs = ping_calls[0].kwargs
-        assert "thread_ts" not in call_kwargs or call_kwargs.get("thread_ts") is None
+        # No ping calls — post_interactive already generates notifications
+        ping_calls = [c for c in provider.post.call_args_list if "Permission needed" in str(c)]
+        assert len(ping_calls) == 0
 
 
 class TestPermissionSuggestions:
@@ -368,7 +371,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "ls"}, context)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
     async def test_suggestion_deny_returns_denied_without_slack(self):
         """When suggestion.behavior='deny', return PermissionResultDeny without Slack."""
@@ -384,14 +387,14 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "rm -rf /"}, context)
 
         assert isinstance(result, PermissionResultDeny)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
     async def test_suggestion_ask_falls_through_to_slack(self):
         """When suggestion.behavior='ask', fall through to Slack approval flow."""
         from unittest.mock import MagicMock
 
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
 
         suggestion = MagicMock()
         suggestion.behavior = "ask"
@@ -401,7 +404,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Bash", {"command": "test"}, context)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     async def test_no_suggestion_uses_auto_approve_fallback(self):
         """When context=None, still use _AUTO_APPROVE_TOOLS fallback."""
@@ -410,7 +413,7 @@ class TestPermissionSuggestions:
         result = await handler.handle("Read", {"file_path": "/tmp/f"}, None)
 
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
 
 class TestGitHubMCPReadToolsAutoApproved:
@@ -431,7 +434,7 @@ class TestGitHubMCPReadToolsAutoApproved:
         handler, provider, _ = make_handler()
         result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_not_called()
+        provider.post_interactive.assert_not_called()
 
 
 class TestGitHubMCPToolsRequireApproval:
@@ -459,10 +462,10 @@ class TestGitHubMCPToolsRequireApproval:
     )
     async def test_requires_slack_approval(self, tool_name):
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle(tool_name, {}, None)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
     @pytest.mark.parametrize(
         "tool_name",
@@ -474,7 +477,7 @@ class TestGitHubMCPToolsRequireApproval:
     async def test_ignores_sdk_allow_suggestion(self, tool_name):
         """Restricted tools must require Slack approval even when SDK suggests allow."""
         handler, provider, _ = make_handler()
-        provider.post_ephemeral = AsyncMock(side_effect=_ephemeral_auto_approve(handler))
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
 
         suggestion = MagicMock()
         suggestion.behavior = "allow"
@@ -483,7 +486,7 @@ class TestGitHubMCPToolsRequireApproval:
 
         result = await handler.handle(tool_name, {}, context)
         assert isinstance(result, PermissionResultAllow)
-        provider.post_ephemeral.assert_called()
+        provider.post_interactive.assert_called()
 
 
 class TestGitHubMCPGuardTests:
@@ -526,6 +529,399 @@ class TestGitHubMCPGuardTests:
             assert not tool.startswith(_GITHUB_MCP_AUTO_APPROVE_PREFIXES), (
                 f"{tool} matches an auto-approve prefix"
             )
+
+
+class TestSummonMCPAutoApprove:
+    """Guard + behavior tests for summon internal MCP auto-approval."""
+
+    def test_summon_mcp_prefixes_pinned(self):
+        assert _SUMMON_MCP_AUTO_APPROVE_PREFIXES == (
+            "mcp__summon-cli__",
+            "mcp__summon-slack__",
+            "mcp__summon-canvas__",
+        )
+
+    async def test_summon_cli_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-cli__session_list", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_summon_slack_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-slack__slack_read_history", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_summon_canvas_tool_auto_approved(self):
+        handler, _, _ = make_handler()
+        result = await handler.handle("mcp__summon-canvas__summon_canvas_read", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_unknown_mcp_tool_not_auto_approved(self):
+        handler, provider, _ = make_handler()
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("mcp__unknown__foo", {}, None)
+        # Falls through to HITL — not auto-approved by summon prefixes
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_called_once()
+
+
+class TestSessionApprovalCaching:
+    """Tests for 'Approve for session' button and per-tool caching."""
+
+    async def test_approve_session_caches_non_write_tool_by_name(self):
+        """Non-write-gated tools are cached by bare tool name."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "CustomTool" in handler._session_approved_tools
+
+    async def test_cached_tool_auto_approved(self):
+        handler, provider, _ = make_handler()
+        handler._session_approved_tools.add("CustomTool")
+        result = await handler.handle("CustomTool", {"key": "val"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should not reach HITL
+        provider.post_interactive.assert_not_called()
+
+    async def test_github_require_approval_never_cached(self):
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["mcp__github__merge_pull_request"]
+        handler._batch.tool_inputs[batch_id] = [{}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "mcp__github__merge_pull_request" not in handler._session_approved_tools
+        assert "mcp__github__merge_pull_request" not in handler._session_approved_tool_args
+
+    async def test_regular_approve_does_not_cache(self):
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "CustomTool" not in handler._session_approved_tools
+
+    async def test_session_cache_per_instance(self):
+        h1, _, _ = make_handler()
+        h2, _, _ = make_handler()
+        h1._session_approved_tools.add("CustomTool")
+        assert "CustomTool" not in h2._session_approved_tools
+
+    async def test_approve_session_button_in_blocks(self):
+        """Verify 'Approve for session' button appears in approval blocks."""
+        handler, provider, _ = make_handler()
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        await handler.handle("Bash", {"command": "echo hi"}, None)
+        call_kwargs = provider.post_interactive.call_args.kwargs
+        blocks = call_kwargs.get("blocks", [])
+        actions_block = next((b for b in blocks if b.get("type") == "actions"), None)
+        assert actions_block is not None
+        action_ids = {e["action_id"] for e in actions_block["elements"]}
+        assert "permission_approve_session" in action_ids
+        assert "permission_approve" in action_ids
+        assert "permission_deny" in action_ids
+
+    async def test_bash_never_session_cached_as_bare_tool(self):
+        """Bash must not appear in _session_approved_tools (bare tool cache)."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tools
+
+    async def test_handle_action_deletes_interactive_message(self):
+        """handle_action should delete the interactive message after user clicks."""
+        handler, provider, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._batch.tool_names[batch_id] = ["Edit"]
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_TEST",
+        )
+        provider.delete_message.assert_awaited_once_with("1234.5678")
+
+    async def test_approve_session_confirmation_includes_tool_names(self):
+        """Confirmation message for approve_session should include 'for session' and tool names."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "Write"]
+        handler._batch.tool_inputs[batch_id] = [{"path": "/f"}, {"file_path": "/g"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" in posted
+        assert "`Edit`" in posted
+        assert "`Write`" in posted
+
+
+class TestArgBasedCaching:
+    """Tests for per-argument session caching (Bash commands, file paths, etc.)."""
+
+    async def test_approve_session_caches_bash_command(self):
+        """approve_session should cache the exact Bash command."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "git status" in handler._session_approved_tool_args.get("Bash", set())
+
+    async def test_cached_bash_command_auto_approved(self):
+        """A Bash command in the arg cache should be auto-approved."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        result = await handler.handle("Bash", {"command": "git status"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+
+    async def test_different_bash_command_still_requires_hitl(self):
+        """A different Bash command should still require HITL."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "rm -rf /"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_called()
+
+    async def test_empty_bash_command_not_cached(self):
+        """Empty command strings should not be cached."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": ""}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tool_args
+
+    async def test_empty_bash_command_not_matched(self):
+        """An empty command should never match cached args."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": ""}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Should have gone to HITL, not cache
+        provider.post_interactive.assert_called()
+
+    async def test_bash_command_exact_match_required(self):
+        """Bash commands must match exactly — no prefix matching."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "git status --short"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        # Different command → HITL
+        provider.post_interactive.assert_called()
+
+    async def test_mixed_batch_caches_write_tools_by_arg(self):
+        """A batch with write-gated tools caches all by primary arg."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"path": "/f"}, {"command": "make lint"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        # Both Edit and Bash use arg-based caching (write-gated)
+        assert "Edit" not in handler._session_approved_tools
+        assert "Bash" not in handler._session_approved_tools
+        assert "/f" in handler._session_approved_tool_args.get("Edit", set())
+        assert "make lint" in handler._session_approved_tool_args.get("Bash", set())
+
+    async def test_non_write_tool_cached_by_name(self):
+        """Non-write-gated tools are still cached by bare tool name."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "CustomTool" in handler._session_approved_tools
+
+    async def test_mixed_write_and_non_write_batch(self):
+        """Batch with write-gated and non-write-gated tools caches correctly."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit", "CustomTool", "Bash"]
+        handler._batch.tool_inputs[batch_id] = [
+            {"path": "/f"},
+            {"key": "val"},
+            {"command": "make lint"},
+        ]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        # Write-gated: cached by arg
+        assert "/f" in handler._session_approved_tool_args.get("Edit", set())
+        assert "make lint" in handler._session_approved_tool_args.get("Bash", set())
+        # Non-write-gated: cached by name
+        assert "CustomTool" in handler._session_approved_tools
+        # Write-gated tools must NOT be in bare name cache
+        assert "Edit" not in handler._session_approved_tools
+        assert "Bash" not in handler._session_approved_tools
+
+    async def test_confirmation_shows_primary_arg_for_write_tools(self):
+        """Session-approve confirmation for write tools should show the primary arg."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" in posted
+        assert "`Bash`" in posted
+        assert "`git status`" in posted
+
+    async def test_regular_approve_does_not_show_arg_in_confirmation(self):
+        """Regular approve should not show arg details in confirmation."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"command": "git status"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        handler._router.post_to_active_thread = AsyncMock()
+
+        await handler.handle_action(
+            value=f"approve:{batch_id}",
+            user_id="U_TEST",
+        )
+        posted = handler._router.post_to_active_thread.call_args[0][0]
+        assert "for session" not in posted
+        assert "`Bash`" in posted
+
+    async def test_arg_cache_per_instance(self):
+        """Arg caches should be per handler instance."""
+        h1, _, _ = make_handler()
+        h2, _, _ = make_handler()
+        h1._session_approved_tool_args.setdefault("Bash", set()).add("git status")
+        assert "Bash" not in h2._session_approved_tool_args
+
+    async def test_bash_no_command_key_not_cached(self):
+        """Bash with no 'command' key in input should not cache anything."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Bash"]
+        handler._batch.tool_inputs[batch_id] = [{"description": "some desc"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Bash" not in handler._session_approved_tool_args
+
+    async def test_edit_path_cached_as_arg(self):
+        """Edit outside CWD should be cached by file path, not tool name."""
+        handler, _, _ = make_handler()
+        batch_id = "test-batch"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["Edit"]
+        handler._batch.tool_inputs[batch_id] = [{"file_path": "/etc/config.ini"}]
+
+        await handler.handle_action(
+            value=f"approve_session:{batch_id}",
+            user_id="U_TEST",
+        )
+        assert "Edit" not in handler._session_approved_tools
+        assert "/etc/config.ini" in handler._session_approved_tool_args.get("Edit", set())
+
+    async def test_cached_edit_path_auto_approved(self):
+        """An Edit path in the arg cache should be auto-approved at step 2f."""
+        handler, provider, _ = make_handler()
+        handler._session_approved_tool_args.setdefault("Edit", set()).add("/etc/config.ini")
+        result = await handler.handle("Edit", {"file_path": "/etc/config.ini"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+
+    async def test_long_bash_commands_no_truncation_collision(self):
+        """Two long commands sharing first 120 chars must NOT collide in cache."""
+        handler, provider, _ = make_handler()
+        prefix = "x" * 120
+        cmd_a = prefix + "_command_a"
+        cmd_b = prefix + "_command_b"
+        handler._session_approved_tool_args.setdefault("Bash", set()).add(cmd_a)
+        # cmd_a should match
+        result = await handler.handle("Bash", {"command": cmd_a}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_not_called()
+        # cmd_b should NOT match (different full command)
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": cmd_b}, None)
+        assert isinstance(result, PermissionResultAllow)
+        provider.post_interactive.assert_called()
 
 
 class TestIdentityVerificationFailClosed:

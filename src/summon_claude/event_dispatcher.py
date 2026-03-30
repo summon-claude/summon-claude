@@ -227,20 +227,17 @@ class EventDispatcher:
         action_id: str = action.get("action_id", "")
         value: str = action.get("value", "")
         user_id: str = body.get("user", {}).get("id", "")
-        response_url: str = body.get("response_url", "")
 
         if _ASK_USER_RE.fullmatch(action_id):
             await handle.permission_handler.handle_ask_user_action(
                 value=value,
                 user_id=user_id,
-                response_url=response_url,
             )
         else:
-            # permission_approve / permission_deny (and any future variants)
+            # permission_approve / permission_approve_session / permission_deny
             await handle.permission_handler.handle_action(
                 value=value,
                 user_id=user_id,
-                response_url=response_url,
             )
 
     async def dispatch_reaction(self, event: dict) -> None:  # type: ignore[type-arg]

@@ -1,4 +1,19 @@
-"""Debounced permission handler — batches tool approval requests and posts to Slack."""
+"""Debounced permission handler — batches tool approval requests and posts to Slack.
+
+Permission check flow (handle() steps):
+  0.  AskUserQuestion  → intercepted, rendered as Slack interactive UI
+  0b. Write gate       → enforces read-only default; SDK deny,
+                         safe-dir bypass, worktree check, CWD containment
+  1.  SDK deny         → always honored unconditionally
+  2.  Static allowlist → _AUTO_APPROVE_TOOLS (Read, Grep, Glob, …)
+  2b. GitHub deny-list → _GITHUB_MCP_REQUIRE_APPROVAL always sent to Slack
+  2c. GitHub allowlist → exact names and get_/list_/search_ prefixes
+  2d. Summon MCP       → summon-cli/summon-slack/summon-canvas tools
+  2e. Session cache    → tools approved for the session lifetime
+  2f. Arg cache        → per-argument exact-match (Bash cmd, file path, etc.)
+  3.  SDK allow        → secondary, after static lists
+  4.  Slack HITL       → interactive approve/deny/approve-for-session buttons
+"""
 
 # pyright: reportArgumentType=false, reportReturnType=false
 # claude_agent_sdk doesn't ship type stubs
@@ -9,9 +24,9 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-import aiohttp
 from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
 
 from summon_claude.config import SummonConfig
@@ -52,6 +67,15 @@ _GITHUB_MCP_AUTO_APPROVE_PREFIXES = (
     "mcp__github__search_",
 )
 
+# Summon's own MCP tools — always auto-approved.
+# Internal tools from the session's own MCP servers (summon-cli,
+# summon-slack, summon-canvas), already scoped to session permissions.
+_SUMMON_MCP_AUTO_APPROVE_PREFIXES = (
+    "mcp__summon-cli__",
+    "mcp__summon-slack__",
+    "mcp__summon-canvas__",
+)
+
 # GitHub MCP tools that ALWAYS require Slack approval — never auto-approved,
 # even if SDK suggestions say "allow". Defense-in-depth against broad
 # allowedTools patterns in settings.json bypassing HITL.
@@ -73,19 +97,66 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     ]
 )
 
-_PERMISSION_TIMEOUT_S = 300  # 5 minutes
+_PERMISSION_TIMEOUT_S = 600  # 10 minutes
+
+# Tools that write to the filesystem — gated until worktree entry.
+# MultiEdit is included defensively even though it's not currently in
+# the codebase (harmless if unused).
+_WRITE_GATED_TOOLS = frozenset(
+    [
+        "Write",
+        "Edit",
+        "str_replace_editor",  # SDK alias for Edit
+        "MultiEdit",
+        "NotebookEdit",
+        "Bash",
+    ]
+)
+
+# File-path argument keys per tool, in priority order (for safe-dir lookup).
+# Matches the tuple-fallback pattern in response.py's _TOOL_PATH_KEYS.
+# Bash has no reliable file path — always gate unless worktree entered.
+_WRITE_TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
+    "Write": ("file_path", "path"),
+    "Edit": ("file_path", "path"),
+    "str_replace_editor": ("path", "file_path"),  # SDK alias for Edit
+    "MultiEdit": ("file_path", "path"),
+    "NotebookEdit": ("notebook_path",),
+}
 
 
-async def _dismiss_ephemeral(response_url: str) -> None:
-    """Delete an ephemeral Slack message via its response_url."""
+def _is_in_safe_dir(file_path: str, safe_dirs: list[str], project_root: Path | None) -> bool:
+    """Return True if file_path resolves to within any of the safe_dirs.
+
+    Security constraints:
+    - project_root must be an absolute path; if missing or relative, returns False (fail-closed).
+    - Both file_path and each safe dir are resolved via Path.resolve() before comparison
+      to prevent symlink escapes.
+    - project_root is used to resolve relative file paths only; it is not itself a safe dir.
+    """
+    if not project_root or not project_root.is_absolute():
+        return False
+
+    if not safe_dirs:
+        return False
+
     try:
-        async with aiohttp.ClientSession() as http:
-            await http.post(
-                response_url,
-                json={"delete_original": True},
-            )
-    except Exception as e:
-        logger.debug("Failed to dismiss ephemeral via response_url: %s", e)
+        fp = Path(file_path)
+        resolved_file = (project_root / fp).resolve() if not fp.is_absolute() else fp.resolve()
+    except (ValueError, OSError):
+        return False
+
+    for safe_dir in safe_dirs:
+        if not safe_dir:
+            continue
+        try:
+            resolved_safe = (project_root / safe_dir).resolve()
+            if resolved_file.is_relative_to(resolved_safe):
+                return True
+        except (ValueError, OSError):
+            continue
+
+    return False
 
 
 @dataclass
@@ -105,6 +176,11 @@ class _BatchState:
 
     events: dict[str, asyncio.Event] = field(default_factory=dict)
     decisions: dict[str, bool] = field(default_factory=dict)
+    message_ts: dict[str, str] = field(default_factory=dict)
+    # Tool names per batch — used to populate session-approve cache on approval
+    tool_names: dict[str, list[str]] = field(default_factory=dict)
+    # Input data per batch — used for per-argument session caching
+    tool_inputs: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -119,21 +195,21 @@ class _AskUserState:
     pending_other: tuple[str, int] | None = None
     # For multi-select: toggled selections per question keyed by (request_id, question_idx)
     multi_selections: dict[tuple[str, int], list[str]] = field(default_factory=dict)
-    # response_url for dismissing the ephemeral when all questions are answered
-    response_urls: dict[str, str] = field(default_factory=dict)
+    # ts of the interactive question message (for deletion on completion)
+    message_ts: dict[str, str] = field(default_factory=dict)
 
 
 class PermissionHandler:
-    """Handles tool permission requests with 500ms debouncing and Slack interactive buttons.
+    """Handles tool permission requests with debounced Slack interactive messages.
+
+    Read-only by default: write-gated tools (Write, Edit, Bash, etc.) are
+    denied until the agent enters a worktree. Safe-dir exceptions allow
+    configured directories to bypass the worktree requirement.
 
     Safe tools (Read, Grep, Glob, WebSearch, WebFetch) are auto-approved.
-    Risky tools (Write, Edit, Bash, etc.) are batched into a single Slack
-    message per debounce window and wait for user approval.
-
-    Permission messages are posted with reply_broadcast=True (when in a thread)
-    and <!channel> to notify all channel members. The 500ms debounce window
-    batches rapid permission requests into a single message, so <!channel>
-    fires once per batch — not once per individual tool request.
+    Permission messages are posted as normal messages and deleted after
+    the user clicks Approve/Deny/Approve-for-session. The debounce window
+    (default 2000ms, configurable) batches rapid requests into one message.
     """
 
     def __init__(
@@ -141,10 +217,20 @@ class PermissionHandler:
         router: ThreadRouter,
         config: SummonConfig,
         authenticated_user_id: str,
+        project_root: str = "",
     ) -> None:
         self._router = router
         self._authenticated_user_id = authenticated_user_id
         self._debounce_ms = config.permission_debounce_ms
+
+        # Write gate state
+        self._project_root: Path | None = Path(project_root) if project_root else None
+        self._safe_dirs: list[str] = [
+            d.strip() for d in config.safe_write_dirs.split(",") if d.strip()
+        ]
+        self._in_worktree = False
+        self._worktree_root: Path | None = None
+        self._write_access_granted = False
 
         # Pending requests waiting for batched approval
         self._pending: dict[str, PendingRequest] = {}
@@ -153,6 +239,13 @@ class PermissionHandler:
 
         # Per-batch tracking (events, decisions)
         self._batch = _BatchState()
+
+        # Session-lifetime per-tool approval cache (bare tool name)
+        self._session_approved_tools: set[str] = set()
+
+        # Per-argument session cache: tool_name → set of approved primary args.
+        # Bash: exact command strings.  File tools outside CWD: exact paths.
+        self._session_approved_tool_args: dict[str, set[str]] = {}
 
         # AskUserQuestion tracking
         self._ask_user = _AskUserState()
@@ -168,12 +261,16 @@ class PermissionHandler:
         if tool_name == "AskUserQuestion":
             return await self._handle_ask_user_question(input_data)
 
+        # 0b. Write gate — enforce read-only default until worktree entry.
+        # Handles: SDK deny, safe-dir bypass, worktree check, CWD containment.
+        if tool_name in _WRITE_GATED_TOOLS:
+            result = await self._check_write_gate(tool_name, input_data, context)
+            if result is not None:
+                return result
+
         # 1. Check SDK suggestions for deny — always honor denials unconditionally
-        if context is not None:
-            for suggestion in getattr(context, "suggestions", []) or []:
-                if getattr(suggestion, "behavior", None) == "deny":
-                    logger.info("SDK suggestion: denying %s", tool_name)
-                    return PermissionResultDeny(message="Denied by permission rules")
+        if _sdk_suggests_deny(context, tool_name):
+            return PermissionResultDeny(message="Denied by permission rules")
 
         # 2. Static auto-approve list is the primary gate for allowing tools
         if tool_name in _AUTO_APPROVE_TOOLS:
@@ -193,17 +290,154 @@ class PermissionHandler:
             logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
             return PermissionResultAllow()
 
-        # 3. Check SDK suggestions for allow — secondary, after static allowlist
-        if context is not None:
-            for suggestion in getattr(context, "suggestions", []) or []:
-                if getattr(suggestion, "behavior", None) == "allow":
-                    logger.info("SDK suggestion: approving %s", tool_name)
-                    return PermissionResultAllow()
-                # behavior == "ask" or None falls through to Slack buttons
+        # 2d. Summon's own MCP tools — always auto-approved.
+        # These are internal tools provided by the session's own MCP servers
+        # (summon-cli, summon-slack, summon-canvas) and already scoped to
+        # the session's permissions.
+        if tool_name.startswith(_SUMMON_MCP_AUTO_APPROVE_PREFIXES):
+            logger.debug("Auto-approving summon MCP tool: %s", tool_name)
+            return PermissionResultAllow()
+
+        # 2e. Session-lifetime cached approvals (defense-in-depth:
+        # GitHub require-approval tools are never session-cached)
+        if (
+            tool_name in self._session_approved_tools
+            and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
+        ):
+            logger.debug("Session-approved tool: %s", tool_name)
+            return PermissionResultAllow()
+
+        # 2f. Per-argument cache — exact match on full arg (Bash command,
+        # file path outside CWD).  Uses _get_cacheable_arg (not
+        # get_tool_primary_arg) to avoid truncation collisions.
+        # Defense-in-depth: GitHub require-approval tools excluded (same as 2e).
+        cacheable_arg = _get_cacheable_arg(tool_name, input_data)
+        if (
+            cacheable_arg
+            and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
+            and cacheable_arg in self._session_approved_tool_args.get(tool_name, set())
+        ):
+            logger.debug("Session-approved %s arg: %s", tool_name, cacheable_arg)
+            return PermissionResultAllow()
+
+        # 3. Check SDK suggestions for allow — secondary, after static allowlist.
+        # Defense-in-depth: write-gated tools that fell through CWD containment
+        # (outside worktree or Bash) must go to HITL, not SDK allow.  This
+        # prevents allowedTools config from bypassing CWD containment — same
+        # principle as the GitHub deny-list overriding SDK suggestions.
+        _write_gated_fallthrough = tool_name in _WRITE_GATED_TOOLS and self._write_access_granted
+        if _sdk_suggests_allow(context, tool_name) and not _write_gated_fallthrough:
+            return PermissionResultAllow()
 
         # 4. Request user approval via Slack
         logger.info("Permission required for tool: %s", tool_name)
         return await self._request_approval(tool_name, input_data, context)
+
+    def notify_entered_worktree(self, worktree_name: str = "") -> None:
+        """Called by response consumer when EnterWorktree tool use is detected.
+
+        Args:
+            worktree_name: Name from the EnterWorktree input (e.g. "feature-x").
+                Used to compute the worktree root for CWD containment checks.
+        """
+        self._in_worktree = True
+        if worktree_name and self._project_root:
+            # Reject names with path separators or traversal components
+            if "/" in worktree_name or "\\" in worktree_name or ".." in worktree_name:
+                logger.warning(
+                    "Suspicious worktree name rejected: %r — "
+                    "CWD containment disabled (all writes require HITL)",
+                    worktree_name,
+                )
+                # Fail-closed: no CWD auto-approve, all writes go to HITL
+            else:
+                candidate = (self._project_root / ".claude" / "worktrees" / worktree_name).resolve()
+                expected_parent = (self._project_root / ".claude" / "worktrees").resolve()
+                if candidate.is_relative_to(expected_parent):
+                    self._worktree_root = candidate
+                else:
+                    logger.warning(
+                        "Worktree path escaped expected parent: %s — CWD containment disabled",
+                        candidate,
+                    )
+        logger.info(
+            "Worktree entry detected — write gate can be unlocked (root=%s)",
+            self._worktree_root,
+        )
+
+    def _is_within_worktree(self, file_path: str) -> bool:
+        """Return True if *file_path* resolves to within the worktree root.
+
+        Symlinks in existing path components are resolved to prevent escapes.
+        Non-existent components are resolved lexically (``os.path.abspath``
+        semantics) — best-effort guard, not a kernel guarantee.
+        Returns False (fail-closed) when the worktree root is unknown.
+        """
+        if not self._worktree_root:
+            return False
+        if not file_path or not file_path.strip():
+            return False  # reject empty/whitespace-only paths
+        try:
+            fp = Path(file_path)
+            resolved = (
+                (self._worktree_root / fp).resolve() if not fp.is_absolute() else fp.resolve()
+            )
+            return resolved.is_relative_to(self._worktree_root)
+        except (ValueError, OSError):
+            return False
+
+    async def _check_write_gate(
+        self,
+        tool_name: str,
+        input_data: dict[str, Any],
+        context: ToolPermissionContext | None,
+    ) -> PermissionResultAllow | PermissionResultDeny | None:
+        """Apply write gate — called for every tool in _WRITE_GATED_TOOLS.
+
+        Returns a PermissionResult to short-circuit handle(), or None to
+        continue the normal permission flow (steps 1-4).
+
+        Decision tree:
+        1. SDK deny → always honored unconditionally
+        2. Safe-dir match → Allow immediately (user configured these dirs)
+        3. Not in worktree → Deny with guidance
+        4. First write in worktree → one-time gate approval (sets _write_access_granted)
+        5. Gate approved, file within worktree → Allow (CWD containment)
+        6. Gate approved, file outside worktree or Bash → fall through to arg cache / HITL
+        """
+        # 1. SDK deny — always honored unconditionally (before any allow path)
+        if _sdk_suggests_deny(context, tool_name):
+            return PermissionResultDeny(message="Denied by permission rules")
+
+        # 2. Safe-dir bypass: takes precedence over worktree requirement
+        file_path = _extract_file_path(tool_name, input_data)
+        if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
+            logger.debug("Safe-dir write allowed: %s → %s", tool_name, file_path)
+            return PermissionResultAllow()
+
+        # 3. No worktree: hard deny
+        if not self._in_worktree:
+            logger.info("Write gate: denying %s (no active worktree)", tool_name)
+            return PermissionResultDeny(
+                message="Write access requires a worktree. "
+                "Use EnterWorktree to create an isolated copy first."
+            )
+
+        # 4. First write in worktree → one-time gate approval
+        if not self._write_access_granted:
+            logger.info("Write gate: requiring approval for %s (in worktree)", tool_name)
+            result = await self._request_approval(tool_name, input_data, context)
+            if isinstance(result, PermissionResultAllow):
+                self._write_access_granted = True
+            return result
+
+        # 5. Gate approved — CWD containment for file-targeting tools
+        if file_path and self._is_within_worktree(file_path):
+            logger.debug("Write within worktree: %s → %s", tool_name, file_path)
+            return PermissionResultAllow()
+
+        # 6. Outside CWD or Bash → fall through to arg cache (step 2f) or HITL (step 4)
+        return None
 
     async def _request_approval(
         self,
@@ -234,7 +468,10 @@ class PermissionHandler:
         except TimeoutError:
             logger.warning("Permission request timed out for tool %s", tool_name)
             await self._post_timeout_message()
-            return PermissionResultDeny(message="Permission request timed out (5 minutes)")
+            timeout_min = _PERMISSION_TIMEOUT_S // 60
+            return PermissionResultDeny(
+                message=f"Permission request timed out ({timeout_min} minutes)",
+            )
 
         if req.approved:
             return PermissionResultAllow()
@@ -253,6 +490,8 @@ class PermissionHandler:
         batch_id = str(uuid.uuid4())
         batch_event = asyncio.Event()
         self._batch.events[batch_id] = batch_event
+        self._batch.tool_names[batch_id] = [req.tool_name for req in batch.values()]
+        self._batch.tool_inputs[batch_id] = [req.input_data for req in batch.values()]
 
         await self._post_approval_message(batch_id, batch)
 
@@ -262,6 +501,9 @@ class PermissionHandler:
                 await batch_event.wait()
         except TimeoutError:
             approved = False
+            msg_ts = self._batch.message_ts.pop(batch_id, None)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
         else:
             approved = self._batch.decisions.get(batch_id, False)
 
@@ -273,6 +515,9 @@ class PermissionHandler:
         # Cleanup
         self._batch.events.pop(batch_id, None)
         self._batch.decisions.pop(batch_id, None)
+        self._batch.message_ts.pop(batch_id, None)
+        self._batch.tool_names.pop(batch_id, None)
+        self._batch.tool_inputs.pop(batch_id, None)
 
     async def _post_approval_message(self, batch_id: str, batch: dict[str, PendingRequest]) -> None:
         """Post the Slack interactive approval message for a batch of requests."""
@@ -289,6 +534,7 @@ class PermissionHandler:
             header_text = f"Claude wants to perform {len(requests)} actions:\n{summaries}"
 
         approve_value = f"approve:{batch_id}"
+        approve_session_value = f"approve_session:{batch_id}"
         deny_value = f"deny:{batch_id}"
 
         blocks = [
@@ -309,6 +555,15 @@ class PermissionHandler:
                     },
                     {
                         "type": "button",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "Approve for session",
+                        },
+                        "action_id": "permission_approve_session",
+                        "value": approve_session_value,
+                    },
+                    {
+                        "type": "button",
                         "text": {"type": "plain_text", "text": "Deny"},
                         "style": "danger",
                         "action_id": "permission_deny",
@@ -319,20 +574,11 @@ class PermissionHandler:
         ]
 
         try:
-            # Ping user in main channel FIRST so the notification arrives
-            # before they open the app (ephemeral messages don't trigger notifications)
-            if self._authenticated_user_id:
-                try:
-                    await self._router.post_to_main(
-                        f"<@{self._authenticated_user_id}> Permission needed",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to post permission ping to main channel: %s", e)
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
+            ref = await self._router.client.post_interactive(
                 f"Permission required: {header_text[:100]}",
                 blocks=blocks,
             )
+            self._batch.message_ts[batch_id] = ref.ts
         except Exception as e:
             logger.error("Failed to post permission message: %s", e)
             # Auto-deny if we can't post
@@ -340,11 +586,30 @@ class PermissionHandler:
             if batch_id in self._batch.events:
                 self._batch.events[batch_id].set()
 
+    def _cache_session_approvals(self, batch_id: str) -> None:
+        """Populate session caches for an approve_session action.
+
+        Write-gated tools: cache per-argument (command or file path).
+        GitHub require-approval tools: excluded (defense-in-depth).
+        Other tools: cache bare tool name.
+        """
+        tool_names_list = self._batch.tool_names.get(batch_id, [])
+        tool_inputs_list = self._batch.tool_inputs.get(batch_id, [])
+        for i, name in enumerate(tool_names_list):
+            if name in _GITHUB_MCP_REQUIRE_APPROVAL:
+                continue
+            if name in _WRITE_GATED_TOOLS:
+                inp = tool_inputs_list[i] if i < len(tool_inputs_list) else {}
+                arg = _get_cacheable_arg(name, inp)
+                if arg:
+                    self._session_approved_tool_args.setdefault(name, set()).add(arg)
+            else:
+                self._session_approved_tools.add(name)
+
     async def handle_action(
         self,
         value: str,
         user_id: str,
-        response_url: str = "",
     ) -> None:
         """Handle a Slack interactive button click for permission approval/denial.
 
@@ -359,9 +624,15 @@ class PermissionHandler:
             )
             return
 
+        is_session_approve = False
         if value.startswith("approve:"):
             batch_id = value[len("approve:") :]
             approved = True
+        elif value.startswith("approve_session:"):
+            batch_id = value[len("approve_session:") :]
+            approved = True
+            is_session_approve = True
+            self._cache_session_approvals(batch_id)
         elif value.startswith("deny:"):
             batch_id = value[len("deny:") :]
             approved = False
@@ -371,14 +642,25 @@ class PermissionHandler:
 
         self._batch.decisions[batch_id] = approved
 
-        # Dismiss the ephemeral message via response_url (the only reliable way)
-        if response_url:
-            await _dismiss_ephemeral(response_url)
+        # Delete the interactive message (replaces ephemeral dismiss)
+        msg_ts = self._batch.message_ts.pop(batch_id, None)
+        if msg_ts:
+            await self._router.client.delete_message(msg_ts)
 
         # Post a persistent confirmation to the turn thread
+        # (include tool names since the interactive message is now deleted)
+        tool_names = self._batch.tool_names.get(batch_id, [])
+        tool_inputs = self._batch.tool_inputs.get(batch_id, [])
+        tool_list = (
+            _format_tool_list(tool_names, tool_inputs, is_session_approve)
+            if tool_names
+            else "tools"
+        )
+        session_suffix = " for session" if is_session_approve else ""
         status_text = ":white_check_mark: Approved" if approved else ":x: Denied"
         try:
-            await self._router.post_to_active_thread(f"{status_text} by user")
+            msg = f"{status_text}{session_suffix}: {tool_list}"
+            await self._router.post_to_active_thread(msg)
         except Exception as e:
             logger.warning("Failed to post permission confirmation: %s", e)
 
@@ -390,7 +672,8 @@ class PermissionHandler:
         """Post a message indicating permission timed out."""
         try:
             await self._router.post_to_active_thread(
-                ":hourglass: Permission request timed out after 5 minutes. Denied.",
+                f":hourglass: Permission request timed out after"
+                f" {_PERMISSION_TIMEOUT_S // 60} minutes. Denied.",
             )
         except Exception as e:
             logger.warning("Failed to post timeout message: %s", e)
@@ -417,19 +700,11 @@ class PermissionHandler:
 
         blocks = _build_ask_user_blocks(request_id, questions)
         try:
-            # Ping user in main channel FIRST so the notification arrives
-            if self._authenticated_user_id:
-                try:
-                    await self._router.post_to_main(
-                        f"<@{self._authenticated_user_id}> Question from Claude",
-                    )
-                except Exception as e:
-                    logger.warning("Failed to post ask-user ping to main channel: %s", e)
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
+            ref = await self._router.client.post_interactive(
                 "Claude has a question for you",
                 blocks=blocks,
             )
+            self._ask_user.message_ts[request_id] = ref.ts
         except Exception as e:
             logger.error("Failed to post AskUserQuestion message: %s", e)
             self._cleanup_ask_user(request_id)
@@ -440,8 +715,15 @@ class PermissionHandler:
                 await event.wait()
         except TimeoutError:
             logger.warning("AskUserQuestion timed out")
+            # Delete the question message on timeout
+            msg_ts = self._ask_user.message_ts.get(request_id)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
             self._cleanup_ask_user(request_id)
-            return PermissionResultDeny(message="Question timed out (5 minutes)")
+            timeout_min = _PERMISSION_TIMEOUT_S // 60
+            return PermissionResultDeny(
+                message=f"Question timed out ({timeout_min} minutes)",
+            )
 
         answers = dict(self._ask_user.answers.get(request_id, {}))
         self._cleanup_ask_user(request_id)
@@ -457,7 +739,6 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
-        response_url: str = "",
     ) -> None:
         """Handle a Slack button click for an AskUserQuestion option.
 
@@ -480,10 +761,6 @@ class PermissionHandler:
         if request_id not in self._ask_user.events:
             return
 
-        # Store response_url for ephemeral dismissal on completion
-        if response_url and request_id not in self._ask_user.response_urls:
-            self._ask_user.response_urls[request_id] = response_url
-
         questions = self._ask_user.questions.get(request_id, [])
         if q_idx >= len(questions):
             return
@@ -501,15 +778,10 @@ class PermissionHandler:
         """Handle 'Other' button — set pending flag for free-text capture."""
         self._ask_user.pending_other = (request_id, q_idx)
         q_text = sanitize_for_mrkdwn(question.get("question", ""))
-        # Post as ephemeral to main channel so the user sees the prompt prominently
-        try:
-            await self._router.client.post_ephemeral(
-                self._authenticated_user_id,
-                f":pencil: Type your answer for: _{q_text}_",
-                blocks=[],
-            )
-        except Exception as e:
-            logger.debug("Failed to post 'Other' prompt: %s", e)
+        await _post_quietly(
+            self._router,
+            f":pencil: Type your answer for: _{q_text}_",
+        )
 
     async def _handle_ask_done(self, request_id: str, q_idx: int, question: dict) -> None:
         """Handle 'Done' button for multi-select — finalize toggled selections."""
@@ -616,14 +888,14 @@ class PermissionHandler:
         await self._check_ask_user_complete(request_id)
 
     async def _check_ask_user_complete(self, request_id: str) -> None:
-        """If all questions for a request are answered, dismiss ephemeral and signal."""
+        """If all questions for a request are answered, delete message and signal."""
         answers = self._ask_user.answers.get(request_id, {})
         expected = self._ask_user.expected.get(request_id, 0)
         if len(answers) >= expected:
-            # Dismiss the ephemeral message
-            url = self._ask_user.response_urls.get(request_id)
-            if url:
-                await _dismiss_ephemeral(url)
+            # Delete the interactive question message
+            msg_ts = self._ask_user.message_ts.get(request_id)
+            if msg_ts:
+                await self._router.client.delete_message(msg_ts)
             event = self._ask_user.events.get(request_id)
             if event:
                 event.set()
@@ -634,12 +906,59 @@ class PermissionHandler:
         questions = self._ask_user.questions.pop(request_id, [])
         self._ask_user.answers.pop(request_id, None)
         self._ask_user.expected.pop(request_id, None)
-        self._ask_user.response_urls.pop(request_id, None)
+        self._ask_user.message_ts.pop(request_id, None)
         if self._ask_user.pending_other and self._ask_user.pending_other[0] == request_id:
             self._ask_user.pending_other = None
         # Clean up multi-select state for all questions in this request
         for i in range(len(questions)):
             self._ask_user.multi_selections.pop((request_id, i), None)
+
+
+def _extract_file_path(tool_name: str, input_data: dict[str, Any]) -> str:
+    """Extract the file path argument from a write-gated tool's input.
+
+    Returns empty string for Bash and unknown tools (no file path to extract).
+    """
+    for key in _WRITE_TOOL_PATH_KEYS.get(tool_name, ()):
+        path = input_data.get(key, "")
+        if path:
+            return path
+    return ""
+
+
+def _get_cacheable_arg(tool_name: str, input_data: dict[str, Any]) -> str:
+    """Return the full, untruncated primary argument for session caching.
+
+    Unlike ``get_tool_primary_arg`` (which truncates Bash commands for
+    display), this returns the raw value to ensure exact-match fidelity.
+    Two commands sharing the first 120 chars but differing after that
+    must NOT collide in the cache.
+    """
+    if tool_name == "Bash":
+        return input_data.get("command", "")
+    return _extract_file_path(tool_name, input_data)
+
+
+def _sdk_suggests_deny(context: ToolPermissionContext | None, tool_name: str) -> bool:
+    """Return True if any SDK suggestion says to deny this tool."""
+    if context is None:
+        return False
+    for suggestion in getattr(context, "suggestions", []) or []:
+        if getattr(suggestion, "behavior", None) == "deny":
+            logger.info("SDK suggestion: denying %s", tool_name)
+            return True
+    return False
+
+
+def _sdk_suggests_allow(context: ToolPermissionContext | None, tool_name: str) -> bool:
+    """Return True if any SDK suggestion says to allow this tool."""
+    if context is None:
+        return False
+    for suggestion in getattr(context, "suggestions", []) or []:
+        if getattr(suggestion, "behavior", None) == "allow":
+            logger.info("SDK suggestion: approving %s", tool_name)
+            return True
+    return False
 
 
 def _parse_ask_user_value(value: str) -> tuple[str, int, str] | None:
@@ -758,6 +1077,30 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
         )
 
     return blocks
+
+
+def _format_tool_list(
+    tool_names: list[str],
+    tool_inputs: list[dict[str, Any]],
+    show_args: bool,
+) -> str:
+    """Format a human-readable tool list for confirmation messages.
+
+    When *show_args* is True (approve-for-session), write-gated tools
+    include their primary argument as a preview.  Display is truncated for
+    readability; the actual cache (``_get_cacheable_arg``) stores the full
+    untruncated value.
+    """
+    parts: list[str] = []
+    for i, name in enumerate(tool_names):
+        if show_args and name in _WRITE_GATED_TOOLS and i < len(tool_inputs):
+            arg = get_tool_primary_arg(name, tool_inputs[i])
+            if arg:
+                safe_arg = sanitize_for_mrkdwn(arg, 80)
+                parts.append(f"`{name}`: `{safe_arg}`")
+                continue
+        parts.append(f"`{name}`")
+    return ", ".join(parts)
 
 
 def _format_request_summary(req: PendingRequest) -> str:

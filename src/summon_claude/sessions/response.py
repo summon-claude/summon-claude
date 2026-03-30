@@ -44,9 +44,10 @@ _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
     "Read": ("file_path", "path"),
     "Cat": ("file_path", "path"),
-    "Edit": ("path", "file_path"),
+    "Edit": ("file_path", "path"),
     "str_replace_editor": ("path", "file_path"),
     "Write": ("file_path", "path"),
+    "MultiEdit": ("file_path", "path"),
     "Glob": ("pattern",),
     "Grep": ("pattern",),
     "NotebookEdit": ("notebook_path",),
@@ -155,6 +156,8 @@ class _TurnState:
     turn_thread_ts: str | None = None
     thinking_buffer: str = ""
     md_rendered_paths: set[str] = field(default_factory=set)
+    # Track EnterWorktree tool_use_ids → worktree name for callback
+    pending_worktree_names: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -179,19 +182,21 @@ class ResponseStreamer:
     - StreamEvent with parent_tool_use_id -> subagent thread
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         router: ThreadRouter,
         user_id: str | None = None,
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
+        on_worktree_entered: Callable[[str], None] | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
         self._show_thinking = show_thinking
         self._max_inline_chars = max_inline_chars
         self._on_file_change = on_file_change
+        self._on_worktree_entered = on_worktree_entered
 
         # Per-turn routing state (reset on each stream call)
         self._turn = _TurnState()
@@ -362,6 +367,10 @@ class ResponseStreamer:
             description = _extract_task_description(block.input or {})
             await self._router.start_subagent_thread(block.id, description)
 
+        if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
+            wt_name = (block.input or {}).get("name", "")
+            self._turn.pending_worktree_names[block.id] = wt_name
+
         await self._post_tool_use(block, parent_id)
         # Set status AFTER posting — thread post auto-clears any previous status,
         # so this persists during actual tool execution until the result arrives.
@@ -371,6 +380,9 @@ class ResponseStreamer:
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
+        wt_name = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
+        if wt_name is not None and not block.is_error and self._on_worktree_entered is not None:
+            self._on_worktree_entered(wt_name)
         await self._post_tool_result(block, parent_id)
         # No _set_status — thread post auto-clears "Running {tool}...",
         # and the next block (tool use or text) arrives quickly.
