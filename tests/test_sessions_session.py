@@ -1577,21 +1577,39 @@ class TestWorktreeDisallowedTools:
         assert "git worktree add" not in prompt["append"]
 
     def test_pm_prompt_contains_enterworktree_instruction(self):
-        """Guard: PM prompt must instruct child to use EnterWorktree."""
+        """Guard: PM prompt must mention EnterWorktree (brief reference stays in system prompt)."""
         from summon_claude.sessions.session import build_pm_system_prompt
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
-        assert 'EnterWorktree(name="review-pr{number}")' in prompt["append"]
+        assert "EnterWorktree" in prompt["append"]
 
     def test_pm_prompt_uses_claude_worktrees_path(self):
-        """Guard: PM cleanup must reference .claude/worktrees/, not .worktrees/."""
+        """Guard: PM system prompt must reference .claude/worktrees/ path convention."""
         from summon_claude.sessions.session import build_pm_system_prompt
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
-        assert ".claude/worktrees/review-pr" in prompt["append"]
-        assert ".worktrees/review-pr" not in prompt["append"].replace(
-            ".claude/worktrees/review-pr", ""
-        )
+        assert ".claude/worktrees/" in prompt["append"]
+
+    def test_pm_prompt_does_not_contain_scan_protocol(self):
+        """Guard: detailed scan protocol moved to timer prompt — not in system prompt."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "Check all active sub-sessions" not in prompt["append"]
+
+    def test_pm_prompt_does_not_contain_pr_review_workflow(self):
+        """Guard: PR review workflow moved to timer prompt — not in system prompt."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "BEGIN REVIEW TEMPLATE" not in prompt["append"]
+
+    def test_pm_prompt_contains_delegator_identity(self):
+        """Guard: PM system prompt must establish delegator-not-doer identity."""
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "orchestration, not execution" in prompt["append"]
 
 
 class TestHeadlessBoilerplate:
