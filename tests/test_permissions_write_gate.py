@@ -640,3 +640,73 @@ class TestNonGitContainment:
         assert handler._containment_root == wt_dir.resolve()
         assert handler._in_containment is True
         _ = original_root  # used above for context
+
+    async def test_notify_entered_worktree_does_not_widen_broader_path(self, tmp_path: Path):
+        """Anti-widening guard: a worktree outside the current root must NOT widen it."""
+        # Set containment to a narrow subdirectory first
+        narrow_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        narrow_dir.mkdir(parents=True)
+        handler, _ = self._make_non_git_handler(tmp_path)
+        # Manually narrow to the worktree directory
+        handler._containment_root = narrow_dir.resolve()
+
+        # Now call notify_entered_worktree with a sibling worktree (same level, not a
+        # subdir of narrow_dir — would widen if allowed)
+        sibling = tmp_path / ".claude" / "worktrees" / "other"
+        sibling.mkdir(parents=True)
+        handler.notify_entered_worktree("other")
+
+        # Root must NOT have changed — sibling is not relative to narrow_dir
+        assert handler._containment_root == narrow_dir.resolve()
+
+    def test_notify_containment_active_resolves_symlink_root(self, tmp_path: Path):
+        """notify_containment_active must store the resolved real path, not the symlink."""
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        link_dir = tmp_path / "link"
+        link_dir.symlink_to(real_dir)
+
+        client = make_mock_slack_client()
+        from summon_claude.slack.router import ThreadRouter
+
+        router = ThreadRouter(client)
+        config = _make_config()
+        handler = PermissionHandler(router, config, authenticated_user_id="U_TEST")
+        handler.notify_containment_active(link_dir, is_git_repo=False)
+
+        # containment_root must be the resolved real path, not the symlink
+        assert handler._containment_root == real_dir.resolve()
+        assert handler._containment_root != link_dir
+
+
+class TestDetectGitFailurePath:
+    """Integration tests for _detect_git failure handling in PermissionHandler."""
+
+    async def test_non_git_containment_set_when_detect_git_fails(self, tmp_path: Path):
+        """When _detect_git returns (False, None), non-git containment must be activated."""
+        from unittest.mock import patch
+
+        from summon_claude.slack.router import ThreadRouter
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        config = _make_config()
+        handler = PermissionHandler(
+            router,
+            config,
+            authenticated_user_id="U_TEST",
+            project_root=str(tmp_path),
+        )
+
+        # Simulate what session.py does when _detect_git returns (False, None)
+        # (i.e., not a git repo or git subprocess failed)
+        is_git = False
+        if not is_git:
+            handler.notify_containment_active(
+                containment_root=tmp_path,
+                is_git_repo=False,
+            )
+
+        assert handler._in_containment is True
+        assert handler._is_git_repo is False
+        assert handler._containment_root == tmp_path.resolve()

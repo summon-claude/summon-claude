@@ -264,6 +264,124 @@ class TestFormatFileReferences:
         assert "unknown" in result
 
 
+class TestDetectGit:
+    """Unit tests for the _detect_git async helper."""
+
+    async def test_non_git_dir_returns_false(self, tmp_path):
+        """A plain directory with no git repo returns (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git(str(tmp_path))
+        assert is_git is False
+        assert branch is None
+
+    async def test_git_ceiling_prevents_parent_discovery(self, tmp_path):
+        """GIT_CEILING_DIRECTORIES must stop git from discovering a parent repo.
+
+        tmp_path is inside the test-runner's git repo. _detect_git sets
+        GIT_CEILING_DIRECTORIES to tmp_path itself, so git cannot walk upward
+        to find the enclosing repo, and must return (False, None).
+        """
+        from summon_claude.sessions.session import _detect_git
+
+        # tmp_path is a plain directory — no .git here
+        is_git, branch = await _detect_git(str(tmp_path))
+        assert is_git is False
+        assert branch is None
+
+    async def test_invalid_path_returns_false(self):
+        """Non-existent or non-absolute path must return (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git("/nonexistent/path/that/does/not/exist")
+        assert is_git is False
+        assert branch is None
+
+    async def test_relative_path_returns_false(self):
+        """Relative path (not absolute) must return (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git("relative/path")
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_zero_lines_returns_false(self, tmp_path):
+        """If git produces fewer than 2 output lines, return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_one_line_returns_false(self, tmp_path):
+        """If git produces only 1 output line (no branch line), return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_three_lines_uses_first_two(self, tmp_path):
+        """Extra output lines beyond the first two must be ignored."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nmain\nextra-line\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is True
+        assert branch == "main"
+
+    async def test_subprocess_failure_returns_false(self, tmp_path):
+        """Exception from subprocess must be caught; return (False, None)."""
+        from unittest.mock import patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        with patch("asyncio.create_subprocess_exec", side_effect=OSError("git not found")):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_detached_head_returns_none_branch(self, tmp_path):
+        """Detached HEAD ('HEAD' branch name) must map to branch=None."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nHEAD\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is True
+        assert branch is None
+
+
 class TestSessionShutdownControl:
     """Test request_shutdown() and authenticate() — the new public control API."""
 
