@@ -11,8 +11,8 @@ from click.testing import CliRunner
 from conftest import make_scheduler
 
 from summon_claude.cli import cli
+from summon_claude.sessions.prompts import build_pm_system_prompt
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.sessions.session import build_pm_system_prompt
 
 # ---------------------------------------------------------------------------
 # Registry: project CRUD
@@ -413,25 +413,30 @@ class TestBuildPmSystemPromptWorkflow:
         result = build_pm_system_prompt(cwd=cwd, scan_interval_s=900)
         assert cwd in result["append"]
 
-    def test_pm_prompt_contains_pr_review_section(self):
+    def test_pm_prompt_does_not_contain_pr_review_section(self):
+        """PR Review section moved to timer prompt — not in system prompt."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "## PR Review" in result["append"]
+        assert "## PR Review" not in result["append"]
 
-    def test_pm_prompt_contains_on_demand_review(self):
+    def test_pm_prompt_does_not_contain_on_demand_review(self):
+        """On-Demand PR Review section moved to timer prompt — not in system prompt."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "## On-Demand PR Review" in result["append"]
+        assert "## On-Demand PR Review" not in result["append"]
 
-    def test_pm_prompt_contains_worktree_cleanup(self):
+    def test_pm_prompt_does_not_contain_worktree_cleanup(self):
+        """Worktree Cleanup section moved to timer prompt — not in system prompt."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "## Worktree Cleanup" in result["append"]
+        assert "## Worktree Cleanup" not in result["append"]
 
-    def test_pm_prompt_contains_safety_rules(self):
+    def test_pm_prompt_does_not_contain_safety_rules(self):
+        """PR safety rules moved to timer prompt — not in system prompt."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "NEVER force-push" in result["append"]
+        assert "NEVER force-push" not in result["append"]
 
-    def test_pm_prompt_contains_ready_for_review_label(self):
+    def test_pm_prompt_does_not_contain_ready_for_review_label(self):
+        """Ready for Review label moved to timer prompt — not in system prompt."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
-        assert "Ready for Review" in result["append"]
+        assert "Ready for Review" not in result["append"]
 
 
 # ---------------------------------------------------------------------------
@@ -595,7 +600,7 @@ class TestFormatPmTopic:
         ],
     )
     def test_format(self, count, expected):
-        from summon_claude.sessions.session import format_pm_topic
+        from summon_claude.sessions.prompts import format_pm_topic
 
         assert format_pm_topic(count) == expected
 

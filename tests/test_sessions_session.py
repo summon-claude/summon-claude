@@ -1571,27 +1571,199 @@ class TestWorktreeDisallowedTools:
 
     async def test_pm_prompt_does_not_contain_raw_worktree_add(self):
         """Guard: PM system prompt must not instruct raw git worktree add."""
-        from summon_claude.sessions.session import build_pm_system_prompt
+        from summon_claude.sessions.prompts import build_pm_system_prompt
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
         assert "git worktree add" not in prompt["append"]
 
     def test_pm_prompt_contains_enterworktree_instruction(self):
-        """Guard: PM prompt must instruct child to use EnterWorktree."""
-        from summon_claude.sessions.session import build_pm_system_prompt
+        """Guard: PM prompt must mention EnterWorktree (brief reference stays in system prompt)."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
-        assert 'EnterWorktree(name="review-pr{number}")' in prompt["append"]
+        assert "EnterWorktree" in prompt["append"]
 
     def test_pm_prompt_uses_claude_worktrees_path(self):
-        """Guard: PM cleanup must reference .claude/worktrees/, not .worktrees/."""
-        from summon_claude.sessions.session import build_pm_system_prompt
+        """Guard: PM system prompt must reference .claude/worktrees/ path convention."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
-        assert ".claude/worktrees/review-pr" in prompt["append"]
-        assert ".worktrees/review-pr" not in prompt["append"].replace(
-            ".claude/worktrees/review-pr", ""
+        assert ".claude/worktrees/" in prompt["append"]
+
+    def test_pm_prompt_does_not_contain_scan_protocol(self):
+        """Guard: detailed scan protocol moved to timer prompt — not in system prompt."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "Check all active sub-sessions" not in prompt["append"]
+
+    def test_pm_prompt_does_not_contain_pr_review_workflow(self):
+        """Guard: PR review workflow moved to timer prompt — not in system prompt."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "BEGIN REVIEW TEMPLATE" not in prompt["append"]
+
+    def test_pm_prompt_contains_delegator_identity(self):
+        """Guard: PM system prompt must establish delegator-not-doer identity."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        assert "orchestration, not execution" in prompt["append"]
+
+
+class TestHeadlessBoilerplate:
+    """Guard: shared headless boilerplate appears in all agent prompts."""
+
+    def test_headless_boilerplate_in_base_append(self):
+        from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
+
+        assert "running headlessly" in _HEADLESS_BOILERPLATE
+
+    def test_headless_boilerplate_contains_permission_timeout(self):
+        from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
+
+        assert "Permission requests" in _HEADLESS_BOILERPLATE
+        assert "10 minutes" in _HEADLESS_BOILERPLATE
+
+    def test_headless_boilerplate_in_pm_prompt(self):
+        from summon_claude.sessions.prompts import build_pm_system_prompt
+
+        result = build_pm_system_prompt(cwd="/test", scan_interval_s=900)
+        assert "running headlessly" in result["append"]
+
+    def test_headless_boilerplate_in_scribe_prompt(self):
+        from summon_claude.sessions.prompts import build_scribe_system_prompt
+
+        result = build_scribe_system_prompt(
+            scan_interval=15,
+            google_enabled=True,
+            slack_enabled=False,
         )
+        assert "running headlessly" in result["append"]
+
+
+class TestPromptPresetGuard:
+    """Guard: all prompt builders return preset claude_code dicts."""
+
+    @pytest.mark.parametrize(
+        "builder,kwargs",
+        [
+            ("build_pm_system_prompt", {"cwd": "/test", "scan_interval_s": 900}),
+            ("build_global_pm_system_prompt", {"reports_dir": "/tmp/reports"}),
+            (
+                "build_scribe_system_prompt",
+                {
+                    "scan_interval": 15,
+                    "google_enabled": True,
+                    "slack_enabled": False,
+                },
+            ),
+        ],
+        ids=["pm", "gpm", "scribe"],
+    )
+    def test_all_prompt_builders_return_preset(self, builder, kwargs):
+        import summon_claude.sessions.session as mod
+
+        fn = getattr(mod, builder)
+        result = fn(**kwargs)
+        assert result["type"] == "preset"
+        assert result["preset"] == "claude_code"
+        assert isinstance(result["append"], str)
+        assert len(result["append"]) > 50
+
+
+class TestNoRedundantHeadless:
+    """Guard: shared boilerplate isn't duplicated in role-specific text."""
+
+    def test_no_redundant_headless_in_role_specific_text(self):
+        from summon_claude.sessions.prompts.global_pm import _GLOBAL_PM_SYSTEM_PROMPT_APPEND
+        from summon_claude.sessions.prompts.pm import _PM_SYSTEM_PROMPT_APPEND
+        from summon_claude.sessions.prompts.scribe import _SCRIBE_SYSTEM_PROMPT_APPEND
+        from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
+
+        for name, const in [
+            ("PM", _PM_SYSTEM_PROMPT_APPEND),
+            ("GPM", _GLOBAL_PM_SYSTEM_PROMPT_APPEND),
+            ("Scribe", _SCRIBE_SYSTEM_PROMPT_APPEND),
+        ]:
+            role_text = const[len(_HEADLESS_BOILERPLATE) :]
+            assert "running headlessly" not in role_text, f"{name} has redundant boilerplate"
+
+
+class TestPmScanPrompt:
+    """Guard tests for the PM periodic scan prompt builder."""
+
+    def test_pm_scan_prompt_prefix(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt()
+        assert result.startswith("[SCAN TRIGGER]")
+
+    def test_pm_scan_prompt_health_check(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt()
+        assert "session_list" in result
+
+    def test_pm_scan_prompt_delegation(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt()
+        assert "delegator" in result
+
+    def test_pm_scan_prompt_worktree(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt()
+        assert "EnterWorktree" in result
+
+    def test_pm_scan_prompt_pr_review_with_github(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt(github_enabled=True)
+        assert "REVIEW TEMPLATE" in result
+        assert "review-pr" in result
+        assert "NEVER force-push" in result
+        assert "NEVER push to main" in result
+
+    def test_pm_scan_prompt_no_pr_without_github(self):
+        from summon_claude.sessions.prompts import build_pm_scan_prompt
+
+        result = build_pm_scan_prompt(github_enabled=False)
+        assert "reviewer" not in result.lower()
+        assert "PR #" not in result
+
+
+class TestScanPromptReturnTypeGuard:
+    """Guard: all scan prompt builders return plain strings (not dicts)."""
+
+    @pytest.mark.parametrize(
+        "builder,kwargs",
+        [
+            ("build_pm_scan_prompt", {}),
+            ("build_global_pm_scan_prompt", {}),
+            (
+                "build_scribe_scan_prompt",
+                {
+                    "nonce": "x",
+                    "google_enabled": True,
+                    "slack_enabled": False,
+                    "user_mention": "<@U>",
+                    "importance_keywords": "",
+                    "quiet_hours": None,
+                },
+            ),
+        ],
+        ids=["pm", "gpm", "scribe"],
+    )
+    def test_all_scan_builders_return_str(self, builder, kwargs):
+        import summon_claude.sessions.session as mod
+
+        fn = getattr(mod, builder)
+        result = fn(**kwargs)
+        assert isinstance(result, str)
+        assert len(result) > 50
 
 
 class TestSystemPromptAppendRestart:
@@ -1647,10 +1819,8 @@ class TestSystemPromptAppendRestart:
 
     async def test_system_prompt_append_coexists_with_summary(self, registry):
         """system_prompt_append and compaction summary both appear after restart."""
-        from summon_claude.sessions.session import (
-            _COMPACT_SUMMARY_PREFIX,
-            _SessionRestartError,
-        )
+        from summon_claude.sessions.prompts.shared import _COMPACT_SUMMARY_PREFIX
+        from summon_claude.sessions.session import _SessionRestartError
 
         captured_prompts = []
 
@@ -1701,10 +1871,8 @@ class TestSystemPromptAppendRestart:
 
     async def test_pm_restart_includes_compaction_summary(self, registry):
         """PM sessions receive compaction summary after restart."""
-        from summon_claude.sessions.session import (
-            _COMPACT_SUMMARY_PREFIX,
-            _SessionRestartError,
-        )
+        from summon_claude.sessions.prompts.shared import _COMPACT_SUMMARY_PREFIX
+        from summon_claude.sessions.session import _SessionRestartError
 
         captured_prompts = []
 
@@ -1761,10 +1929,8 @@ class TestSystemPromptAppendRestart:
 
     async def test_recovery_mode_restart_preserves_system_prompt_append(self, registry):
         """system_prompt_append survives recovery_mode restart (overflow)."""
-        from summon_claude.sessions.session import (
-            _OVERFLOW_RECOVERY_PROMPT,
-            _SessionRestartError,
-        )
+        from summon_claude.sessions.prompts.shared import _OVERFLOW_RECOVERY_PROMPT
+        from summon_claude.sessions.session import _SessionRestartError
 
         captured_prompts = []
 
@@ -2485,18 +2651,18 @@ class TestAutoCompactionDisabled:
         assert captured_env.get("val") == "100"
 
     def test_base_system_append_is_string(self):
-        """_BASE_SYSTEM_APPEND must be a non-empty string."""
-        from summon_claude.sessions.session import _BASE_SYSTEM_APPEND
+        """_HEADLESS_BOILERPLATE must be a non-empty string."""
+        from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
 
-        assert isinstance(_BASE_SYSTEM_APPEND, str)
-        assert len(_BASE_SYSTEM_APPEND) > 0
+        assert isinstance(_HEADLESS_BOILERPLATE, str)
+        assert len(_HEADLESS_BOILERPLATE) > 0
 
 
 class TestCompactPromptConstants:
     """Verify compaction prompt constants are well-formed."""
 
     def test_compact_prompt_has_mandatory_sections(self):
-        from summon_claude.sessions.session import _COMPACT_PROMPT
+        from summon_claude.sessions.prompts.shared import _COMPACT_PROMPT
 
         assert isinstance(_COMPACT_PROMPT, str)
         assert "Task Overview" in _COMPACT_PROMPT
@@ -2508,13 +2674,13 @@ class TestCompactPromptConstants:
         assert "<analysis>" in _COMPACT_PROMPT
 
     def test_compact_summary_prefix_exists(self):
-        from summon_claude.sessions.session import _COMPACT_SUMMARY_PREFIX
+        from summon_claude.sessions.prompts.shared import _COMPACT_SUMMARY_PREFIX
 
         assert isinstance(_COMPACT_SUMMARY_PREFIX, str)
         assert "Compacted" in _COMPACT_SUMMARY_PREFIX
 
     def test_overflow_recovery_prompt_mentions_tools(self):
-        from summon_claude.sessions.session import _OVERFLOW_RECOVERY_PROMPT
+        from summon_claude.sessions.prompts.shared import _OVERFLOW_RECOVERY_PROMPT
 
         assert isinstance(_OVERFLOW_RECOVERY_PROMPT, str)
         assert "slack_read_history" in _OVERFLOW_RECOVERY_PROMPT
@@ -2679,7 +2845,7 @@ class TestExecuteCompact:
 
     async def test_instructions_appended_to_compact_prompt(self, registry):
         """Instructions should be appended to the compaction prompt."""
-        from summon_claude.sessions.session import _COMPACT_PROMPT
+        from summon_claude.sessions.prompts.shared import _COMPACT_PROMPT
 
         session = make_session()
         rt = make_rt(registry)
@@ -2705,7 +2871,7 @@ class TestExecuteCompact:
 
     async def test_summary_truncated_when_too_long(self, registry):
         """Summaries exceeding _MAX_COMPACT_SUMMARY_CHARS are truncated."""
-        from summon_claude.sessions.session import _MAX_COMPACT_SUMMARY_CHARS
+        from summon_claude.sessions.prompts.shared import _MAX_COMPACT_SUMMARY_CHARS
 
         session = make_session()
         rt = make_rt(registry)
@@ -2730,8 +2896,8 @@ class TestSessionRestartLoop:
     async def test_restart_rebuilds_system_prompt_with_summary(self, registry):
         """After _SessionRestartError(summary=...), system prompt includes the summary."""
         from summon_claude.sessions.session import (
-            _BASE_SYSTEM_APPEND,
             _COMPACT_SUMMARY_PREFIX,
+            _HEADLESS_BOILERPLATE,
         )
 
         captured_prompts = []
@@ -2776,13 +2942,13 @@ class TestSessionRestartLoop:
             await session._run_session_tasks(rt, router)
 
         assert len(captured_prompts) == 2
-        assert _BASE_SYSTEM_APPEND in captured_prompts[0]
+        assert _HEADLESS_BOILERPLATE in captured_prompts[0]
         assert _COMPACT_SUMMARY_PREFIX in captured_prompts[1]
         assert "Build widget" in captured_prompts[1]
 
     async def test_restart_recovery_mode_includes_overflow_prompt(self, registry):
         """After recovery_mode restart, system prompt includes recovery instructions."""
-        from summon_claude.sessions.session import _OVERFLOW_RECOVERY_PROMPT
+        from summon_claude.sessions.prompts.shared import _OVERFLOW_RECOVERY_PROMPT
 
         captured_prompts = []
         consumer_call = 0
@@ -3218,7 +3384,7 @@ class TestPMHeartbeatTopicUpdate:
 
     async def test_pm_heartbeat_updates_topic(self):
         """PM heartbeat calls set_topic when child count changes."""
-        from summon_claude.sessions.session import format_pm_topic
+        from summon_claude.sessions.prompts import format_pm_topic
 
         session = make_session(session_id="pm-hb-topic", pm_profile=True)
         session._authenticated_user_id = "U_TEST"
@@ -3245,7 +3411,7 @@ class TestPMHeartbeatTopicUpdate:
 
     async def test_pm_heartbeat_caches_topic(self):
         """PM heartbeat skips set_topic when child count has not changed."""
-        from summon_claude.sessions.session import format_pm_topic
+        from summon_claude.sessions.prompts import format_pm_topic
 
         session = make_session(session_id="pm-hb-cache", pm_profile=True)
         session._authenticated_user_id = "U_TEST"
