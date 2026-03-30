@@ -258,10 +258,12 @@ class TestJobExpiry:
         # Backdate creation to make it expired
         job.created_at = datetime.now(UTC) - timedelta(seconds=10)
 
-        # Give the task time to notice expiry
-        await asyncio.sleep(0.2)
+        # Poll until the task detects expiry (avoid fixed sleep that flakes on CI)
+        async def _wait_for_expiry():
+            while job.id in {j.id for j in scheduler.list_jobs()}:
+                await asyncio.sleep(0.05)
 
-        # Job should have been removed
+        await asyncio.wait_for(_wait_for_expiry(), timeout=5.0)
         assert job.id not in {j.id for j in scheduler.list_jobs()}
 
         scheduler.cancel_all()
@@ -459,6 +461,117 @@ class TestSchedulerPersistence:
         deleted = await scheduler.delete(job.id)
         assert deleted is True
         assert scheduler.list_jobs() == []
+
+    async def test_one_shot_firing_deletes_from_db(self, scheduler_with_registry) -> None:
+        """Non-recurring job firing removes the DB row automatically."""
+        sched, reg, session_id = scheduler_with_registry
+        job = await sched.create("*/5 * * * *", "one-shot DB", recurring=False)
+        job_id = job.id
+
+        # Verify DB row exists
+        assert len(await reg.list_scheduled_jobs(session_id)) == 1
+
+        # Cancel original task and restart with patched CronSim for immediate fire
+        if job.task:
+            job.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await job.task
+
+        now = datetime.now().astimezone()
+        immediate = now + timedelta(milliseconds=10)
+
+        with patch("summon_claude.sessions.scheduler.CronSim") as mock_cronsim:
+            mock_cronsim.return_value = iter([immediate])
+            job.task = asyncio.create_task(sched._run_job(job))
+            # Wait for the synthetic event
+            await asyncio.wait_for(sched._event_queue.get(), timeout=2.0)
+            # Let the task complete its DB cleanup
+            await asyncio.sleep(0.1)
+
+        # Job removed from memory
+        assert job_id not in {j.id for j in sched.list_jobs()}
+        # Job removed from DB
+        assert await reg.list_scheduled_jobs(session_id) == []
+
+    async def test_restore_idempotent(self, scheduler_with_registry) -> None:
+        """Calling restore_from_db twice without cancel_all doesn't duplicate jobs."""
+        sched, reg, session_id = scheduler_with_registry
+        await reg.save_scheduled_job(
+            session_id=session_id,
+            job_id="idem-job-001",
+            cron_expr="*/5 * * * *",
+            prompt="idempotent",
+            recurring=True,
+            max_lifetime_s=86400,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        await sched.restore_from_db()
+        assert len(sched.list_jobs()) == 1
+
+        # Second restore without cancel_all — idempotency guard must prevent duplication
+        await sched.restore_from_db()
+        assert len(sched.list_jobs()) == 1
+        sched.cancel_all()
+
+    async def test_restore_respects_agent_cap(self, scheduler_with_registry) -> None:
+        """restore_from_db stops at _MAX_AGENT_JOBS even with more DB rows."""
+        sched, reg, session_id = scheduler_with_registry
+        # Insert 12 jobs directly into DB (bypassing create() cap)
+        for i in range(12):
+            await reg.save_scheduled_job(
+                session_id=session_id,
+                job_id=f"cap-job-{i:03d}",
+                cron_expr="*/5 * * * *",
+                prompt=f"cap test {i}",
+                recurring=True,
+                max_lifetime_s=86400,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+
+        await sched.restore_from_db()
+        assert len(sched.list_jobs()) == SessionScheduler._MAX_AGENT_JOBS  # 10
+        sched.cancel_all()
+
+    async def test_restore_skips_and_deletes_corrupt_rows(
+        self,
+        scheduler_with_registry,
+    ) -> None:
+        """Corrupt rows (invalid cron_expr) are skipped and deleted from DB."""
+        sched, reg, session_id = scheduler_with_registry
+        # Insert a corrupt row with invalid cron expression
+        await reg.save_scheduled_job(
+            session_id=session_id,
+            job_id="corrupt-job-001",
+            cron_expr="99 99 99 99 99",
+            prompt="corrupt",
+            recurring=True,
+            max_lifetime_s=86400,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+        # Insert a valid row
+        await reg.save_scheduled_job(
+            session_id=session_id,
+            job_id="valid-job-001",
+            cron_expr="*/5 * * * *",
+            prompt="valid",
+            recurring=True,
+            max_lifetime_s=86400,
+            created_at=datetime.now(UTC).isoformat(),
+        )
+
+        await sched.restore_from_db()
+
+        # Only valid job restored
+        jobs = sched.list_jobs()
+        assert len(jobs) == 1
+        assert jobs[0].id == "valid-job-001"
+
+        # Corrupt row deleted from DB, valid row remains
+        db_jobs = await reg.list_scheduled_jobs(session_id)
+        assert len(db_jobs) == 1
+        assert db_jobs[0]["id"] == "valid-job-001"
+        sched.cancel_all()
 
 
 class TestCronPersistenceIntegration:

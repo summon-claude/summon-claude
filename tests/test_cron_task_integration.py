@@ -64,7 +64,7 @@ class TestSchedulerSessionLifecycle:
         scheduler.cancel_all()
         assert len(scheduler.list_jobs()) == 0  # All cleared
 
-        # Re-register only internal job (agent jobs lost)
+        # Re-register only internal job (memory-only mode — no DB persistence)
         await scheduler.create("*/5 * * * *", "scan", internal=True, max_lifetime_s=0)
         jobs = scheduler.list_jobs()
         assert len(jobs) == 1

@@ -711,6 +711,8 @@ class SessionRegistry:
             raise ValueError(f"created_at must be valid ISO 8601: {e}") from e
         if dt.tzinfo is None:
             raise ValueError("created_at must be timezone-aware ISO 8601")
+        # Normalize to UTC so SQLite datetime arithmetic works correctly
+        created_at = dt.astimezone(UTC).isoformat()
         db = self._check_connected()
         async with self._lock:
             await db.execute(

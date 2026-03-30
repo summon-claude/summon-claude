@@ -650,6 +650,43 @@ class TestScheduledJobs:
         )
         jobs = await registry.list_scheduled_jobs("sess-sj-neg")
         assert len(jobs) == 1
+        # Verify normalized to UTC
+        assert jobs[0]["created_at"] == "2026-01-01T15:00:00+00:00"
+
+    async def test_save_fk_violation(self, registry):
+        """Saving a job with non-existent session_id raises IntegrityError."""
+        import sqlite3
+
+        with pytest.raises(sqlite3.IntegrityError):
+            await registry.save_scheduled_job(
+                session_id="nonexistent-session",
+                job_id="job-fk",
+                cron_expr="*/5 * * * *",
+                prompt="test",
+                recurring=True,
+                max_lifetime_s=86400,
+                created_at="2026-01-01T10:00:00+00:00",
+            )
+
+    async def test_migrate_to_nonexistent_session_raises(self, registry):
+        """Migrating to a non-existent new_session_id raises IntegrityError."""
+        import sqlite3
+
+        await registry.register("sess-sj-migrate-fk", 111, "/tmp")
+        await registry.save_scheduled_job(
+            session_id="sess-sj-migrate-fk",
+            job_id="job-migrate-fk",
+            cron_expr="*/5 * * * *",
+            prompt="test",
+            recurring=True,
+            max_lifetime_s=86400,
+            created_at="2026-01-01T10:00:00+00:00",
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            await registry.migrate_scheduled_jobs(
+                "sess-sj-migrate-fk",
+                "nonexistent-target",
+            )
 
     async def test_scheduled_jobs_schema_columns(self, registry):
         """Pin the column set of scheduled_jobs via PRAGMA table_info."""

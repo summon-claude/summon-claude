@@ -146,7 +146,7 @@ class SessionScheduler:
         job.task = asyncio.create_task(self._run_job(job))
         self._jobs[job.id] = job
 
-        if self._registry is not None and self._session_id is not None and not internal:
+        if self._should_persist(job):
             try:
                 await self._registry.save_scheduled_job(
                     session_id=self._session_id,
@@ -222,13 +222,20 @@ class SessionScheduler:
         """Check if a job should be persisted/deleted in the DB."""
         return self._registry is not None and self._session_id is not None and not job.internal
 
-    async def _delete_job_from_db(self, job_id: str, reason: str) -> None:
+    async def _delete_job_from_db(
+        self,
+        job_id: str,
+        reason: str,
+        *,
+        session_id: str | None = None,
+    ) -> None:
         """Best-effort delete of a scheduled job from DB."""
-        if self._registry is None or self._session_id is None:
+        sid = session_id or self._session_id
+        if self._registry is None or sid is None:
             return
         try:
             await self._registry.delete_scheduled_job(
-                self._session_id,
+                sid,
                 job_id,
             )
         except Exception:
@@ -319,7 +326,68 @@ class SessionScheduler:
         except Exception:
             logger.exception("Scheduler job %s failed", job.id)
 
-    async def restore_from_db(self) -> None:  # noqa: PLR0912
+    async def _try_migrate_from_old_session(
+        self,
+    ) -> tuple[list[dict[str, Any]], str]:
+        """Try to load and migrate jobs from resume_from_session_id.
+
+        Returns ``(rows, owning_session_id)`` — the session_id that currently
+        owns the returned rows in the DB (needed for correct corrupt-row cleanup).
+        """
+        assert self._registry is not None  # noqa: S101
+        assert self._resume_from_session_id is not None  # noqa: S101
+        assert self._session_id is not None  # noqa: S101
+
+        try:
+            rows = await self._registry.list_scheduled_jobs(
+                self._resume_from_session_id,
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load scheduled jobs from resume session",
+                exc_info=True,
+            )
+            return [], self._session_id
+
+        if not rows:
+            return [], self._session_id
+
+        try:
+            await self._registry.migrate_scheduled_jobs(
+                self._resume_from_session_id,
+                self._session_id,
+            )
+        except Exception:
+            # Migration failed — rows still owned by resume_from_session_id.
+            # Expiry cleanup for these rows was skipped (delete_expired ran
+            # against self._session_id at the caller).  Orphaned rows will be
+            # cleaned by ON DELETE CASCADE when the old session is purged.
+            logger.warning(
+                "Fallback FK migration failed from %s, restoring from old session data",
+                self._resume_from_session_id[:8],
+                exc_info=True,
+            )
+            return rows, self._resume_from_session_id
+
+        # Migration succeeded — clean up any newly-migrated expired rows
+        try:
+            await self._registry.delete_expired_scheduled_jobs(self._session_id)
+        except Exception:
+            logger.warning(
+                "Failed to delete expired jobs after migration",
+                exc_info=True,
+            )
+        try:
+            rows = await self._registry.list_scheduled_jobs(self._session_id)
+        except Exception:
+            logger.warning(
+                "Failed to reload jobs after migration",
+                exc_info=True,
+            )
+            return [], self._session_id
+        return rows, self._session_id
+
+    async def restore_from_db(self) -> None:
         """Reload non-expired agent jobs from DB into the in-memory scheduler.
 
         No-op if registry is None (memory-only mode).
@@ -341,39 +409,21 @@ class SessionScheduler:
             logger.warning("Failed to load scheduled jobs from DB", exc_info=True)
             return
 
-        # Fallback: if no jobs found and we have a resume_from_session_id, try the old session
+        # Track which session owns the rows (for correct corrupt-row cleanup)
+        rows_session_id = self._session_id
+
+        # Fallback: if no jobs found, try migrating from the old session
         if not rows and self._resume_from_session_id:
-            try:
-                rows = await self._registry.list_scheduled_jobs(self._resume_from_session_id)
-                if rows:
-                    # FK migration must have failed — try to migrate now
-                    try:
-                        await self._registry.migrate_scheduled_jobs(
-                            self._resume_from_session_id, self._session_id
-                        )
-                        rows = await self._registry.list_scheduled_jobs(self._session_id)
-                    except Exception:
-                        # Migration failed but rows are valid — proceed
-                        # with data from old session (DB deletes on
-                        # expiry may miss due to session_id mismatch,
-                        # cleaned by CASCADE on purge)
-                        logger.warning(
-                            "Fallback FK migration failed from %s, restoring from old session data",
-                            self._resume_from_session_id[:8],
-                            exc_info=True,
-                        )
-            except Exception:
-                logger.warning("Failed to load scheduled jobs from resume session", exc_info=True)
-                return
+            rows, rows_session_id = await self._try_migrate_from_old_session()
 
         restored = 0
+        agent_count = sum(1 for j in self._jobs.values() if not j.internal)
         for row in rows:
             job_id = row["id"]
             if job_id in self._jobs:
                 continue  # idempotency guard
 
             # Enforce agent job cap even on restore
-            agent_count = sum(1 for j in self._jobs.values() if not j.internal)
             if agent_count >= self._MAX_AGENT_JOBS:
                 logger.warning("Cap reached during restore, skipping job %s", job_id)
                 break
@@ -396,6 +446,7 @@ class SessionScheduler:
                 )
                 job.task = asyncio.create_task(self._run_job(job))
                 self._jobs[job_id] = job
+                agent_count += 1
                 restored += 1
             except Exception:
                 logger.warning(
@@ -403,14 +454,11 @@ class SessionScheduler:
                     job_id,
                     exc_info=True,
                 )
-                try:
-                    await self._registry.delete_scheduled_job(self._session_id, job_id)
-                except Exception:
-                    logger.warning(
-                        "Failed to delete corrupt job %s from DB",
-                        job_id,
-                        exc_info=True,
-                    )
+                await self._delete_job_from_db(
+                    job_id,
+                    "corrupt-row",
+                    session_id=rows_session_id,
+                )
 
         if restored and self.on_change:
             await self.on_change()
