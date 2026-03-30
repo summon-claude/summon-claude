@@ -110,11 +110,16 @@ If the SDK provides an `allow` suggestion (from `settings.json` `allowedTools`),
 
 ### 7. Write Gate (read-only default)
 
-Write-capable tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) are **denied by default** until the agent enters a worktree via `EnterWorktree`. This prevents accidental writes to the main working directory. Safe-dir exceptions (`SUMMON_SAFE_WRITE_DIRS`) allow configured directories to bypass the worktree requirement. Path validation uses `Path.resolve()` on both sides to prevent symlink escapes.
+Write-capable tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) are **denied by default** until containment is active (worktree or CWD). This prevents accidental writes to the main working directory.
+
+- **Git repositories:** the agent enters a worktree via `EnterWorktree`; the containment root is the worktree directory.
+- **Non-git directories:** containment is activated automatically at session start using the session CWD as the containment root.
+
+Safe-dir exceptions (`SUMMON_SAFE_WRITE_DIRS`) allow configured directories to bypass the containment requirement. Path validation uses `Path.resolve()` on both sides to prevent symlink escapes.
 
 ### 8. Slack Approval Buttons (fallback)
 
-All other tools — and write-gated tools after worktree entry — go through the Slack approval flow:
+All other tools — and write-gated tools after containment entry — go through the Slack approval flow:
 
 1. Requests within the same 2-second debounce window are batched into a single Slack message (`SUMMON_PERMISSION_DEBOUNCE_MS`, default 2000).
 2. The message posts as a normal message with **Approve**, **Approve for session**, and **Deny** buttons.
