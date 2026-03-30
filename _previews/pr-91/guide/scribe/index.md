@@ -1,0 +1,239 @@
+# Scribe Agent
+
+Prerequisites
+
+This guide assumes you've completed the [Quick Start](https://summon-claude.github.io/summon-claude/getting-started/quickstart/index.md) and have a working `summon config check`.
+
+The scribe is a background monitoring agent that keeps an eye on your inboxes so you don't have to. It periodically checks Gmail, Google Calendar, Google Drive, and optionally external Slack channels, then posts alerts, daily summaries, and important signals to its persistent `#0-summon-scribe` channel.
+
+______________________________________________________________________
+
+## What the scribe does
+
+The scribe runs as a persistent Claude session that wakes up on a configurable interval (default: every 5 minutes), scans connected data sources, and posts notable items to Slack. It triages items by importance on a 1--5 scale, respects quiet hours, tracks notes and action items, and produces daily summary reports.
+
+The scribe is not interactive in the same way as a regular session — it is meant to run unattended in the background and surface information proactively.
+
+Key behaviors:
+
+- **Alert triage** — each item is scored 1--5 and formatted by importance level (see [Alert formatting](#alert-formatting) below)
+- **Quiet hours** — only critical (level 5) alerts are posted during the configured quiet window
+- **Note-taking** — messages posted to the scribe channel are tracked as notes or action items
+- **Daily summaries** — generated automatically when activity is quiet, when quiet hours begin, or on request
+- **State checkpoints** — the scribe posts periodic checkpoints to its channel so it can resume after a restart without re-alerting
+
+______________________________________________________________________
+
+## Setup
+
+### Step 1: Enable the scribe
+
+```
+summon config set SUMMON_SCRIBE_ENABLED true
+```
+
+### Step 2: Enable data sources
+
+The scribe has two data collectors, each with its own enable flag. Enable at least one.
+
+#### Google Workspace
+
+```
+summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
+```
+
+Then authenticate with Google:
+
+```
+summon auth google login
+```
+
+This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Once complete, credentials are stored in summon's config directory.
+
+To verify authentication status:
+
+```
+summon auth google status
+```
+
+#### External Slack monitoring
+
+See [Scribe Integrations — Slack Browser Monitoring](https://summon-claude.github.io/summon-claude/guide/scribe-integrations/#slack-browser-monitoring) for full setup instructions.
+
+### Step 3: Start the scribe
+
+The scribe auto-spawns when you run:
+
+```
+summon project up
+```
+
+It creates (or reuses) a persistent private channel called `#0-summon-scribe`. No manual start or `/summon CODE` authentication is needed — the scribe inherits the authenticated user from `project up`.
+
+If the scribe was previously suspended by `project down`, `project up` resumes it with transcript continuity.
+
+______________________________________________________________________
+
+## Configuration
+
+All scribe configuration uses `SUMMON_SCRIBE_*` environment variables. These can be set in the summon config file or as shell environment variables.
+
+### Core settings
+
+| Variable                              | Default                           | Description                              |
+| ------------------------------------- | --------------------------------- | ---------------------------------------- |
+| `SUMMON_SCRIBE_ENABLED`               | `false`                           | Enable the scribe agent                  |
+| `SUMMON_SCRIBE_MODEL`                 | (inherits `SUMMON_DEFAULT_MODEL`) | Model to use for the scribe session      |
+| `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | `5`                               | How often the scribe polls for new data  |
+| `SUMMON_SCRIBE_CWD`                   | `<data-dir>/scribe`               | Working directory for the scribe session |
+
+### Filtering and quiet hours
+
+| Variable                            | Default | Description                                                                                                                    |
+| ----------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `SUMMON_SCRIBE_IMPORTANCE_KEYWORDS` | (unset) | Comma-separated keywords that elevate item importance. Items containing these words are always flagged as importance level 4+. |
+| `SUMMON_SCRIBE_QUIET_HOURS`         | (unset) | Quiet hours in `HH:MM-HH:MM` format (e.g., `22:00-08:00`). Only level-5 (urgent) items are posted during this window.          |
+
+**Example with keyword filtering and quiet hours:**
+
+```
+summon config set SUMMON_SCRIBE_IMPORTANCE_KEYWORDS urgent,outage,deploy,PagerDuty
+summon config set SUMMON_SCRIBE_QUIET_HOURS 23:00-07:00
+```
+
+### Google Workspace
+
+| Variable                        | Default                | Description                                        |
+| ------------------------------- | ---------------------- | -------------------------------------------------- |
+| `SUMMON_SCRIBE_GOOGLE_ENABLED`  | `false`                | Enable the Google Workspace data collector         |
+| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated list of Google services to monitor |
+
+The default services are `gmail`, `calendar`, `drive`. The full set of supported services is: `gmail`, `calendar`, `drive`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`.
+
+```
+# Monitor only Gmail and Calendar, not Drive
+summon config set SUMMON_SCRIBE_GOOGLE_SERVICES gmail,calendar
+```
+
+Requires workspace-mcp
+
+The Google collector requires the `google` extra: `uv tool install "summon-claude[google]"`. Google OAuth credentials must also be configured via `summon auth google login`.
+
+### Slack channel monitoring
+
+The scribe can monitor an external Slack workspace using browser-based WebSocket interception. This is separate from the native Slack bot integration used for session interaction — it watches a different workspace (e.g., your company's Slack) via a real browser session.
+
+| Variable                                 | Default  | Description                                                  |
+| ---------------------------------------- | -------- | ------------------------------------------------------------ |
+| `SUMMON_SCRIBE_SLACK_ENABLED`            | `false`  | Enable Slack channel monitoring                              |
+| `SUMMON_SCRIBE_SLACK_BROWSER`            | `chrome` | Browser to use: `chrome`, `chromium`, `firefox`, or `webkit` |
+| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | (unset)  | Comma-separated channel IDs to monitor                       |
+
+DMs and @mentions are always captured regardless of `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS`. The channel list controls which channels have *all* messages monitored.
+
+**Example:**
+
+```
+summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+summon config set SUMMON_SCRIBE_SLACK_BROWSER chrome
+summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01ABC123,C02DEF456
+```
+
+______________________________________________________________________
+
+## Slack browser monitoring
+
+For full setup instructions (install, authentication, channel selection), see [Scribe Integrations — Slack Browser Monitoring](https://summon-claude.github.io/summon-claude/guide/scribe-integrations/#slack-browser-monitoring).
+
+______________________________________________________________________
+
+## Alert formatting
+
+The scribe triages each item on a 1--5 importance scale and formats alerts accordingly:
+
+| Level | Label     | Format                                                | Notification       |
+| ----- | --------- | ----------------------------------------------------- | ------------------ |
+| 5     | Urgent    | `:rotating_light:` **URGENT** with detail block       | @mentions the user |
+| 4     | Important | `:warning:` **Source**: summary with detail block     | No @mention        |
+| 3     | Normal    | Source: summary (one line)                            | None               |
+| 1--2  | Low/Noise | Batched into a single "*Low priority (N items)*" line | None               |
+
+Items matching configured importance keywords are always elevated to level 4+.
+
+During quiet hours, only level-5 items are posted.
+
+______________________________________________________________________
+
+## Daily summaries
+
+The scribe produces daily summary reports covering all monitored sources. A summary includes:
+
+- **Email** — count received, important items highlighted
+- **Calendar** — events, notable meetings or changes
+- **Drive** — documents modified or shared
+- **Slack** — message counts, DMs, mentions, key conversations
+- **Notes & Action Items** — user-posted notes tracked during the day
+- **Agent Work** — summary of what project sessions accomplished (read from the Global PM channel)
+- **Alerts** — total items flagged as important
+
+Summaries are generated when:
+
+- Activity has been quiet for 3+ consecutive scans
+- The user explicitly asks for a summary
+- Quiet hours begin (if configured)
+
+______________________________________________________________________
+
+## Prompt injection defense
+
+The scribe processes content from external sources (emails, Slack messages, calendar events, documents) that may contain text designed to manipulate the agent. The scribe's system prompt includes explicit defenses against prompt injection attacks — it treats all external content as untrusted data, never as instructions. If a suspected injection attempt is detected, the scribe posts a warning to its channel rather than acting on the content.
+
+______________________________________________________________________
+
+## Scribe canvas
+
+The scribe's Slack channel has a canvas with a summary layout:
+
+- **Recent Signals** — items surfaced in the last scan
+- **Active Items** — ongoing calendar events or long-running threads
+- **Suppressed** — items seen but filtered below the importance threshold
+
+The canvas is updated after each scan cycle. See [Canvas Integration](https://summon-claude.github.io/summon-claude/guide/canvas/index.md) for how the canvas sync works.
+
+______________________________________________________________________
+
+## Full configuration example
+
+```
+# ~/.config/summon/config.env (or environment variables)
+
+# Enable scribe
+SUMMON_SCRIBE_ENABLED=true
+
+# Use a lighter model to reduce cost
+SUMMON_SCRIBE_MODEL=claude-haiku-4-5-20251001
+
+# Scan every 10 minutes
+SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES=10
+
+# Elevate items with these keywords regardless of importance scoring
+SUMMON_SCRIBE_IMPORTANCE_KEYWORDS=urgent,sev1,sev2,outage,on-call
+
+# Don't post non-critical items overnight
+SUMMON_SCRIBE_QUIET_HOURS=22:00-08:00
+
+# Google Workspace collector
+SUMMON_SCRIBE_GOOGLE_ENABLED=true
+SUMMON_SCRIBE_GOOGLE_SERVICES=gmail,calendar
+
+# External Slack collector
+SUMMON_SCRIBE_SLACK_ENABLED=true
+SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C01ABC123,C02DEF456
+```
+
+______________________________________________________________________
+
+## See also
+
+- [Projects](https://summon-claude.github.io/summon-claude/guide/projects/index.md) — the project system the scribe runs within
+- [Configuration](https://summon-claude.github.io/summon-claude/guide/configuration/index.md) — full configuration reference
