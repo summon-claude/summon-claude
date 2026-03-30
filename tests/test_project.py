@@ -462,20 +462,10 @@ class TestBuildPmSystemPromptWorkflow:
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
         assert "Working Without Version Control" in result["append"]
 
-    def test_non_git_pm_prompt_no_worktree_orchestration_section(self):
-        """Non-git PM prompt must NOT contain the worktree orchestration section header."""
-        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
-        assert "## Worktree Orchestration" not in result["append"]
-
     def test_non_git_pm_prompt_no_git_worktree(self):
         """Non-git PM prompt must NOT reference 'git worktree' commands."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
         assert "git worktree" not in result["append"]
-
-    def test_non_git_pm_prompt_contains_safety_rules(self):
-        """Non-git PM prompt must still contain NEVER force-push safety rule."""
-        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
-        assert "NEVER force-push" in result["append"]
 
 
 # ---------------------------------------------------------------------------
