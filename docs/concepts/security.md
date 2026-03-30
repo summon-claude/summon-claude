@@ -104,7 +104,7 @@ All other tools — and write-gated tools after worktree entry — go through th
 1. Requests within the same 2-second debounce window are batched into a single Slack message (`SUMMON_PERMISSION_DEBOUNCE_MS`, default 2000).
 2. The message posts as a normal message with **Approve**, **Approve for session**, and **Deny** buttons.
 3. After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.
-4. If no response arrives within 5 minutes (`_PERMISSION_TIMEOUT_S = 300`), the request is automatically denied and the message is deleted.
+4. If no response arrives within 10 minutes (`_PERMISSION_TIMEOUT_S = 600`), the request is automatically denied and the message is deleted.
 
 "Approve for session" caches the tool name for the session lifetime — subsequent uses of the same tool are auto-approved. `Bash` and GitHub require-approval tools are never session-cached (defense-in-depth).
 

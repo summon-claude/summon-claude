@@ -321,6 +321,7 @@ _DB_TABLES = [
     "spawn_tokens",
     "channels",
     "projects",
+    "scheduled_jobs",
     "session_tasks",
     "workflow_defaults",
     "pending_auth_tokens",

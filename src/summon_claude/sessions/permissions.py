@@ -97,7 +97,7 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     ]
 )
 
-_PERMISSION_TIMEOUT_S = 300  # 5 minutes
+_PERMISSION_TIMEOUT_S = 600  # 10 minutes
 
 # Tools that write to the filesystem — gated until worktree entry.
 # MultiEdit is included defensively even though it's not currently in
@@ -468,7 +468,10 @@ class PermissionHandler:
         except TimeoutError:
             logger.warning("Permission request timed out for tool %s", tool_name)
             await self._post_timeout_message()
-            return PermissionResultDeny(message="Permission request timed out (5 minutes)")
+            timeout_min = _PERMISSION_TIMEOUT_S // 60
+            return PermissionResultDeny(
+                message=f"Permission request timed out ({timeout_min} minutes)",
+            )
 
         if req.approved:
             return PermissionResultAllow()
@@ -669,7 +672,8 @@ class PermissionHandler:
         """Post a message indicating permission timed out."""
         try:
             await self._router.post_to_active_thread(
-                ":hourglass: Permission request timed out after 5 minutes. Denied.",
+                f":hourglass: Permission request timed out after"
+                f" {_PERMISSION_TIMEOUT_S // 60} minutes. Denied.",
             )
         except Exception as e:
             logger.warning("Failed to post timeout message: %s", e)
@@ -716,7 +720,10 @@ class PermissionHandler:
             if msg_ts:
                 await self._router.client.delete_message(msg_ts)
             self._cleanup_ask_user(request_id)
-            return PermissionResultDeny(message="Question timed out (5 minutes)")
+            timeout_min = _PERMISSION_TIMEOUT_S // 60
+            return PermissionResultDeny(
+                message=f"Question timed out ({timeout_min} minutes)",
+            )
 
         answers = dict(self._ask_user.answers.get(request_id, {}))
         self._cleanup_ask_user(request_id)
