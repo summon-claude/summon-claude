@@ -2232,9 +2232,9 @@
 </details>
 <hr />
 <h2 id="step-5-review-tool-permissions">Step 5: Review tool permissions<a class="headerlink" href="#step-5-review-tool-permissions" title="Permanent link">&para;</a></h2>
-<p>When Claude wants to use a tool (run a command, edit a file, etc.), summon-claude sends you an <strong>ephemeral message</strong> — visible only to you — with Approve/Deny buttons. A ping is also posted to the main channel so you get a notification.</p>
+<p>When Claude wants to use a tool (run a command, edit a file, etc.), summon-claude posts an interactive message with <strong>Approve</strong>, <strong>Approve for session</strong>, and <strong>Deny</strong> buttons. The message is deleted after you click, keeping the channel clean.</p>
 <p><img alt="Tool permission request in Slack" src="../../assets/screenshots/quickstart-permission-request.png" /></p>
-<p>Click <strong>Approve</strong> to let Claude proceed, or <strong>Deny</strong> to reject the action. Claude adapts its approach based on your decision. Read-only tools (file reads, searches, web fetches) are auto-approved without prompting — see <a href="../../reference/permissions/">Permissions</a> for the full list.</p>
+<p>Click <strong>Approve</strong> for a one-time approval, <strong>Approve for session</strong> to auto-approve that tool for the rest of the session, or <strong>Deny</strong> to reject. Claude adapts its approach based on your decision. Read-only tools (file reads, searches, web fetches) are auto-approved without prompting — see <a href="../../reference/permissions/">Permissions</a> for the full list.</p>
 <p>Type <code>!help</code> in the Slack channel to see all available in-channel commands:</p>
 <div class="highlight"><pre><span></span><code>!help
 </code></pre></div>

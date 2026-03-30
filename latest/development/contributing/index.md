@@ -46,6 +46,7 @@ make py-test-slack   # Slack integration tests (requires real credentials)
 
 make docs-serve      # Serve docs locally with live reload
 make docs-build      # Build docs in strict mode
+make docs-screenshots  # Regenerate all documentation screenshots
 ```
 
 Full reference:
@@ -471,6 +472,47 @@ The `summon doctor` command uses a registry pattern in `diagnostics.py`. Each ch
 - **Keep checks fast** — use timeouts for network calls (10s for API calls, 5s for CLI version checks)
 - **Never log secrets** — use the `redactor` singleton to sanitize any user-specific data in details or messages
 - **Match SEC-003** — don't include workspace names, usernames, or Slack team names in results
+
+______________________________________________________________________
+
+## Documentation Screenshots
+
+Screenshots in `docs/assets/screenshots/` are **generated automatically** — never edit them manually. When you change UI-facing behavior (permission buttons, channel messages, canvas layout), regenerate them:
+
+```
+make docs-screenshots
+```
+
+### Prerequisites
+
+The screenshot script starts a real summon session, authenticates via Slack, and captures Playwright screenshots. It requires:
+
+1. **summon configured** — `summon init` completed with valid Slack credentials
+1. **Slack browser auth** — run `summon auth slack login <workspace-url>` once to save Playwright browser state
+1. **Playwright installed** — `uv sync --extra slack-browser`
+1. **`.env` file** — the script loads `SUMMON_TEST_SLACK_BOT_TOKEN` from `.env` via `python-dotenv`
+
+### Worktree considerations
+
+In a worktree (`.claude/worktrees/*/`), the local-install detection may resolve config paths to the worktree's `.summon/` directory instead of the global config. Two options:
+
+- **Copy config**: `cp ~/.config/summon/config.env .summon/config.env` and `cp ~/.local/share/summon/slack_workspace.json .summon/`
+- **Force global**: `SUMMON_LOCAL=0 make docs-screenshots` bypasses local-install detection
+
+If the worktree path is too long for Unix sockets (>104 chars), use `SUMMON_LOCAL=0`.
+
+### Sections
+
+```
+# All sections (recommended)
+make docs-screenshots
+
+# Individual sections
+uv run python scripts/docs-screenshots.py --section session-ux    # Real session screenshots
+uv run python scripts/docs-screenshots.py --section terminal      # CLI terminal captures
+uv run python scripts/docs-screenshots.py --section slack-setup   # Validates setup screenshots
+uv run python scripts/docs-screenshots.py --dry-run               # List planned screenshots
+```
 
 ______________________________________________________________________
 

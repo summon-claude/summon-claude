@@ -264,13 +264,13 @@ Permission request times out
 summon config set SUMMON_PERMISSION_DEBOUNCE_MS 1000
 ```
 
-Ephemeral permission messages visible to wrong people
+Permission messages disappear after clicking
 
-**Symptom:** Permission request messages are visible only to you, not to other team members who should see them.
+**Symptom:** The Approve/Deny permission message disappears from the channel after you click a button.
 
-**Cause:** Permission requests are posted as ephemeral messages in Slack — only visible to the session owner. A separate ping is posted to the main channel to trigger a notification.
+**Cause:** Permission messages are normal messages that are intentionally deleted after interaction to keep the channel clean. A persistent confirmation (e.g. " Approved: `Edit`") is posted to the turn thread as an audit trail.
 
-**Behavior:** This is by design. The ephemeral message contains the Approve/Deny buttons. The main channel ping alerts you to check for it. See [Permissions](https://summon-claude.github.io/summon-claude/latest/reference/permissions/index.md) for details.
+**Behavior:** This is by design. See [Permissions](https://summon-claude.github.io/summon-claude/latest/reference/permissions/index.md) for details.
 
 ______________________________________________________________________
 

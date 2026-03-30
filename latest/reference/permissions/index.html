@@ -1383,6 +1383,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#read-only-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only by default
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Read-only by default">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#safe-dir-exception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe-dir exception
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#auto-approved-tools" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1404,6 +1432,17 @@
   
     <nav class="md-nav" aria-label="Approval flow">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approve-for-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approve for session
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#batched-requests" class="md-nav__link">
@@ -1448,6 +1487,17 @@
     <span class="md-ellipsis">
       
         AskUserQuestion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-flow-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission flow (internal)
       
     </span>
   </a>
@@ -1983,6 +2033,34 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
+  <a href="#read-only-by-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Read-only by default
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Read-only by default">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#safe-dir-exception" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Safe-dir exception
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#auto-approved-tools" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2004,6 +2082,17 @@
   
     <nav class="md-nav" aria-label="Approval flow">
       <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#approve-for-session" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Approve for session
+      
+    </span>
+  </a>
+  
+</li>
         
           <li class="md-nav__item">
   <a href="#batched-requests" class="md-nav__link">
@@ -2048,6 +2137,17 @@
     <span class="md-ellipsis">
       
         AskUserQuestion
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-flow-internal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission flow (internal)
       
     </span>
   </a>
@@ -2137,6 +2237,22 @@
 <p>When Claude wants to run a tool that could modify files, execute commands, or take other consequential actions, summon pauses and asks for your approval in Slack. This keeps you in control without interrupting every read operation.</p>
 <p><img alt="Permission request in Slack" src="../../assets/screenshots/permissions-approval.png" /></p>
 <hr />
+<h2 id="read-only-by-default">Read-only by default<a class="headerlink" href="#read-only-by-default" title="Permanent link">&para;</a></h2>
+<p>Summon sessions start in <strong>read-only mode</strong>. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until the agent enters an isolated worktree.</p>
+<p><strong>Write-gated tools:</strong> <code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code> (and the SDK alias <code>str_replace_editor</code>)</p>
+<p>When Claude tries to use a write-gated tool before entering a worktree, summon automatically denies the request with a message guiding Claude to use <code>EnterWorktree</code> first. Once Claude enters a worktree:</p>
+<ol>
+<li>The first write-gated tool triggers a <strong>one-time Slack approval</strong> prompt.</li>
+<li>After approval, writes <strong>within the worktree</strong> are auto-approved — CWD containment ensures file-targeting tools (Edit, Write, etc.) can only modify files inside the worktree without additional prompts.</li>
+<li>Writes <strong>outside the worktree</strong> still require Slack approval, with per-path session caching available.</li>
+<li><code>Bash</code> always requires HITL on first use, with per-command session caching (exact match).</li>
+</ol>
+<h3 id="safe-dir-exception">Safe-dir exception<a class="headerlink" href="#safe-dir-exception" title="Permanent link">&para;</a></h3>
+<p>You can configure directories where writes are allowed <strong>without entering a worktree</strong>:</p>
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SAFE_WRITE_DIRS<span class="w"> </span><span class="s2">&quot;hack/,.dev/&quot;</span>
+</code></pre></div>
+<p>Files written to these directories bypass the worktree requirement entirely. Paths are resolved with symlink protection (<code>Path.resolve()</code> on both sides) to prevent escapes. Setting <code>safe_write_dirs=.</code> exempts the entire project directory for file-targeting tools (Bash remains gated regardless).</p>
+<hr />
 <h2 id="auto-approved-tools">Auto-approved tools<a class="headerlink" href="#auto-approved-tools" title="Permanent link">&para;</a></h2>
 <p>The following tools are always approved without prompting. They are read-only and cannot modify your system:</p>
 <table>
@@ -2189,40 +2305,58 @@
 </tr>
 </tbody>
 </table>
-<p>All other tools — write operations (<code>Bash</code>, <code>Edit</code>, <code>Write</code>, <code>NotebookEdit</code>), network operations that send data, and any unknown tool — require Slack approval.</p>
+<p>Summon's own MCP tools (<code>summon-cli</code>, <code>summon-slack</code>, <code>summon-canvas</code>) are also auto-approved — they are internal tools already scoped to the session's permissions.</p>
 <hr />
 <h2 id="approval-flow">Approval flow<a class="headerlink" href="#approval-flow" title="Permanent link">&para;</a></h2>
 <p>When Claude requests a tool that needs approval:</p>
 <ol>
-<li><strong>Ping in the main channel</strong> — summon posts <code>@you Permission needed</code> to notify you.</li>
-<li><strong>Ephemeral approval message</strong> — an interactive message appears, visible only to you, describing what Claude wants to do.</li>
-<li><strong>You click Approve or Deny</strong> — the ephemeral message disappears and a persistent confirmation is posted in the turn thread.</li>
+<li><strong>Interactive message</strong> — summon posts a message in the session channel with the tool details and action buttons.</li>
+<li><strong>You click Approve, Approve for session, or Deny</strong> — the interactive message is deleted and a persistent confirmation is posted in the turn thread.</li>
 <li><strong>Claude continues</strong> — if approved, Claude runs the tool; if denied, Claude is told the action was denied and adapts.</li>
 </ol>
 <div class="highlight"><pre><span></span><code>Claude wants to run:
 `Bash`: `npm run build`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 </code></pre></div>
+<h3 id="approve-for-session">Approve for session<a class="headerlink" href="#approve-for-session" title="Permanent link">&para;</a></h3>
+<p>Clicking <strong>Approve for session</strong> caches the tool for the remainder of the session:</p>
+<ul>
+<li><strong>Write-gated tools</strong> (Edit, Write, Bash, etc.) — the specific <strong>argument</strong> is cached: the file path for file tools, the command string for Bash. This prevents blanket <code>Edit(*)</code> or <code>Bash(*)</code> approval. Writes within the worktree are already auto-approved by CWD containment, so this mainly applies to writes outside the worktree and all Bash commands.</li>
+<li><strong>Other tools</strong> — the tool name is cached; all subsequent uses are auto-approved.</li>
+</ul>
+<p>The confirmation message shows what was cached:</p>
+<div class="highlight"><pre><span></span><code>✅ Approved for session: `Bash`: `git status`
+✅ Approved for session: `Edit`: `/etc/config.ini`
+</code></pre></div>
+<div class="admonition warning">
+<p class="admonition-title">GitHub write tools are never session-cached</p>
+<p>Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.</p>
+</div>
+<div class="admonition info">
+<p class="admonition-title">CWD containment and <code>allowedTools</code></p>
+<p>Write-gated tools that target paths outside the worktree always require Slack approval, even if your <code>~/.claude/settings.json</code> includes them in <code>allowedTools</code>. This is the same defense-in-depth principle used for GitHub tools — <code>allowedTools</code> cannot override CWD containment.</p>
+</div>
 <h3 id="batched-requests">Batched requests<a class="headerlink" href="#batched-requests" title="Permanent link">&para;</a></h3>
-<p>If Claude requests multiple tools within a 500ms window (configurable via <code>SUMMON_PERMISSION_DEBOUNCE_MS</code>), they are batched into a single approval message:</p>
+<p>If Claude requests multiple tools within a 2-second window (configurable via <code>SUMMON_PERMISSION_DEBOUNCE_MS</code>), they are batched into a single approval message:</p>
 <div class="highlight"><pre><span></span><code>Claude wants to perform 3 actions:
 1. `Edit`: `src/auth/login.py`
 2. `Write`: `src/auth/token.py`
 3. `Bash`: `python -m pytest tests/test_auth.py`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 </code></pre></div>
-<p>Approve or Deny applies to all tools in the batch.</p>
+<p>Approve or Deny applies to all tools in the batch. "Approve for session" caches each tool's primary argument (file path or command).</p>
 <div class="admonition tip">
 <p class="admonition-title">Debounce tuning</p>
-<p>The default 500ms window catches most batches naturally. Lower it (e.g. <code>SUMMON_PERMISSION_DEBOUNCE_MS=200</code>) to reduce latency, or set it to <code>0</code> to get a separate message per tool.</p>
+<p>The default 2000ms window catches most batches naturally. Lower it (e.g. <code>SUMMON_PERMISSION_DEBOUNCE_MS=500</code>) to reduce latency, or set it to <code>0</code> to get a separate message per tool.</p>
 </div>
 <hr />
 <h2 id="timeout">Timeout<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
-<p>Permission requests expire after <strong>5 minutes</strong>. If you do not respond:</p>
+<p>Permission requests expire after <strong>10 minutes</strong>. If you do not respond:</p>
 <ul>
 <li>The request is automatically denied.</li>
+<li>The interactive message is deleted.</li>
 <li>A timeout message is posted in the turn thread.</li>
 <li>Claude is told the permission timed out and adapts (typically by reporting it could not complete the action).</li>
 </ul>
@@ -2292,7 +2426,7 @@
 </div>
 <hr />
 <h2 id="askuserquestion">AskUserQuestion<a class="headerlink" href="#askuserquestion" title="Permanent link">&para;</a></h2>
-<p>Claude can ask you structured questions mid-task using the <code>AskUserQuestion</code> tool. This appears as an ephemeral interactive message:</p>
+<p>Claude can ask you structured questions mid-task using the <code>AskUserQuestion</code> tool. This appears as an interactive message in the session channel:</p>
 <div class="highlight"><pre><span></span><code>Claude has a question for you
 
 Which database should I use for the session store?
@@ -2303,7 +2437,76 @@ Which database should I use for the session store?
 <li><strong>Multi-select:</strong> toggle options, then click <strong>Done</strong>.</li>
 <li><strong>Other:</strong> click <strong>Other</strong> to type a free-text answer in the channel.</li>
 </ul>
-<p>Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered.</p>
+<p>Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered. The interactive message is deleted after all questions are answered.</p>
+<hr />
+<h2 id="permission-flow-internal">Permission flow (internal)<a class="headerlink" href="#permission-flow-internal" title="Permanent link">&para;</a></h2>
+<p>The full permission evaluation order in <code>handle()</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Check</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>AskUserQuestion intercept</td>
+<td>Route to interactive UI</td>
+</tr>
+<tr>
+<td>0b</td>
+<td>Write gate (<code>_WRITE_GATED_TOOLS</code>)</td>
+<td>SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through</td>
+</tr>
+<tr>
+<td>1</td>
+<td>SDK deny suggestions</td>
+<td>Deny</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Static auto-approve (<code>_AUTO_APPROVE_TOOLS</code>)</td>
+<td>Allow</td>
+</tr>
+<tr>
+<td>2b</td>
+<td>GitHub deny-list (<code>_GITHUB_MCP_REQUIRE_APPROVAL</code>)</td>
+<td>Always HITL</td>
+</tr>
+<tr>
+<td>2c</td>
+<td>GitHub auto-approve (prefix matching)</td>
+<td>Allow</td>
+</tr>
+<tr>
+<td>2d</td>
+<td>Summon MCP auto-approve (prefix matching)</td>
+<td>Allow</td>
+</tr>
+<tr>
+<td>2e</td>
+<td>Session-lifetime cached approvals</td>
+<td>Allow (GitHub deny-list excluded)</td>
+</tr>
+<tr>
+<td>2f</td>
+<td>Per-argument cache (exact match on primary arg)</td>
+<td>Allow if arg matches (GitHub deny-list excluded)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>SDK allow suggestions</td>
+<td>Allow (write-gated tools excluded — CWD containment cannot be overridden)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Slack HITL (interactive message, deleted after)</td>
+<td>User decides</td>
+</tr>
+</tbody>
+</table>
 <hr />
 <h2 id="authorization-scope">Authorization scope<a class="headerlink" href="#authorization-scope" title="Permanent link">&para;</a></h2>
 <p>Only the authenticated user for a session can approve or deny permission requests. The authenticated user is the person who claimed the session with <code>/summon CODE</code> in Slack.</p>

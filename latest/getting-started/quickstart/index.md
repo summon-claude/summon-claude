@@ -92,9 +92,9 @@ ______________________________________________________________________
 
 ## Step 5: Review tool permissions
 
-When Claude wants to use a tool (run a command, edit a file, etc.), summon-claude sends you an **ephemeral message** — visible only to you — with Approve/Deny buttons. A ping is also posted to the main channel so you get a notification.
+When Claude wants to use a tool (run a command, edit a file, etc.), summon-claude posts an interactive message with **Approve**, **Approve for session**, and **Deny** buttons. The message is deleted after you click, keeping the channel clean.
 
-Click **Approve** to let Claude proceed, or **Deny** to reject the action. Claude adapts its approach based on your decision. Read-only tools (file reads, searches, web fetches) are auto-approved without prompting — see [Permissions](https://summon-claude.github.io/summon-claude/latest/reference/permissions/index.md) for the full list.
+Click **Approve** for a one-time approval, **Approve for session** to auto-approve that tool for the rest of the session, or **Deny** to reject. Claude adapts its approach based on your decision. Read-only tools (file reads, searches, web fetches) are auto-approved without prompting — see [Permissions](https://summon-claude.github.io/summon-claude/latest/reference/permissions/index.md) for the full list.
 
 Type `!help` in the Slack channel to see all available in-channel commands:
 

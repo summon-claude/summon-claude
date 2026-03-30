@@ -2107,6 +2107,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documentation-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Screenshots
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Screenshots">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#project-architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2521,6 +2571,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#documentation-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Screenshots
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Screenshots">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#project-architecture" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2636,6 +2736,7 @@ make<span class="w"> </span>py-test-slack<span class="w">   </span><span class="
 
 make<span class="w"> </span>docs-serve<span class="w">      </span><span class="c1"># Serve docs locally with live reload</span>
 make<span class="w"> </span>docs-build<span class="w">      </span><span class="c1"># Build docs in strict mode</span>
+make<span class="w"> </span>docs-screenshots<span class="w">  </span><span class="c1"># Regenerate all documentation screenshots</span>
 </code></pre></div>
 <p>Full reference:
 <div class="notest highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">help</span><span class="w">  </span><span class="c1"># Lists all targets with descriptions</span>
@@ -3091,6 +3192,36 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <li><strong>Never log secrets</strong> — use the <code>redactor</code> singleton to sanitize any user-specific data in details or messages</li>
 <li><strong>Match SEC-003</strong> — don't include workspace names, usernames, or Slack team names in results</li>
 </ul>
+<hr />
+<h2 id="documentation-screenshots">Documentation Screenshots<a class="headerlink" href="#documentation-screenshots" title="Permanent link">&para;</a></h2>
+<p>Screenshots in <code>docs/assets/screenshots/</code> are <strong>generated automatically</strong> — never edit them manually. When you change UI-facing behavior (permission buttons, channel messages, canvas layout), regenerate them:</p>
+<div class="highlight"><pre><span></span><code>make<span class="w"> </span>docs-screenshots
+</code></pre></div>
+<h3 id="prerequisites_1">Prerequisites<a class="headerlink" href="#prerequisites_1" title="Permanent link">&para;</a></h3>
+<p>The screenshot script starts a real summon session, authenticates via Slack, and captures Playwright screenshots. It requires:</p>
+<ol>
+<li><strong>summon configured</strong> — <code>summon init</code> completed with valid Slack credentials</li>
+<li><strong>Slack browser auth</strong> — run <code>summon auth slack login &lt;workspace-url&gt;</code> once to save Playwright browser state</li>
+<li><strong>Playwright installed</strong> — <code>uv sync --extra slack-browser</code></li>
+<li><strong><code>.env</code> file</strong> — the script loads <code>SUMMON_TEST_SLACK_BOT_TOKEN</code> from <code>.env</code> via <code>python-dotenv</code></li>
+</ol>
+<h3 id="worktree-considerations">Worktree considerations<a class="headerlink" href="#worktree-considerations" title="Permanent link">&para;</a></h3>
+<p>In a worktree (<code>.claude/worktrees/*/</code>), the local-install detection may resolve config paths to the worktree's <code>.summon/</code> directory instead of the global config. Two options:</p>
+<ul>
+<li><strong>Copy config</strong>: <code>cp ~/.config/summon/config.env .summon/config.env</code> and <code>cp ~/.local/share/summon/slack_workspace.json .summon/</code></li>
+<li><strong>Force global</strong>: <code>SUMMON_LOCAL=0 make docs-screenshots</code> bypasses local-install detection</li>
+</ul>
+<p>If the worktree path is too long for Unix sockets (&gt;104 chars), use <code>SUMMON_LOCAL=0</code>.</p>
+<h3 id="sections">Sections<a class="headerlink" href="#sections" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># All sections (recommended)</span>
+make<span class="w"> </span>docs-screenshots
+
+<span class="c1"># Individual sections</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>session-ux<span class="w">    </span><span class="c1"># Real session screenshots</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>terminal<span class="w">      </span><span class="c1"># CLI terminal captures</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>slack-setup<span class="w">   </span><span class="c1"># Validates setup screenshots</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--dry-run<span class="w">               </span><span class="c1"># List planned screenshots</span>
+</code></pre></div>
 <hr />
 <h2 id="project-architecture">Project Architecture<a class="headerlink" href="#project-architecture" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>src/summon_claude/
