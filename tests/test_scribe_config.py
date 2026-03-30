@@ -223,15 +223,14 @@ class TestScribeSystemPrompt:
         )
         assert "every 10 minutes" in prompt["append"]
 
-    def test_prompt_interpolates_user_mention(self):
-        """user_mention moved to scan prompt — not directly in system prompt."""
+    def test_prompt_does_not_contain_user_mention(self):
+        """user_mention moved to scan prompt — not in system prompt."""
         from summon_claude.sessions.session import build_scribe_system_prompt
 
         prompt = build_scribe_system_prompt(
             scan_interval=5,
         )
-        # user_mention used in scan prompts; system prompt focuses on identity
-        assert "append" in prompt
+        assert "<@U" not in prompt["append"]
 
     def test_prompt_interpolates_importance_keywords(self):
         """Keywords moved to scan prompt — not interpolated into system prompt."""
@@ -298,7 +297,9 @@ class TestScribeSystemPrompt:
             google_enabled=False,
             slack_enabled=False,
         )
-        assert "append" in prompt
+        # Still has identity and security even with no data sources
+        assert "sentinel" in prompt["append"]
+        assert "SECURITY" in prompt["append"]
 
     def test_prompt_no_google_section_when_disabled(self):
         from summon_claude.sessions.session import build_scribe_system_prompt
@@ -361,15 +362,14 @@ class TestScribeSystemPrompt:
         # No raw double-braces should remain
         assert "{{" not in prompt["append"]
 
-    def test_prompt_handles_curly_braces_in_keywords(self):
-        """Keywords removed from system prompt signature — no crash test."""
+    def test_prompt_note_taking_preserves_summary_literal(self):
+        """The {summary} literal in note-taking section must survive interpolation."""
         from summon_claude.sessions.session import build_scribe_system_prompt
 
         prompt = build_scribe_system_prompt(
             scan_interval=5,
         )
-        # Keywords no longer part of system prompt — just verify no crash
-        assert "append" in prompt
+        assert "{summary}" in prompt["append"]
 
 
 class TestGoogleIntegration:

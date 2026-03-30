@@ -735,7 +735,7 @@ def build_global_pm_scan_prompt() -> str:
         "generate a daily summary. Do NOT try to predict whether the current scan is "
         "the 'last' one -- generate summaries when there is enough completed work to "
         "report on, or on request. Write to the reports directory.\n\n"
-        "Daily Summary -- YYYY-MM-DD\n"
+        "# Daily Summary -- YYYY-MM-DD\n"
         "## Project: <name>\n"
         "### Active Sessions\n"
         "- **<session-name>** -- <N> turns, <duration> -- <what it's doing>\n"
