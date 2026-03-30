@@ -1594,6 +1594,33 @@ class TestWorktreeDisallowedTools:
         )
 
 
+class TestHeadlessBoilerplate:
+    """Guard: shared headless boilerplate appears in all agent prompts."""
+
+    def test_headless_boilerplate_in_base_append(self):
+        from summon_claude.sessions.session import _BASE_SYSTEM_APPEND
+
+        assert "running headlessly" in _BASE_SYSTEM_APPEND
+
+    def test_headless_boilerplate_in_pm_prompt(self):
+        from summon_claude.sessions.session import build_pm_system_prompt
+
+        result = build_pm_system_prompt(cwd="/test", scan_interval_s=900)
+        assert "running headlessly" in result["append"]
+
+    def test_headless_boilerplate_in_scribe_prompt(self):
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        result = build_scribe_system_prompt(
+            scan_interval=15,
+            user_mention="<@U123>",
+            importance_keywords="urgent",
+            google_enabled=True,
+            slack_enabled=False,
+        )
+        assert "running headlessly" in result["append"]
+
+
 class TestSystemPromptAppendRestart:
     """Verify system_prompt_append survives compaction restarts."""
 
