@@ -4,6 +4,31 @@ When Claude wants to run a tool that could modify files, execute commands, or ta
 
 ______________________________________________________________________
 
+## Read-only by default
+
+Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until the agent enters an isolated worktree.
+
+**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` (and the SDK alias `str_replace_editor`)
+
+When Claude tries to use a write-gated tool before entering a worktree, summon automatically denies the request with a message guiding Claude to use `EnterWorktree` first. Once Claude enters a worktree:
+
+1. The first write-gated tool triggers a **one-time Slack approval** prompt.
+1. After approval, writes **within the worktree** are auto-approved — CWD containment ensures file-targeting tools (Edit, Write, etc.) can only modify files inside the worktree without additional prompts.
+1. Writes **outside the worktree** still require Slack approval, with per-path session caching available.
+1. `Bash` always requires HITL on first use, with per-command session caching (exact match).
+
+### Safe-dir exception
+
+You can configure directories where writes are allowed **without entering a worktree**:
+
+```
+summon config set SUMMON_SAFE_WRITE_DIRS "hack/,.dev/"
+```
+
+Files written to these directories bypass the worktree requirement entirely. Paths are resolved with symlink protection (`Path.resolve()` on both sides) to prevent escapes. Setting `safe_write_dirs=.` exempts the entire project directory for file-targeting tools (Bash remains gated regardless).
+
+______________________________________________________________________
+
 ## Auto-approved tools
 
 The following tools are always approved without prompting. They are read-only and cannot modify your system:
@@ -21,7 +46,7 @@ The following tools are always approved without prompting. They are read-only an
 | `FindSymbol`             | Find a symbol definition         |
 | `FindReferencingSymbols` | Find symbol references           |
 
-All other tools — write operations (`Bash`, `Edit`, `Write`, `NotebookEdit`), network operations that send data, and any unknown tool — require Slack approval.
+Summon's own MCP tools (`summon-cli`, `summon-slack`, `summon-canvas`) are also auto-approved — they are internal tools already scoped to the session's permissions.
 
 ______________________________________________________________________
 
@@ -29,21 +54,42 @@ ______________________________________________________________________
 
 When Claude requests a tool that needs approval:
 
-1. **Ping in the main channel** — summon posts `@you Permission needed` to notify you.
-1. **Ephemeral approval message** — an interactive message appears, visible only to you, describing what Claude wants to do.
-1. **You click Approve or Deny** — the ephemeral message disappears and a persistent confirmation is posted in the turn thread.
+1. **Interactive message** — summon posts a message in the session channel with the tool details and action buttons.
+1. **You click Approve, Approve for session, or Deny** — the interactive message is deleted and a persistent confirmation is posted in the turn thread.
 1. **Claude continues** — if approved, Claude runs the tool; if denied, Claude is told the action was denied and adapts.
 
 ```
 Claude wants to run:
 `Bash`: `npm run build`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 ```
+
+### Approve for session
+
+Clicking **Approve for session** caches the tool for the remainder of the session:
+
+- **Write-gated tools** (Edit, Write, Bash, etc.) — the specific **argument** is cached: the file path for file tools, the command string for Bash. This prevents blanket `Edit(*)` or `Bash(*)` approval. Writes within the worktree are already auto-approved by CWD containment, so this mainly applies to writes outside the worktree and all Bash commands.
+- **Other tools** — the tool name is cached; all subsequent uses are auto-approved.
+
+The confirmation message shows what was cached:
+
+```
+✅ Approved for session: `Bash`: `git status`
+✅ Approved for session: `Edit`: `/etc/config.ini`
+```
+
+GitHub write tools are never session-cached
+
+Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.
+
+CWD containment and `allowedTools`
+
+Write-gated tools that target paths outside the worktree always require Slack approval, even if your `~/.claude/settings.json` includes them in `allowedTools`. This is the same defense-in-depth principle used for GitHub tools — `allowedTools` cannot override CWD containment.
 
 ### Batched requests
 
-If Claude requests multiple tools within a 500ms window (configurable via `SUMMON_PERMISSION_DEBOUNCE_MS`), they are batched into a single approval message:
+If Claude requests multiple tools within a 2-second window (configurable via `SUMMON_PERMISSION_DEBOUNCE_MS`), they are batched into a single approval message:
 
 ```
 Claude wants to perform 3 actions:
@@ -51,22 +97,23 @@ Claude wants to perform 3 actions:
 2. `Write`: `src/auth/token.py`
 3. `Bash`: `python -m pytest tests/test_auth.py`
 
-[Approve]  [Deny]
+[Approve]  [Approve for session]  [Deny]
 ```
 
-Approve or Deny applies to all tools in the batch.
+Approve or Deny applies to all tools in the batch. "Approve for session" caches each tool's primary argument (file path or command).
 
 Debounce tuning
 
-The default 500ms window catches most batches naturally. Lower it (e.g. `SUMMON_PERMISSION_DEBOUNCE_MS=200`) to reduce latency, or set it to `0` to get a separate message per tool.
+The default 2000ms window catches most batches naturally. Lower it (e.g. `SUMMON_PERMISSION_DEBOUNCE_MS=500`) to reduce latency, or set it to `0` to get a separate message per tool.
 
 ______________________________________________________________________
 
 ## Timeout
 
-Permission requests expire after **5 minutes**. If you do not respond:
+Permission requests expire after **10 minutes**. If you do not respond:
 
 - The request is automatically denied.
+- The interactive message is deleted.
 - A timeout message is posted in the turn thread.
 - Claude is told the permission timed out and adapts (typically by reporting it could not complete the action).
 
@@ -104,7 +151,7 @@ ______________________________________________________________________
 
 ## AskUserQuestion
 
-Claude can ask you structured questions mid-task using the `AskUserQuestion` tool. This appears as an ephemeral interactive message:
+Claude can ask you structured questions mid-task using the `AskUserQuestion` tool. This appears as an interactive message in the session channel:
 
 ```
 Claude has a question for you
@@ -117,7 +164,27 @@ Which database should I use for the session store?
 - **Multi-select:** toggle options, then click **Done**.
 - **Other:** click **Other** to type a free-text answer in the channel.
 
-Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered.
+Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered. The interactive message is deleted after all questions are answered.
+
+______________________________________________________________________
+
+## Permission flow (internal)
+
+The full permission evaluation order in `handle()`:
+
+| Step | Check                                             | Result                                                                                                                    |
+| ---- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 0    | AskUserQuestion intercept                         | Route to interactive UI                                                                                                   |
+| 0b   | Write gate (`_WRITE_GATED_TOOLS`)                 | SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through |
+| 1    | SDK deny suggestions                              | Deny                                                                                                                      |
+| 2    | Static auto-approve (`_AUTO_APPROVE_TOOLS`)       | Allow                                                                                                                     |
+| 2b   | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL                                                                                                               |
+| 2c   | GitHub auto-approve (prefix matching)             | Allow                                                                                                                     |
+| 2d   | Summon MCP auto-approve (prefix matching)         | Allow                                                                                                                     |
+| 2e   | Session-lifetime cached approvals                 | Allow (GitHub deny-list excluded)                                                                                         |
+| 2f   | Per-argument cache (exact match on primary arg)   | Allow if arg matches (GitHub deny-list excluded)                                                                          |
+| 3    | SDK allow suggestions                             | Allow (write-gated tools excluded — CWD containment cannot be overridden)                                                 |
+| 4    | Slack HITL (interactive message, deleted after)   | User decides                                                                                                              |
 
 ______________________________________________________________________
 

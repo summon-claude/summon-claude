@@ -2488,7 +2488,7 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <tr>
 <td><code>SUMMON_PERMISSION_DEBOUNCE_MS</code></td>
 <td>integer</td>
-<td><code>500</code></td>
+<td><code>2000</code></td>
 <td>Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message.</td>
 </tr>
 <tr>
@@ -2496,6 +2496,12 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <td>boolean</td>
 <td><code>false</code></td>
 <td>Disable the background PyPI update check on <code>summon start</code>.</td>
+</tr>
+<tr>
+<td><code>SUMMON_SAFE_WRITE_DIRS</code></td>
+<td>text</td>
+<td>``</td>
+<td>Comma-separated directories where writes are allowed without worktree entry (e.g. <code>hack/</code>). Paths resolved with symlink protection.</td>
 </tr>
 </tbody>
 </table>

@@ -45,18 +45,20 @@ Each `SessionHandle` contains:
 
 Output methods:
 
-| Method             | Description                                                      |
-| ------------------ | ---------------------------------------------------------------- |
-| `post()`           | Post a message (with optional thread_ts and Block Kit blocks)    |
-| `update()`         | Edit an existing message by timestamp                            |
-| `react()`          | Add a reaction emoji to a message                                |
-| `unreact()`        | Remove a reaction emoji                                          |
-| `upload_file()`    | Upload a file snippet (for large outputs)                        |
-| `post_ephemeral()` | Post a message visible only to one user (for permission prompts) |
-| `canvas_create()`  | Create a channel canvas                                          |
-| `canvas_sync()`    | Replace canvas body content                                      |
-| `canvas_rename()`  | Update canvas title                                              |
-| `get_canvas_id()`  | Look up the canvas ID for the channel                            |
+| Method               | Description                                                                                 |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| `post()`             | Post a message (with optional thread_ts and Block Kit blocks)                               |
+| `update()`           | Edit an existing message by timestamp                                                       |
+| `react()`            | Add a reaction emoji to a message                                                           |
+| `unreact()`          | Remove a reaction emoji                                                                     |
+| `upload_file()`      | Upload a file snippet (for large outputs)                                                   |
+| `post_ephemeral()`   | Post a message visible only to one user                                                     |
+| `post_interactive()` | Post a message with interactive buttons (for permission prompts, deleted after interaction) |
+| `delete_message()`   | Delete a message by timestamp (best-effort)                                                 |
+| `canvas_create()`    | Create a channel canvas                                                                     |
+| `canvas_sync()`      | Replace canvas body content                                                                 |
+| `canvas_rename()`    | Update canvas title                                                                         |
+| `get_canvas_id()`    | Look up the canvas ID for the channel                                                       |
 
 Every output method calls `redact_secrets()` before sending to Slack. See [Security](https://summon-claude.github.io/summon-claude/concepts/security/index.md) for the redaction pattern.
 
