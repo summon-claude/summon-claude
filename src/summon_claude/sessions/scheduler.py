@@ -180,7 +180,11 @@ class SessionScheduler:
         self._jobs.pop(job_id, None)
 
         if self._should_persist(job):
-            await self._delete_job_from_db(job_id, "user-deleted")
+            await self._delete_job_from_db(
+                job_id,
+                "user-deleted",
+                session_id=job.db_session_id,
+            )
 
         if self.on_change:
             await self.on_change()

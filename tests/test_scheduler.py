@@ -577,6 +577,49 @@ class TestSchedulerPersistence:
         assert db_jobs[0]["id"] == "valid-job-001"
         sched.cancel_all()
 
+    async def test_user_delete_after_fallback_uses_correct_session_id(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """CronDelete on a fallback-restored job deletes the DB row from the old session."""
+        db_path = tmp_path / "delete_fallback_test.db"
+        session_a = "del-fb-a-001"
+        session_b = "del-fb-b-001"
+
+        async with SessionRegistry(db_path=db_path) as reg:
+            await reg.register(session_a, 1111, "/tmp")
+            await reg.save_scheduled_job(
+                session_id=session_a,
+                job_id="del-fb-job",
+                cron_expr="*/5 * * * *",
+                prompt="delete me after fallback",
+                recurring=True,
+                max_lifetime_s=86400,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            await reg.register(session_b, 2222, "/tmp")
+
+            sched = SessionScheduler(
+                asyncio.Queue(maxsize=100),
+                asyncio.Event(),
+                registry=reg,
+                session_id=session_b,
+                resume_from_session_id=session_a,
+            )
+
+            with patch.object(reg, "migrate_scheduled_jobs", side_effect=RuntimeError("boom")):
+                await sched.restore_from_db()
+
+            assert len(sched.list_jobs()) == 1
+
+            # User deletes the job via CronDelete
+            deleted = await sched.delete("del-fb-job")
+            assert deleted is True
+            assert sched.list_jobs() == []
+
+            # DB row deleted from session A (the owning session)
+            assert await reg.list_scheduled_jobs(session_a) == []
+
     async def test_restore_fallback_migration_failure(self, tmp_path: Path) -> None:
         """When FK migration fails, jobs are still restored from old session data."""
         db_path = tmp_path / "migrate_fail_test.db"
