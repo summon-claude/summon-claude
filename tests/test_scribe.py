@@ -11,11 +11,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from summon_claude.config import SummonConfig
-from summon_claude.sessions.session import (
-    SessionOptions,
-    SummonSession,
-    build_scribe_system_prompt,
-)
+from summon_claude.sessions.prompts import build_scribe_system_prompt
+from summon_claude.sessions.session import SessionOptions, SummonSession
 
 # ---------------------------------------------------------------------------
 # Helpers
