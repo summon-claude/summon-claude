@@ -269,7 +269,7 @@ class PermissionHandler:
     def record_context(
         self,
         role: str,
-        content: str,
+        content: str = "",
         tool_name: str | None = None,
         tool_input: dict[str, Any] | None = None,
     ) -> None:
@@ -400,7 +400,7 @@ class PermissionHandler:
 
         # Record tool call context (after classifier, before HITL — avoids
         # duplicating the pending tool in the classifier's own context window)
-        self.record_context("tool_call", "", tool_name=tool_name, tool_input=input_data)
+        self.record_context("tool_call", tool_name=tool_name, tool_input=input_data)
 
         # 3. Check SDK suggestions for allow — secondary, after static allowlist.
         # Defense-in-depth: write-gated tools that fell through CWD containment

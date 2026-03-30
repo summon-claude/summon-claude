@@ -48,11 +48,7 @@ from summon_claude.config import (
     google_mcp_env,
 )
 from summon_claude.sessions.auth import SessionAuth, generate_spawn_token
-from summon_claude.sessions.classifier import (
-    SummonAutoClassifier,
-    get_effective_allow_rules,
-    get_effective_deny_rules,
-)
+from summon_claude.sessions.classifier import SummonAutoClassifier
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
@@ -2505,10 +2501,11 @@ class SummonSession:
                 current_model = self._last_model_seen or self._model
                 git_branch = await _get_git_branch(self._cwd)
                 # Derive mode label from live classifier state so fallback-disabled
-                # state is reflected. Only show after worktree entry.
+                # state is reflected. Only show after worktree entry and only
+                # when the classifier feature is configured.
                 live_mode = (
                     ("[auto]" if rt.permission_handler.classifier_enabled else "[manual]")
-                    if rt.permission_handler.in_worktree
+                    if rt.permission_handler.in_worktree and self._config.auto_classifier_enabled
                     else None
                 )
                 if (
@@ -3069,8 +3066,8 @@ class SummonSession:
             in_worktree=rt.permission_handler.in_worktree,
             metadata={
                 "models": self._available_models,
-                "deny_rules": get_effective_deny_rules(self._config),
-                "allow_rules": get_effective_allow_rules(self._config),
+                "auto_mode_deny": self._config.auto_mode_deny,
+                "auto_mode_allow": self._config.auto_mode_allow,
             },
         )
 
@@ -3136,7 +3133,14 @@ class SummonSession:
         set_auto = result.metadata.get("set_auto")
         if set_auto is not None:
             rt.permission_handler.set_classifier_enabled(set_auto)
-            self._auto_mode_label = "[auto]" if set_auto else "[manual]"
+            # Derive label from actual handler state (not the request) and
+            # only show when in worktree with classifier configured.
+            if rt.permission_handler.in_worktree and self._config.auto_classifier_enabled:
+                self._auto_mode_label = (
+                    "[auto]" if rt.permission_handler.classifier_enabled else "[manual]"
+                )
+            else:
+                self._auto_mode_label = None
             try:
                 git_branch = await _get_git_branch(self._cwd)
                 topic = _format_topic(
@@ -3687,7 +3691,7 @@ class SummonSession:
                         or result.metadata.get("resume")
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
-                        or match.name == "auto"
+                        or result.metadata.get("standalone")
                     )
                     if standalone_only:
                         annotations.insert(

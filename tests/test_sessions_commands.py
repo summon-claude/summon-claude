@@ -1066,9 +1066,13 @@ class TestAutoHandler:
         assert result.metadata.get("set_auto") is False
 
     async def test_auto_rules(self, make_context):
-        """!auto rules shows effective rules."""
+        """!auto rules shows effective rules from metadata."""
         ctx = make_context(
-            metadata={"deny_rules": "no bad stuff", "allow_rules": "safe stuff", "models": []}
+            metadata={
+                "auto_mode_deny": "no bad stuff",
+                "auto_mode_allow": "safe stuff",
+                "models": [],
+            }
         )
         result = await dispatch("auto", ["rules"], ctx)
         assert "no bad stuff" in result.text

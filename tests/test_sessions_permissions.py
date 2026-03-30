@@ -15,6 +15,7 @@ from summon_claude.sessions.permissions import (
     _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
     _GITHUB_MCP_REQUIRE_APPROVAL,
     _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
+    _WRITE_GATED_TOOLS,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -1221,3 +1222,93 @@ class TestRecordContext:
         await handler.handle("Bash", {"command": "pwd"}, None)
         second_call_approvals = mock_classifier.classify.call_args[1].get("recent_approvals", [])
         assert second_call_approvals == ["Bash"]
+
+
+class TestClassifierFallbackTopicTransition:
+    """Verify that fallback-pause produces a state change detectable by topic update logic."""
+
+    async def test_fallback_changes_classifier_enabled_for_topic_detection(self):
+        """After fallback, classifier_enabled=False triggers live_mode mismatch.
+
+        _finalize_turn_result computes:
+            live_mode = "[auto]" if classifier_enabled else "[manual]"
+        Before fallback: classifier_enabled=True → live_mode="[auto]"
+        After fallback:  classifier_enabled=False → live_mode="[manual]"
+        The mismatch with _auto_mode_label="[auto]" triggers a topic update.
+        """
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(
+            return_value=ClassifyResult("fallback_exceeded", "too many blocks")
+        )
+        handler, _, router = _make_classifier_handler(mock_classifier)
+        router.post_to_main = AsyncMock()
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Before fallback: classifier is enabled
+        assert handler.classifier_enabled is True
+        assert handler.in_worktree is True
+
+        # Trigger fallback via handle()
+        await handler.handle("Bash", {"command": "ls"}, None)
+
+        # After fallback: classifier is disabled
+        assert handler.classifier_enabled is False
+
+        # Simulate _finalize_turn_result's live_mode computation:
+        # This is the exact expression from session.py
+        live_mode = (
+            ("[auto]" if handler.classifier_enabled else "[manual]")
+            if handler.in_worktree
+            else None
+        )
+
+        assert live_mode == "[manual]"
+        # The _auto_mode_label would have been "[auto]" before fallback,
+        # so live_mode != _auto_mode_label → topic update fires
+
+
+class TestClassifierWriteGateOrdering:
+    """Guard tests: write-gated tools cannot reach the classifier pre-worktree."""
+
+    async def test_write_gated_tools_denied_before_classifier_pre_worktree(self):
+        """Write-gated tools hit _check_write_gate (deny) before classifier at step 2g."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "would allow"))
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=True, in_worktree=False
+        )
+
+        for tool in _WRITE_GATED_TOOLS:
+            result = await handler.handle(tool, {"command": "test", "file_path": "/tmp/x"}, None)
+            assert isinstance(result, PermissionResultDeny), f"{tool} should be denied pre-worktree"
+
+        mock_classifier.classify.assert_not_called()
+
+    async def test_classifier_approve_short_circuits_before_sdk_allow(self):
+        """Classifier-approved Bash at step 2g short-circuits before step 3 SDK allow."""
+        from claude_agent_sdk import ToolPermissionContext
+
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "safe"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        # Mock HITL *before* the call so we can verify it wasn't reached
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Create a context with SDK allow suggestion
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        mock_context = MagicMock(spec=ToolPermissionContext)
+        mock_context.suggestions = [mock_suggestion]
+
+        result = await handler.handle("Bash", {"command": "echo hi"}, mock_context)
+        # Classifier approved at step 2g — should not reach HITL at step 4
+        assert isinstance(result, PermissionResultAllow)
+        mock_classifier.classify.assert_awaited_once()
+        handler._request_approval.assert_not_called()

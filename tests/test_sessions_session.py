@@ -29,6 +29,7 @@ from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
     _format_file_references,
+    _format_topic,
     _PendingTurn,
     _SessionRestartError,
     _SessionRuntime,
@@ -3377,6 +3378,40 @@ class TestFinalizeEscalatingWarnings:
         standard = [c for c in calls if "getting large" in str(c)]
         assert len(urgent) == 1
         assert len(standard) == 0
+
+
+class TestFormatTopic:
+    """Unit tests for _format_topic mode parameter."""
+
+    def test_mode_none_omitted(self):
+        """mode=None produces topic without mode label (backwards-compatible)."""
+        topic = _format_topic(model="claude-sonnet-4-6", cwd="/tmp/test", git_branch="main")
+        assert "[auto]" not in topic
+        assert "[manual]" not in topic
+
+    def test_mode_auto_included(self):
+        """mode='[auto]' appears in the topic string."""
+        topic = _format_topic(
+            model="claude-sonnet-4-6", cwd="/tmp/test", git_branch="main", mode="[auto]"
+        )
+        assert "[auto]" in topic
+
+    def test_mode_manual_included(self):
+        """mode='[manual]' appears in the topic string."""
+        topic = _format_topic(
+            model="claude-sonnet-4-6", cwd="/tmp/test", git_branch="main", mode="[manual]"
+        )
+        assert "[manual]" in topic
+
+    def test_truncation_with_mode(self):
+        """Topic with mode is still truncated to 250 chars."""
+        topic = _format_topic(
+            model="claude-sonnet-4-6",
+            cwd="/tmp/" + "x" * 300,
+            git_branch="main",
+            mode="[auto]",
+        )
+        assert len(topic) <= 250
 
 
 class TestPMHeartbeatTopicUpdate:

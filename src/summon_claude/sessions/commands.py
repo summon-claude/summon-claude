@@ -258,33 +258,42 @@ async def _handle_auto(args: list[str], ctx: CommandContext) -> CommandResult:
         status = "enabled" if ctx.auto_enabled else "disabled"
         return CommandResult(
             text=f"*Auto-mode classifier:* `{status}`\n"
-            f"Use `!auto on` or `!auto off` to toggle.\n"
-            f"Use `!auto rules` to see effective rules."
+            "Use `!auto on` or `!auto off` to toggle.\n"
+            "Use `!auto rules` to see effective rules.",
+            metadata={"standalone": True},
         )
     action = args[0].lower()
     if action == "on":
         if not ctx.in_worktree:
             return CommandResult(
                 text=":warning: Auto-mode requires write access. "
-                "Enter a worktree first (`EnterWorktree`)."
+                "Enter a worktree first (`EnterWorktree`).",
+                metadata={"standalone": True},
             )
         return CommandResult(
             text=":gear: Enabling auto-mode classifier...",
-            metadata={"set_auto": True},
+            metadata={"set_auto": True, "standalone": True},
         )
     if action == "off":
         return CommandResult(
             text=":gear: Disabling auto-mode classifier. Tool calls will require Slack approval.",
-            metadata={"set_auto": False},
+            metadata={"set_auto": False, "standalone": True},
         )
     if action == "rules":
-        deny = ctx.metadata.get("deny_rules", "(unavailable)")
-        allow = ctx.metadata.get("allow_rules", "(unavailable)")
+        from summon_claude.sessions.classifier import (  # noqa: PLC0415
+            get_effective_allow_rules,
+            get_effective_deny_rules,
+        )
+
+        deny = get_effective_deny_rules(ctx.metadata.get("auto_mode_deny", ""))
+        allow = get_effective_allow_rules(ctx.metadata.get("auto_mode_allow", ""))
         return CommandResult(
-            text=f"*Block rules:*\n```\n{deny}\n```\n\n*Allow rules:*\n```\n{allow}\n```"
+            text=f"*Block rules:*\n```\n{deny}\n```\n\n*Allow rules:*\n```\n{allow}\n```",
+            metadata={"standalone": True},
         )
     return CommandResult(
-        text=f":warning: Unknown auto-mode action `{action}`. Use `on`, `off`, or `rules`."
+        text=f":warning: Unknown auto-mode action `{action}`. Use `on`, `off`, or `rules`.",
+        metadata={"standalone": True},
     )
 
 
