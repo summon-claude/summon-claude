@@ -790,17 +790,6 @@ class SessionRegistry:
             await db.commit()
         return cursor.rowcount
 
-    async def delete_all_scheduled_jobs(self, session_id: str) -> int:
-        """Bulk delete all scheduled jobs for a session. Returns count deleted."""
-        db = self._check_connected()
-        async with self._lock:
-            cursor = await db.execute(
-                "DELETE FROM scheduled_jobs WHERE session_id = ?",
-                (session_id,),
-            )
-            await db.commit()
-        return cursor.rowcount
-
     # --- Project methods ---
 
     async def add_project(self, name: str, directory: str) -> str:

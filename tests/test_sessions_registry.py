@@ -548,23 +548,6 @@ class TestScheduledJobs:
         assert len(surviving) == 1
         assert surviving[0]["id"] == "job-fresh"
 
-    async def test_delete_all(self, registry):
-        await registry.register("sess-sj-all", 111, "/tmp")
-        for i in range(3):
-            await registry.save_scheduled_job(
-                session_id="sess-sj-all",
-                job_id=f"job-all-{i}",
-                cron_expr="*/5 * * * *",
-                prompt=f"job {i}",
-                recurring=True,
-                max_lifetime_s=86400,
-                created_at="2026-01-01T10:00:00+00:00",
-            )
-        count = await registry.delete_all_scheduled_jobs("sess-sj-all")
-        assert count == 3
-        jobs = await registry.list_scheduled_jobs("sess-sj-all")
-        assert jobs == []
-
     async def test_save_validates_empty_ids(self, registry):
         await registry.register("sess-sj-val", 111, "/tmp")
         with pytest.raises(ValueError, match="job_id"):
