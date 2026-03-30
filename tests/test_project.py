@@ -438,6 +438,25 @@ class TestBuildPmSystemPromptWorkflow:
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
         assert "Ready for Review" not in result["append"]
 
+    def test_non_git_pm_prompt_no_worktree_orchestration(self):
+        """SC-08 guard: non-git PM prompt must not include worktree orchestration."""
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
+        # Worktree orchestration section must be absent
+        assert "## Worktree Orchestration" not in result["append"]
+        assert "## Worktree Cleanup" not in result["append"]
+        # PR review section (which uses git) must be absent
+        assert "## PR Review" not in result["append"]
+
+    def test_non_git_pm_prompt_contains_safety_section(self):
+        """SC-06 guard: safety section always included regardless of git status."""
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
+        assert "NEVER force-push" in result["append"]
+
+    def test_git_pm_prompt_contains_enterworktree(self):
+        """Git PM prompt must still include EnterWorktree instructions."""
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=True)
+        assert "EnterWorktree" in result["append"]
+
 
 # ---------------------------------------------------------------------------
 # PM welcome message
