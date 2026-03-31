@@ -380,6 +380,70 @@ async def _check_features(db_path: Path) -> tuple[bool, bool, int]:
     return has_workflow, has_hooks, project_count
 
 
+def jira_login() -> None:
+    """Interactive Jira OAuth authentication.
+
+    Opens a browser for Atlassian OAuth 2.1 authorization.  Credentials are
+    stored under summon's XDG config directory with 0600 permissions.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from summon_claude.jira_auth import (  # noqa: PLC0415
+        discover_cloud_sites,
+        save_jira_token,
+        start_auth_flow,
+    )
+
+    click.echo("Starting Jira OAuth flow — a browser window will open for authorization.")
+    try:
+        token_data = asyncio.run(start_auth_flow())
+    except TimeoutError as e:
+        click.echo(f"Timed out: {e}", err=True)
+        sys.exit(1)
+    except RuntimeError as e:
+        click.echo(f"Authentication failed: {e}", err=True)
+        sys.exit(1)
+
+    # Discover accessible Atlassian cloud sites and pick the first one.
+    access_token = token_data.get("access_token", "")
+    sites = asyncio.run(discover_cloud_sites(access_token))
+    if sites:
+        site = sites[0]
+        token_data["cloud_id"] = site["id"]
+        token_data["cloud_name"] = site.get("name", "")
+        save_jira_token(token_data)
+        click.echo(f"Jira authenticated successfully (site: {site.get('name', site['id'])}).")
+    else:
+        # No accessible resources — still save token; cloud_id left absent.
+        save_jira_token(token_data)
+        click.echo(
+            "Jira authenticated but no accessible cloud sites found. "
+            "Ensure your Atlassian account has access to a Jira project."
+        )
+
+
+def jira_logout() -> None:
+    """Remove stored Jira OAuth credentials."""
+    from summon_claude.jira_auth import jira_credentials_exist, logout  # noqa: PLC0415
+
+    if not jira_credentials_exist():
+        click.echo("No Jira credentials to remove.")
+        return
+    logout()
+    click.echo("Jira credentials removed.")
+
+
+def jira_status() -> None:
+    """Check Jira authentication status (CLI entry point)."""
+    from summon_claude.jira_auth import check_jira_status  # noqa: PLC0415
+
+    err = check_jira_status()
+    if err is None:
+        click.echo("Jira: authenticated")
+    else:
+        click.echo(f"Jira: {err}")
+
+
 def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     """Check config validity. Returns True if all checks pass."""
     from summon_claude.cli.google_auth import _check_google_status  # noqa: PLC0415
@@ -618,6 +682,20 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo()
         click.echo(click.style("Features:", bold=True))
         _print_feature_inventory(db_path, values)
+
+    # Jira (optional, only if credentials exist)
+    from summon_claude.jira_auth import check_jira_status, jira_credentials_exist  # noqa: PLC0415
+
+    if jira_credentials_exist():
+        jira_err = check_jira_status()
+        if jira_err is None:
+            if not quiet:
+                click.echo("  [PASS] Jira credentials valid")
+        else:
+            click.echo(f"  [FAIL] Jira: {jira_err}")
+            all_pass = False
+    elif not quiet:
+        click.echo("  [INFO] Jira: not configured (optional)")
 
     return all_pass
 

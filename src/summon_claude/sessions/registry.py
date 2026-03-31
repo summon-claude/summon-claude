@@ -932,7 +932,7 @@ class SessionRegistry:
             return [dict(r) for r in rows]
 
     _UPDATABLE_PROJECT_FIELDS: frozenset[str] = frozenset(
-        {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory"}
+        {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory", "jira_jql"}
     )
 
     async def update_project(self, project_id: str, **kwargs: Any) -> None:

@@ -327,6 +327,8 @@ def _build_google_workspace_mcp_untrusted(services: str, account: GoogleAccount)
     }
 
 
+
+
 AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
 
@@ -1704,7 +1706,8 @@ class SummonSession:
             profile = "scribe"
         else:
             profile = "agent"
-        template = get_canvas_template(profile)
+        _jira_enabled = self._config.jira_enabled
+        template = get_canvas_template(profile, jira_enabled=_jira_enabled)
         markdown = template.replace("{model}", self._model or "unknown").replace("{cwd}", self._cwd)
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
@@ -1830,6 +1833,40 @@ class SummonSession:
             gh_mcp = self._config.github_mcp_config()
             if gh_mcp:
                 mcp_servers["github"] = gh_mcp
+
+        # Add Jira remote MCP if credentials are configured.
+        # Same lazy-connection resilience as GitHub: failures surface as individual
+        # tool errors, not session startup failures.
+        # SC-03: only the access_token is embedded here — refresh_token and
+        # client_secret stay in the token file on disk.
+        #
+        # CR-002/PERF-001: refresh must happen in the async context — never via
+        # asyncio.run() inside a running loop. After refresh, load_jira_token()
+        # is a cheap sync read of the fresh file.
+        # PERF-002: single token load extracts both access_token and cloud_id.
+        jira_mcp: dict | None = None
+        _jira_cloud_id: str | None = None
+        if self._config.jira_enabled:
+            from summon_claude.jira_auth import (  # noqa: PLC0415
+                load_jira_token,
+                refresh_jira_token_if_needed,
+            )
+
+            await refresh_jira_token_if_needed()
+            _jira_token = load_jira_token()
+            if _jira_token is not None:
+                _access_token = _jira_token.get("access_token")
+                _jira_cloud_id = _jira_token.get("cloud_id")
+                if _access_token:
+                    jira_mcp = {
+                        "type": "http",
+                        "url": "https://mcp.atlassian.com/v1/mcp",
+                        "headers": {
+                            "Authorization": f"Bearer {_access_token}",
+                        },
+                    }
+        if jira_mcp:
+            mcp_servers["jira"] = jira_mcp
 
         if self._canvas_store is not None and self._authenticated_user_id is not None:
             canvas_mcp = create_canvas_mcp_server(
@@ -1993,6 +2030,20 @@ class SummonSession:
         # external content from spoofing the scan trigger system messages.
         _scribe_scan_nonce = secrets.token_hex(8) if is_scribe else ""
 
+        # Fetch Jira params once for PM sessions (survives compaction restarts)
+        # jira_mcp is already computed above — use it as the enabled signal.
+        # PERF-002: _jira_cloud_id is extracted from the same token load above.
+        pm_jira_enabled = bool(jira_mcp) and is_pm
+        pm_jira_jql: str | None = None
+        pm_jira_cloud_id: str | None = _jira_cloud_id if pm_jira_enabled else None
+        if pm_jira_enabled and self._project_id:
+            try:
+                project_row = await rt.registry.get_project(self._project_id)
+                if project_row:
+                    pm_jira_jql = project_row.get("jira_jql") or None
+            except Exception as e:
+                logger.warning("Failed to fetch project Jira config: %s", e)
+
         while True:
             # Cancel any orphaned scheduler tasks from prior iteration and re-register
             scheduler.cancel_all()
@@ -2051,6 +2102,9 @@ class SummonSession:
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
                     is_git_repo=is_git_repo,
+                    jira_enabled=pm_jira_enabled,
+                    jira_jql=pm_jira_jql,
+                    jira_cloud_id=pm_jira_cloud_id,
                 )
                 # PM prompt is built separately — inject compaction context if present
                 if restart_count > 0 and system_prompt_append != base_prompt:

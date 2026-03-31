@@ -948,6 +948,96 @@ class TestSchemaVersioning:
                 assert version == CURRENT_SCHEMA_VERSION
 
 
+class TestMigration12To13:
+    """Targeted tests for migration 12 → 13 (adds jira_jql to projects table)."""
+
+    async def test_migrate_12_to_13_adds_jira_jql(self, tmp_path):
+        """Migration must add jira_jql to a projects table that lacks it."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_12_to_13
+
+        # Build a minimal projects table without jira_jql (simulating v12 schema)
+        db_path = tmp_path / "migrate_12_to_13.db"
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL,
+                    hooks TEXT DEFAULT NULL
+                )
+                """
+            )
+
+            # Confirm jira_jql absent before migration
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols_before = {row[1] for row in await cursor.fetchall()}
+            assert "jira_jql" not in cols_before
+
+            # Run the targeted migration
+            await _migrate_12_to_13(raw_db)
+
+            # Confirm jira_jql present after migration
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols_after = {row[1] for row in await cursor.fetchall()}
+            assert "jira_jql" in cols_after
+
+    async def test_migrate_12_to_13_idempotent(self, tmp_path):
+        """Running migration 12→13 twice must not raise."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_12_to_13
+
+        db_path = tmp_path / "idempotent_12_to_13.db"
+        async with SessionRegistry(db_path=db_path):
+            pass
+
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            # First run — column already exists (added by full migration chain)
+            await _migrate_12_to_13(raw_db)
+            # Second run — must be a no-op, not raise
+            await _migrate_12_to_13(raw_db)
+
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols = {row[1] for row in await cursor.fetchall()}
+            assert "jira_jql" in cols
+
+    async def test_migrate_12_to_13_default_is_null(self, tmp_path):
+        """Existing rows must have NULL jira_jql after migration."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_12_to_13
+
+        db_path = tmp_path / "default_null_12_to_13.db"
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL
+                )
+                """
+            )
+            await raw_db.execute(
+                "INSERT INTO projects (project_id, name, directory, channel_prefix)"
+                " VALUES ('proj-1', 'Test', '/tmp', 'tst')"
+            )
+
+            await _migrate_12_to_13(raw_db)
+
+            async with raw_db.execute(
+                "SELECT jira_jql FROM projects WHERE project_id = 'proj-1'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] is None  # DEFAULT NULL
+
+
 class TestSpawnTokens:
     async def test_store_and_consume_spawn_token(self, registry):
         from datetime import UTC, datetime, timedelta

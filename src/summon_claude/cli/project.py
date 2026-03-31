@@ -96,6 +96,22 @@ async def async_project_list() -> list[dict[str, Any]]:
     return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
+async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
+    """Update mutable project fields by name or ID.
+
+    Pass ``jira_jql=""`` to clear the JQL filter.
+    Raises ``click.ClickException`` if the project is not found.
+    """
+    async with SessionRegistry() as registry:
+        project = await registry.get_project(name_or_id)
+        if project is None:
+            raise click.ClickException(f"No project found: {name_or_id!r}")
+        try:
+            await registry.update_project(project["project_id"], **kwargs)
+        except (ValueError, KeyError) as e:
+            raise click.ClickException(str(e)) from e
+
+
 async def launch_project_managers() -> None:
     """Start PM sessions for all registered projects that don't have one running.
 

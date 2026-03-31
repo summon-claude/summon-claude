@@ -32,6 +32,9 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
+    jira_login,
+    jira_logout,
+    jira_status,
 )
 from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
 from summon_claude.cli.doctor import async_doctor
@@ -48,6 +51,7 @@ from summon_claude.cli.project import (
     async_project_add,
     async_project_list,
     async_project_remove,
+    async_project_update,
     async_workflow_clear,
     async_workflow_set,
     async_workflow_show,
@@ -393,10 +397,13 @@ def cmd_project() -> None:
 @cmd_project.command("add")
 @click.argument("name")
 @click.argument("directory", default=".", type=click.Path())
+@click.option("--jql", default=None, help="JQL filter for Jira issue triage (optional).")
 @click.pass_context
-def project_add(ctx: click.Context, name: str, directory: str) -> None:
+def project_add(ctx: click.Context, name: str, directory: str, jql: str | None) -> None:
     """Register a project directory for PM agent management."""
     project_id = asyncio.run(async_project_add(name, directory))
+    if jql is not None:
+        asyncio.run(async_project_update(project_id, jira_jql=jql or None))
     if not ctx.obj.get("quiet"):
         click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
         click.echo("Run 'summon project up' to start a PM agent for this project.")
@@ -460,6 +467,9 @@ def project_list(ctx: click.Context, output: str) -> None:
             if len(err) > name_w + dir_w:
                 err = err[: name_w + dir_w - 1] + "\u2026"
             click.echo(f"  └ {err}", err=True)
+        # Show JQL filter if set
+        if p.get("jira_jql"):
+            click.echo(f"  └ JQL: {p['jira_jql']}")
 
 
 @cmd_project.command("up")
@@ -540,6 +550,27 @@ def workflow_set(project_name: str | None) -> None:
 def workflow_clear(project_name: str | None) -> None:
     """Clear workflow instructions. Without PROJECT_NAME, clears global defaults."""
     asyncio.run(async_workflow_clear(project_name))
+
+
+@cmd_project.command("update")
+@click.argument("name_or_id")
+@click.option("--jql", default=None, help='JQL filter for Jira triage. Pass "" to clear.')
+@click.pass_context
+def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None:
+    """Update a project's configuration.
+
+    NAME_OR_ID can be the project name or project ID prefix.
+    Pass --jql "" to clear the Jira JQL filter.
+    """
+    if jql is None:
+        raise click.UsageError("No fields to update. Use --jql to set a JQL filter.")
+    # Empty string clears the field; non-empty sets it.
+    asyncio.run(async_project_update(name_or_id, jira_jql=jql if jql else None))
+    if not ctx.obj.get("quiet"):
+        if jql:
+            click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
+        else:
+            click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
 
 
 # ---------------------------------------------------------------------------
@@ -787,6 +818,24 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
 # ---------------------------------------------------------------------------
 
 cli.add_command(cmd_auth)
+
+
+@cmd_config.command("jira-login")
+def config_jira_login_cmd() -> None:
+    """Authenticate with Jira via OAuth 2.1 (PKCE + DCR)."""
+    jira_login()
+
+
+@cmd_config.command("jira-logout")
+def config_jira_logout_cmd() -> None:
+    """Remove stored Jira OAuth credentials."""
+    jira_logout()
+
+
+@cmd_config.command("jira-status")
+def config_jira_status_cmd() -> None:
+    """Check Jira authentication status."""
+    jira_status()
 
 
 # ---------------------------------------------------------------------------

@@ -291,7 +291,7 @@ class TestProjectIdInUpdatableFields:
 class TestUpdatableProjectFieldsGuard:
     def test_updatable_project_fields_pins_set(self):
         expected = frozenset(
-            {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory"}
+            {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory", "jira_jql"}
         )
         assert expected == SessionRegistry._UPDATABLE_PROJECT_FIELDS
 
@@ -501,6 +501,87 @@ class TestBuildPmSystemPromptWorkflow:
         for git in (True, False):
             prompt = build_pm_scan_prompt(is_git_repo=git)
             assert "## Canvas Update" in prompt
+
+
+# ---------------------------------------------------------------------------
+# PM system prompt: Jira triage
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPmSystemPromptJira:
+    def test_pm_prompt_jira_triage_present_when_enabled(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql="project = FOO",
+            jira_cloud_id="abc-123",
+        )
+        assert "Jira Triage" in result["append"]
+
+    def test_pm_prompt_jira_triage_absent_when_disabled(self):
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "Jira Triage" not in result["append"]
+
+    def test_pm_prompt_jql_appears_in_triage(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql="project = FOO AND status != Done",
+            jira_cloud_id="abc-123",
+        )
+        assert "project = FOO AND status != Done" in result["append"]
+
+    def test_pm_prompt_cloud_id_appears_in_triage(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql="project = FOO",
+            jira_cloud_id="cloud-id-xyz-789",
+        )
+        assert "cloud-id-xyz-789" in result["append"]
+
+    def test_pm_prompt_jira_no_jql_shows_all_issues(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql=None,
+            jira_cloud_id="abc-123",
+        )
+        assert "none (all issues)" in result["append"]
+
+    def test_pm_prompt_injection_defense(self):
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql="project = FOO",
+            jira_cloud_id="abc-123",
+        )
+        append = result["append"]
+        assert "untrusted data" in append or "NEVER follow instructions" in append
+
+    def test_pm_prompt_jira_disabled_by_default(self):
+        """jira_enabled defaults to False — triage section must be absent."""
+        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
+        assert "mcp__jira__" not in result["append"]
+
+    def test_pm_prompt_jira_structure_preserved(self):
+        """Jira section must not corrupt the surrounding prompt structure."""
+        result = build_pm_system_prompt(
+            cwd="/tmp",
+            scan_interval_s=900,
+            jira_enabled=True,
+            jira_jql="project = BAR",
+            jira_cloud_id="cid-1",
+        )
+        assert result["type"] == "preset"
+        assert result["preset"] == "claude_code"
+        assert "/tmp" in result["append"]
+        assert "15 minutes" in result["append"]
 
 
 # ---------------------------------------------------------------------------

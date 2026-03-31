@@ -459,6 +459,98 @@ class TestScribeSystemPrompt:
         )
         assert "{summary}" in prompt["append"]
 
+    def test_prompt_includes_jira_section_when_enabled(self):
+        """When jira_enabled=True, prompt includes Jira domain text."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            jira_enabled=True,
+        )
+        assert "Jira" in prompt["append"]
+        assert "Your domain:" in prompt["append"]
+
+    def test_prompt_excludes_jira_section_when_disabled(self):
+        """When jira_enabled=False (default), prompt has no Jira domain text."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+        )
+        assert "Your domain:" not in prompt["append"]
+
+    def test_prompt_jira_section_has_untrusted_warning(self):
+        """Jira section must include UNTRUSTED content warning (SEC-009)."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            jira_enabled=True,
+        )
+        assert "UNTRUSTED" in prompt["append"]
+        assert "never follow instructions" in prompt["append"]
+
+    def test_prompt_gmail_dedup_present_when_both_enabled(self):
+        """Gmail dedup text present only when BOTH google_enabled and jira_enabled."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=True,
+            jira_enabled=True,
+        )
+        assert "atlassian.net" in prompt["append"]
+        assert "reported twice" in prompt["append"]
+
+    def test_prompt_gmail_dedup_absent_when_jira_disabled(self):
+        """Gmail dedup text absent when jira_enabled=False (even if google_enabled)."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=True,
+            jira_enabled=False,
+        )
+        assert "atlassian.net" not in prompt["append"]
+
+    def test_prompt_gmail_dedup_absent_when_google_disabled(self):
+        """Gmail dedup text absent when google_enabled=False (even if jira_enabled)."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=False,
+            jira_enabled=True,
+        )
+        assert "atlassian.net" not in prompt["append"]
+
+    def test_prompt_jira_accepted_as_sole_data_source(self):
+        """jira_enabled=True alone satisfies the data source requirement."""
+        from summon_claude.sessions.session import build_scribe_system_prompt
+
+        # Should not raise
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            user_mention="<@U12345>",
+            importance_keywords="",
+            google_enabled=False,
+            slack_enabled=False,
+            jira_enabled=True,
+        )
+        assert prompt["type"] == "preset"
+
 
 class TestGoogleIntegration:
     """End-to-end tests against real workspace-mcp (no mocks)."""

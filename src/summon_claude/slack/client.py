@@ -53,6 +53,13 @@ def sanitize_for_mrkdwn(text: str, max_len: int = 100) -> str:
     return sanitized if max_len >= len(sanitized) else sanitized[:max_len]
 
 
+# Note: Atlassian OAuth access tokens are standard JWTs (eyJ...) with no
+# Atlassian-specific prefix, so they cannot be reliably distinguished from
+# other JWTs and are NOT included here (SEC-005 / SC-09). The primary defence
+# is architectural: Atlassian tokens are passed only to the MCP server
+# subprocess via config headers and never flow through summon's Slack output
+# methods. Do not add a blanket "eyJ" pattern — it would cause widespread
+# false positives across all base64-encoded content.
 _SECRET_RE = re.compile(
     r"xox[a-z]-[A-Za-z0-9\-]+|xapp-[A-Za-z0-9\-]+|sk-ant-[A-Za-z0-9\-]+"
     r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"

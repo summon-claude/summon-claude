@@ -1591,6 +1591,63 @@ class TestMCPRegistration:
         result = await self._capture_mcp_servers_with_config()
         assert "github" not in result["mcp_servers"]
 
+    async def test_jira_mcp_wired_when_credentials_configured(self):
+        _jira_token = {
+            "access_token": "test-jira-token",
+            "cloud_id": "abc-123",
+            "expires_at": 9999999999,
+        }
+        with (
+            patch(
+                "summon_claude.jira_auth.jira_credentials_exist",
+                return_value=True,
+            ),
+            patch(
+                "summon_claude.jira_auth.refresh_jira_token_if_needed",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "summon_claude.jira_auth.load_jira_token",
+                return_value=_jira_token,
+            ),
+        ):
+            result = await self._capture_mcp_servers_with_config()
+        assert "jira" in result["mcp_servers"]
+        assert result["mcp_servers"]["jira"]["type"] == "http"
+
+    async def test_jira_mcp_not_wired_when_no_credentials(self):
+        with patch(
+            "summon_claude.jira_auth.jira_credentials_exist",
+            return_value=False,
+        ):
+            result = await self._capture_mcp_servers_with_config()
+        assert "jira" not in result["mcp_servers"]
+
+    async def test_jira_and_github_mcp_wired_independently(self):
+        """Both Jira and GitHub MCP can be wired in the same session."""
+        _jira_token = {
+            "access_token": "test-jira-token",
+            "cloud_id": "abc-123",
+            "expires_at": 9999999999,
+        }
+        with (
+            patch(
+                "summon_claude.jira_auth.jira_credentials_exist",
+                return_value=True,
+            ),
+            patch(
+                "summon_claude.jira_auth.refresh_jira_token_if_needed",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "summon_claude.jira_auth.load_jira_token",
+                return_value=_jira_token,
+            ),
+        ):
+            result = await self._capture_mcp_servers_with_config(github_pat="ghp_test123")
+        assert "github" in result["mcp_servers"]
+        assert "jira" in result["mcp_servers"]
+
     async def test_github_mcp_connection_failure_propagates(self):
         """SDK startup failure with GitHub MCP configured propagates cleanly.
 
