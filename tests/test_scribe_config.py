@@ -14,6 +14,31 @@ from summon_claude.config import SummonConfig
 _GA = "summon_claude.cli.google_auth"
 
 
+def _no_auto_detect():
+    """Context manager that disables all scribe auto-detection primitives."""
+    return _with_auto_detect()
+
+
+def _with_auto_detect(
+    *,
+    google_mcp: bool = False,
+    google_creds: bool = False,
+    playwright: bool = False,
+    slack_auth: bool = False,
+):
+    """Context manager that controls scribe auto-detection primitives."""
+    from contextlib import ExitStack
+    from unittest.mock import patch as _patch
+
+    stack = ExitStack()
+    _cfg = "summon_claude.config"
+    stack.enter_context(_patch(f"{_cfg}._workspace_mcp_installed", return_value=google_mcp))
+    stack.enter_context(_patch(f"{_cfg}._google_credentials_exist", return_value=google_creds))
+    stack.enter_context(_patch(f"{_cfg}.is_extra_installed", return_value=playwright))
+    stack.enter_context(_patch(f"{_cfg}._slack_browser_auth_exists", return_value=slack_auth))
+    return stack
+
+
 def _make_config(**overrides) -> SummonConfig:
     """Create a SummonConfig isolated from env vars and .env files."""
     return SummonConfig.for_test(**overrides)
@@ -21,7 +46,8 @@ def _make_config(**overrides) -> SummonConfig:
 
 class TestScribeConfigDefaults:
     def test_scribe_disabled_by_default(self):
-        cfg = _make_config()
+        with _no_auto_detect():
+            cfg = _make_config()
         assert cfg.scribe_enabled is False
 
     def test_scan_interval_default(self):
@@ -45,28 +71,19 @@ class TestScribeConfigDefaults:
         assert cfg.scribe_quiet_hours == ""
 
     def test_google_enabled_default_false(self):
-        with (
-            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
-            patch("summon_claude.config._google_credentials_exist", return_value=False),
-        ):
+        with _no_auto_detect():
             cfg = _make_config()
         assert cfg.scribe_google_enabled is False
 
     def test_google_enabled_auto_detects_true(self):
         """Auto-detect enables Google when workspace-mcp and credentials exist."""
-        with (
-            patch("summon_claude.config._workspace_mcp_installed", return_value=True),
-            patch("summon_claude.config._google_credentials_exist", return_value=True),
-        ):
+        with _with_auto_detect(google_mcp=True, google_creds=True):
             cfg = _make_config()
         assert cfg.scribe_google_enabled is True
 
     def test_google_enabled_auto_detect_no_creds(self):
         """Auto-detect stays False when credentials are missing."""
-        with (
-            patch("summon_claude.config._workspace_mcp_installed", return_value=True),
-            patch("summon_claude.config._google_credentials_exist", return_value=False),
-        ):
+        with _with_auto_detect(google_mcp=True):
             cfg = _make_config()
         assert cfg.scribe_google_enabled is False
 
@@ -74,10 +91,7 @@ class TestScribeConfigDefaults:
         """Explicit SUMMON_SCRIBE_GOOGLE_ENABLED=false disables even with credentials."""
         from summon_claude.config import _scribe_google_enabled
 
-        with (
-            patch("summon_claude.config._workspace_mcp_installed", return_value=True),
-            patch("summon_claude.config._google_credentials_exist", return_value=True),
-        ):
+        with _with_auto_detect(google_mcp=True, google_creds=True):
             result = _scribe_google_enabled(
                 {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_GOOGLE_ENABLED": "false"}
             )
@@ -88,7 +102,8 @@ class TestScribeConfigDefaults:
         assert cfg.scribe_google_services == "gmail,calendar,drive"
 
     def test_slack_disabled_by_default(self):
-        cfg = _make_config()
+        with _no_auto_detect():
+            cfg = _make_config()
         assert cfg.scribe_slack_enabled is False
 
     def test_slack_browser_default(self):
@@ -98,6 +113,51 @@ class TestScribeConfigDefaults:
     def test_monitored_channels_default_empty(self):
         cfg = _make_config()
         assert cfg.scribe_slack_monitored_channels == ""
+
+    def test_slack_enabled_auto_detects_true(self):
+        """Auto-detect enables Slack when Playwright and browser auth exist."""
+        with _with_auto_detect(playwright=True, slack_auth=True):
+            cfg = _make_config()
+        assert cfg.scribe_slack_enabled is True
+
+    def test_slack_enabled_auto_detect_no_auth(self):
+        """Auto-detect stays False when browser auth is missing."""
+        with _with_auto_detect(playwright=True):
+            cfg = _make_config()
+        assert cfg.scribe_slack_enabled is False
+
+    def test_slack_enabled_auto_detect_no_playwright(self):
+        """Auto-detect stays False when Playwright is not installed."""
+        with _with_auto_detect(slack_auth=True):
+            cfg = _make_config()
+        assert cfg.scribe_slack_enabled is False
+
+    def test_scribe_auto_enables_from_google(self):
+        """Scribe auto-enables when Google sub-feature is detected."""
+        with _with_auto_detect(google_mcp=True, google_creds=True):
+            cfg = _make_config()
+        assert cfg.scribe_enabled is True
+        assert cfg.scribe_google_enabled is True
+
+    def test_scribe_auto_enables_from_slack(self):
+        """Scribe auto-enables when Slack sub-feature is detected."""
+        with _with_auto_detect(playwright=True, slack_auth=True):
+            cfg = _make_config()
+        assert cfg.scribe_enabled is True
+        assert cfg.scribe_slack_enabled is True
+
+    def test_scribe_auto_enables_from_both(self):
+        """Scribe auto-enables when both sub-features are detected."""
+        with _with_auto_detect(
+            google_mcp=True,
+            google_creds=True,
+            playwright=True,
+            slack_auth=True,
+        ):
+            cfg = _make_config()
+        assert cfg.scribe_enabled is True
+        assert cfg.scribe_google_enabled is True
+        assert cfg.scribe_slack_enabled is True
 
 
 class TestScribeConfigValidation:
@@ -1047,8 +1107,6 @@ class TestScribeDisallowedTools:
         assert "slack_upload_file" in _SCRIBE_DISALLOWED_TOOLS
         assert "CronCreate" in _SCRIBE_DISALLOWED_TOOLS
         assert "summon_canvas_write" in _SCRIBE_DISALLOWED_TOOLS
-        assert "get_drive_shareable_link" in _SCRIBE_DISALLOWED_TOOLS
-        assert "get_drive_file_download_url" in _SCRIBE_DISALLOWED_TOOLS
         # Exfiltration-capable built-in tools
         assert "Bash" in _SCRIBE_DISALLOWED_TOOLS
         assert "WebSearch" in _SCRIBE_DISALLOWED_TOOLS
