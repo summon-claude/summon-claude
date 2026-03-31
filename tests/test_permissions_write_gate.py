@@ -583,13 +583,37 @@ class TestNonGitContainment:
         assert isinstance(result, PermissionResultAllow)
         client.post_interactive.assert_called()
 
-    async def test_symlink_escape_rejected(self, tmp_path: Path):
-        """Path traversal via symlink must NOT be auto-approved."""
+    async def test_path_traversal_rejected(self, tmp_path: Path):
+        """Path traversal via .. must NOT be auto-approved."""
         handler, client = self._make_non_git_handler(tmp_path)
         handler._write_access_granted = True
         escape_path = str(tmp_path / ".." / "etc" / "passwd")
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Edit", {"file_path": escape_path}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_real_symlink_escape_rejected(self, tmp_path: Path):
+        """A symlink inside containment root pointing outside must go to HITL."""
+        handler, client = self._make_non_git_handler(tmp_path)
+        handler._write_access_granted = True
+        # Create a symlink inside containment root that points outside
+        outside_target = tmp_path.parent / "outside_file.txt"
+        evil_link = tmp_path / "evil_link.txt"
+        evil_link.symlink_to(outside_target)
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Write", {"file_path": str(evil_link)}, None)
+        # Must go to HITL because resolve() follows symlink outside containment
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_called()
+
+    async def test_bash_after_gate_non_git_goes_to_hitl(self, tmp_path: Path):
+        """SC-05: Bash always falls through to HITL in non-git mode, same as git."""
+        handler, client = self._make_non_git_handler(tmp_path)
+        handler._write_access_granted = True
+        client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+        result = await handler.handle("Bash", {"command": "echo hello"}, None)
+        # Bash has no file path — falls through to arg cache / HITL
         assert isinstance(result, PermissionResultAllow)
         client.post_interactive.assert_called()
 

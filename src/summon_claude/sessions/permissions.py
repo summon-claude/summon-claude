@@ -502,7 +502,7 @@ class PermissionHandler:
                     # the current root. Widening would expand the write-allowed surface.
                     if self._containment_root is not None:
                         current = self._containment_root
-                        if candidate.is_relative_to(current) or candidate == current:
+                        if candidate.is_relative_to(current):
                             # Narrowing or same: safe to update
                             self._containment_root = candidate
                         else:
