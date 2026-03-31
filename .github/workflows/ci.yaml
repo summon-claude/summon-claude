@@ -114,6 +114,6 @@ jobs:
         if: hashFiles('tests/docs/test_bash_codeblocks.py') != ''
         run: uv run pytest tests/docs/test_bash_codeblocks.py -v -m docs -n0
         env:
-          SUMMON_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
-          SUMMON_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
-          SUMMON_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}
+          SUMMON_TEST_SLACK_BOT_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_BOT_TOKEN }}
+          SUMMON_TEST_SLACK_APP_TOKEN: ${{ secrets.SUMMON_TEST_SLACK_APP_TOKEN }}
+          SUMMON_TEST_SLACK_SIGNING_SECRET: ${{ secrets.SUMMON_TEST_SLACK_SIGNING_SECRET }}

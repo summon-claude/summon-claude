@@ -281,16 +281,17 @@ class TestThinkingConfigIntegration:
 # ------------------------------------------------------------------
 
 
+@pytest.mark.asyncio(loop_scope="class")
 class TestSDKCommandInventory:
     """Verify COMMAND_ACTIONS covers all SDK commands."""
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     async def server_info(self):
         """Get server_info from a real Claude SDK connection."""
         options = ClaudeAgentOptions(cwd="/tmp")
         async with ClaudeSDKClient(options) as client:
             info = await client.get_server_info()
-        return info
+        yield info
 
     async def test_all_sdk_commands_in_inventory(self, server_info):
         if not server_info:

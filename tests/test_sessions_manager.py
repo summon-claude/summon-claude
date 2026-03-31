@@ -2414,7 +2414,10 @@ class TestSuspendOnShutdown:
         mock_adhoc_session.request_shutdown = MagicMock()
 
         manager._sessions = {"sid-1": mock_project_session, "sid-2": mock_adhoc_session}
-        manager._tasks = {"sid-1": MagicMock(), "sid-2": MagicMock()}
+        t1 = asyncio.create_task(asyncio.sleep(0))
+        t2 = asyncio.create_task(asyncio.sleep(0))
+        await asyncio.sleep(0)  # let tasks complete
+        manager._tasks = {"sid-1": t1, "sid-2": t2}
         manager._suspend_on_shutdown = True
 
         mock_reg = MagicMock()
@@ -2447,7 +2450,9 @@ class TestSuspendOnShutdown:
         mock_session.request_shutdown = MagicMock()
 
         manager._sessions = {"sid-1": mock_session}
-        manager._tasks = {"sid-1": MagicMock()}
+        t1 = asyncio.create_task(asyncio.sleep(0))
+        await asyncio.sleep(0)
+        manager._tasks = {"sid-1": t1}
         manager._suspend_on_shutdown = False
 
         mock_reg = MagicMock()

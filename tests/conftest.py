@@ -34,12 +34,12 @@ def _isolate_summon_config():
         if k.startswith("SUMMON_") and not k.startswith("SUMMON_TEST_")
     }
     original_env_file = SummonConfig.model_config.get("env_file")
-    SummonConfig.model_config["env_file"] = ()
-    # Set sensible defaults for required fields so bare SummonConfig() works
-    os.environ["SUMMON_SLACK_BOT_TOKEN"] = "xoxb-test-token"
-    os.environ["SUMMON_SLACK_APP_TOKEN"] = "xapp-test-token"
-    os.environ["SUMMON_SLACK_SIGNING_SECRET"] = "abc123def456"
     try:
+        SummonConfig.model_config["env_file"] = ()
+        # Set sensible defaults for required fields so bare SummonConfig() works
+        os.environ["SUMMON_SLACK_BOT_TOKEN"] = "xoxb-test-token"
+        os.environ["SUMMON_SLACK_APP_TOKEN"] = "xapp-test-token"
+        os.environ["SUMMON_SLACK_SIGNING_SECRET"] = "abc123def456"
         yield
     finally:
         SummonConfig.model_config["env_file"] = original_env_file
