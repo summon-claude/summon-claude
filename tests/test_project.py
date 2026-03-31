@@ -11,7 +11,7 @@ from click.testing import CliRunner
 from conftest import make_scheduler
 
 from summon_claude.cli import cli
-from summon_claude.sessions.prompts import build_pm_system_prompt
+from summon_claude.sessions.prompts import build_pm_scan_prompt, build_pm_system_prompt
 from summon_claude.sessions.registry import SessionRegistry
 
 # ---------------------------------------------------------------------------
@@ -438,34 +438,56 @@ class TestBuildPmSystemPromptWorkflow:
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900)
         assert "Ready for Review" not in result["append"]
 
-    def test_non_git_pm_prompt_no_worktree_orchestration(self):
-        """SC-08 guard: non-git PM prompt must not include worktree orchestration."""
-        result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
-        # Worktree orchestration section must be absent
-        assert "## Worktree Orchestration" not in result["append"]
-        assert "## Worktree Cleanup" not in result["append"]
-        # PR review section (which uses git) must be absent
-        assert "## PR Review" not in result["append"]
-
-    def test_non_git_pm_prompt_contains_boundaries(self):
+    def test_non_git_system_prompt_contains_boundaries(self):
         """Non-git PM prompt must still include boundary rules."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
         assert "You must NOT" in result["append"]
 
-    def test_git_pm_prompt_contains_enterworktree(self):
+    def test_git_system_prompt_contains_enterworktree(self):
         """Git PM prompt must still include EnterWorktree instructions."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=True)
         assert "EnterWorktree" in result["append"]
 
-    def test_non_git_pm_prompt_contains_non_git_section_text(self):
+    def test_non_git_system_prompt_contains_non_git_section_text(self):
         """Non-git PM prompt must contain the non-git guidance section."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
         assert "not version-controlled" in result["append"]
 
-    def test_non_git_pm_prompt_no_git_worktree(self):
+    def test_non_git_system_prompt_no_git_worktree(self):
         """Non-git PM prompt must NOT reference 'git worktree' commands."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
         assert "git worktree" not in result["append"]
+
+    def test_system_prompt_no_leftover_placeholder(self):
+        """Guard: {{worktree_constraint}} must be replaced, never appear in output."""
+        for git in (True, False):
+            result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=git)
+            assert "{{worktree_constraint}}" not in result["append"]
+
+    def test_non_git_scan_prompt_no_worktree_orchestration(self):
+        """SC-08 guard: non-git scan prompt must not include worktree orchestration."""
+        prompt = build_pm_scan_prompt(is_git_repo=False)
+        assert "## Worktree Orchestration" not in prompt
+        assert "## Worktree Cleanup" not in prompt
+        assert "EnterWorktree" not in prompt
+
+    def test_non_git_scan_prompt_no_pr_review(self):
+        """Non-git scan prompt must not include PR review (requires git)."""
+        prompt = build_pm_scan_prompt(github_enabled=True, is_git_repo=False)
+        assert "## PR Review" not in prompt
+        assert "## On-Demand PR Review" not in prompt
+
+    def test_git_scan_prompt_contains_worktree_orchestration(self):
+        """Git scan prompt must include worktree orchestration."""
+        prompt = build_pm_scan_prompt(is_git_repo=True)
+        assert "## Worktree Orchestration" in prompt
+        assert "EnterWorktree" in prompt
+
+    def test_git_scan_prompt_with_github_contains_pr_review(self):
+        """Git scan prompt with github enabled must include PR review."""
+        prompt = build_pm_scan_prompt(github_enabled=True, is_git_repo=True)
+        assert "## PR Review" in prompt
+        assert "## Worktree Cleanup" in prompt
 
 
 # ---------------------------------------------------------------------------

@@ -381,6 +381,51 @@ class TestDetectGit:
         assert is_git is True
         assert branch is None
 
+    async def test_nonzero_returncode_returns_false(self, tmp_path):
+        """Non-zero exit code (e.g., 128 for non-repo) must return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 128
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"fatal: not a git repository"))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_existing_ceiling_dirs_preserved(self, tmp_path):
+        """GIT_CEILING_DIRECTORIES from env must be preserved and extended."""
+        import os
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nmain\n", b""))
+
+        captured_env = {}
+
+        async def capture_exec(*args, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            return mock_proc
+
+        existing_ceiling = "/some/other/path"
+        with (
+            patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": existing_ceiling}),
+            patch("asyncio.create_subprocess_exec", side_effect=capture_exec),
+        ):
+            await _detect_git(str(tmp_path))
+
+        ceiling = captured_env.get("GIT_CEILING_DIRECTORIES", "")
+        assert existing_ceiling in ceiling
+        assert str(tmp_path.resolve()) in ceiling
+        assert ceiling.startswith(existing_ceiling + ":")
+
 
 class TestSessionShutdownControl:
     """Test request_shutdown() and authenticate() — the new public control API."""

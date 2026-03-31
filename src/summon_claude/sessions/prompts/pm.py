@@ -194,10 +194,12 @@ def build_pm_system_prompt(
     }
 
 
-def build_pm_scan_prompt(*, github_enabled: bool = False) -> str:
+def build_pm_scan_prompt(*, github_enabled: bool = False, is_git_repo: bool = True) -> str:
     """Build the PM periodic scan prompt with conditional sections.
 
     Returns a plain string — timer prompts are injected as conversation turns.
+    When *is_git_repo* is False, worktree orchestration, PR review, and
+    worktree cleanup sections are omitted (they require git).
     """
     parts = [
         "[SCAN TRIGGER] Perform your scheduled project scan now.\n\n"
@@ -210,21 +212,25 @@ def build_pm_scan_prompt(*, github_enabled: bool = False) -> str:
         "## Delegation Checklist\n\n"
         "For each issue found: can this be delegated to a sub-session? "
         "If yes, spawn one using `session_start`. You are a delegator, not a doer.\n\n"
-        "## Worktree Orchestration\n\n"
-        "When assigning isolated tasks to child sessions, use git worktrees:\n\n"
-        "1. **Choose the worktree name yourself** — use a short, descriptive slug "
-        "(e.g. 'fix-auth', 'feature-search'). Track name-to-task mapping in your canvas.\n"
-        '2. **Instruct the child** to use `EnterWorktree(name="<worktree-name>")` '
-        "to create and switch to an isolated working copy.\n"
-        "3. **Constrain the child to its worktree CWD** — instruct: "
-        "'Do not read or write files outside your worktree directory.'\n"
-        "4. **Verify acknowledgement** before assigning substantive work.\n"
-        "5. **Handle failures** — if EnterWorktree fails, choose a different name "
-        "(e.g. append '-v2') and retry.\n\n"
-        "## Canvas Update\n\n"
-        "Update your canvas with current task status after each scan.\n"
     ]
-    if github_enabled:
+    if is_git_repo:
+        parts.append(
+            "## Worktree Orchestration\n\n"
+            "When assigning isolated tasks to child sessions, use git worktrees:\n\n"
+            "1. **Choose the worktree name yourself** — use a short, descriptive slug "
+            "(e.g. 'fix-auth', 'feature-search'). Track name-to-task mapping in your canvas.\n"
+            '2. **Instruct the child** to use `EnterWorktree(name="<worktree-name>")` '
+            "to create and switch to an isolated working copy.\n"
+            "3. **Constrain the child to its worktree CWD** — instruct: "
+            "'Do not read or write files outside your worktree directory.'\n"
+            "4. **Verify acknowledgement** before assigning substantive work.\n"
+            "5. **Handle failures** — if EnterWorktree fails, choose a different name "
+            "(e.g. append '-v2') and retry.\n\n"
+        )
+    parts.append(
+        "## Canvas Update\n\nUpdate your canvas with current task status after each scan.\n"
+    )
+    if github_enabled and is_git_repo:
         parts.append(
             "\n## PR Review\n\n"
             "Check for completed sub-sessions that may have produced pull requests:\n\n"

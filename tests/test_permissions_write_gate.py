@@ -716,34 +716,18 @@ class TestNonGitContainment:
         assert handler._containment_root != link_dir
 
 
-class TestDetectGitFailurePath:
-    """Integration tests for _detect_git failure handling in PermissionHandler."""
+class TestContainmentGitProperty:
+    """Tests for notify_containment_active with is_git_repo=True (git-session variant)."""
 
-    async def test_non_git_containment_set_when_detect_git_fails(self, tmp_path: Path):
-        """When _detect_git returns (False, None), non-git containment must be activated."""
-        from unittest.mock import patch
-
-        from summon_claude.slack.router import ThreadRouter
-
+    def test_notify_containment_active_git_sets_flag(self, tmp_path: Path):
+        """notify_containment_active(is_git_repo=True) sets _is_git_repo correctly."""
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         config = _make_config()
         handler = PermissionHandler(
-            router,
-            config,
-            authenticated_user_id="U_TEST",
-            project_root=str(tmp_path),
+            router, config, authenticated_user_id="U_TEST", project_root=str(tmp_path)
         )
-
-        # Simulate what session.py does when _detect_git returns (False, None)
-        # (i.e., not a git repo or git subprocess failed)
-        is_git = False
-        if not is_git:
-            handler.notify_containment_active(
-                containment_root=tmp_path,
-                is_git_repo=False,
-            )
-
+        handler.notify_containment_active(tmp_path, is_git_repo=True)
         assert handler._in_containment is True
-        assert handler._is_git_repo is False
+        assert handler._is_git_repo is True
         assert handler._containment_root == tmp_path.resolve()

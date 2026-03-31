@@ -1716,7 +1716,6 @@ class SummonSession:
         """Create SDK client, then run preprocessor + response consumer concurrently."""
         is_pm = self._pm_profile
         is_scribe = self._scribe_profile
-        is_git = is_git_repo
 
         # Channel scoping: every session type gets an explicit async resolver.
         # Regular sessions: own channel only.
@@ -1977,6 +1976,7 @@ class SummonSession:
                     cron_expr=_build_scan_cron(self._scan_interval_s),
                     prompt=build_pm_scan_prompt(
                         github_enabled=bool(self._config.github_mcp_config()),
+                        is_git_repo=is_git_repo,
                     ),
                     internal=True,
                     max_lifetime_s=0,
@@ -2017,7 +2017,7 @@ class SummonSession:
                     cwd=self._cwd,
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
-                    is_git_repo=is_git,
+                    is_git_repo=is_git_repo,
                 )
                 # PM prompt is built separately — inject compaction context if present
                 if restart_count > 0 and system_prompt_append != base_prompt:
@@ -2499,7 +2499,9 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post context warning", exc_info=True)
 
-        # Only update topic if model, branch, or mode changed (PM and scribe manage their own)
+        # Only update topic when model or mode changes (PM and scribe manage their own).
+        # Branch detection is deferred to model/mode-change events — branch changes
+        # mid-session are rare and will be picked up on the next model change.
         if not self._pm_profile and not self._scribe_profile:
             try:
                 current_model = self._last_model_seen or self._model
@@ -2516,7 +2518,6 @@ class SummonSession:
                     or live_mode != self._auto_mode_label
                 )
                 if needs_update:
-                    # Skip subprocess for non-git sessions — branch is always None
                     if self._is_git_repo:
                         _, git_branch = await _detect_git(self._cwd)
                     else:
