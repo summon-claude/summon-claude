@@ -447,10 +447,10 @@ class TestBuildPmSystemPromptWorkflow:
         # PR review section (which uses git) must be absent
         assert "## PR Review" not in result["append"]
 
-    def test_non_git_pm_prompt_contains_safety_section(self):
-        """SC-06 guard: safety section always included regardless of git status."""
+    def test_non_git_pm_prompt_contains_boundaries(self):
+        """Non-git PM prompt must still include boundary rules."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
-        assert "NEVER force-push" in result["append"]
+        assert "You must NOT" in result["append"]
 
     def test_git_pm_prompt_contains_enterworktree(self):
         """Git PM prompt must still include EnterWorktree instructions."""
@@ -460,7 +460,7 @@ class TestBuildPmSystemPromptWorkflow:
     def test_non_git_pm_prompt_contains_non_git_section_text(self):
         """Non-git PM prompt must contain the non-git guidance section."""
         result = build_pm_system_prompt(cwd="/tmp", scan_interval_s=900, is_git_repo=False)
-        assert "Working Without Version Control" in result["append"]
+        assert "not version-controlled" in result["append"]
 
     def test_non_git_pm_prompt_no_git_worktree(self):
         """Non-git PM prompt must NOT reference 'git worktree' commands."""
