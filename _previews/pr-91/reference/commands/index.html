@@ -1394,6 +1394,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#auto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !auto
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compact" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2155,6 +2166,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#auto" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !auto
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#compact" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2411,6 +2433,11 @@ Fix the login bug !stop
 <td>Show current effort, or switch effort level</td>
 </tr>
 <tr>
+<td><code>!auto [on\|off\|rules]</code></td>
+<td><code>!automode</code></td>
+<td>Toggle or inspect the auto-mode classifier</td>
+</tr>
+<tr>
 <td><code>!compact [INSTRUCTIONS]</code></td>
 <td></td>
 <td>Compact conversation context (reduces token usage)</td>
@@ -2473,6 +2500,18 @@ Fix the login bug !stop
 <p class="admonition-title">Extended thinking</p>
 <p><code>!effort max</code> enables extended thinking (ultrathink mode). Claude will reason more deeply but responses will take longer and cost more.</p>
 </div>
+<h3 id="auto">!auto<a class="headerlink" href="#auto" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>!auto                   # show classifier status
+!auto on                # enable the classifier
+!auto off               # disable the classifier
+!auto rules             # show effective allow/deny rules
+</code></pre></div>
+<p>Toggles the auto-mode classifier, which automatically approves or blocks tool calls based on configurable prose rules. See <a href="../permissions/#auto-mode-classifier">Permissions — Auto-mode classifier</a> for details.</p>
+<div class="admonition warning">
+<p class="admonition-title">Requires worktree</p>
+<p><code>!auto on</code> only works after the agent has entered a worktree. Before worktree entry, the classifier is dormant regardless of configuration.</p>
+</div>
+<p><code>!auto off</code> and <code>!auto rules</code> work at any time.</p>
 <h3 id="compact">!compact<a class="headerlink" href="#compact" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>!compact
 !compact Focus on the authentication module

@@ -1494,6 +1494,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#auto-mode-classifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-mode classifier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-mode classifier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fallback-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback safety
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#permission-flow-internal" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2144,6 +2194,56 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#auto-mode-classifier" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-mode classifier
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Auto-mode classifier">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#activation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Activation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#fallback-safety" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Fallback safety
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#permission-flow-internal" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2439,6 +2539,29 @@ Which database should I use for the session store?
 </ul>
 <p>Your answers are returned to Claude as structured data. The question times out after 5 minutes if unanswered. The interactive message is deleted after all questions are answered.</p>
 <hr />
+<h2 id="auto-mode-classifier">Auto-mode classifier<a class="headerlink" href="#auto-mode-classifier" title="Permanent link">&para;</a></h2>
+<p>After the agent enters a worktree, summon can automatically approve or block tool calls using a secondary Sonnet classifier — without waiting for Slack approval on every action.</p>
+<p>The classifier evaluates each pending tool call against configurable prose rules:</p>
+<ul>
+<li><strong>Allow rules</strong> — actions that are safe to auto-approve (e.g. local file operations, running tests, git status)</li>
+<li><strong>Deny rules</strong> — actions that should be blocked (e.g. force pushing, production deploys, sending credentials externally)</li>
+<li><strong>Uncertain</strong> — when the classifier can't confidently decide, the tool falls through to Slack HITL</li>
+</ul>
+<p>The classifier only runs <strong>after worktree entry</strong>. Read-only sessions (before <code>EnterWorktree</code>) never use it — all tool decisions go through the standard permission flow.</p>
+<h3 id="activation">Activation<a class="headerlink" href="#activation" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Session starts in read-only mode — classifier is dormant</li>
+<li>Agent enters worktree via <code>EnterWorktree</code></li>
+<li>If <code>SUMMON_AUTO_CLASSIFIER_ENABLED=true</code> (default), the classifier activates</li>
+<li>Tool calls now go through: write gate → static lists → caches → <strong>classifier</strong> → SDK allow → Slack HITL</li>
+</ol>
+<p>Use <code>!auto on/off</code> to toggle the classifier mid-session. <code>!auto on</code> only works after worktree entry.</p>
+<h3 id="fallback-safety">Fallback safety<a class="headerlink" href="#fallback-safety" title="Permanent link">&para;</a></h3>
+<p>If the classifier blocks too many consecutive tool calls (3) or too many total (20), it automatically pauses and falls back to manual Slack approval. A notification is posted to the channel. Use <code>!auto on</code> to re-enable.</p>
+<p>The classifier's block reason is never shown to the outer Claude agent — only a generic "Blocked by auto-mode policy" message is returned. This prevents the agent from learning to craft bypass attempts.</p>
+<h3 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h3>
+<p>See <a href="../environment-variables/#auto-mode">Auto Mode</a> for the environment variables that control the classifier.</p>
+<hr />
 <h2 id="permission-flow-internal">Permission flow (internal)<a class="headerlink" href="#permission-flow-internal" title="Permanent link">&para;</a></h2>
 <p>The full permission evaluation order in <code>handle()</code>:</p>
 <table>
@@ -2494,6 +2617,11 @@ Which database should I use for the session store?
 <td>2f</td>
 <td>Per-argument cache (exact match on primary arg)</td>
 <td>Allow if arg matches (GitHub deny-list excluded)</td>
+</tr>
+<tr>
+<td>2g</td>
+<td>Auto-classifier (Sonnet, only active after worktree entry)</td>
+<td>Allow, Block, or fall through on uncertain</td>
 </tr>
 <tr>
 <td>3</td>

@@ -1762,10 +1762,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-sdk-allow-suggestions" class="md-nav__link">
+  <a href="#5-auto-mode-classifier-post-worktree-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. SDK Allow Suggestions
+        5. Auto-mode Classifier (post-worktree only)
       
     </span>
   </a>
@@ -1773,10 +1773,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-write-gate-read-only-default" class="md-nav__link">
+  <a href="#6-sdk-allow-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Write Gate (read-only default)
+        6. SDK Allow Suggestions
       
     </span>
   </a>
@@ -1784,10 +1784,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-slack-approval-buttons-fallback" class="md-nav__link">
+  <a href="#7-write-gate-read-only-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Slack Approval Buttons (fallback)
+        7. Write Gate (read-only default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-slack-approval-buttons-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Slack Approval Buttons (fallback)
       
     </span>
   </a>
@@ -2244,10 +2255,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-sdk-allow-suggestions" class="md-nav__link">
+  <a href="#5-auto-mode-classifier-post-worktree-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. SDK Allow Suggestions
+        5. Auto-mode Classifier (post-worktree only)
       
     </span>
   </a>
@@ -2255,10 +2266,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-write-gate-read-only-default" class="md-nav__link">
+  <a href="#6-sdk-allow-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. Write Gate (read-only default)
+        6. SDK Allow Suggestions
       
     </span>
   </a>
@@ -2266,10 +2277,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-slack-approval-buttons-fallback" class="md-nav__link">
+  <a href="#7-write-gate-read-only-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Slack Approval Buttons (fallback)
+        7. Write Gate (read-only default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-slack-approval-buttons-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Slack Approval Buttons (fallback)
       
     </span>
   </a>
@@ -2529,11 +2551,23 @@
 <span class="p">])</span>
 </code></pre></div>
 <p>This is defense-in-depth — deny-list precedence over prefix matching prevents a broadly-scoped <code>allowedTools</code> pattern in <code>settings.json</code> from silently bypassing human-in-the-loop review for externally-visible actions.</p>
-<h3 id="5-sdk-allow-suggestions">5. SDK Allow Suggestions<a class="headerlink" href="#5-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
+<h3 id="5-auto-mode-classifier-post-worktree-only">5. Auto-mode Classifier (post-worktree only)<a class="headerlink" href="#5-auto-mode-classifier-post-worktree-only" title="Permanent link">&para;</a></h3>
+<p>After the agent enters a worktree, a secondary Sonnet classifier can automatically approve or block tool calls based on configurable prose rules. This sits between the session caches and SDK allow suggestions — it only evaluates tools that weren't already handled by static lists or caches.</p>
+<p>Security mitigations:</p>
+<ul>
+<li><strong>Prompt-level defenses</strong>: The classifier's system prompt follows the same safety framework as other agents — principal hierarchy (system prompt &gt; rules &gt; evaluated content), permitted action enumeration, and bookend reminders. See <a href="../../reference/prompts/#safety-classifier-system-prompt">Prompts Reference</a> for the full prompt.</li>
+<li><strong>XML escaping</strong>: User messages and tool inputs in the classifier prompt are HTML-escaped to prevent structural injection that could close <code>&lt;conversation_context&gt;</code> or <code>&lt;pending_action&gt;</code> tags early.</li>
+<li><strong>Reason redaction</strong>: The classifier's block reason is never returned to the outer Claude agent — only a generic "Blocked by auto-mode policy" message. This prevents the agent from learning to craft bypass attempts.</li>
+<li><strong>Fail-open to HITL</strong>: On any classifier error (timeout, parse failure, unknown decision), the tool falls through to Slack HITL rather than being auto-approved or silently blocked.</li>
+<li><strong>Fallback threshold</strong>: After 3 consecutive blocks or 20 total blocks, the classifier automatically pauses and all decisions revert to manual Slack approval. This prevents a misconfigured classifier from permanently blocking the agent.</li>
+<li><strong>Tool-use denied in classifier</strong>: The classifier subprocess is configured with <code>can_use_tool</code> that denies all tool calls, preventing the classifier itself from taking actions.</li>
+</ul>
+<p>The intended security layering is: <strong>read-only</strong> (pre-worktree) → <strong>write gate</strong> (worktree entry + one-time approval) → <strong>auto-classifier</strong> (post-worktree, configurable rules) → <strong>Slack HITL</strong> (fallback).</p>
+<h3 id="6-sdk-allow-suggestions">6. SDK Allow Suggestions<a class="headerlink" href="#6-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
 <p>If the SDK provides an <code>allow</code> suggestion (from <code>settings.json</code> <code>allowedTools</code>), the tool is approved.</p>
-<h3 id="6-write-gate-read-only-default">6. Write Gate (read-only default)<a class="headerlink" href="#6-write-gate-read-only-default" title="Permanent link">&para;</a></h3>
+<h3 id="7-write-gate-read-only-default">7. Write Gate (read-only default)<a class="headerlink" href="#7-write-gate-read-only-default" title="Permanent link">&para;</a></h3>
 <p>Write-capable tools (<code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code>) are <strong>denied by default</strong> until the agent enters a worktree via <code>EnterWorktree</code>. This prevents accidental writes to the main working directory. Safe-dir exceptions (<code>SUMMON_SAFE_WRITE_DIRS</code>) allow configured directories to bypass the worktree requirement. Path validation uses <code>Path.resolve()</code> on both sides to prevent symlink escapes.</p>
-<h3 id="7-slack-approval-buttons-fallback">7. Slack Approval Buttons (fallback)<a class="headerlink" href="#7-slack-approval-buttons-fallback" title="Permanent link">&para;</a></h3>
+<h3 id="8-slack-approval-buttons-fallback">8. Slack Approval Buttons (fallback)<a class="headerlink" href="#8-slack-approval-buttons-fallback" title="Permanent link">&para;</a></h3>
 <p>All other tools — and write-gated tools after worktree entry — go through the Slack approval flow:</p>
 <ol>
 <li>Requests within the same 2-second debounce window are batched into a single Slack message (<code>SUMMON_PERMISSION_DEBOUNCE_MS</code>, default 2000).</li>
