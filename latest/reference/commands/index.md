@@ -40,6 +40,7 @@ These commands are handled locally by summon without forwarding to Claude.
 | `!clear`                      | `!new`, `!reset`            | Clear conversation history (start fresh context)              |
 | `!model [MODEL]`              |                             | Show current model, or switch to a different model            |
 | `!effort [LEVEL]`             |                             | Show current effort, or switch effort level                   |
+| `!auto [on\|off\|rules]`      | `!automode`                 | Toggle or inspect the auto-mode classifier                    |
 | `!compact [INSTRUCTIONS]`     |                             | Compact conversation context (reduces token usage)            |
 | `!summon start`               |                             | Spawn a new child session in the current channel              |
 | `!summon resume [SESSION_ID]` |                             | Resume a previous Claude Code session                         |
@@ -99,6 +100,23 @@ Valid levels: `low`, `medium`, `high`, `max`. Takes effect on the next turn.
 Extended thinking
 
 `!effort max` enables extended thinking (ultrathink mode). Claude will reason more deeply but responses will take longer and cost more.
+
+### !auto
+
+```
+!auto                   # show classifier status
+!auto on                # enable the classifier
+!auto off               # disable the classifier
+!auto rules             # show effective allow/deny rules
+```
+
+Toggles the auto-mode classifier, which automatically approves or blocks tool calls based on configurable prose rules. See [Permissions — Auto-mode classifier](https://summon-claude.github.io/summon-claude/latest/reference/permissions/#auto-mode-classifier) for details.
+
+Requires worktree
+
+`!auto on` only works after the agent has entered a worktree. Before worktree entry, the classifier is dormant regardless of configuration.
+
+`!auto off` and `!auto rules` work at any time.
 
 ### !compact
 

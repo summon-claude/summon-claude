@@ -168,23 +168,57 @@ Your answers are returned to Claude as structured data. The question times out a
 
 ______________________________________________________________________
 
+## Auto-mode classifier
+
+After the agent enters a worktree, summon can automatically approve or block tool calls using a secondary Sonnet classifier — without waiting for Slack approval on every action.
+
+The classifier evaluates each pending tool call against configurable prose rules:
+
+- **Allow rules** — actions that are safe to auto-approve (e.g. local file operations, running tests, git status)
+- **Deny rules** — actions that should be blocked (e.g. force pushing, production deploys, sending credentials externally)
+- **Uncertain** — when the classifier can't confidently decide, the tool falls through to Slack HITL
+
+The classifier only runs **after worktree entry**. Read-only sessions (before `EnterWorktree`) never use it — all tool decisions go through the standard permission flow.
+
+### Activation
+
+1. Session starts in read-only mode — classifier is dormant
+1. Agent enters worktree via `EnterWorktree`
+1. If `SUMMON_AUTO_CLASSIFIER_ENABLED=true` (default), the classifier activates
+1. Tool calls now go through: write gate → static lists → caches → **classifier** → SDK allow → Slack HITL
+
+Use `!auto on/off` to toggle the classifier mid-session. `!auto on` only works after worktree entry.
+
+### Fallback safety
+
+If the classifier blocks too many consecutive tool calls (3) or too many total (20), it automatically pauses and falls back to manual Slack approval. A notification is posted to the channel. Use `!auto on` to re-enable.
+
+The classifier's block reason is never shown to the outer Claude agent — only a generic "Blocked by auto-mode policy" message is returned. This prevents the agent from learning to craft bypass attempts.
+
+### Configuration
+
+See [Auto Mode](https://summon-claude.github.io/summon-claude/latest/reference/environment-variables/#auto-mode) for the environment variables that control the classifier.
+
+______________________________________________________________________
+
 ## Permission flow (internal)
 
 The full permission evaluation order in `handle()`:
 
-| Step | Check                                             | Result                                                                                                                    |
-| ---- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 0    | AskUserQuestion intercept                         | Route to interactive UI                                                                                                   |
-| 0b   | Write gate (`_WRITE_GATED_TOOLS`)                 | SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through |
-| 1    | SDK deny suggestions                              | Deny                                                                                                                      |
-| 2    | Static auto-approve (`_AUTO_APPROVE_TOOLS`)       | Allow                                                                                                                     |
-| 2b   | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL                                                                                                               |
-| 2c   | GitHub auto-approve (prefix matching)             | Allow                                                                                                                     |
-| 2d   | Summon MCP auto-approve (prefix matching)         | Allow                                                                                                                     |
-| 2e   | Session-lifetime cached approvals                 | Allow (GitHub deny-list excluded)                                                                                         |
-| 2f   | Per-argument cache (exact match on primary arg)   | Allow if arg matches (GitHub deny-list excluded)                                                                          |
-| 3    | SDK allow suggestions                             | Allow (write-gated tools excluded — CWD containment cannot be overridden)                                                 |
-| 4    | Slack HITL (interactive message, deleted after)   | User decides                                                                                                              |
+| Step | Check                                                      | Result                                                                                                                    |
+| ---- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| 0    | AskUserQuestion intercept                                  | Route to interactive UI                                                                                                   |
+| 0b   | Write gate (`_WRITE_GATED_TOOLS`)                          | SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through |
+| 1    | SDK deny suggestions                                       | Deny                                                                                                                      |
+| 2    | Static auto-approve (`_AUTO_APPROVE_TOOLS`)                | Allow                                                                                                                     |
+| 2b   | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`)          | Always HITL                                                                                                               |
+| 2c   | GitHub auto-approve (prefix matching)                      | Allow                                                                                                                     |
+| 2d   | Summon MCP auto-approve (prefix matching)                  | Allow                                                                                                                     |
+| 2e   | Session-lifetime cached approvals                          | Allow (GitHub deny-list excluded)                                                                                         |
+| 2f   | Per-argument cache (exact match on primary arg)            | Allow if arg matches (GitHub deny-list excluded)                                                                          |
+| 2g   | Auto-classifier (Sonnet, only active after worktree entry) | Allow, Block, or fall through on uncertain                                                                                |
+| 3    | SDK allow suggestions                                      | Allow (write-gated tools excluded — CWD containment cannot be overridden)                                                 |
+| 4    | Slack HITL (interactive message, deleted after)            | User decides                                                                                                              |
 
 ______________________________________________________________________
 

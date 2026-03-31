@@ -1387,6 +1387,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#auto-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto Mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#standard-variables-that-affect-summon" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2143,6 +2154,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#auto-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto Mode
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#standard-variables-that-affect-summon" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2535,6 +2557,50 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<hr />
+<h2 id="auto-mode">Auto Mode<a class="headerlink" href="#auto-mode" title="Permanent link">&para;</a></h2>
+<div class="admonition note">
+<p class="admonition-title">Advanced</p>
+<p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
+</div>
+<p>The auto-mode classifier uses a secondary Sonnet model to automatically approve or block tool calls based on configurable prose rules. It only activates <strong>after the agent enters a worktree</strong> — read-only sessions never use the classifier.</p>
+<table>
+<thead>
+<tr>
+<th>Config Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SUMMON_AUTO_CLASSIFIER_ENABLED</code></td>
+<td>boolean</td>
+<td><code>true</code></td>
+<td>Enable the Sonnet classifier for automatic tool approval. When enabled, the classifier activates on worktree entry.</td>
+</tr>
+<tr>
+<td><code>SUMMON_AUTO_MODE_ENVIRONMENT</code></td>
+<td>text</td>
+<td>``</td>
+<td>Environment description for the classifier (e.g. <code>production server</code>, <code>staging environment</code>). Provides context for safety decisions.</td>
+</tr>
+<tr>
+<td><code>SUMMON_AUTO_MODE_DENY</code></td>
+<td>text</td>
+<td>``</td>
+<td>Custom deny rules (newline-separated). Overrides the built-in deny rules when set. Any tool matching a deny rule is blocked.</td>
+</tr>
+<tr>
+<td><code>SUMMON_AUTO_MODE_ALLOW</code></td>
+<td>text</td>
+<td>``</td>
+<td>Custom allow rules (newline-separated). Overrides the built-in allow rules when set. Tools matching an allow rule (with no deny match) are approved.</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../permissions/#auto-mode-classifier">Permissions</a> for the full classification flow and default rules.</p>
 <hr />
 <h2 id="standard-variables-that-affect-summon">Standard Variables That Affect summon<a class="headerlink" href="#standard-variables-that-affect-summon" title="Permanent link">&para;</a></h2>
 <p>These are not summon-specific, but summon respects them:</p>

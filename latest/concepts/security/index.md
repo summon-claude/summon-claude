@@ -90,15 +90,30 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset([
 
 This is defense-in-depth — deny-list precedence over prefix matching prevents a broadly-scoped `allowedTools` pattern in `settings.json` from silently bypassing human-in-the-loop review for externally-visible actions.
 
-### 5. SDK Allow Suggestions
+### 5. Auto-mode Classifier (post-worktree only)
+
+After the agent enters a worktree, a secondary Sonnet classifier can automatically approve or block tool calls based on configurable prose rules. This sits between the session caches and SDK allow suggestions — it only evaluates tools that weren't already handled by static lists or caches.
+
+Security mitigations:
+
+- **Prompt-level defenses**: The classifier's system prompt follows the same safety framework as other agents — principal hierarchy (system prompt > rules > evaluated content), permitted action enumeration, and bookend reminders. See [Prompts Reference](https://summon-claude.github.io/summon-claude/latest/reference/prompts/#safety-classifier-system-prompt) for the full prompt.
+- **XML escaping**: User messages and tool inputs in the classifier prompt are HTML-escaped to prevent structural injection that could close `<conversation_context>` or `<pending_action>` tags early.
+- **Reason redaction**: The classifier's block reason is never returned to the outer Claude agent — only a generic "Blocked by auto-mode policy" message. This prevents the agent from learning to craft bypass attempts.
+- **Fail-open to HITL**: On any classifier error (timeout, parse failure, unknown decision), the tool falls through to Slack HITL rather than being auto-approved or silently blocked.
+- **Fallback threshold**: After 3 consecutive blocks or 20 total blocks, the classifier automatically pauses and all decisions revert to manual Slack approval. This prevents a misconfigured classifier from permanently blocking the agent.
+- **Tool-use denied in classifier**: The classifier subprocess is configured with `can_use_tool` that denies all tool calls, preventing the classifier itself from taking actions.
+
+The intended security layering is: **read-only** (pre-worktree) → **write gate** (worktree entry + one-time approval) → **auto-classifier** (post-worktree, configurable rules) → **Slack HITL** (fallback).
+
+### 6. SDK Allow Suggestions
 
 If the SDK provides an `allow` suggestion (from `settings.json` `allowedTools`), the tool is approved.
 
-### 6. Write Gate (read-only default)
+### 7. Write Gate (read-only default)
 
 Write-capable tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) are **denied by default** until the agent enters a worktree via `EnterWorktree`. This prevents accidental writes to the main working directory. Safe-dir exceptions (`SUMMON_SAFE_WRITE_DIRS`) allow configured directories to bypass the worktree requirement. Path validation uses `Path.resolve()` on both sides to prevent symlink escapes.
 
-### 7. Slack Approval Buttons (fallback)
+### 8. Slack Approval Buttons (fallback)
 
 All other tools — and write-gated tools after worktree entry — go through the Slack approval flow:
 
