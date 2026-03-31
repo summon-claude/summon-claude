@@ -48,6 +48,7 @@ from summon_claude.config import (
     google_mcp_env,
 )
 from summon_claude.sessions.auth import SessionAuth, generate_spawn_token
+from summon_claude.sessions.classifier import SummonAutoClassifier
 from summon_claude.sessions.commands import (
     COMMAND_ACTIONS,
     CommandContext,
@@ -377,10 +378,11 @@ def _format_topic(
     model: str | None,
     cwd: str,
     git_branch: str | None,
+    mode: str | None = None,
 ) -> str:
     """Build the channel topic string with session metadata.
 
-    Only includes stable metadata (model, cwd, branch) — not per-turn
+    Only includes stable metadata (model, cwd, branch, mode) — not per-turn
     context usage, which changes every turn and belongs in the turn summary.
     """
     # Model: strip 'claude-' prefix for brevity
@@ -399,6 +401,8 @@ def _format_topic(
     if git_branch:
         branch_display = git_branch[:50]
         parts.append(f"\U0001f33f {branch_display}")
+    if mode:
+        parts.append(mode)
 
     topic = " \u00b7 ".join(parts)
     return topic[:250]
@@ -642,6 +646,7 @@ class SummonSession:
         self._last_model_seen: str | None = None
         self._last_topic_model: str | None = None
         self._last_topic_branch: str | None = None
+        self._auto_mode_label: str | None = None  # set after worktree entry
         self._claude_session_id: str | None = None
         self._available_models: list[dict[str, str]] = []
 
@@ -1152,11 +1157,14 @@ class SummonSession:
             raise RuntimeError(
                 f"Session {self._session_id}: cannot build runtime without authenticated_user_id"
             )
+        classifier = SummonAutoClassifier(self._config, cwd=self._cwd)
         permission_handler = PermissionHandler(
             router,
             self._config,
             self._authenticated_user_id,
             project_root=self._cwd,
+            classifier=classifier,
+            classifier_configured=self._config.auto_classifier_enabled,
         )
 
         rt = _SessionRuntime(
@@ -2182,6 +2190,9 @@ class SummonSession:
                 if not user_message:
                     continue
 
+                # Record user message for classifier context
+                rt.permission_handler.record_context("user", user_message)
+
                 # Agent context awareness: prepend context note when usage is high
                 if self._last_context and self._last_context.percentage > _CONTEXT_AGENT_THRESHOLD:
                     pct = self._last_context.percentage
@@ -2484,13 +2495,31 @@ class SummonSession:
                 except Exception:
                     logger.debug("Failed to post context warning", exc_info=True)
 
-        # Only update topic if model or branch changed (PM and scribe manage their own topics)
+        # Only update topic if model, branch, or mode changed (PM and scribe manage their own)
         if not self._pm_profile and not self._scribe_profile:
             try:
                 current_model = self._last_model_seen or self._model
                 git_branch = await _get_git_branch(self._cwd)
-                if current_model != self._last_topic_model or git_branch != self._last_topic_branch:
-                    topic = _format_topic(model=current_model, cwd=self._cwd, git_branch=git_branch)
+                # Derive mode label from live classifier state so fallback-disabled
+                # state is reflected. Only show after worktree entry and only
+                # when the classifier feature is configured.
+                live_mode = (
+                    ("[auto]" if rt.permission_handler.classifier_enabled else "[manual]")
+                    if rt.permission_handler.in_worktree and self._config.auto_classifier_enabled
+                    else None
+                )
+                if (
+                    current_model != self._last_topic_model
+                    or git_branch != self._last_topic_branch
+                    or live_mode != self._auto_mode_label
+                ):
+                    self._auto_mode_label = live_mode
+                    topic = _format_topic(
+                        model=current_model,
+                        cwd=self._cwd,
+                        git_branch=git_branch,
+                        mode=live_mode,
+                    )
                     await rt.client.set_topic(topic)
                     self._last_topic_model = current_model
                     self._last_topic_branch = git_branch
@@ -3033,7 +3062,13 @@ class SummonSession:
             model=self._model,
             effort=self._effort,
             session_id=self._session_id,
-            metadata={"models": self._available_models},
+            auto_enabled=rt.permission_handler.classifier_enabled,
+            in_worktree=rt.permission_handler.in_worktree,
+            metadata={
+                "models": self._available_models,
+                "auto_mode_deny": self._config.auto_mode_deny,
+                "auto_mode_allow": self._config.auto_mode_allow,
+            },
         )
 
         try:
@@ -3093,6 +3128,30 @@ class SummonSession:
         if new_effort:
             await self._execute_effort(rt, new_effort, thread_ts)
             return
+
+        # Handle !auto — toggle classifier on/off, update topic
+        set_auto = result.metadata.get("set_auto")
+        if set_auto is not None:
+            rt.permission_handler.set_classifier_enabled(set_auto)
+            # Derive label from actual handler state (not the request) and
+            # only show when in worktree with classifier configured.
+            if rt.permission_handler.in_worktree and self._config.auto_classifier_enabled:
+                self._auto_mode_label = (
+                    "[auto]" if rt.permission_handler.classifier_enabled else "[manual]"
+                )
+            else:
+                self._auto_mode_label = None
+            try:
+                git_branch = await _get_git_branch(self._cwd)
+                topic = _format_topic(
+                    model=self._model,
+                    cwd=self._cwd,
+                    git_branch=git_branch,
+                    mode=self._auto_mode_label,
+                )
+                await rt.client.set_topic(topic)
+            except Exception:
+                logger.debug("Auto-mode topic update failed", exc_info=True)
 
         # Handle !clear — post visual delineation then fall through to passthrough
         if result.metadata.get("clear"):
@@ -3632,6 +3691,7 @@ class SummonSession:
                         or result.metadata.get("resume")
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
+                        or result.metadata.get("standalone")
                     )
                     if standalone_only:
                         annotations.insert(

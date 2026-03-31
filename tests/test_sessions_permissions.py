@@ -15,6 +15,7 @@ from summon_claude.sessions.permissions import (
     _GITHUB_MCP_AUTO_APPROVE_PREFIXES,
     _GITHUB_MCP_REQUIRE_APPROVAL,
     _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
+    _WRITE_GATED_TOOLS,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -985,3 +986,329 @@ class TestIdentityVerificationFailClosed:
 
         # Pending should be consumed
         assert handler._ask_user.pending_other is None
+
+
+# ── Classifier integration ──────────────────────────────────────────────────
+
+
+def _make_classifier_handler(classifier, classifier_configured=True, in_worktree=True):
+    """Create a PermissionHandler with a mock classifier.
+
+    Sets _in_worktree=True by default so classifier tests exercise the
+    post-worktree flow. Pre-worktree behavior is tested separately.
+    """
+    client = make_mock_slack_client()
+    router = ThreadRouter(client)
+    config = make_config(debounce_ms=10)
+    handler = PermissionHandler(
+        router,
+        config,
+        authenticated_user_id="U_TEST",
+        classifier=classifier,
+        classifier_configured=classifier_configured,
+    )
+    if in_worktree:
+        handler._in_worktree = True
+        handler._classifier_enabled = classifier_configured
+        handler._write_access_granted = True
+    return handler, client, router
+
+
+class TestClassifierIntegration:
+    async def test_classifier_allow_returns_allow(self):
+        """Classifier allow -> PermissionResultAllow and records in _recent_approved."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "safe to run"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultAllow)
+        assert list(handler._recent_approved) == ["Bash"]
+
+    async def test_classifier_block_returns_deny(self):
+        """Classifier block -> PermissionResultDeny with generic message."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(
+            return_value=ClassifyResult("block", "dangerous operation")
+        )
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        result = await handler.handle("Bash", {"command": "rm -rf /"}, None)
+        assert isinstance(result, PermissionResultDeny)
+        assert "Blocked by auto-mode policy" in result.message
+
+    async def test_classifier_uncertain_falls_through(self):
+        """Classifier uncertain -> falls through to SDK/HITL."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("uncertain", "can't tell"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+        result = await handler.handle("Bash", {"command": "echo hi"}, None)
+        mock_classifier.classify.assert_awaited_once()
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_classifier_not_run_pre_worktree(self):
+        """Classifier does NOT run when not in worktree."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "would allow"))
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=True, in_worktree=False
+        )
+
+        # Patch _request_approval to avoid HITL hang
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Write gate will deny Bash pre-worktree — use a non-write-gated tool
+        result = await handler.handle("mcp__custom__tool", {}, None)
+        mock_classifier.classify.assert_not_called()
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_classifier_none_skips_classification(self):
+        """No classifier -> goes straight to HITL without classifier call."""
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+        result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_github_require_approval_before_classifier(self):
+        """_GITHUB_MCP_REQUIRE_APPROVAL checked before classifier."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "would allow"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        restricted_tool = next(iter(_GITHUB_MCP_REQUIRE_APPROVAL))
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+        await handler.handle(restricted_tool, {}, None)
+        mock_classifier.classify.assert_not_called()
+
+    async def test_set_classifier_enabled_false_skips(self):
+        """Disabled classifier -> straight to HITL."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "would allow"))
+        handler, _, _ = _make_classifier_handler(mock_classifier, classifier_configured=False)
+
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+        await handler.handle("Bash", {"command": "ls"}, None)
+        mock_classifier.classify.assert_not_called()
+
+    async def test_fallback_posts_notification(self):
+        """Fallback exceeded -> notification posted to main channel."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(
+            return_value=ClassifyResult("fallback_exceeded", "too many blocks")
+        )
+        handler, _, router = _make_classifier_handler(mock_classifier)
+
+        router.post_to_main = AsyncMock()
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        await handler.handle("Bash", {"command": "ls"}, None)
+
+        assert handler.classifier_enabled is False
+        router.post_to_main.assert_awaited_once()
+        call_text = router.post_to_main.call_args[0][0]
+        assert "paused" in call_text
+
+    async def test_set_classifier_enabled_resets_counters(self):
+        """Re-enabling classifier resets fallback counters."""
+        mock_classifier = MagicMock()
+        mock_classifier.reset_counters = MagicMock()
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        handler.set_classifier_enabled(True)
+        mock_classifier.reset_counters.assert_called_once()
+
+    async def test_notify_entered_worktree_enables_classifier(self):
+        """notify_entered_worktree enables classifier when configured."""
+        mock_classifier = MagicMock()
+        mock_classifier.reset_counters = MagicMock()
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=True, in_worktree=False
+        )
+        assert handler.classifier_enabled is False
+
+        handler.notify_entered_worktree("test-wt")
+        assert handler.classifier_enabled is True
+        mock_classifier.reset_counters.assert_called()
+
+    async def test_notify_entered_worktree_does_not_enable_when_not_configured(self):
+        """notify_entered_worktree does NOT enable classifier when not configured."""
+        mock_classifier = MagicMock()
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=False, in_worktree=False
+        )
+
+        handler.notify_entered_worktree("test-wt")
+        assert handler.classifier_enabled is False
+
+    async def test_auto_on_rejected_pre_worktree(self):
+        """set_classifier_enabled(True) is a no-op pre-worktree."""
+        mock_classifier = MagicMock()
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=True, in_worktree=False
+        )
+
+        handler.set_classifier_enabled(True)
+        assert handler.classifier_enabled is False
+
+
+class TestRecordContext:
+    """Tests for PermissionHandler.record_context()."""
+
+    def test_user_message_appended(self):
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+        handler.record_context("user", "hello world")
+        assert len(handler._context_history) == 1
+        assert handler._context_history[0] == {"role": "user", "content": "hello world"}
+
+    def test_tool_call_includes_name_and_input(self):
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+        handler.record_context("tool_call", "", tool_name="Bash", tool_input={"command": "ls"})
+        entry = handler._context_history[0]
+        assert entry["role"] == "tool_call"
+        assert entry["tool_name"] == "Bash"
+        assert entry["tool_input"] == {"command": "ls"}
+
+    def test_maxlen_evicts_old_entries(self):
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+        for i in range(25):
+            handler.record_context("user", f"msg {i}")
+        assert len(handler._context_history) == 20
+        assert handler._context_history[0]["content"] == "msg 5"
+
+    def test_optional_fields_omitted_when_none(self):
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+        handler.record_context("user", "test")
+        entry = handler._context_history[0]
+        assert "tool_name" not in entry
+        assert "tool_input" not in entry
+
+    async def test_auto_approved_tools_not_in_context_history(self):
+        """Auto-approved tools (Read, Grep, etc.) should not appear in context history."""
+        handler, _, _ = _make_classifier_handler(classifier=None, classifier_configured=False)
+        await handler.handle("Read", {"file_path": "/tmp/test"}, None)
+        assert len(handler._context_history) == 0
+
+    async def test_recent_approved_passes_to_classifier(self):
+        """Classifier receives _recent_approved list."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "safe"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        # First call — empty approvals
+        await handler.handle("Bash", {"command": "ls"}, None)
+        first_call_approvals = mock_classifier.classify.call_args[1].get("recent_approvals", [])
+        assert first_call_approvals == []
+
+        # Second call — should include "Bash" from first approval
+        await handler.handle("Bash", {"command": "pwd"}, None)
+        second_call_approvals = mock_classifier.classify.call_args[1].get("recent_approvals", [])
+        assert second_call_approvals == ["Bash"]
+
+
+class TestClassifierFallbackTopicTransition:
+    """Verify that fallback-pause produces a state change detectable by topic update logic."""
+
+    async def test_fallback_changes_classifier_enabled_for_topic_detection(self):
+        """After fallback, classifier_enabled=False triggers live_mode mismatch.
+
+        _finalize_turn_result computes:
+            live_mode = "[auto]" if classifier_enabled else "[manual]"
+        Before fallback: classifier_enabled=True → live_mode="[auto]"
+        After fallback:  classifier_enabled=False → live_mode="[manual]"
+        The mismatch with _auto_mode_label="[auto]" triggers a topic update.
+        """
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(
+            return_value=ClassifyResult("fallback_exceeded", "too many blocks")
+        )
+        handler, _, router = _make_classifier_handler(mock_classifier)
+        router.post_to_main = AsyncMock()
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Before fallback: classifier is enabled
+        assert handler.classifier_enabled is True
+        assert handler.in_worktree is True
+
+        # Trigger fallback via handle()
+        await handler.handle("Bash", {"command": "ls"}, None)
+
+        # After fallback: classifier is disabled
+        assert handler.classifier_enabled is False
+
+        # Simulate _finalize_turn_result's live_mode computation:
+        # This is the exact expression from session.py
+        live_mode = (
+            ("[auto]" if handler.classifier_enabled else "[manual]")
+            if handler.in_worktree
+            else None
+        )
+
+        assert live_mode == "[manual]"
+        # The _auto_mode_label would have been "[auto]" before fallback,
+        # so live_mode != _auto_mode_label → topic update fires
+
+
+class TestClassifierWriteGateOrdering:
+    """Guard tests: write-gated tools cannot reach the classifier pre-worktree."""
+
+    async def test_write_gated_tools_denied_before_classifier_pre_worktree(self):
+        """Write-gated tools hit _check_write_gate (deny) before classifier at step 2g."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "would allow"))
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=True, in_worktree=False
+        )
+
+        for tool in _WRITE_GATED_TOOLS:
+            result = await handler.handle(tool, {"command": "test", "file_path": "/tmp/x"}, None)
+            assert isinstance(result, PermissionResultDeny), f"{tool} should be denied pre-worktree"
+
+        mock_classifier.classify.assert_not_called()
+
+    async def test_classifier_approve_short_circuits_before_sdk_allow(self):
+        """Classifier-approved Bash at step 2g short-circuits before step 3 SDK allow."""
+        from claude_agent_sdk import ToolPermissionContext
+
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("allow", "safe"))
+        handler, _, _ = _make_classifier_handler(mock_classifier)
+
+        # Mock HITL *before* the call so we can verify it wasn't reached
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Create a context with SDK allow suggestion
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        mock_context = MagicMock(spec=ToolPermissionContext)
+        mock_context.suggestions = [mock_suggestion]
+
+        result = await handler.handle("Bash", {"command": "echo hi"}, mock_context)
+        # Classifier approved at step 2g — should not reach HITL at step 4
+        assert isinstance(result, PermissionResultAllow)
+        mock_classifier.classify.assert_awaited_once()
+        handler._request_approval.assert_not_called()

@@ -1029,3 +1029,64 @@ class TestSummonHandler:
         defn = COMMAND_ACTIONS["summon"]
         assert defn.handler is not None
         assert defn.max_args == 2
+
+
+class TestAutoHandler:
+    """Tests for !auto command with worktree guard."""
+
+    async def test_auto_status(self, make_context):
+        """!auto with no args shows status."""
+        ctx = make_context(auto_enabled=True)
+        result = await dispatch("auto", [], ctx)
+        assert "enabled" in result.text
+
+    async def test_auto_status_disabled(self, make_context):
+        """!auto shows disabled when classifier is off."""
+        ctx = make_context(auto_enabled=False)
+        result = await dispatch("auto", [], ctx)
+        assert "disabled" in result.text
+
+    async def test_auto_on_in_worktree(self, make_context):
+        """!auto on in worktree sets metadata."""
+        ctx = make_context(in_worktree=True)
+        result = await dispatch("auto", ["on"], ctx)
+        assert result.metadata.get("set_auto") is True
+
+    async def test_auto_on_pre_worktree_rejected(self, make_context):
+        """!auto on before worktree entry is rejected."""
+        ctx = make_context(in_worktree=False)
+        result = await dispatch("auto", ["on"], ctx)
+        assert "worktree" in result.text.lower()
+        assert "set_auto" not in result.metadata
+
+    async def test_auto_off_always_works(self, make_context):
+        """!auto off works regardless of worktree state."""
+        ctx = make_context(in_worktree=False)
+        result = await dispatch("auto", ["off"], ctx)
+        assert result.metadata.get("set_auto") is False
+
+    async def test_auto_rules(self, make_context):
+        """!auto rules shows effective rules from metadata."""
+        ctx = make_context(
+            metadata={
+                "auto_mode_deny": "no bad stuff",
+                "auto_mode_allow": "safe stuff",
+                "models": [],
+            }
+        )
+        result = await dispatch("auto", ["rules"], ctx)
+        assert "no bad stuff" in result.text
+        assert "safe stuff" in result.text
+
+    async def test_auto_unknown_action(self, make_context):
+        """!auto with unknown action returns error."""
+        ctx = make_context()
+        result = await dispatch("auto", ["banana"], ctx)
+        assert "Unknown" in result.text
+
+    def test_auto_in_command_actions(self):
+        """!auto should be registered in COMMAND_ACTIONS."""
+        assert "auto" in COMMAND_ACTIONS
+        defn = COMMAND_ACTIONS["auto"]
+        assert defn.handler is not None
+        assert "automode" in (defn.aliases or [])

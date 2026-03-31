@@ -34,6 +34,11 @@ def get_source_prompts() -> dict[str, str]:
     optional features enabled and user-facing template variables left as
     placeholder strings (e.g. ``{cwd}``).
     """
+    from summon_claude.sessions.classifier import (
+        _DEFAULT_ALLOW_RULES,
+        _DEFAULT_DENY_RULES,
+        build_classifier_prompt,
+    )
     from summon_claude.sessions.prompts import (
         build_global_pm_scan_prompt,
         build_pm_scan_prompt,
@@ -64,6 +69,17 @@ def get_source_prompts() -> dict[str, str]:
         "every message in your monitored workspaces passes through your watch.\n\n",
     )
 
+    # Classifier: call builder with default rules and no environment.
+    # tool_name/tool_input/context only affect the user message, not system prompt.
+    classifier_system, _ = build_classifier_prompt(
+        tool_name="",
+        tool_input={},
+        context="",
+        environment="",
+        deny_rules=_DEFAULT_DENY_RULES,
+        allow_rules=_DEFAULT_ALLOW_RULES,
+    )
+
     return {
         "pm-system": _PM_SYSTEM_PROMPT_APPEND,
         "pm-scan": build_pm_scan_prompt(github_enabled=True),
@@ -79,6 +95,7 @@ def get_source_prompts() -> dict[str, str]:
             quiet_hours="{quiet_hours}",
         ),
         "reviewer-system": _REVIEWER_SYSTEM_PROMPT_TEMPLATE,
+        "classifier-system": classifier_system,
         "compact": _COMPACT_PROMPT,
         "overflow-recovery": _OVERFLOW_RECOVERY_PROMPT,
         "canvas": _CANVAS_PROMPT_SECTION,

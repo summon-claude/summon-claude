@@ -132,6 +132,24 @@ See [GitHub Integration](../guide/github-integration.md) for setup details.
 
 ---
 
+## Auto Mode
+
+!!! note "Advanced"
+    These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
+
+The auto-mode classifier uses a secondary Sonnet model to automatically approve or block tool calls based on configurable prose rules. It only activates **after the agent enters a worktree** — read-only sessions never use the classifier.
+
+| Config Key | Type | Default | Description |
+|------------|------|---------|-------------|
+| `SUMMON_AUTO_CLASSIFIER_ENABLED` | boolean | `true` | Enable the Sonnet classifier for automatic tool approval. When enabled, the classifier activates on worktree entry. |
+| `SUMMON_AUTO_MODE_ENVIRONMENT` | text | `` | Environment description for the classifier (e.g. `production server`, `staging environment`). Provides context for safety decisions. |
+| `SUMMON_AUTO_MODE_DENY` | text | `` | Custom deny rules (newline-separated). Overrides the built-in deny rules when set. Any tool matching a deny rule is blocked. |
+| `SUMMON_AUTO_MODE_ALLOW` | text | `` | Custom allow rules (newline-separated). Overrides the built-in allow rules when set. Tools matching an allow rule (with no deny match) are approved. |
+
+See [Permissions](permissions.md#auto-mode-classifier) for the full classification flow and default rules.
+
+---
+
 ## Standard Variables That Affect summon
 
 These are not summon-specific, but summon respects them:
