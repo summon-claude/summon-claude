@@ -3,7 +3,7 @@
 ??? info "Prerequisites"
     This guide assumes you've completed the [Quick Start](../getting-started/quickstart.md) and have a working `summon config check`.
 
-summon-claude integrates with Jira via the [Atlassian Rovo MCP](https://mcp.atlassian.com/) server, giving Claude read-only access to Jira issues, projects, and Confluence pages.
+summon-claude integrates with Jira via the Atlassian Rovo MCP server, giving Claude read-only access to Jira issues, projects, and Confluence pages.
 
 ---
 
