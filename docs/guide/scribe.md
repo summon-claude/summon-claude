@@ -57,7 +57,7 @@ summon auth google status
 
 See [Scribe Integrations — Slack Browser Monitoring](scribe-integrations.md#slack-browser-monitoring) for full setup instructions.
 
-### Step 3: Start the scribe
+### Step 2: Start the scribe
 
 The scribe auto-spawns when you run:
 
@@ -130,7 +130,7 @@ DMs and @mentions are always captured regardless of `SUMMON_SCRIBE_SLACK_MONITOR
 **Example:**
 
 ```bash
-summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+# Slack auto-enables when browser auth exists; these are optional overrides
 summon config set SUMMON_SCRIBE_SLACK_BROWSER chrome
 summon config set SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS C01ABC123,C02DEF456
 ```

@@ -159,6 +159,19 @@ class TestScribeConfigDefaults:
         assert cfg.scribe_google_enabled is True
         assert cfg.scribe_slack_enabled is True
 
+    def test_scribe_explicit_false_overrides_auto_detect(self):
+        """Explicit scribe_enabled=False stays off even with detected sub-features."""
+        with _with_auto_detect(google_mcp=True, google_creds=True):
+            cfg = _make_config(scribe_enabled=False)
+        assert cfg.scribe_enabled is False
+        assert cfg.scribe_google_enabled is True  # sub-feature still detected
+
+    def test_slack_explicit_false_overrides_auto_detect(self):
+        """Explicit scribe_slack_enabled=False stays off even with detected auth."""
+        with _with_auto_detect(playwright=True, slack_auth=True):
+            cfg = _make_config(scribe_slack_enabled=False)
+        assert cfg.scribe_slack_enabled is False
+
 
 class TestScribeConfigValidation:
     def test_valid_browser_chrome(self):
