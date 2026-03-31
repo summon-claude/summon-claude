@@ -479,8 +479,8 @@ class TestDequeueAndStart:
         assert len(started_sessions) == 2
         assert "proj-1" not in manager._session_queue
 
-    async def test_dequeue_failure_requeues_entry(self):
-        """If SummonSession() raises during dequeue, the entry is re-queued."""
+    async def test_dequeue_failure_drops_entry(self):
+        """If SummonSession() raises during dequeue, the entry is dropped (not re-queued)."""
         manager, _, _ = _make_manager()
 
         manager.queue_session(
@@ -496,25 +496,14 @@ class TestDequeueAndStart:
         pm_stub._session_id = "pm-sess-1"
         manager._sessions["pm-sess-1"] = pm_stub  # type: ignore[assignment]
 
-        with (
-            patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls,
-            patch(
-                "summon_claude.sessions.manager.SummonSession",
-                side_effect=RuntimeError("boom"),
-            ),
+        with patch(
+            "summon_claude.sessions.manager.SummonSession",
+            side_effect=RuntimeError("boom"),
         ):
-            mock_reg = AsyncMock()
-            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
-            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            mock_reg.list_children = AsyncMock(return_value=[])
-
             await manager._dequeue_and_start("proj-1")
 
-        # Entry should be re-queued (not lost)
-        assert "proj-1" in manager._session_queue
-        q = manager._session_queue["proj-1"]
-        assert len(q) == 1
-        assert q[0].options.name == "fragile"
+        # Entry should be dropped — deterministic failures should not retry
+        assert "proj-1" not in manager._session_queue
 
 
 # ---------------------------------------------------------------------------

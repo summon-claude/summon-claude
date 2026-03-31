@@ -1605,8 +1605,6 @@ class SessionManager:
         )
         return position
 
-    _MAX_DEQUEUE_RETRIES = 3
-
     async def _dequeue_and_start(self, project_id: str) -> None:
         """Dequeue the next waiting session for *project_id* and start it.
 
@@ -1672,18 +1670,9 @@ class SessionManager:
                     entry.options.name,
                     redact_secrets(str(exc)),
                 )
-                # Re-queue with retry tracking (drop after max retries)
-                retry = getattr(entry, "_retry_count", 0) + 1
-                if retry < self._MAX_DEQUEUE_RETRIES:
-                    # Frozen dataclass — create a new entry with retry info
-                    requeue = self._session_queue.setdefault(project_id, collections.deque())
-                    requeue.appendleft(entry)
-                else:
-                    logger.error(
-                        "Dropping queued session '%s' after %d failed attempts",
-                        entry.options.name,
-                        retry,
-                    )
+                # Don't re-queue: SummonSession() failures are typically
+                # deterministic (bad config, deleted cwd). Re-queuing would
+                # create an infinite retry loop.
                 return
 
             self._cancel_grace_timer()
