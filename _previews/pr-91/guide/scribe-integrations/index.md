@@ -29,13 +29,32 @@ uv pip install 'summon-claude[google]'
 pipx inject summon-claude workspace-mcp
 ```
 
+Run the guided setup to create Google OAuth credentials:
+
+```
+summon auth google setup
+```
+
+The setup is an interactive wizard with a progress roadmap — each step gets a clean screen showing where you are and what's next:
+
+1. **Google Cloud Project** — select an existing project or create a new one. If `gcloud` is installed, the wizard detects your current project and offers it as the default, and can create new projects for you. Console links route through Google's account chooser for multi-account users.
+1. **Enable APIs** — enable Gmail, Calendar, and Drive APIs. If `gcloud` is installed, offers to run the command directly; otherwise provides browser links with an option to open them automatically.
+1. **OAuth Consent Screen** — configure branding and set publishing status to Production (avoids 7-day token expiry). Links open directly in your browser.
+1. **Create OAuth Client** — create a "Desktop app" OAuth client and download `client_secret.json`. The wizard accepts either the JSON file path or a manually pasted Client ID + Secret.
+
+Already have a GCP project with OAuth configured?
+
+In step 1, choose "Skip this step" to proceed directly to API enablement and credentials.
+
 Then authenticate with Google:
 
 ```
 summon auth google login
 ```
 
-This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Credentials are stored in summon's config directory (`google-credentials/`).
+This prompts which services need write access (all are read-only by default), then opens a browser for OAuth consent. Credentials are stored in summon's config directory (`google-credentials/`).
+
+To re-run later and change scope access (e.g., grant or revoke write access for a service), run `summon auth google login` again — prompt defaults match your current grants so you won't accidentally downgrade.
 
 To verify authentication status:
 
@@ -43,15 +62,13 @@ To verify authentication status:
 summon auth google status
 ```
 
-This shows whether credentials exist, which scopes are granted, and whether the token is still valid.
+This shows whether credentials exist, which scopes are granted (read-only vs read-write per service), and whether the token is still valid.
 
 ### Enabling the Google collector
 
-Once authenticated, enable the Google data collector in the scribe:
+The Google collector is **auto-detected**: when workspace-mcp is installed and Google credentials exist, the scribe automatically uses Google tools. No manual config flag is needed.
 
-```
-summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
-```
+To explicitly disable it: `summon config set SUMMON_SCRIBE_GOOGLE_ENABLED false`
 
 By default the scribe monitors `gmail`, `calendar`, and `drive`. To customize:
 
@@ -136,13 +153,7 @@ Removes saved browser auth state and workspace config. This cannot be undone.
 
 ### Enabling the Slack collector
 
-Once authenticated, enable the Slack data collector in the scribe:
-
-```
-summon config set SUMMON_SCRIBE_SLACK_ENABLED true
-```
-
-Optionally configure monitored channels and browser:
+Once authenticated, the Slack collector auto-enables on the next `summon project up`. Optionally configure monitored channels and browser:
 
 ```
 summon config set SUMMON_SCRIBE_SLACK_BROWSER chrome

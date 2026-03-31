@@ -1729,10 +1729,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-sdk-deny-suggestions-always-honored" class="md-nav__link">
+  <a href="#2-write-gate-read-only-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. SDK Deny Suggestions (always honored)
+        2. Write Gate (read-only default)
       
     </span>
   </a>
@@ -1740,10 +1740,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-static-auto-approve-list" class="md-nav__link">
+  <a href="#3-sdk-deny-suggestions-always-honored" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Static Auto-Approve List
+        3. SDK Deny Suggestions (always honored)
       
     </span>
   </a>
@@ -1751,10 +1751,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
+  <a href="#4-static-auto-approve-list" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. GitHub MCP Require-Approval List (checked before prefix auto-approve)
+        4. Static Auto-Approve List
       
     </span>
   </a>
@@ -1762,10 +1762,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-auto-mode-classifier-post-worktree-only" class="md-nav__link">
+  <a href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Auto-mode Classifier (post-worktree only)
+        5. GitHub MCP Require-Approval List (checked before prefix auto-approve)
       
     </span>
   </a>
@@ -1773,10 +1773,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-sdk-allow-suggestions" class="md-nav__link">
+  <a href="#6-auto-mode-classifier-post-worktree-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. SDK Allow Suggestions
+        6. Auto-mode Classifier (post-worktree only)
       
     </span>
   </a>
@@ -1784,10 +1784,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-write-gate-read-only-default" class="md-nav__link">
+  <a href="#7-sdk-allow-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Write Gate (read-only default)
+        7. SDK Allow Suggestions
       
     </span>
   </a>
@@ -2222,10 +2222,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#2-sdk-deny-suggestions-always-honored" class="md-nav__link">
+  <a href="#2-write-gate-read-only-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        2. SDK Deny Suggestions (always honored)
+        2. Write Gate (read-only default)
       
     </span>
   </a>
@@ -2233,10 +2233,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#3-static-auto-approve-list" class="md-nav__link">
+  <a href="#3-sdk-deny-suggestions-always-honored" class="md-nav__link">
     <span class="md-ellipsis">
       
-        3. Static Auto-Approve List
+        3. SDK Deny Suggestions (always honored)
       
     </span>
   </a>
@@ -2244,10 +2244,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
+  <a href="#4-static-auto-approve-list" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. GitHub MCP Require-Approval List (checked before prefix auto-approve)
+        4. Static Auto-Approve List
       
     </span>
   </a>
@@ -2255,10 +2255,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#5-auto-mode-classifier-post-worktree-only" class="md-nav__link">
+  <a href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
     <span class="md-ellipsis">
       
-        5. Auto-mode Classifier (post-worktree only)
+        5. GitHub MCP Require-Approval List (checked before prefix auto-approve)
       
     </span>
   </a>
@@ -2266,10 +2266,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#6-sdk-allow-suggestions" class="md-nav__link">
+  <a href="#6-auto-mode-classifier-post-worktree-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        6. SDK Allow Suggestions
+        6. Auto-mode Classifier (post-worktree only)
       
     </span>
   </a>
@@ -2277,10 +2277,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#7-write-gate-read-only-default" class="md-nav__link">
+  <a href="#7-sdk-allow-suggestions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        7. Write Gate (read-only default)
+        7. SDK Allow Suggestions
       
     </span>
   </a>
@@ -2514,12 +2514,20 @@
 <p>Spawn token verification uses the same constant-time comparison pattern as short codes.</p>
 <p>When a spawn token is consumed, the daemon logs a <code>spawn_token_consumed</code> audit event on success or <code>spawn_token_rejected</code> on failure.</p>
 <h2 id="permission-handling">Permission Handling<a class="headerlink" href="#permission-handling" title="Permanent link">&para;</a></h2>
-<p>Every tool call from Claude goes through <code>PermissionHandler.handle()</code> before execution. The decision logic has six layers, evaluated in order:</p>
+<p>Every tool call from Claude goes through <code>PermissionHandler.handle()</code> before execution. The decision logic has seven layers, evaluated in order:</p>
 <h3 id="1-askuserquestion-intercept-first">1. AskUserQuestion (intercept first)<a class="headerlink" href="#1-askuserquestion-intercept-first" title="Permanent link">&para;</a></h3>
 <p><code>AskUserQuestion</code> is intercepted before any other logic and routed to Slack interactive buttons for user input. This is not a permission check — it is a structured Q&amp;A mechanism.</p>
-<h3 id="2-sdk-deny-suggestions-always-honored">2. SDK Deny Suggestions (always honored)<a class="headerlink" href="#2-sdk-deny-suggestions-always-honored" title="Permanent link">&para;</a></h3>
+<h3 id="2-write-gate-read-only-default">2. Write Gate (read-only default)<a class="headerlink" href="#2-write-gate-read-only-default" title="Permanent link">&para;</a></h3>
+<p>Write-capable tools (<code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code>) are <strong>denied by default</strong> until containment is active (worktree or CWD). This prevents accidental writes to the main working directory.</p>
+<ul>
+<li><strong>Git repositories:</strong> the agent enters a worktree via <code>EnterWorktree</code>; the containment root is the worktree directory.</li>
+<li><strong>Non-git directories:</strong> containment is activated automatically at session start using the session CWD as the containment root.</li>
+</ul>
+<p>Before the first write-gated tool is approved, if the session is not in a git repository, a warning is shown that changes cannot be automatically rolled back.</p>
+<p>Safe-dir exceptions (<code>SUMMON_SAFE_WRITE_DIRS</code>) allow configured directories to bypass the containment requirement. Path validation uses <code>Path.resolve()</code> on both sides to prevent symlink escapes.</p>
+<h3 id="3-sdk-deny-suggestions-always-honored">3. SDK Deny Suggestions (always honored)<a class="headerlink" href="#3-sdk-deny-suggestions-always-honored" title="Permanent link">&para;</a></h3>
 <p>If the Claude SDK provides a <code>deny</code> suggestion for a tool, it is denied immediately and unconditionally. SDK deny suggestions represent the user's own <code>settings.json</code> rules and are always respected.</p>
-<h3 id="3-static-auto-approve-list">3. Static Auto-Approve List<a class="headerlink" href="#3-static-auto-approve-list" title="Permanent link">&para;</a></h3>
+<h3 id="4-static-auto-approve-list">4. Static Auto-Approve List<a class="headerlink" href="#4-static-auto-approve-list" title="Permanent link">&para;</a></h3>
 <p>The following tools are auto-approved without any Slack prompt:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_AUTO_APPROVE_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
     <span class="s2">&quot;Read&quot;</span><span class="p">,</span> <span class="s2">&quot;Cat&quot;</span><span class="p">,</span> <span class="s2">&quot;Grep&quot;</span><span class="p">,</span> <span class="s2">&quot;Glob&quot;</span><span class="p">,</span> <span class="s2">&quot;WebSearch&quot;</span><span class="p">,</span> <span class="s2">&quot;WebFetch&quot;</span><span class="p">,</span>
@@ -2534,7 +2542,7 @@
     <span class="s2">&quot;mcp__github__search_&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<h3 id="4-github-mcp-require-approval-list-checked-before-prefix-auto-approve">4. GitHub MCP Require-Approval List (checked before prefix auto-approve)<a class="headerlink" href="#4-github-mcp-require-approval-list-checked-before-prefix-auto-approve" title="Permanent link">&para;</a></h3>
+<h3 id="5-github-mcp-require-approval-list-checked-before-prefix-auto-approve">5. GitHub MCP Require-Approval List (checked before prefix auto-approve)<a class="headerlink" href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" title="Permanent link">&para;</a></h3>
 <p>Destructive and externally-visible GitHub operations <strong>always</strong> require Slack approval, even if the SDK suggests allow or they match a read prefix:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_REQUIRE_APPROVAL</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
     <span class="s2">&quot;mcp__github__merge_pull_request&quot;</span><span class="p">,</span>
@@ -2551,7 +2559,7 @@
 <span class="p">])</span>
 </code></pre></div>
 <p>This is defense-in-depth — deny-list precedence over prefix matching prevents a broadly-scoped <code>allowedTools</code> pattern in <code>settings.json</code> from silently bypassing human-in-the-loop review for externally-visible actions.</p>
-<h3 id="5-auto-mode-classifier-post-worktree-only">5. Auto-mode Classifier (post-worktree only)<a class="headerlink" href="#5-auto-mode-classifier-post-worktree-only" title="Permanent link">&para;</a></h3>
+<h3 id="6-auto-mode-classifier-post-worktree-only">6. Auto-mode Classifier (post-worktree only)<a class="headerlink" href="#6-auto-mode-classifier-post-worktree-only" title="Permanent link">&para;</a></h3>
 <p>After the agent enters a worktree, a secondary Sonnet classifier can automatically approve or block tool calls based on configurable prose rules. This sits between the session caches and SDK allow suggestions — it only evaluates tools that weren't already handled by static lists or caches.</p>
 <p>Security mitigations:</p>
 <ul>
@@ -2562,20 +2570,18 @@
 <li><strong>Fallback threshold</strong>: After 3 consecutive blocks or 20 total blocks, the classifier automatically pauses and all decisions revert to manual Slack approval. This prevents a misconfigured classifier from permanently blocking the agent.</li>
 <li><strong>Tool-use denied in classifier</strong>: The classifier subprocess is configured with <code>can_use_tool</code> that denies all tool calls, preventing the classifier itself from taking actions.</li>
 </ul>
-<p>The intended security layering is: <strong>read-only</strong> (pre-worktree) → <strong>write gate</strong> (worktree entry + one-time approval) → <strong>auto-classifier</strong> (post-worktree, configurable rules) → <strong>Slack HITL</strong> (fallback).</p>
-<h3 id="6-sdk-allow-suggestions">6. SDK Allow Suggestions<a class="headerlink" href="#6-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
-<p>If the SDK provides an <code>allow</code> suggestion (from <code>settings.json</code> <code>allowedTools</code>), the tool is approved.</p>
-<h3 id="7-write-gate-read-only-default">7. Write Gate (read-only default)<a class="headerlink" href="#7-write-gate-read-only-default" title="Permanent link">&para;</a></h3>
-<p>Write-capable tools (<code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code>) are <strong>denied by default</strong> until the agent enters a worktree via <code>EnterWorktree</code>. This prevents accidental writes to the main working directory. Safe-dir exceptions (<code>SUMMON_SAFE_WRITE_DIRS</code>) allow configured directories to bypass the worktree requirement. Path validation uses <code>Path.resolve()</code> on both sides to prevent symlink escapes.</p>
+<p>The intended security layering is: <strong>read-only</strong> (pre-containment) → <strong>write gate</strong> (containment entry + one-time approval) → <strong>auto-classifier</strong> (post-worktree, configurable rules) → <strong>Slack HITL</strong> (fallback).</p>
+<h3 id="7-sdk-allow-suggestions">7. SDK Allow Suggestions<a class="headerlink" href="#7-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
+<p>If the SDK provides an <code>allow</code> suggestion (from <code>settings.json</code> <code>allowedTools</code>), the tool is approved. Write-gated tools that fell through CWD containment checks (paths outside the containment root, or <code>Bash</code>) are excluded — <code>allowedTools</code> cannot override CWD containment.</p>
 <h3 id="8-slack-approval-buttons-fallback">8. Slack Approval Buttons (fallback)<a class="headerlink" href="#8-slack-approval-buttons-fallback" title="Permanent link">&para;</a></h3>
-<p>All other tools — and write-gated tools after worktree entry — go through the Slack approval flow:</p>
+<p>All other tools — and write-gated tools after containment entry — go through the Slack approval flow:</p>
 <ol>
 <li>Requests within the same 2-second debounce window are batched into a single Slack message (<code>SUMMON_PERMISSION_DEBOUNCE_MS</code>, default 2000).</li>
 <li>The message posts as a normal message with <strong>Approve</strong>, <strong>Approve for session</strong>, and <strong>Deny</strong> buttons.</li>
 <li>After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.</li>
 <li>If no response arrives within 10 minutes (<code>_PERMISSION_TIMEOUT_S = 600</code>), the request is automatically denied and the message is deleted.</li>
 </ol>
-<p>"Approve for session" caches the tool name for the session lifetime — subsequent uses of the same tool are auto-approved. <code>Bash</code> and GitHub require-approval tools are never session-cached (defense-in-depth).</p>
+<p>"Approve for session" caches the approval for the session lifetime. Two tiers apply: write-gated tools (Edit, Write, Bash, etc.) cache the specific argument — the file path for file tools, or the exact command string for Bash — so blanket approval is not possible. All other tools cache the tool name, auto-approving all subsequent uses. GitHub require-approval tools are never session-cached regardless of tier (defense-in-depth).</p>
 <p>Only the authenticated session owner (<code>authenticated_user_id</code>) can approve or deny — clicks from other users are logged and ignored.</p>
 <h2 id="audit-logging">Audit Logging<a class="headerlink" href="#audit-logging" title="Permanent link">&para;</a></h2>
 <p>All significant session events are written to the <code>audit_log</code> table in SQLite with a timestamp, event type, session ID, user ID, and details:</p>
