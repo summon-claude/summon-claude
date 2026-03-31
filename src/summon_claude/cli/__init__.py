@@ -32,9 +32,6 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
-    jira_login,
-    jira_logout,
-    jira_status,
 )
 from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
 from summon_claude.cli.doctor import async_doctor
@@ -312,6 +309,13 @@ def cmd_start(
 def cmd_stop(ctx: click.Context, session: str | None, stop_all: bool) -> None:
     """Stop a session (by name or ID) or all sessions via the daemon."""
     asyncio.run(async_stop(ctx, session, stop_all))
+
+
+# ---------------------------------------------------------------------------
+# auth command group — summon auth <provider> <action>
+# ---------------------------------------------------------------------------
+
+cli.add_command(cmd_auth)
 
 
 # ---------------------------------------------------------------------------
@@ -814,31 +818,6 @@ def config_set_cmd(ctx: click.Context, key: str, value: str) -> None:
     """Set a configuration value (e.g. SUMMON_SLACK_BOT_TOKEN)."""
     config_path_override = ctx.obj.get("config_path") if ctx.obj else None
     config_set(key, value, config_path_override)
-
-
-# ---------------------------------------------------------------------------
-# auth command group (defined in cli/auth.py)
-# ---------------------------------------------------------------------------
-
-cli.add_command(cmd_auth)
-
-
-@cmd_config.command("jira-login")
-def config_jira_login_cmd() -> None:
-    """Authenticate with Jira via OAuth 2.1 (PKCE + DCR)."""
-    jira_login()
-
-
-@cmd_config.command("jira-logout")
-def config_jira_logout_cmd() -> None:
-    """Remove stored Jira OAuth credentials."""
-    jira_logout()
-
-
-@cmd_config.command("jira-status")
-def config_jira_status_cmd() -> None:
-    """Check Jira authentication status."""
-    jira_status()
 
 
 # ---------------------------------------------------------------------------

@@ -683,13 +683,13 @@ def check_jira_status() -> str | None:
         Error message string if there is a problem (no token, expired, etc.).
     """
     if not jira_credentials_exist():
-        return "No Jira credentials found. Run: summon config jira-login"
+        return "No Jira credentials found. Run: summon auth jira login"
 
     token_data = load_jira_token()
     if token_data is None:
         return (
             "Jira credentials are present but could not be loaded or refreshed. "
-            "Re-authenticate: summon config jira-login"
+            "Re-authenticate: summon auth jira login"
         )
 
     # Check that we have a cloud_id stored (set during login)
@@ -697,7 +697,7 @@ def check_jira_status() -> str | None:
     if not cloud_id:
         return (
             "Jira credentials found but no cloud_id is configured. "
-            "Re-authenticate: summon config jira-login"
+            "Re-authenticate: summon auth jira login"
         )
 
     return None

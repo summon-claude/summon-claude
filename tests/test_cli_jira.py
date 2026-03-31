@@ -8,7 +8,7 @@ import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
-from summon_claude.cli.config import jira_login, jira_logout, jira_status
+from summon_claude.cli.auth import auth_jira_login, auth_jira_logout, auth_jira_status
 
 # ---------------------------------------------------------------------------
 # jira_login
@@ -36,7 +36,7 @@ class TestJiraLogin:
             patch("summon_claude.jira_auth.save_jira_token") as mock_save,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-login"])
+            result = runner.invoke(cli, ["auth", "jira", "login"])
 
         assert result.exit_code == 0
         assert "authenticated" in result.output.lower() or "My Jira" in result.output
@@ -45,8 +45,8 @@ class TestJiraLogin:
         assert saved["cloud_id"] == "cloud-abc"
         assert saved["cloud_name"] == "My Jira"
 
-    def test_jira_login_no_sites(self):
-        """Login succeeds but no accessible cloud sites → still saves token, prints warning."""
+    def test_jira_login_no_sites_prompts_for_url(self):
+        """Login with no auto-discovered sites → prompts for site URL, saves with cloud_id."""
         token_data = {"access_token": "atoken"}
 
         with (
@@ -63,14 +63,14 @@ class TestJiraLogin:
             patch("summon_claude.jira_auth.save_jira_token") as mock_save,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-login"])
+            result = runner.invoke(cli, ["auth", "jira", "login"], input="myorg.atlassian.net\n")
 
         assert result.exit_code == 0
         mock_save.assert_called()
-        # cloud_id should NOT be set when no sites found
         saved = mock_save.call_args[0][0]
-        assert "cloud_id" not in saved
-        assert "no accessible cloud sites" in result.output.lower()
+        assert saved["cloud_id"] == "myorg.atlassian.net"
+        assert saved["cloud_name"] == "myorg"
+        assert "could not auto-discover" in result.output.lower()
 
     def test_jira_login_timeout_exits_nonzero(self):
         """If start_auth_flow raises TimeoutError, CLI exits with code 1."""
@@ -80,7 +80,7 @@ class TestJiraLogin:
             side_effect=TimeoutError("flow timed out"),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-login"])
+            result = runner.invoke(cli, ["auth", "jira", "login"])
 
         assert result.exit_code == 1
         assert "timed out" in result.output.lower()
@@ -93,7 +93,7 @@ class TestJiraLogin:
             side_effect=RuntimeError("authorization denied"),
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-login"])
+            result = runner.invoke(cli, ["auth", "jira", "login"])
 
         assert result.exit_code == 1
         assert "authentication failed" in result.output.lower()
@@ -117,7 +117,7 @@ class TestJiraLogin:
             patch("summon_claude.jira_auth.save_jira_token"),
         ):
             # Should not raise
-            jira_login()
+            auth_jira_login.callback()
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +136,7 @@ class TestJiraLogout:
             patch("summon_claude.jira_auth.logout") as mock_logout,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-logout"])
+            result = runner.invoke(cli, ["auth", "jira", "logout"])
 
         assert result.exit_code == 0
         mock_logout.assert_called_once()
@@ -152,7 +152,7 @@ class TestJiraLogout:
             patch("summon_claude.jira_auth.logout") as mock_logout,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-logout"])
+            result = runner.invoke(cli, ["auth", "jira", "logout"])
 
         assert result.exit_code == 0
         mock_logout.assert_not_called()
@@ -167,7 +167,7 @@ class TestJiraLogout:
             ),
             patch("summon_claude.jira_auth.logout") as mock_logout,
         ):
-            jira_logout()
+            auth_jira_logout.callback()
 
         mock_logout.assert_called_once()
 
@@ -185,20 +185,20 @@ class TestJiraStatus:
             return_value=None,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-status"])
+            result = runner.invoke(cli, ["auth", "jira", "status"])
 
         assert result.exit_code == 0
         assert "authenticated" in result.output.lower()
 
     def test_jira_status_error(self):
         """When _check_jira_status returns an error string, it is displayed."""
-        error_msg = "No Jira credentials found. Run: summon config jira-login"
+        error_msg = "No Jira credentials found. Run: summon auth jira login"
         with patch(
             "summon_claude.jira_auth.check_jira_status",
             return_value=error_msg,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-status"])
+            result = runner.invoke(cli, ["auth", "jira", "status"])
 
         assert result.exit_code == 0
         assert error_msg in result.output
@@ -211,7 +211,7 @@ class TestJiraStatus:
             return_value=error_msg,
         ):
             runner = CliRunner()
-            result = runner.invoke(cli, ["config", "jira-status"])
+            result = runner.invoke(cli, ["auth", "jira", "status"])
 
         assert result.exit_code == 0
         assert error_msg in result.output
@@ -222,7 +222,7 @@ class TestJiraStatus:
             "summon_claude.jira_auth.check_jira_status",
             return_value=None,
         ):
-            jira_status()  # Should not raise
+            auth_jira_status.callback()  # Should not raise
 
     def test_jira_status_direct_function_error(self):
         """Direct call to jira_status() does not raise on error status."""
@@ -230,4 +230,4 @@ class TestJiraStatus:
             "summon_claude.jira_auth.check_jira_status",
             return_value="some error",
         ):
-            jira_status()  # Should not raise
+            auth_jira_status.callback()  # Should not raise

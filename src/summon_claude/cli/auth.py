@@ -7,6 +7,9 @@ Consolidates all authentication commands under `summon auth`:
   - summon auth github logout   (remove GitHub token)
   - summon auth google login    (Google Workspace OAuth)
   - summon auth google status   (check Google creds)
+  - summon auth jira login      (Jira OAuth 2.1 with PKCE + DCR)
+  - summon auth jira logout     (remove Jira credentials)
+  - summon auth jira status     (check Jira auth status)
   - summon auth slack login     (external Slack browser auth)
   - summon auth slack logout    (remove Slack auth state)
   - summon auth slack status    (show Slack auth status)
@@ -68,6 +71,21 @@ def auth_status(ctx: click.Context) -> None:
     if google_result is not None:
         any_configured = True
 
+    # Jira
+    from summon_claude.jira_auth import check_jira_status  # noqa: PLC0415
+
+    jira_err = check_jira_status()
+    if jira_err is None:
+        any_configured = True
+        if not quiet:
+            click.echo("  [PASS] Jira: authenticated")
+    elif jira_err != "no credentials":
+        any_configured = True
+        if not quiet:
+            click.echo(f"  [FAIL] Jira: {jira_err}")
+    elif not quiet:
+        click.echo("  [INFO] Jira: not configured (run `summon auth jira login`)")
+
     # External Slack
     workspace_config_path = get_workspace_config_path()
     if workspace_config_path.exists():
@@ -99,6 +117,7 @@ def auth_status(ctx: click.Context) -> None:
         click.echo("  summon auth github login    Authenticate with GitHub")
         click.echo("  summon auth google setup    Set up Google OAuth credentials")
         click.echo("  summon auth google login    Authenticate with Google Workspace")
+        click.echo("  summon auth jira login      Authenticate with Jira")
         click.echo("  summon auth slack login     Authenticate with external Slack")
 
 
@@ -199,3 +218,100 @@ def auth_slack_status() -> None:
 def auth_slack_channels(refresh: bool) -> None:
     """Update monitored channel selection (no re-auth needed)."""
     slack_channels(refresh=refresh)
+
+
+# ---------------------------------------------------------------------------
+# summon auth jira
+# ---------------------------------------------------------------------------
+
+
+@cmd_auth.group("jira")
+def auth_jira() -> None:
+    """Jira authentication (OAuth 2.1 with PKCE + DCR)."""
+
+
+@auth_jira.command("login")
+def auth_jira_login() -> None:
+    """Authenticate with Jira via OAuth 2.1."""
+    import sys  # noqa: PLC0415
+
+    from summon_claude.jira_auth import (  # noqa: PLC0415
+        discover_cloud_sites,
+        save_jira_token,
+        start_auth_flow,
+    )
+
+    click.echo("Starting Jira OAuth flow — a browser window will open for authorization.")
+    try:
+        token_data = asyncio.run(start_auth_flow())
+    except TimeoutError as e:
+        click.echo(f"Timed out: {e}", err=True)
+        sys.exit(1)
+    except RuntimeError as e:
+        click.echo(f"Authentication failed: {e}", err=True)
+        sys.exit(1)
+
+    # Discover accessible Atlassian cloud sites via REST API.
+    # Rovo MCP tokens may not be interoperable with api.atlassian.com —
+    # if discovery fails, fall back to user-provided site URL.
+    access_token = token_data.get("access_token", "")
+    sites = asyncio.run(discover_cloud_sites(access_token))
+
+    if sites:
+        if len(sites) == 1:
+            site = sites[0]
+        else:
+            click.echo("Multiple Atlassian cloud sites found:")
+            for i, s in enumerate(sites, 1):
+                click.echo(f"  {i}. {s.get('name', 'unnamed')} ({s.get('url', '')})")
+            choice = click.prompt(
+                "Select a site",
+                type=click.IntRange(1, len(sites)),
+                default=1,
+            )
+            site = sites[choice - 1]
+        token_data["cloud_id"] = site["id"]
+        token_data["cloud_name"] = site.get("name", "")
+    else:
+        # REST API discovery failed (Rovo MCP token not interoperable).
+        # The MCP tools accept site hostnames as cloudId, so prompt for the URL.
+        click.echo(
+            "Could not auto-discover cloud sites (Rovo MCP tokens are not "
+            "interoperable with the Atlassian REST API)."
+        )
+        site_url = click.prompt(
+            "Enter your Atlassian site URL (e.g. myorg.atlassian.net)",
+            type=str,
+        )
+        # Normalize: strip protocol prefix if provided
+        site_url = site_url.strip().removeprefix("https://").removeprefix("http://")
+        token_data["cloud_id"] = site_url
+        token_data["cloud_name"] = site_url.split(".")[0]
+
+    save_jira_token(token_data)
+    site_label = token_data.get("cloud_name", token_data["cloud_id"])
+    click.echo(f"Jira authenticated (site: {site_label}).")
+
+
+@auth_jira.command("logout")
+def auth_jira_logout() -> None:
+    """Remove stored Jira OAuth credentials."""
+    from summon_claude.jira_auth import jira_credentials_exist, logout  # noqa: PLC0415
+
+    if not jira_credentials_exist():
+        click.echo("No Jira credentials to remove.")
+        return
+    logout()
+    click.echo("Jira credentials removed.")
+
+
+@auth_jira.command("status")
+def auth_jira_status() -> None:
+    """Check Jira authentication status."""
+    from summon_claude.jira_auth import check_jira_status  # noqa: PLC0415
+
+    err = check_jira_status()
+    if err is None:
+        click.echo("Jira: authenticated")
+    else:
+        click.echo(f"Jira: {err}")
