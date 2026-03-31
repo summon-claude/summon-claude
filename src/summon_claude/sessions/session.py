@@ -2120,6 +2120,7 @@ class SummonSession:
                     google_enabled=google_mcp_wired,
                     google_accounts=google_accounts or None,
                     slack_enabled=bool(self._slack_monitors),
+                    jira_enabled=bool(jira_mcp),
                 )
                 if self._system_prompt_append:
                     system_prompt["append"] += "\n\n" + self._system_prompt_append
