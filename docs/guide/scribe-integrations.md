@@ -153,13 +153,7 @@ Removes saved browser auth state and workspace config. This cannot be undone.
 
 ### Enabling the Slack collector
 
-Once authenticated, enable the Slack data collector in the scribe:
-
-```bash
-summon config set SUMMON_SCRIBE_SLACK_ENABLED true
-```
-
-Optionally configure monitored channels and browser:
+Once authenticated, the Slack collector auto-enables on the next `summon project up`. Optionally configure monitored channels and browser:
 
 ```bash
 summon config set SUMMON_SCRIBE_SLACK_BROWSER chrome

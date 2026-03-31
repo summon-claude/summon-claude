@@ -391,12 +391,12 @@ This page covers common problems and their solutions. Issues are grouped by cate
 ???+ tip "Slack browser monitoring not working"
     **Symptom:** Scribe is running but not capturing messages from external Slack workspaces.
 
-    **Cause:** The Slack browser monitor requires separate enablement, Playwright, and browser authentication.
+    **Cause:** The Slack browser monitor auto-detects when Playwright is installed and browser auth exists. If either is missing, it stays disabled.
 
     **Fix:**
-    1. Enable the Slack browser monitor:
+    1. Ensure Playwright is installed:
     ```bash
-    summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+    uv tool install "summon-claude[slack-browser]"
     ```
     2. Check Slack browser authentication status:
     ```bash
