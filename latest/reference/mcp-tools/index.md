@@ -260,20 +260,21 @@ PM (project manager) sessions are started with `--pm-profile` or via `summon pro
 
 Start a new summon-claude session. Generates a spawn token and creates a pre-authenticated session via daemon IPC.
 
-| Parameter       | Type   | Required | Default               | Description                                                                                                         |
-| --------------- | ------ | -------- | --------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `name`          | string | Yes      | —                     | Session name. Must be lowercase alphanumeric + hyphens, 1–20 characters, starting with alphanumeric                 |
-| `cwd`           | string | No       | Calling session's cwd | Working directory for the new session. Must be within the calling session's directory (symlink-safe ancestor check) |
-| `model`         | string | No       | *(inherited)*         | Model override                                                                                                      |
-| `system_prompt` | string | No       | —                     | Additional system prompt text appended to the session (max 10,000 characters)                                       |
+| Parameter        | Type   | Required | Default               | Description                                                                                                                               |
+| ---------------- | ------ | -------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`           | string | Yes      | —                     | Session name. Must be lowercase alphanumeric + hyphens, 1–20 characters, starting with alphanumeric                                       |
+| `cwd`            | string | No       | Calling session's cwd | Working directory for the new session. Must be within the calling session's directory (symlink-safe ancestor check)                       |
+| `model`          | string | No       | *(inherited)*         | Model override                                                                                                                            |
+| `system_prompt`  | string | No       | —                     | Additional system prompt text appended to the session (max 10,000 characters)                                                             |
+| `initial_prompt` | string | No       | —                     | First message injected into the session after startup (max 10,000 characters). Eliminates the need for a follow-up `session_message` call |
 
-**Returns:** The new session ID and a note that the Slack channel will appear shortly.
+**Returns:** The new session ID and a note that the Slack channel will appear shortly. If the active session cap is reached and the caller is a PM, the session is queued and starts automatically when a slot opens.
 
 **Constraints:**
 
 - Cannot spawn sessions outside the calling session's directory tree
 - Spawn depth is capped at 2 (root → child → grandchild)
-- Maximum active children per PM session is enforced
+- Maximum active children per PM session is enforced (PM sessions queue when at cap; non-PM sessions receive an error)
 - Project ID is auto-propagated from the calling session
 
 ______________________________________________________________________
