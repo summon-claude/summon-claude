@@ -339,7 +339,7 @@ Your domain: Gmail, Google Calendar, Google Drive — watch every inbox, every c
 
 Your domain: External Slack channels, DMs, and @mentions — every message in your monitored workspaces passes through your watch.
 
-## Periodic Scan Awareness
+{jira_section}## Periodic Scan Awareness
 
 Periodic scan triggers arrive every {scan_interval} minutes with specific instructions for checking your data sources, triaging items by importance, and posting results. Follow the scan protocol when triggers arrive.
 
