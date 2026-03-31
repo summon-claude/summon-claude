@@ -1844,7 +1844,7 @@ class SummonSession:
         # PERF-002: single token load extracts both access_token and cloud_id.
         jira_mcp: dict | None = None
         _jira_cloud_id: str | None = None
-        if getattr(self, "_jira_enabled", self._config.jira_enabled):
+        if self._config.jira_enabled:
             from summon_claude.jira_auth import (  # noqa: PLC0415
                 load_jira_token,
                 refresh_jira_token_if_needed,
