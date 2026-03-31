@@ -400,7 +400,15 @@ async def _exchange_code(  # noqa: PLR0913
     redirect_uri: str,
     code_verifier: str,
 ) -> dict[str, Any]:
-    """Exchange an authorization code for tokens using client_secret_post."""
+    """Exchange an authorization code for tokens via the token endpoint.
+
+    SC-02: Uses client_secret_post (credentials in POST body, not HTTP Basic
+    auth) because DCR registered this client with that auth method. Never uses
+    'none' — a missing client_secret in the DCR response aborts the flow.
+
+    SEC-P4-004: Error responses may reflect the client_secret from the POST
+    body, so only the error/error_description fields are surfaced to the user.
+    """
     payload = {
         "grant_type": "authorization_code",
         "code": code,

@@ -196,6 +196,7 @@ async def _migrate_11_to_12(db: aiosqlite.Connection) -> None:
 
 
 async def _migrate_12_to_13(db: aiosqlite.Connection) -> None:
+<<<<<<< HEAD
     """Add index on authenticated_user_id + status for channel scoping queries.
 
     Covers get_all_active_channels (Global PM) and get_child_channels (Project PM).

@@ -3676,7 +3676,6 @@ class TestFinalizeEscalatingWarnings:
         assert len(standard) == 0
 
 
-<<<<<<< HEAD
 class TestFormatTopic:
     """Unit tests for _format_topic mode parameter."""
 

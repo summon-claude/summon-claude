@@ -140,7 +140,10 @@ def _is_google_write_tool(tool_name: str) -> bool:
 _JIRA_MCP_PREFIX = "mcp__jira__"
 
 # Hard deny: write tools + fetchAtlassian. Checked BEFORE auto-approve (SC-04, SEC-017).
-# fetchAtlassian is a generic ARI accessor that bypasses tool-level gating (SEC-008).
+# Write tools denied because the OAuth scope is read-only (read:jira-work).
+# fetchAtlassian (SEC-008) is a generic Atlassian Resource Identifier (ARI) accessor
+# that can fetch arbitrary resources across projects and products, bypassing the
+# per-tool read-only gating. Must be blocked even though it appears "read-only".
 _JIRA_MCP_HARD_DENY = frozenset(
     {
         "mcp__jira__addCommentToJiraIssue",
@@ -164,7 +167,9 @@ _JIRA_MCP_AUTO_APPROVE_PREFIXES = (
     "mcp__jira__lookup",
 )
 
-# Auto-approve read-only tools by exact name (don't match any auto-approve prefix)
+# Auto-approve read-only tools by exact name. These are read-only tools whose
+# names don't match any auto-approve prefix (e.g. atlassianUserInfo starts with
+# a lowercase 'a', not 'get'/'search'/'lookup').
 _JIRA_MCP_AUTO_APPROVE_EXACT = frozenset(
     {
         "mcp__jira__atlassianUserInfo",
