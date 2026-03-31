@@ -59,7 +59,7 @@ _TRUSTED_TOKEN_HOSTS = frozenset({"cf.mcp.atlassian.com", "auth.atlassian.com"})
 
 # Fields from the original token that the OAuth server never returns on refresh
 # but must be preserved across refreshes (e.g. cloud_id set during login).
-_TOKEN_PRESERVE_FIELDS = ("cloud_id", "cloud_name")
+_TOKEN_PRESERVE_FIELDS = frozenset({"cloud_id", "cloud_name"})
 
 
 def get_jira_credentials_dir() -> Path:

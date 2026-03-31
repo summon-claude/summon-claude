@@ -664,7 +664,7 @@ class TestModuleConstants:
         )
 
     def test_token_preserve_fields_pinned(self):
-        assert jira_auth._TOKEN_PRESERVE_FIELDS == ("cloud_id", "cloud_name")
+        assert frozenset({"cloud_id", "cloud_name"}) == jira_auth._TOKEN_PRESERVE_FIELDS
 
     def test_token_endpoint_cached_in_start_auth_flow(self):
         """start_auth_flow must store token_endpoint for future refresh."""
@@ -726,6 +726,23 @@ class TestDoRefresh:
         assert result["cloud_name"] == "my-cloud-name", (
             "cloud_name must be preserved across refresh"
         )
+
+    @pytest.mark.asyncio
+    async def test_server_returned_cloud_id_wins(self):
+        """If the OAuth server returns cloud_id, the server value takes precedence."""
+        token = _make_token(cloud_id="original-cloud-id")
+        server_response = {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+            "cloud_id": "server-cloud-id",
+        }
+        mock_session = self._make_mock_http(200, server_response)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await jira_auth._do_refresh(token)
+
+        assert result is not None
+        assert result["cloud_id"] == "server-cloud-id"
 
     @pytest.mark.asyncio
     async def test_trusted_host_validation_rejects_untrusted(self):

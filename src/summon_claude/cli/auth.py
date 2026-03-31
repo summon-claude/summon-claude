@@ -279,20 +279,20 @@ def auth_jira_login(site: str | None) -> None:
         if matched:
             token_data["cloud_id"] = matched[0]["id"]
             token_data["cloud_name"] = matched[0].get("name", "")
-        elif sites:
-            click.echo(
-                f"Warning: --site '{site}' did not match any discovered site. "
-                f"Available: {', '.join(s.get('name', '') for s in sites)}",
-                err=True,
-            )
-            token_data["cloud_id"] = site_host
-            token_data["cloud_name"] = site_host.split(".")[0]
         else:
-            click.echo(
-                f"Warning: site discovery unavailable — storing '{site_host}' as cloud_id. "
-                "MCP tools may require a UUID; re-run login without --site if issues arise.",
-                err=True,
-            )
+            # Fallback: store hostname (not UUID) with a warning
+            if sites:
+                click.echo(
+                    f"Warning: --site '{site}' did not match any discovered site. "
+                    f"Available: {', '.join(s.get('name', '') for s in sites)}",
+                    err=True,
+                )
+            else:
+                click.echo(
+                    f"Warning: site discovery unavailable — storing '{site_host}' as cloud_id. "
+                    "MCP tools may require a UUID; re-run login without --site if issues arise.",
+                    err=True,
+                )
             token_data["cloud_id"] = site_host
             token_data["cloud_name"] = site_host.split(".")[0]
     elif sites:
