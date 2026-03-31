@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import stat
@@ -352,10 +351,7 @@ class TestRefreshJiraTokenIfNeeded:
             "expires_at": time.time() + 3600,
         }
 
-        with (
-            patch.object(jira_auth, "_do_refresh", return_value=refreshed_token),
-            patch.object(jira_auth, "_asyncio_sleep"),
-        ):
+        with patch.object(jira_auth, "_do_refresh", return_value=refreshed_token):
             await jira_auth.refresh_jira_token_if_needed()
 
         # Load the token and verify it was refreshed
@@ -369,10 +365,7 @@ class TestRefreshJiraTokenIfNeeded:
         token = _make_token(expires_at=time.time() + 60)
         jira_auth.save_jira_token(token)
 
-        with (
-            patch.object(jira_auth, "_do_refresh", return_value=None),
-            patch.object(jira_auth, "_asyncio_sleep"),
-        ):
+        with patch.object(jira_auth, "_do_refresh", return_value=None):
             await jira_auth.refresh_jira_token_if_needed()
         # No exception; existing token unchanged
 
@@ -542,29 +535,30 @@ class TestCheckJiraStatus:
 
         result = jira_auth.check_jira_status()
         assert result is not None
-        assert "could not be loaded" in result
+        assert "corrupt or unreadable" in result
 
     def test_returns_error_when_no_cloud_id(self):
         token = _make_token()
         token.pop("cloud_id")
         jira_auth.save_jira_token(token)
 
-        # load_jira_token is patched to return the token without cloud_id
-        with patch.object(jira_auth, "load_jira_token", return_value=token):
-            result = jira_auth.check_jira_status()
+        result = jira_auth.check_jira_status()
 
         assert result is not None
         assert "cloud_id" in result
 
-    def test_returns_error_when_token_expired(self):
-        """Expired token: load_jira_token returns None — caller should have refreshed async."""
+    def test_returns_none_when_token_near_expiry(self):
+        """Near-expiry token: check_jira_status reads raw file, ignores expiry.
+
+        check_jira_status bypasses load_jira_token() and reads the token file
+        directly. A near-expiry token with valid access_token and cloud_id
+        should return None (OK) — the daemon refreshes tokens asynchronously.
+        """
         token = _make_token(expires_at=time.time() + 60)  # within 5-min buffer
         jira_auth.save_jira_token(token)
 
-        # load_jira_token returns None for expired tokens (no sync refresh)
         result = jira_auth.check_jira_status()
-        assert result is not None
-        assert "could not be loaded" in result
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -645,3 +639,219 @@ class TestSecurityConstraints:
         # Verify the module docstring mentions SC-03
         module_doc = jira_auth.__doc__ or ""
         assert "SC-03" in module_doc, "Module docstring should reference SC-03"
+
+
+# ---------------------------------------------------------------------------
+# Module-level constant guard tests
+# ---------------------------------------------------------------------------
+
+
+class TestModuleConstants:
+    def test_trusted_token_hosts_pinned(self):
+        assert (
+            frozenset({"cf.mcp.atlassian.com", "auth.atlassian.com"})
+            == jira_auth._TRUSTED_TOKEN_HOSTS
+        )
+
+    def test_token_preserve_fields_pinned(self):
+        assert jira_auth._TOKEN_PRESERVE_FIELDS == ("cloud_id", "cloud_name")
+
+    def test_token_endpoint_cached_in_start_auth_flow(self):
+        """start_auth_flow must store token_endpoint for future refresh."""
+        import inspect
+
+        source = inspect.getsource(jira_auth.start_auth_flow)
+        assert 'token_data["token_endpoint"]' in source
+
+
+# ---------------------------------------------------------------------------
+# _do_refresh() direct tests
+# ---------------------------------------------------------------------------
+
+
+class TestDoRefresh:
+    """Direct tests for _do_refresh() — the actual token refresh logic."""
+
+    def _make_mock_http(self, status: int = 200, body: dict | None = None):
+        """Build a fake aiohttp session+response pair."""
+        if body is None:
+            body = {
+                "access_token": "new-access-token",
+                "refresh_token": "new-refresh-token",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            }
+        mock_response = AsyncMock()
+        mock_response.status = status
+        mock_response.json = AsyncMock(return_value=body)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(return_value=mock_response)
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_preserves_cloud_id_and_cloud_name(self):
+        """cor-1: cloud_id and cloud_name from token_data must survive refresh."""
+        token = _make_token(cloud_id="my-cloud-id")
+        token["cloud_name"] = "my-cloud-name"
+
+        # Server response does NOT include cloud_id or cloud_name
+        server_response = {
+            "access_token": "new-access-token",
+            "refresh_token": "new-refresh-token",
+            "expires_in": 3600,
+        }
+        mock_session = self._make_mock_http(200, server_response)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await jira_auth._do_refresh(token)
+
+        assert result is not None
+        assert result["cloud_id"] == "my-cloud-id", "cloud_id must be preserved across refresh"
+        assert result["cloud_name"] == "my-cloud-name", (
+            "cloud_name must be preserved across refresh"
+        )
+
+    @pytest.mark.asyncio
+    async def test_trusted_host_validation_rejects_untrusted(self):
+        """SEC-P4-005: cached token_endpoint on untrusted host triggers rediscovery."""
+        token = _make_token()
+        token["token_endpoint"] = "https://evil.com/token"
+
+        server_response = {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+        }
+        mock_session = self._make_mock_http(200, server_response)
+
+        with (
+            patch("aiohttp.ClientSession", return_value=mock_session),
+            patch.object(
+                jira_auth,
+                "discover_oauth_metadata",
+                return_value={"token_endpoint": "https://cf.mcp.atlassian.com/v1/token"},
+            ) as mock_discover,
+        ):
+            result = await jira_auth._do_refresh(token)
+
+        # Discovery must have been called because the cached endpoint was untrusted
+        mock_discover.assert_called_once()
+        # Refresh still succeeds via the discovered endpoint
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_trusted_host_validation_accepts_trusted(self):
+        """Cached token_endpoint on trusted host is used directly (no rediscovery)."""
+        token = _make_token()
+        # token_endpoint is already "https://cf.mcp.atlassian.com/v1/token" from _make_token
+
+        server_response = {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+        }
+        mock_session = self._make_mock_http(200, server_response)
+
+        with (
+            patch("aiohttp.ClientSession", return_value=mock_session),
+            patch.object(jira_auth, "discover_oauth_metadata") as mock_discover,
+        ):
+            result = await jira_auth._do_refresh(token)
+
+        mock_discover.assert_not_called()
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_missing_refresh_token(self):
+        """Token without refresh_token returns None."""
+        token = _make_token()
+        del token["refresh_token"]
+
+        result = await jira_auth._do_refresh(token)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_network_error(self):
+        """aiohttp.ClientError returns None."""
+        import aiohttp as _aiohttp
+
+        token = _make_token()
+
+        mock_session = MagicMock()
+        mock_session.post = MagicMock(side_effect=_aiohttp.ClientError("timeout"))
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await jira_auth._do_refresh(token)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_non_200_response(self):
+        """Non-200 HTTP response returns None."""
+        token = _make_token()
+        error_body = {"error": "invalid_grant", "error_description": "Refresh token expired"}
+        mock_session = self._make_mock_http(400, error_body)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await jira_auth._do_refresh(token)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_preserves_old_refresh_token_when_server_omits_it(self):
+        """If server doesn't return new refresh_token, keep the old one."""
+        token = _make_token(refresh_token="original-refresh-token")
+
+        # Server response deliberately omits refresh_token
+        server_response = {
+            "access_token": "new-access-token",
+            "expires_in": 3600,
+        }
+        mock_session = self._make_mock_http(200, server_response)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            result = await jira_auth._do_refresh(token)
+
+        assert result is not None
+        assert result["refresh_token"] == "original-refresh-token"
+
+
+# ---------------------------------------------------------------------------
+# OAuth discovery — fallback endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverOAuthMetadataFallback:
+    @pytest.mark.asyncio
+    async def test_fallback_to_openid_configuration(self):
+        """Primary endpoint fails (404), fallback to openid-configuration succeeds."""
+        not_found = AsyncMock()
+        not_found.status = 404
+        not_found.__aenter__ = AsyncMock(return_value=not_found)
+        not_found.__aexit__ = AsyncMock(return_value=False)
+
+        ok_response = AsyncMock()
+        ok_response.status = 200
+        ok_response.json = AsyncMock(return_value=MOCK_METADATA)
+        ok_response.__aenter__ = AsyncMock(return_value=ok_response)
+        ok_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        # First call (primary) → 404, second call (fallback) → 200
+        mock_session.get = MagicMock(side_effect=[not_found, ok_response])
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("aiohttp.ClientSession", return_value=mock_session):
+            metadata = await jira_auth.discover_oauth_metadata("https://mcp.atlassian.com")
+
+        assert metadata["issuer"] == "https://cf.mcp.atlassian.com"
+        assert metadata["token_endpoint"] == "https://cf.mcp.atlassian.com/v1/token"
+        assert mock_session.get.call_count == 2

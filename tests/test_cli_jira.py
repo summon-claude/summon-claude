@@ -8,7 +8,12 @@ import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
-from summon_claude.cli.auth import auth_jira_login, auth_jira_logout, auth_jira_status
+from summon_claude.cli.auth import (
+    _normalize_site,
+    auth_jira_login,
+    auth_jira_logout,
+    auth_jira_status,
+)
 
 # ---------------------------------------------------------------------------
 # jira_login
@@ -72,15 +77,27 @@ class TestJiraLogin:
         assert saved["cloud_id"] == "myorg.atlassian.net"
         assert saved["cloud_name"] == "myorg"
 
-    def test_jira_login_site_flag_skips_discovery(self):
-        """--site flag skips REST API discovery and interactive prompt."""
+    def test_jira_login_site_flag_matches_discovered_site(self):
+        """--site flag calls discover_cloud_sites, matches by hostname, saves UUID cloud_id."""
         token_data = {"access_token": "atoken"}
+        sites = [
+            {
+                "id": "uuid-redhat-123",
+                "name": "Red Hat",
+                "url": "https://redhat.atlassian.net",
+            }
+        ]
 
         with (
             patch(
                 "summon_claude.jira_auth.start_auth_flow",
                 new_callable=AsyncMock,
                 return_value=token_data,
+            ),
+            patch(
+                "summon_claude.jira_auth.discover_cloud_sites",
+                new_callable=AsyncMock,
+                return_value=sites,
             ),
             patch("summon_claude.jira_auth.save_jira_token") as mock_save,
         ):
@@ -90,8 +107,45 @@ class TestJiraLogin:
         assert result.exit_code == 0
         mock_save.assert_called()
         saved = mock_save.call_args[0][0]
+        # UUID from discovered site, not the bare hostname
+        assert saved["cloud_id"] == "uuid-redhat-123"
+        assert saved["cloud_name"] == "Red Hat"
+
+    def test_jira_login_site_flag_no_match_stores_hostname_with_warning(self):
+        """--site flag with no matching discovered site stores hostname and emits warning."""
+        token_data = {"access_token": "atoken"}
+        sites = [
+            {
+                "id": "uuid-other-456",
+                "name": "OtherOrg",
+                "url": "https://otherorg.atlassian.net",
+            }
+        ]
+
+        with (
+            patch(
+                "summon_claude.jira_auth.start_auth_flow",
+                new_callable=AsyncMock,
+                return_value=token_data,
+            ),
+            patch(
+                "summon_claude.jira_auth.discover_cloud_sites",
+                new_callable=AsyncMock,
+                return_value=sites,
+            ),
+            patch("summon_claude.jira_auth.save_jira_token") as mock_save,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "jira", "login", "--site", "redhat"])
+
+        assert result.exit_code == 0
+        mock_save.assert_called()
+        saved = mock_save.call_args[0][0]
+        # Falls back to hostname when no site matches
         assert saved["cloud_id"] == "redhat.atlassian.net"
         assert saved["cloud_name"] == "redhat"
+        # Warning should have been emitted to stderr
+        assert "warning" in result.output.lower() or "did not match" in result.output.lower()
 
     def test_jira_login_timeout_exits_nonzero(self):
         """If start_auth_flow raises TimeoutError, CLI exits with code 1."""
@@ -252,3 +306,230 @@ class TestJiraStatus:
             return_value="some error",
         ):
             auth_jira_status.callback()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# _normalize_site
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSite:
+    """Tests for _normalize_site() URL normalization."""
+
+    def test_bare_org_name(self):
+        assert _normalize_site("myorg") == "myorg.atlassian.net"
+
+    def test_already_qualified_hostname(self):
+        assert _normalize_site("myorg.atlassian.net") == "myorg.atlassian.net"
+
+    def test_https_url(self):
+        assert _normalize_site("https://myorg.atlassian.net") == "myorg.atlassian.net"
+
+    def test_http_url(self):
+        assert _normalize_site("http://myorg.atlassian.net") == "myorg.atlassian.net"
+
+    def test_trailing_slash(self):
+        assert _normalize_site("https://myorg.atlassian.net/") == "myorg.atlassian.net"
+
+    def test_whitespace_stripped(self):
+        assert _normalize_site("  myorg  ") == "myorg.atlassian.net"
+
+
+# ---------------------------------------------------------------------------
+# TestJiraLogin — multi-site selection
+# ---------------------------------------------------------------------------
+
+
+class TestJiraLoginMultiSite:
+    """Tests for multi-site discovery and selection in jira_login."""
+
+    def test_jira_login_multiple_sites_selects_second(self):
+        """Multi-site discovery prompts for selection; user picks site 2."""
+        token_data = {"access_token": "atoken"}
+        sites = [
+            {"id": "site-1-id", "name": "OrgOne", "url": "https://orgone.atlassian.net"},
+            {"id": "site-2-id", "name": "OrgTwo", "url": "https://orgtwo.atlassian.net"},
+        ]
+
+        with (
+            patch(
+                "summon_claude.jira_auth.start_auth_flow",
+                new_callable=AsyncMock,
+                return_value=token_data,
+            ),
+            patch(
+                "summon_claude.jira_auth.discover_cloud_sites",
+                new_callable=AsyncMock,
+                return_value=sites,
+            ),
+            patch("summon_claude.jira_auth.save_jira_token") as mock_save,
+        ):
+            runner = CliRunner()
+            # User selects site 2 at the prompt
+            result = runner.invoke(cli, ["auth", "jira", "login"], input="2\n")
+
+        assert result.exit_code == 0
+        mock_save.assert_called_once()
+        saved = mock_save.call_args[0][0]
+        assert saved["cloud_id"] == "site-2-id"
+        assert saved["cloud_name"] == "OrgTwo"
+
+    def test_jira_login_multiple_sites_selects_first_by_default(self):
+        """Multi-site selection defaults to 1 when user presses Enter."""
+        token_data = {"access_token": "atoken"}
+        sites = [
+            {"id": "site-1-id", "name": "OrgOne", "url": "https://orgone.atlassian.net"},
+            {"id": "site-2-id", "name": "OrgTwo", "url": "https://orgtwo.atlassian.net"},
+        ]
+
+        with (
+            patch(
+                "summon_claude.jira_auth.start_auth_flow",
+                new_callable=AsyncMock,
+                return_value=token_data,
+            ),
+            patch(
+                "summon_claude.jira_auth.discover_cloud_sites",
+                new_callable=AsyncMock,
+                return_value=sites,
+            ),
+            patch("summon_claude.jira_auth.save_jira_token") as mock_save,
+        ):
+            runner = CliRunner()
+            # User presses Enter (accepts default=1)
+            result = runner.invoke(cli, ["auth", "jira", "login"], input="\n")
+
+        assert result.exit_code == 0
+        mock_save.assert_called_once()
+        saved = mock_save.call_args[0][0]
+        assert saved["cloud_id"] == "site-1-id"
+        assert saved["cloud_name"] == "OrgOne"
+
+
+# ---------------------------------------------------------------------------
+# project add --jql
+# ---------------------------------------------------------------------------
+
+
+class TestProjectAddJQL:
+    """Tests for project add --jql CLI path."""
+
+    def test_add_project_with_jql(self):
+        """project add NAME DIR --jql 'filter' stores JQL via async_project_update."""
+        fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+
+        with (
+            patch(
+                "summon_claude.cli.async_project_add",
+                new_callable=AsyncMock,
+                return_value=fake_project_id,
+            ) as mock_add,
+            patch(
+                "summon_claude.cli.async_project_update",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["project", "add", "myproj", ".", "--jql", "project = FOO"],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_add.assert_called_once_with("myproj", ".")
+        mock_update.assert_called_once_with(fake_project_id, jira_jql="project = FOO")
+
+    def test_add_project_without_jql_skips_update(self):
+        """project add NAME DIR without --jql does not call async_project_update."""
+        fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+
+        with (
+            patch(
+                "summon_claude.cli.async_project_add",
+                new_callable=AsyncMock,
+                return_value=fake_project_id,
+            ),
+            patch(
+                "summon_claude.cli.async_project_update",
+                new_callable=AsyncMock,
+            ) as mock_update,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "add", "myproj", "."])
+
+        assert result.exit_code == 0, result.output
+        mock_update.assert_not_called()
+
+    def test_add_project_jql_update_failure_warns(self):
+        """If JQL update fails after project add, warn but exit 0."""
+        fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
+
+        with (
+            patch(
+                "summon_claude.cli.async_project_add",
+                new_callable=AsyncMock,
+                return_value=fake_project_id,
+            ),
+            patch(
+                "summon_claude.cli.async_project_update",
+                new_callable=AsyncMock,
+                side_effect=Exception("DB unavailable"),
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["project", "add", "myproj", ".", "--jql", "project = FOO"],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Warning" in result.output or "warning" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# project update
+# ---------------------------------------------------------------------------
+
+
+class TestProjectUpdateCLI:
+    """Tests for the project update CLI command."""
+
+    def test_update_jql_set(self):
+        """project update NAME --jql 'filter' calls async_project_update with the JQL."""
+        with patch(
+            "summon_claude.cli.async_project_update",
+            new_callable=AsyncMock,
+        ) as mock_update:
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["project", "update", "myproj", "--jql", "project = FOO"],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_update.assert_called_once_with("myproj", jira_jql="project = FOO")
+        assert "set" in result.output.lower()
+
+    def test_update_jql_clear(self):
+        """project update NAME --jql '' clears the JQL filter (passes None to update)."""
+        with patch(
+            "summon_claude.cli.async_project_update",
+            new_callable=AsyncMock,
+        ) as mock_update:
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["project", "update", "myproj", "--jql", ""],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_update.assert_called_once_with("myproj", jira_jql=None)
+        assert "cleared" in result.output.lower()
+
+    def test_update_no_fields_error(self):
+        """project update NAME without --jql raises UsageError (non-zero exit)."""
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "update", "myproj"])
+
+        assert result.exit_code != 0
+        assert "no fields" in result.output.lower() or "No fields" in result.output

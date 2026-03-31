@@ -945,6 +945,9 @@ class SessionRegistry:
             if key in self._UPDATABLE_PROJECT_FIELDS:
                 updates[key] = val
             else:
+                # Intentionally raises (not warns like update_status) because
+                # project field names come from internal code, not runtime data.
+                # A KeyError here is always a programming bug.
                 raise ValueError(f"update_project: unknown field {key!r}")
         if not updates:
             return

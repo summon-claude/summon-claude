@@ -243,7 +243,7 @@ def auth_jira() -> None:
     "--site",
     default=None,
     help="Atlassian site (e.g. 'myorg' or 'myorg.atlassian.net'). "
-    "Skips interactive site discovery.",
+    "Resolves to a cloud UUID via API discovery when possible.",
 )
 def auth_jira_login(site: str | None) -> None:
     """Authenticate with Jira via OAuth 2.1."""
@@ -265,30 +265,55 @@ def auth_jira_login(site: str | None) -> None:
         click.echo(f"Authentication failed: {e}", err=True)
         sys.exit(1)
 
-    # Resolve cloud site: --site flag > REST API discovery > prompt
+    # Resolve cloud site: always discover via API first (to get the UUID),
+    # then use --site as a filter or manual prompt as a last resort.
+    access_token = token_data.get("access_token", "")
+    sites = asyncio.run(discover_cloud_sites(access_token))
+
     if site:
+        # --site narrows the discovery results by hostname match
         site_host = _normalize_site(site)
-        token_data["cloud_id"] = site_host
-        token_data["cloud_name"] = site_host.split(".")[0]
-    else:
-        access_token = token_data.get("access_token", "")
-        sites = asyncio.run(discover_cloud_sites(access_token))
-        if sites:
-            if len(sites) == 1:
-                chosen = sites[0]
-            else:
-                click.echo("Multiple Atlassian cloud sites found:")
-                for i, s in enumerate(sites, 1):
-                    click.echo(f"  {i}. {s.get('name', '')} ({s.get('url', '')})")
-                idx = click.prompt("Select a site", type=click.IntRange(1, len(sites)), default=1)
-                chosen = sites[idx - 1]
-            token_data["cloud_id"] = chosen["id"]
-            token_data["cloud_name"] = chosen.get("name", "")
-        else:
-            org = click.prompt("Enter your Atlassian org name (e.g. 'myorg')")
-            site_host = _normalize_site(org)
+        matched = [s for s in sites if _normalize_site(s.get("url", "")) == site_host]
+        if matched:
+            token_data["cloud_id"] = matched[0]["id"]
+            token_data["cloud_name"] = matched[0].get("name", "")
+        elif sites:
+            click.echo(
+                f"Warning: --site '{site}' did not match any discovered site. "
+                f"Available: {', '.join(s.get('name', '') for s in sites)}",
+                err=True,
+            )
             token_data["cloud_id"] = site_host
-            token_data["cloud_name"] = org.strip()
+            token_data["cloud_name"] = site_host.split(".")[0]
+        else:
+            click.echo(
+                f"Warning: site discovery unavailable — storing '{site_host}' as cloud_id. "
+                "MCP tools may require a UUID; re-run login without --site if issues arise.",
+                err=True,
+            )
+            token_data["cloud_id"] = site_host
+            token_data["cloud_name"] = site_host.split(".")[0]
+    elif sites:
+        if len(sites) == 1:
+            chosen = sites[0]
+        else:
+            click.echo("Multiple Atlassian cloud sites found:")
+            for i, s in enumerate(sites, 1):
+                click.echo(f"  {i}. {s.get('name', '')} ({s.get('url', '')})")
+            idx = click.prompt("Select a site", type=click.IntRange(1, len(sites)), default=1)
+            chosen = sites[idx - 1]
+        token_data["cloud_id"] = chosen["id"]
+        token_data["cloud_name"] = chosen.get("name", "")
+    else:
+        org = click.prompt("Enter your Atlassian org name (e.g. 'myorg')")
+        site_host = _normalize_site(org)
+        click.echo(
+            f"Warning: storing '{site_host}' as cloud_id — MCP tools may require a UUID. "
+            "Re-run login if issues arise.",
+            err=True,
+        )
+        token_data["cloud_id"] = site_host
+        token_data["cloud_name"] = org.strip()
 
     save_jira_token(token_data)
     site_label = token_data.get("cloud_name", token_data["cloud_id"])

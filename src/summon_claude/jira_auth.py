@@ -14,6 +14,7 @@ Security constraints implemented:
 
 from __future__ import annotations
 
+import asyncio
 import fcntl
 import hashlib
 import json
@@ -34,9 +35,6 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-# OAuth 2.1 discovery endpoint for the Atlassian MCP server
-_OAUTH_DISCOVERY_URL = "https://mcp.atlassian.com/.well-known/oauth-authorization-server"
-_OAUTH_DISCOVERY_FALLBACK = "https://mcp.atlassian.com/.well-known/openid-configuration"
 _ACCESSIBLE_RESOURCES_URL = "https://api.atlassian.com/oauth/token/accessible-resources"
 
 # Atlassian scopes for Jira read access
@@ -53,6 +51,15 @@ _HTTP_CONNECT_TIMEOUT = aiohttp.ClientTimeout(connect=10, total=30)
 
 # Auth flow browser wait timeout
 _AUTH_FLOW_TIMEOUT = 120
+
+# SEC-P4-005: Trusted Atlassian hosts for cached token_endpoint validation.
+# If the on-disk token_endpoint is not on one of these hosts, rediscovery is
+# triggered to prevent redirect-based exfiltration via local file tampering.
+_TRUSTED_TOKEN_HOSTS = frozenset({"cf.mcp.atlassian.com", "auth.atlassian.com"})
+
+# Fields from the original token that the OAuth server never returns on refresh
+# but must be preserved across refreshes (e.g. cloud_id set during login).
+_TOKEN_PRESERVE_FIELDS = ("cloud_id", "cloud_name")
 
 
 def get_jira_credentials_dir() -> Path:
@@ -325,7 +332,7 @@ async def start_auth_flow() -> dict[str, Any]:
     }
     auth_url = f"{authorization_endpoint}?{urlencode(auth_params)}"
 
-    logger.info("Opening browser for Jira authorization: %s", auth_url)
+    logger.debug("Opening browser for Jira authorization: %s", auth_url)
     webbrowser.open(auth_url)
 
     # CR-014: wrap server lifecycle in try/finally so the socket is always closed.
@@ -372,6 +379,7 @@ async def start_auth_flow() -> dict[str, Any]:
     # Annotate token with DCR credentials (SC-03: stays in file, not MCP config)
     token_data["client_id"] = client_id
     token_data["client_secret"] = client_secret
+    token_data["token_endpoint"] = token_endpoint
 
     # Compute and store absolute expiry time
     expires_in = token_data.get("expires_in", 3600)
@@ -481,7 +489,7 @@ async def refresh_jira_token_if_needed() -> None:  # noqa: PLR0911, PLR0912, PLR
                 acquired = True
                 break
             except OSError:
-                await _asyncio_sleep(0.1)
+                await asyncio.sleep(0.1)
 
         if not acquired:
             logger.warning("Jira token lock contended — using existing token without refresh")
@@ -514,7 +522,7 @@ async def refresh_jira_token_if_needed() -> None:  # noqa: PLR0911, PLR0912, PLR
                 acquired_write = True
                 break
             except OSError:
-                await _asyncio_sleep(0.1)
+                await asyncio.sleep(0.1)
 
         if not acquired_write:
             logger.warning("Jira token write lock contended — could not persist refreshed token")
@@ -544,13 +552,6 @@ async def refresh_jira_token_if_needed() -> None:  # noqa: PLR0911, PLR0912, PLR
             os.close(lock_fd)
 
 
-async def _asyncio_sleep(seconds: float) -> None:
-    """Thin wrapper around asyncio.sleep for testability."""
-    import asyncio  # noqa: PLC0415
-
-    await asyncio.sleep(seconds)
-
-
 async def _do_refresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
     """Perform token refresh using the stored refresh_token.
 
@@ -568,10 +569,9 @@ async def _do_refresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
     # SEC-P4-005: validate cached URL to prevent redirect-based exfiltration
     # if the token file is tampered with by a local attacker.
     token_endpoint = token_data.get("token_endpoint")
-    trusted_token_hosts = ("cf.mcp.atlassian.com", "auth.atlassian.com")
     if token_endpoint:
         parsed = urlparse(token_endpoint)
-        if parsed.netloc not in trusted_token_hosts:
+        if parsed.netloc not in _TRUSTED_TOKEN_HOSTS:
             logger.warning(
                 "Cached token_endpoint %r is not on a trusted Atlassian host — rediscovering",
                 parsed.netloc,
@@ -616,6 +616,11 @@ async def _do_refresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
                 # If server didn't return a new refresh_token, keep the old one
                 if "refresh_token" not in body:
                     body["refresh_token"] = refresh_token
+
+                # Preserve fields the OAuth server never returns (set during login)
+                for field in _TOKEN_PRESERVE_FIELDS:
+                    if field in token_data and field not in body:
+                        body[field] = token_data[field]
 
                 logger.debug("Jira token refreshed successfully")
                 return body
@@ -674,25 +679,35 @@ async def discover_cloud_sites(access_token: str) -> list[dict[str, Any]]:
 def check_jira_status() -> str | None:
     """Check Jira integration status.
 
-    Returns an error message string when misconfigured, or None when OK.
-    Different convention from _check_google_status (which returns bool|None
-    and calls click.echo internally) — this separates checking from presentation.
+    Reads the token file directly (bypassing the expiry check in
+    ``load_jira_token``) so that near-expiry tokens don't produce
+    misleading errors — the daemon refreshes tokens asynchronously
+    at session startup.
 
     Returns:
-        None if Jira credentials are present and valid.
-        Error message string if there is a problem (no token, expired, etc.).
+        None if Jira credentials are present and structurally valid.
+        Error message string if there is a problem.
     """
     if not jira_credentials_exist():
         return "No Jira credentials found. Run: summon auth jira login"
 
-    token_data = load_jira_token()
-    if token_data is None:
+    # Read raw token file — don't use load_jira_token() which returns None
+    # for near-expiry tokens (within _REFRESH_BUFFER_SECONDS).
+    token_path = get_jira_token_path()
+    try:
+        token_data = json.loads(token_path.read_text())
+    except (json.JSONDecodeError, OSError):
         return (
-            "Jira credentials are present but could not be loaded or refreshed. "
+            "Jira credentials are present but corrupt or unreadable. "
             "Re-authenticate: summon auth jira login"
         )
 
-    # Check that we have a cloud_id stored (set during login)
+    if not token_data.get("access_token"):
+        return (
+            "Jira credentials are present but missing access_token. "
+            "Re-authenticate: summon auth jira login"
+        )
+
     cloud_id = token_data.get("cloud_id")
     if not cloud_id:
         return (

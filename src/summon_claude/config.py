@@ -886,6 +886,11 @@ class SummonConfig(BaseSettings):
 
         SC-03: Only the access_token is placed in the MCP config header.
         refresh_token and client_secret remain on disk only.
+
+        Note: production session startup (``session.py``) inlines this logic
+        because it must call ``refresh_jira_token_if_needed()`` (async) before
+        the sync ``load_jira_token()`` call.  This method is for diagnostics
+        and tests only — it does NOT trigger a token refresh.
         """
         from summon_claude.jira_auth import load_jira_token  # noqa: PLC0415
 
