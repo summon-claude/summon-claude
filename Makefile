@@ -61,7 +61,7 @@ py-test-slack: ## Run Slack integration tests (requires credentials)
 
 py-test-llm: ## Run LLM classifier integration tests (requires Claude CLI, makes API calls)
 	@echo "Running LLM classifier tests..."
-	uv run pytest tests/integration/test_classifier_llm.py -v -m llm -n0
+	uv run pytest tests/integration/test_classifier_llm.py -v -m llm
 
 py-test-quick: ## Run quick Python tests (exclude slow, fail-fast)
 	@echo "Running quick pytest..."

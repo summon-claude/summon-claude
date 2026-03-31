@@ -3,9 +3,9 @@
 Spawns real Sonnet 4.6 classifier subprocesses and validates that the model
 correctly blocks deny-rule scenarios and allows allow-rule scenarios.
 
-Skipped automatically when running inside an existing Claude Code session
-(CLAUDECODE env var is set) or when Claude Code CLI is not installed.
-Run outside Claude Code with::
+Skipped automatically when Claude Code CLI is not installed. Safe to run
+inside a Claude Code session — the classifier handles CLAUDECODE env var
+nesting internally. Run with::
 
     uv run pytest tests/integration/test_classifier_llm.py -m llm -v
 
@@ -15,7 +15,6 @@ subprocess. Expect ~5-10 seconds per case.
 
 from __future__ import annotations
 
-import os
 import shutil
 from unittest.mock import MagicMock
 
@@ -26,10 +25,6 @@ from summon_claude.sessions.classifier import SummonAutoClassifier
 pytestmark = [
     pytest.mark.slow,
     pytest.mark.llm,
-    pytest.mark.skipif(
-        "CLAUDECODE" in os.environ,
-        reason="Cannot nest Claude Code sessions (CLAUDECODE env var is set)",
-    ),
     pytest.mark.skipif(
         shutil.which("claude") is None,
         reason="Claude Code CLI not installed",
