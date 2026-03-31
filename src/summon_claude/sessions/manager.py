@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import dataclasses
 import logging
@@ -39,10 +40,10 @@ from summon_claude.sessions.auth import (
     verify_spawn_token,
 )
 from summon_claude.sessions.prompts import format_pm_topic
-from summon_claude.sessions.registry import SessionRegistry
+from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN_PM, SessionRegistry
 from summon_claude.sessions.session import SessionOptions, SummonSession
 from summon_claude.slack.client import redact_secrets
-from summon_claude.summon_cli_mcp import MAX_SYSTEM_PROMPT_CHARS
+from summon_claude.summon_cli_mcp import MAX_PROMPT_CHARS
 
 if TYPE_CHECKING:
     from summon_claude.config import SummonConfig
@@ -53,6 +54,17 @@ logger = logging.getLogger(__name__)
 
 _GRACE_SECONDS = 60.0
 _SHUTDOWN_WAIT_TIMEOUT = 30.0
+_MAX_QUEUED_SESSIONS = 50
+
+
+@dataclasses.dataclass(frozen=True)
+class _QueuedSession:
+    """A session waiting to start once an active slot opens up."""
+
+    options: SessionOptions
+    project_id: str  # project the session belongs to (for dequeue routing)
+    pm_session_id: str  # session_id of the PM that queued this session
+    authenticated_user_id: str  # for auto-authenticate on dequeue
 
 
 class SessionManager:
@@ -86,11 +98,16 @@ class SessionManager:
         self._resuming_channels: set[str] = set()  # guard against concurrent resume
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
+<<<<<<< HEAD
         self._suspend_on_shutdown: bool = False  # set by health monitor on event pipeline failure
 
     def set_suspend_on_shutdown(self) -> None:
         """Mark for session suspension on shutdown (called on event pipeline failure)."""
         self._suspend_on_shutdown = True
+
+        # FIFO queue: project_id → deque of _QueuedSession
+        self._session_queue: dict[str, collections.deque[_QueuedSession]] = {}
+        self._queue_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -151,6 +168,7 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
         )
         self._sessions[session_id] = session
 
@@ -235,6 +253,7 @@ class SessionManager:
             parent_channel_id=spawn_auth.parent_channel_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
         )
         session.authenticate(spawn_auth.target_user_id)
 
@@ -514,6 +533,7 @@ class SessionManager:
                         }
                         for sid, s in self._sessions.items()
                     ],
+                    "queued": {pid: len(dq) for pid, dq in self._session_queue.items() if dq},
                 }
 
             case "create_session_with_spawn_token":
@@ -525,11 +545,16 @@ class SessionManager:
                 # Defense-in-depth: re-validate free-text fields at the daemon boundary
                 if (
                     options.system_prompt_append
-                    and len(options.system_prompt_append) > MAX_SYSTEM_PROMPT_CHARS
+                    and len(options.system_prompt_append) > MAX_PROMPT_CHARS
                 ):
                     return {
                         "type": "error",
-                        "message": f"system_prompt_append exceeds {MAX_SYSTEM_PROMPT_CHARS} chars",
+                        "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
+                    }
+                if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
+                    return {
+                        "type": "error",
+                        "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
                     }
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
@@ -573,6 +598,13 @@ class SessionManager:
 
             case "health_check":
                 return await self._handle_health_check()
+
+            case "clear_project_queue":
+                project_id = msg.get("project_id")
+                if not project_id:
+                    return {"type": "error", "message": "Missing project_id"}
+                count = self.clear_queue(project_id)
+                return {"type": "queue_cleared", "project_id": project_id, "count": count}
 
             case _:
                 return {"type": "error", "message": f"Unknown command: {msg.get('type')}"}
@@ -795,6 +827,7 @@ class SessionManager:
             parent_session_id=parent_session_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
         )
         session.authenticate(authenticated_user_id)
 
@@ -883,6 +916,7 @@ class SessionManager:
                 bot_user_id=self._bot_user_id,
                 ipc_spawn=self.create_session_with_spawn_token,
                 ipc_resume=self._ipc_resume,
+                ipc_queue=self.queue_session,
             )
             self._sessions[session_id] = session
             task = asyncio.create_task(
@@ -1062,6 +1096,7 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
         )
         new_session.authenticate(user_id)
 
@@ -1109,6 +1144,7 @@ class SessionManager:
             bot_user_id=self._bot_user_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
         )
         new_session.authenticate(user_id)
 
@@ -1440,7 +1476,7 @@ class SessionManager:
         if session is not None and session.is_pm and session.project_id:
             self._pm_topic_cache.pop(session.project_id, None)
 
-        # Update PM topic if a non-PM child with a project finished
+        # Update PM topic if a non-PM child with a project finished; also try dequeue
         if session is not None and not session.is_pm and session.project_id:
             # _on_task_done is synchronous (done_callback); schedule async update
             with contextlib.suppress(RuntimeError):
@@ -1449,6 +1485,14 @@ class SessionManager:
                 )
                 t.add_done_callback(self._on_background_task_done)
                 self._background_tasks.add(t)
+            # Dequeue next waiting session for this project (if any)
+            if session.project_id in self._session_queue:
+                with contextlib.suppress(RuntimeError):
+                    t = asyncio.get_running_loop().create_task(
+                        self._dequeue_and_start(session.project_id)
+                    )
+                    t.add_done_callback(self._on_background_task_done)
+                    self._background_tasks.add(t)
 
         # Log unexpected task exceptions (CancelledError is expected on shutdown)
         if not task.cancelled():
@@ -1515,6 +1559,147 @@ class SessionManager:
         if self._grace_timer is not None:
             self._grace_timer.cancel()
             self._grace_timer = None
+
+    # ------------------------------------------------------------------
+    # Session queue (FIFO per project)
+    # ------------------------------------------------------------------
+
+    def queue_session(
+        self,
+        options: SessionOptions,
+        *,
+        project_id: str,
+        pm_session_id: str,
+        authenticated_user_id: str,
+    ) -> int:
+        """Enqueue a session for deferred startup.
+
+        Returns the queue position (1-based) for this project's queue,
+        or -1 if the queue is full.
+        """
+        q = self._session_queue.setdefault(project_id, collections.deque())
+        total = sum(len(dq) for dq in self._session_queue.values())
+        if total >= _MAX_QUEUED_SESSIONS:
+            logger.warning(
+                "SessionManager: session queue full (%d/%d) for project %s",
+                total,
+                _MAX_QUEUED_SESSIONS,
+                project_id,
+            )
+            return -1
+        entry = _QueuedSession(
+            options=options,
+            project_id=project_id,
+            pm_session_id=pm_session_id,
+            authenticated_user_id=authenticated_user_id,
+        )
+        q.append(entry)
+        position = len(q)
+        logger.info(
+            "SessionManager: queued session '%s' for project %s (position %d)",
+            options.name,
+            project_id,
+            position,
+        )
+        return position
+
+    async def _dequeue_and_start(self, project_id: str) -> None:
+        """Dequeue the next waiting session for *project_id* and start it.
+
+        Serialized by ``_queue_lock`` to prevent concurrent dequeues from
+        racing past the cap check.
+        """
+        async with self._queue_lock:
+            q = self._session_queue.get(project_id)
+            if not q:
+                return
+
+            # Re-check cap inside the lock (race-free)
+            async with SessionRegistry() as registry:
+                pm_session = next(
+                    (s for s in self._sessions.values() if s.is_pm and s.project_id == project_id),
+                    None,
+                )
+                if pm_session is None:
+                    logger.debug(
+                        "SessionManager: no live PM for project %s, skipping dequeue",
+                        project_id,
+                    )
+                    return
+                children = await registry.list_children(pm_session._session_id, limit=500)  # noqa: SLF001
+                active = [c for c in children if c.get("status") in ("pending_auth", "active")]
+                if len(active) >= MAX_SPAWN_CHILDREN_PM:
+                    logger.debug(
+                        "SessionManager: cap still reached for project %s, skipping dequeue",
+                        project_id,
+                    )
+                    return
+
+            entry = q.popleft()
+            if not q:
+                del self._session_queue[project_id]
+
+        # Start session outside the lock (non-blocking path)
+        new_session_id = str(uuid.uuid4())
+        session = SummonSession(
+            config=self._config,
+            options=entry.options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
+        )
+        session.authenticate(entry.authenticated_user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = session
+        task = asyncio.create_task(
+            self._supervised_session(session, new_session_id),
+            name=f"session-dequeued-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+        logger.info(
+            "SessionManager: dequeued and started session '%s' (%s) for project %s",
+            entry.options.name,
+            new_session_id,
+            project_id,
+        )
+
+        if entry.options.project_id:
+            await self._update_pm_topic(entry.options.project_id)
+
+        await self._notify_pm_of_dequeue(entry, new_session_id)
+
+    async def _notify_pm_of_dequeue(self, entry: _QueuedSession, new_session_id: str) -> None:
+        """Best-effort: notify the PM's channel that a queued session started."""
+        pm_session = self._sessions.get(entry.pm_session_id)
+        if pm_session is None or not pm_session.channel_id or not self._web_client:
+            return
+        with contextlib.suppress(Exception):
+            await self._web_client.chat_postMessage(
+                channel=pm_session.channel_id,
+                text=(
+                    f"_Queued session '{entry.options.name}' started "
+                    f"(session_id: {new_session_id[:8]}...)_"
+                ),
+            )
+
+    def clear_queue(self, project_id: str) -> int:
+        """Remove all queued sessions for *project_id*. Returns count cleared."""
+        q = self._session_queue.pop(project_id, None)
+        count = len(q) if q else 0
+        if count:
+            logger.info(
+                "SessionManager: cleared %d queued session(s) for project %s",
+                count,
+                project_id,
+            )
+        return count
 
     @staticmethod
     def _is_recoverable(exc: Exception) -> bool:

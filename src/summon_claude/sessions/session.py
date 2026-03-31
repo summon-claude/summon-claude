@@ -477,6 +477,7 @@ class SessionOptions:
     scan_interval_s: int = 900
     system_prompt_append: str | None = None
     resume_from_session_id: str | None = None
+    initial_prompt: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -597,6 +598,7 @@ class SummonSession:
         parent_channel_id: str | None = None,
         ipc_spawn: Callable[[SessionOptions, str], Awaitable[str]] | None = None,
         ipc_resume: Callable[[str], Awaitable[dict[str, Any]]] | None = None,
+        ipc_queue: Callable[..., int] | None = None,
     ) -> None:
         self._config = config
         self._pm_profile = options.pm_profile
@@ -606,6 +608,8 @@ class SummonSession:
         self._project_id = options.project_id
         self._scan_interval_s = max(30, options.scan_interval_s)
         self._system_prompt_append = options.system_prompt_append
+        self._initial_prompt: str | None = options.initial_prompt
+        self._initial_prompt_sent: bool = False
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -627,6 +631,7 @@ class SummonSession:
         # Daemon IPC callbacks (injected to avoid circular imports with cli.daemon_client)
         self._ipc_spawn = ipc_spawn
         self._ipc_resume = ipc_resume
+        self._ipc_queue = ipc_queue
 
         # Raw event queue: Slack events from EventDispatcher -> preprocessor
         # maxsize=100 provides backpressure — EventDispatcher drops events when full
@@ -1885,7 +1890,9 @@ class SummonSession:
                 scheduler=scheduler,
                 project_id=self._project_id,
                 on_task_change=_on_task_change,
+<<<<<<< HEAD
                 pm_status_ts=self._pm_status_ts,
+                ipc_queue=self._ipc_queue,
             )
             mcp_servers["summon-cli"] = cli_mcp
 
@@ -2103,6 +2110,29 @@ class SummonSession:
                             register_plugin_skills(plugin_skills)
                     except Exception as e:
                         logger.debug("Could not discover plugin skills: %s", e)
+
+                    # Inject initial_prompt on first startup only (not on compaction restart)
+                    if self._initial_prompt and not self._initial_prompt_sent:
+                        self._initial_prompt_sent = True
+                        safe_prompt = redact_secrets(self._initial_prompt)
+                        safe_prompt = re.sub(r"<!(channel|here|everyone)>", r"\1", safe_prompt)
+                        safe_prompt = re.sub(r"<@(U\w+)>", r"user:\1", safe_prompt)
+                        safe_prompt = re.sub(r"<!subteam\^[^>]+>", "group", safe_prompt)
+                        pending_initial = _PendingTurn(message=self._initial_prompt, pre_sent=False)
+                        try:
+                            self._pending_turns.put_nowait(pending_initial)
+                        except asyncio.QueueFull:
+                            logger.warning(
+                                "initial_prompt dropped: queue full for session %s",
+                                self._session_id,
+                            )
+                        else:
+                            logger.info("initial_prompt enqueued for session %s", self._session_id)
+                            # Observability: post truncated prompt to session's Slack channel
+                            try:
+                                await rt.client.post(f"_Initial prompt:_ {safe_prompt[:500]}")
+                            except Exception:
+                                logger.debug("Failed to post initial_prompt observability message")
 
                     try:
                         async with asyncio.TaskGroup() as tg:
