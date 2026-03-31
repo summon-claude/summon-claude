@@ -1864,10 +1864,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#quick-skip-slow-slack-fail-fast" class="md-nav__link">
+  <a href="#quick-skip-slack-llm-integration-fail-fast" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick (skip slow + slack, fail-fast)
+        Quick (skip Slack + LLM integration, fail-fast)
       
     </span>
   </a>
@@ -2013,10 +2013,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#marking-slow-tests" class="md-nav__link">
+  <a href="#marking-llm-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Marking slow tests
+        Marking LLM tests
       
     </span>
   </a>
@@ -2205,10 +2205,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#quick-skip-slow-slack-fail-fast" class="md-nav__link">
+  <a href="#quick-skip-slack-llm-integration-fail-fast" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick (skip slow + slack, fail-fast)
+        Quick (skip Slack + LLM integration, fail-fast)
       
     </span>
   </a>
@@ -2354,10 +2354,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#marking-slow-tests" class="md-nav__link">
+  <a href="#marking-llm-tests" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Marking slow tests
+        Marking LLM tests
       
     </span>
   </a>
@@ -2524,10 +2524,10 @@
 <span class="c1"># or</span>
 uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/<span class="w"> </span>-v
 </code></pre></div>
-<h3 id="quick-skip-slow-slack-fail-fast">Quick (skip slow + slack, fail-fast)<a class="headerlink" href="#quick-skip-slow-slack-fail-fast" title="Permanent link">&para;</a></h3>
+<h3 id="quick-skip-slack-llm-integration-fail-fast">Quick (skip Slack + LLM integration, fail-fast)<a class="headerlink" href="#quick-skip-slack-llm-integration-fail-fast" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>py-test-quick
 <span class="c1"># or</span>
-uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slow and not slack&quot;</span>
+uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slack and not llm&quot;</span>
 </code></pre></div>
 <h3 id="single-module">Single module<a class="headerlink" href="#single-module" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_auth.py<span class="w"> </span>-v
@@ -2574,9 +2574,10 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <span class="p">]</span>
 <span class="n">cache_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;.cache/pytest&quot;</span>
 <span class="n">markers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;slow: marks tests as slow (deselect with &#39;-m </span><span class="se">\&quot;</span><span class="s2">not slow</span><span class="se">\&quot;</span><span class="s2">&#39;)&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="s2">&quot;slack: marks tests requiring real Slack workspace credentials&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;llm: marks tests that make real LLM API calls&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="s2">&quot;xdist_group: groups tests to run on the same worker (pytest-xdist)&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;docs: documentation validation tests&quot;</span><span class="p">,</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>Key settings:
@@ -2643,19 +2644,21 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_daemon_disconnects</span><span class="p">():</span> <span class="o">...</span>
 </code></pre></div>
-<h3 id="marking-slow-tests">Marking slow tests<a class="headerlink" href="#marking-slow-tests" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">slow</span>
-<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_full_session_lifecycle</span><span class="p">():</span>
-    <span class="c1"># takes several seconds</span>
+<h3 id="marking-llm-tests">Marking LLM tests<a class="headerlink" href="#marking-llm-tests" title="Permanent link">&para;</a></h3>
+<p>Tests that make real API calls (spawning Claude sessions, classifier calls) use <code>@pytest.mark.llm</code>:</p>
+<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">llm</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_classifier_blocks_dangerous_command</span><span class="p">():</span>
+    <span class="c1"># spawns a real Claude subprocess</span>
     <span class="o">...</span>
 </code></pre></div>
-<p>Excluded from quick runs: <code>make py-test-quick</code> passes <code>-m "not slow and not slack"</code>.</p>
+<p>Excluded from pre-commit runs: <code>make py-test-quick</code> passes <code>-m "not slack and not llm"</code>.</p>
 <hr />
 <h2 id="documentation-validation-tests">Documentation Validation Tests<a class="headerlink" href="#documentation-validation-tests" title="Permanent link">&para;</a></h2>
 <p>Documentation tests (<code>pytest.mark.docs</code>) verify that docs stay in sync with the codebase and that code examples are valid.</p>
 <h3 id="running-doc-tests">Running doc tests<a class="headerlink" href="#running-doc-tests" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>docs-test<span class="w">       </span><span class="c1"># Guard tests + Python blocks (fast, no credentials)</span>
-make<span class="w"> </span>docs-test-full<span class="w">  </span><span class="c1"># All doc tests including link validation (slower)</span>
+<p>Doc tests run automatically as part of the main test suite (<code>make py-test</code> or <code>make py-test-quick</code>).
+To run only doc tests:</p>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/docs/<span class="w"> </span>-v<span class="w"> </span>-m<span class="w"> </span>docs
 </code></pre></div>
 <h3 id="test-categories">Test categories<a class="headerlink" href="#test-categories" title="Permanent link">&para;</a></h3>
 <table>
@@ -2705,19 +2708,18 @@ summon start --model opus
 <p>The <code>notest</code> attribute is invisible to documentation readers — markdown renderers ignore unknown attributes after the language identifier.</p>
 <h3 id="ci-integration">CI integration<a class="headerlink" href="#ci-integration" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>checks</code> job (PRs):</strong> Runs <code>make docs-test</code> — guard tests and Tier 1 bash commands (<code>summon --version</code>, <code>summon --help</code>)</li>
+<li><strong><code>test</code> job:</strong> <code>make py-test</code> runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks + link checks. <code>make docs-test</code> runs markdown code block validation separately</li>
 <li><strong><code>slack-integration</code> job:</strong> Runs bash CLI tests with real credentials (Tier 2 commands like <code>summon config show</code>)</li>
-<li><strong><code>make py-test</code>:</strong> Includes doc guard tests (excludes <code>slow</code> link tests)</li>
-<li><strong><code>make py-test-quick</code>:</strong> Excludes all doc tests for speed</li>
 </ul>
 <hr />
 <h2 id="ci-testing">CI Testing<a class="headerlink" href="#ci-testing" title="Permanent link">&para;</a></h2>
-<p>The <code>ci.yaml</code> workflow runs on every PR to <code>main</code>:</p>
+<p>The <code>ci.yaml</code> workflow runs three parallel jobs on every PR to <code>main</code>:</p>
 <ol>
-<li><code>make py-lint</code> — ruff check + format (fails if files were modified by auto-fix)</li>
-<li><code>make py-test</code> — full pytest suite (4 parallel workers)</li>
+<li><strong><code>lint</code></strong> — <code>make py-lint</code> (ruff check + format)</li>
+<li><strong><code>typecheck</code></strong> — <code>make py-typecheck</code> (pyright)</li>
+<li><strong><code>test</code></strong> — <code>make py-test</code> + <code>make docs-test</code> (full pytest suite + markdown code block validation)</li>
 </ol>
-<p>Lint runs first; tests only run if lint passes.</p>
+<p>All three jobs run independently in parallel. Slack integration tests run only on pushes to <code>main</code>.</p>
 <p><strong>Debugging CI failures:</strong></p>
 <ul>
 <li><strong>Flaky parallel test:</strong> Run locally with <code>-n0</code> to get clean output: <code>uv run pytest tests/test_&lt;module&gt;.py -v -n0</code></li>
@@ -2725,7 +2727,6 @@ summon start --model opus
 <li><strong>Asyncio fixture scope error:</strong> Check <code>asyncio_default_fixture_loop_scope</code> — function scope means fixtures cannot be session/module scoped unless they manage their own loop</li>
 <li><strong>Import error in tests:</strong> Verify <code>pythonpath = ["tests"]</code> is set and the import is from a file in <code>tests/</code>, not a package import that should use <code>summon_claude.*</code></li>
 </ul>
-<p>Type checking is a separate target (<code>make py-typecheck</code>) and is not currently enforced in CI — it can be run locally during development.</p>
 
 
 
