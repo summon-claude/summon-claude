@@ -67,7 +67,7 @@ def make_handler():
         {
             "slack_bot_token": "xoxb-t",
             "slack_app_token": "xapp-t",
-            "slack_signing_secret": "s",
+            "slack_signing_secret": "abcd1234",
             "permission_debounce_ms": 10,
         }
     )

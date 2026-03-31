@@ -19,7 +19,7 @@ def _make_config(**kwargs) -> SummonConfig:
     defaults = {
         "slack_bot_token": "xoxb-test",
         "slack_app_token": "xapp-test",
-        "slack_signing_secret": "secret",
+        "slack_signing_secret": "abcd1234",
     }
     defaults.update(kwargs)
     return SummonConfig(**defaults)

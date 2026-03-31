@@ -155,7 +155,7 @@ def _format_interval(seconds: int) -> str:
     return " ".join(parts) or "0 seconds"
 
 
-def build_pm_system_prompt(
+def build_pm_system_prompt(  # noqa: PLR0913
     *,
     cwd: str,
     scan_interval_s: int,

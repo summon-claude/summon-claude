@@ -55,7 +55,7 @@ def cmd_auth() -> None:
 
 @cmd_auth.command("status")
 @click.pass_context
-def auth_status(ctx: click.Context) -> None:
+def auth_status(ctx: click.Context) -> None:  # noqa: PLR0912
     """Show authentication status for all configured providers."""
     quiet = ctx.obj.get("quiet", False) if ctx.obj else False
 

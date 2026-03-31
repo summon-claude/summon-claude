@@ -327,9 +327,6 @@ def _build_google_workspace_mcp_untrusted(services: str, account: GoogleAccount)
     }
 
 
-
-
-
 AuthResult = Literal["authenticated", "timed_out", "shutdown"]
 
 

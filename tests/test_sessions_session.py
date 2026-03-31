@@ -1653,8 +1653,9 @@ class TestMCPRegistration:
                 "summon_claude.jira_auth.load_jira_token",
                 return_value=_jira_token,
             ),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test123"),
         ):
-            result = await self._capture_mcp_servers_with_config(github_pat="ghp_test123")
+            result = await self._capture_mcp_servers_with_config()
         assert "github" in result["mcp_servers"]
         assert "jira" in result["mcp_servers"]
 
