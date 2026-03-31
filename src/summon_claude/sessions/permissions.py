@@ -252,6 +252,7 @@ class PermissionHandler:
             d.strip() for d in config.safe_write_dirs.split(",") if d.strip()
         ]
         self._in_containment = False
+        self._in_worktree = False  # worktree-specific flag for classifier gating
         self._containment_root: Path | None = None
         self._is_git_repo: bool = True  # updated by notify_containment_active(is_git_repo=False)
         self._write_access_granted = False
@@ -489,6 +490,7 @@ class PermissionHandler:
                 Used to compute the worktree root for CWD containment checks.
         """
         self._in_containment = True
+        self._in_worktree = True
         if worktree_name and self._project_root:
             # Reject names with path separators or traversal components
             if "/" in worktree_name or "\\" in worktree_name or ".." in worktree_name:

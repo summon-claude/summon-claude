@@ -2516,8 +2516,7 @@ class SummonSession:
                     else None
                 )
                 needs_update = (
-                    current_model != self._last_topic_model
-                    or live_mode != self._auto_mode_label
+                    current_model != self._last_topic_model or live_mode != self._auto_mode_label
                 )
                 if needs_update:
                     if self._is_git_repo:

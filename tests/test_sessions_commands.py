@@ -1031,7 +1031,6 @@ class TestSummonHandler:
         assert defn.max_args == 2
 
 
-
 class TestAutoHandler:
     """Tests for !auto command with worktree guard."""
 

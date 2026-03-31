@@ -1109,6 +1109,7 @@ def _make_classifier_handler(classifier, classifier_configured=True, in_worktree
         classifier_configured=classifier_configured,
     )
     if in_worktree:
+        handler._in_containment = True
         handler._in_worktree = True
         handler._classifier_enabled = classifier_configured
         handler._write_access_granted = True
