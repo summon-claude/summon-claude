@@ -95,6 +95,7 @@ After the agent enters a worktree, a secondary Sonnet classifier can automatical
 
 Security mitigations:
 
+- **Prompt-level defenses**: The classifier's system prompt follows the same safety framework as other agents — principal hierarchy (system prompt > rules > evaluated content), permitted action enumeration, and bookend reminders. See [Prompts Reference](../reference/prompts.md#safety-classifier-system-prompt) for the full prompt.
 - **XML escaping**: User messages and tool inputs in the classifier prompt are HTML-escaped to prevent structural injection that could close `<conversation_context>` or `<pending_action>` tags early.
 - **Reason redaction**: The classifier's block reason is never returned to the outer Claude agent — only a generic "Blocked by auto-mode policy" message. This prevents the agent from learning to craft bypass attempts.
 - **Fail-open to HITL**: On any classifier error (timeout, parse failure, unknown decision), the tool falls through to Slack HITL rather than being auto-approved or silently blocked.
