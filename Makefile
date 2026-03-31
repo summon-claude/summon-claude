@@ -8,7 +8,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 
 .PHONY: help
 .PHONY: install lint test build clean all release
-.PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-quick py-build py-clean py-all
+.PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-llm py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
 .PHONY: docs-prompts docs-serve docs-build docs-check docs-screenshots docs-terminal docs-test
 
@@ -51,17 +51,21 @@ py-typecheck: ## Run pyright type checking
 	@echo "Running pyright..."
 	uv run pyright
 
-py-test: ## Run full Python test suite (excludes Slack integration)
+py-test: ## Run full Python test suite (excludes Slack and LLM integration)
 	@echo "Running pytest..."
-	uv run pytest tests/ -v -m "not slack"
+	uv run pytest tests/ -v -m "not slack and not llm"
 
 py-test-slack: ## Run Slack integration tests (requires credentials)
 	@echo "Running Slack integration tests..."
 	uv run pytest tests/integration/ -v -m slack -n0
 
+py-test-llm: ## Run LLM classifier integration tests (requires Claude CLI, makes API calls)
+	@echo "Running LLM classifier tests..."
+	uv run pytest tests/integration/test_classifier_llm.py -v -m llm -n0
+
 py-test-quick: ## Run quick Python tests (exclude slow, fail-fast)
 	@echo "Running quick pytest..."
-	uv run pytest --maxfail=1 -q -m "not slow and not slack and not docs"
+	uv run pytest --maxfail=1 -q -m "not slow and not slack and not llm and not docs"
 
 py-build: ## Build sdist and wheel
 	uv build

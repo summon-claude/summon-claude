@@ -31,6 +31,7 @@ hooks = [
   { id = "py-test-quick", name = "Quick Python tests (make py-test-quick)", entry = "make py-test-quick", language = "system", pass_filenames = false, always_run = true, priority = 10 },
   { id = "py-test", name = "Full Python tests (make py-test)", entry = "make py-test", language = "system", pass_filenames = false, always_run = true, stages = ["pre-push"], priority = 10 },
   { id = "py-test-slack", name = "Slack integration tests (make py-test-slack)", entry = "make py-test-slack", language = "system", pass_filenames = false, always_run = true, stages = ["pre-push"], priority = 20 },
+  { id = "py-test-llm", name = "LLM classifier tests (make py-test-llm)", entry = "make py-test-llm", language = "system", pass_filenames = false, always_run = true, stages = ["pre-push"], priority = 25 },
   { id = "py-typecheck", name = "Python type checking (make py-typecheck)", entry = "make py-typecheck", language = "system", files = '\.py$', pass_filenames = false, stages = ["pre-push"], priority = 0 },
 ]
 
