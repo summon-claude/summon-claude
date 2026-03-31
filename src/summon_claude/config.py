@@ -426,7 +426,7 @@ class SummonConfig(BaseSettings):
     # Permission handling
     permission_debounce_ms: int = 2000
 
-    # Write gate — directories where writes are allowed without worktree entry
+    # Write gate — directories where writes are allowed without entering containment
     safe_write_dirs: str = ""  # comma-separated relative paths (e.g. "hack/,.dev/")
 
     # Content display
@@ -1111,7 +1111,7 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         env_key="SUMMON_SAFE_WRITE_DIRS",
         group="Permissions",
         label="Safe Write Directories",
-        help_text="Comma-separated dirs where writes are allowed without worktree (e.g. hack/)",
+        help_text="Comma-separated dirs where writes are always allowed (e.g. hack/)",
         input_type="text",
         advanced=True,
     ),

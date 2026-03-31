@@ -8,26 +8,31 @@ When Claude wants to run a tool that could modify files, execute commands, or ta
 
 ## Read-only by default
 
-Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until the agent enters an isolated worktree.
+Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until containment is active.
 
 **Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` (and the SDK alias `str_replace_editor`)
 
-When Claude tries to use a write-gated tool before entering a worktree, summon automatically denies the request with a message guiding Claude to use `EnterWorktree` first. Once Claude enters a worktree:
+Containment is activated in two ways depending on whether the session directory is a git repository:
 
-1. The first write-gated tool triggers a **one-time Slack approval** prompt.
-2. After approval, writes **within the worktree** are auto-approved — CWD containment ensures file-targeting tools (Edit, Write, etc.) can only modify files inside the worktree without additional prompts.
-3. Writes **outside the worktree** still require Slack approval, with per-path session caching available.
+- **Git repository:** Claude must call `EnterWorktree` to create an isolated working copy. The containment root is the worktree directory.
+- **Non-git directory:** Containment is activated automatically when the session starts, using the session's working directory as the containment root. No `EnterWorktree` call is needed (or available).
+
+When Claude tries to use a write-gated tool before containment is active, summon automatically denies the request. Once containment is active:
+
+1. The first write-gated tool triggers a **one-time Slack approval** prompt. For non-git sessions, the approval message includes a warning that changes cannot be automatically rolled back.
+2. After approval, writes **within the containment root** are auto-approved — CWD containment ensures file-targeting tools (Edit, Write, etc.) can only modify files inside the containment root without additional prompts.
+3. Writes **outside the containment root** still require Slack approval, with per-path session caching available.
 4. `Bash` always requires HITL on first use, with per-command session caching (exact match).
 
 ### Safe-dir exception
 
-You can configure directories where writes are allowed **without entering a worktree**:
+You can configure directories where writes are allowed **without entering containment**:
 
 ```bash
 summon config set SUMMON_SAFE_WRITE_DIRS "hack/,.dev/"
 ```
 
-Files written to these directories bypass the worktree requirement entirely. Paths are resolved with symlink protection (`Path.resolve()` on both sides) to prevent escapes. Setting `safe_write_dirs=.` exempts the entire project directory for file-targeting tools (Bash remains gated regardless).
+Files written to these directories bypass the containment requirement entirely. Paths are resolved with symlink protection (`Path.resolve()` on both sides) to prevent escapes. Setting `safe_write_dirs=.` exempts the entire project directory for file-targeting tools (Bash remains gated regardless).
 
 ---
 
@@ -71,7 +76,7 @@ Claude wants to run:
 
 Clicking **Approve for session** caches the tool for the remainder of the session:
 
-- **Write-gated tools** (Edit, Write, Bash, etc.) — the specific **argument** is cached: the file path for file tools, the command string for Bash. This prevents blanket `Edit(*)` or `Bash(*)` approval. Writes within the worktree are already auto-approved by CWD containment, so this mainly applies to writes outside the worktree and all Bash commands.
+- **Write-gated tools** (Edit, Write, Bash, etc.) — the specific **argument** is cached: the file path for file tools, the command string for Bash. This prevents blanket `Edit(*)` or `Bash(*)` approval. Writes within the containment root are already auto-approved by CWD containment, so this mainly applies to writes outside the containment root and all Bash commands.
 - **Other tools** — the tool name is cached; all subsequent uses are auto-approved.
 
 The confirmation message shows what was cached:
@@ -85,7 +90,7 @@ The confirmation message shows what was cached:
     Tools in the GitHub MCP require-approval list (merge, delete branch, create PR, etc.) always require explicit Slack approval — even if you click "Approve for session." This is a defense-in-depth measure.
 
 !!! info "CWD containment and `allowedTools`"
-    Write-gated tools that target paths outside the worktree always require Slack approval, even if your `~/.claude/settings.json` includes them in `allowedTools`. This is the same defense-in-depth principle used for GitHub tools — `allowedTools` cannot override CWD containment.
+    Write-gated tools that target paths outside the containment root always require Slack approval, even if your `~/.claude/settings.json` includes them in `allowedTools`. This is the same defense-in-depth principle used for GitHub tools — `allowedTools` cannot override CWD containment.
 
 ### Batched requests
 
@@ -205,18 +210,18 @@ The full permission evaluation order in `handle()`:
 
 | Step | Check | Result |
 |------|-------|--------|
-| 0 | AskUserQuestion intercept | Route to interactive UI |
-| 0b | Write gate (`_WRITE_GATED_TOOLS`) | SDK deny → Deny; safe-dir → Allow; no worktree → Deny; first write → HITL; within CWD → Allow; outside CWD → fall through |
-| 1 | SDK deny suggestions | Deny |
-| 2 | Static auto-approve (`_AUTO_APPROVE_TOOLS`) | Allow |
-| 2b | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL |
-| 2c | GitHub auto-approve (prefix matching) | Allow |
-| 2d | Summon MCP auto-approve (prefix matching) | Allow |
-| 2e | Session-lifetime cached approvals | Allow (GitHub deny-list excluded) |
-| 2f | Per-argument cache (exact match on primary arg) | Allow if arg matches (GitHub deny-list excluded) |
-| 2g | Auto-classifier (Sonnet, only active after worktree entry) | Allow, Block, or fall through on uncertain |
-| 3 | SDK allow suggestions | Allow (write-gated tools excluded — CWD containment cannot be overridden) |
-| 4 | Slack HITL (interactive message, deleted after) | User decides |
+| 1 | AskUserQuestion intercept | Route to interactive UI |
+| 2 | Write gate (`_WRITE_GATED_TOOLS`) | SDK deny → Deny; safe-dir → Allow; no containment → Deny; first write → HITL; within containment root → Allow; outside containment root → fall through |
+| 3 | SDK deny suggestions | Deny |
+| 4 | Static auto-approve (`_AUTO_APPROVE_TOOLS`) | Allow |
+| 5 | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`) | Always HITL |
+| 6 | GitHub auto-approve (prefix matching) | Allow |
+| 7 | Summon MCP auto-approve (prefix matching) | Allow |
+| 8 | Session-lifetime cached approvals | Allow (GitHub deny-list excluded) |
+| 9 | Per-argument cache (exact match on primary arg) | Allow if arg matches (GitHub deny-list excluded) |
+| 10 | Auto-classifier (Sonnet, only active after worktree entry) | Allow, Block, or fall through on uncertain |
+| 11 | SDK allow suggestions | Allow (write-gated tools excluded — CWD containment cannot be overridden) |
+| 12 | Slack HITL (interactive message, deleted after) | User decides |
 
 ---
 

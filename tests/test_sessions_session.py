@@ -264,6 +264,195 @@ class TestFormatFileReferences:
         assert "unknown" in result
 
 
+class TestDetectGit:
+    """Unit tests for the _detect_git async helper."""
+
+    async def test_non_git_dir_returns_false(self, tmp_path):
+        """A plain directory with no git repo returns (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git(str(tmp_path))
+        assert is_git is False
+        assert branch is None
+
+    async def test_git_ceiling_prevents_parent_discovery(self, tmp_path):
+        """GIT_CEILING_DIRECTORIES must stop git from discovering a parent repo.
+
+        tmp_path is inside the test-runner's git repo. _detect_git sets
+        GIT_CEILING_DIRECTORIES to tmp_path itself, so git cannot walk upward
+        to find the enclosing repo, and must return (False, None).
+        """
+        from summon_claude.sessions.session import _detect_git
+
+        # tmp_path is a plain directory — no .git here
+        is_git, branch = await _detect_git(str(tmp_path))
+        assert is_git is False
+        assert branch is None
+
+    async def test_invalid_path_returns_false(self):
+        """Non-existent or non-absolute path must return (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git("/nonexistent/path/that/does/not/exist")
+        assert is_git is False
+        assert branch is None
+
+    async def test_relative_path_returns_false(self):
+        """Relative path (not absolute) must return (False, None)."""
+        from summon_claude.sessions.session import _detect_git
+
+        is_git, branch = await _detect_git("relative/path")
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_zero_lines_returns_false(self, tmp_path):
+        """If git produces fewer than 2 output lines, return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_one_line_returns_false(self, tmp_path):
+        """If git produces only 1 output line (no branch line), return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_output_three_lines_uses_first_two(self, tmp_path):
+        """Extra output lines beyond the first two must be ignored."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nmain\nextra-line\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is True
+        assert branch == "main"
+
+    async def test_subprocess_failure_returns_false(self, tmp_path):
+        """Exception from subprocess must be caught; return (False, None)."""
+        from unittest.mock import patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        with patch("asyncio.create_subprocess_exec", side_effect=OSError("git not found")):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_detached_head_returns_none_branch(self, tmp_path):
+        """Detached HEAD ('HEAD' branch name) must map to branch=None."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nHEAD\n", b""))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is True
+        assert branch is None
+
+    async def test_nonzero_returncode_returns_false(self, tmp_path):
+        """Non-zero exit code (e.g., 128 for non-repo) must return (False, None)."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 128
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"fatal: not a git repository"))
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            is_git, branch = await _detect_git(str(tmp_path))
+
+        assert is_git is False
+        assert branch is None
+
+    async def test_existing_ceiling_dirs_preserved(self, tmp_path):
+        """GIT_CEILING_DIRECTORIES from env must be preserved and extended."""
+        import os
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nmain\n", b""))
+
+        captured_env = {}
+
+        async def capture_exec(*args, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            return mock_proc
+
+        existing_ceiling = "/some/other/path"
+        with (
+            patch.dict(os.environ, {"GIT_CEILING_DIRECTORIES": existing_ceiling}),
+            patch("asyncio.create_subprocess_exec", side_effect=capture_exec),
+        ):
+            await _detect_git(str(tmp_path))
+
+        ceiling = captured_env.get("GIT_CEILING_DIRECTORIES", "")
+        assert existing_ceiling in ceiling
+        assert str(tmp_path.resolve()) in ceiling
+        assert ceiling.startswith(existing_ceiling + ":")
+
+    async def test_git_dir_and_work_tree_scrubbed(self, tmp_path):
+        """SC-03: GIT_DIR and GIT_WORK_TREE must not leak into subprocess env."""
+        import os
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from summon_claude.sessions.session import _detect_git
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"true\nmain\n", b""))
+
+        captured_env = {}
+
+        async def capture_exec(*args, **kwargs):
+            captured_env.update(kwargs.get("env", {}))
+            return mock_proc
+
+        with (
+            patch.dict(os.environ, {"GIT_DIR": "/evil/.git", "GIT_WORK_TREE": "/evil"}),
+            patch("asyncio.create_subprocess_exec", side_effect=capture_exec),
+        ):
+            await _detect_git(str(tmp_path))
+
+        assert "GIT_DIR" not in captured_env
+        assert "GIT_WORK_TREE" not in captured_env
+
+
 class TestSessionShutdownControl:
     """Test request_shutdown() and authenticate() — the new public control API."""
 
@@ -3256,9 +3445,45 @@ class TestFinalizeEscalatingWarnings:
                 "summon_claude.sessions.session.derive_transcript_path",
                 return_value=Path("/fake"),
             ),
-            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+            patch(
+                "summon_claude.sessions.session._detect_git",
+                return_value=(False, None),
+            ),
         ):
             await session._finalize_turn_result(rt, streamer, sr)
+
+    async def test_non_git_session_skips_detect_git_on_topic_update(self):
+        """Non-git sessions must not spawn a _detect_git subprocess for topic updates."""
+        from pathlib import Path
+
+        from summon_claude.sessions.context import ContextUsage
+
+        session = make_session()
+        session._is_git_repo = False
+        session._last_topic_model = None  # different from "opus" → triggers update
+        session._last_topic_branch = None
+        session._claude_session_id = "already-set"
+        session._last_context = ContextUsage(
+            input_tokens=20000, context_window=200000, percentage=10.0
+        )
+        rt = make_rt(AsyncMock())
+
+        detect_mock = AsyncMock(return_value=(False, None))
+        with (
+            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
+            patch(
+                "summon_claude.sessions.session.derive_transcript_path",
+                return_value=Path("/fake"),
+            ),
+            patch("summon_claude.sessions.session._detect_git", detect_mock),
+        ):
+            await session._finalize_turn_result(
+                rt, self._make_streamer(), self._make_stream_result()
+            )
+
+        detect_mock.assert_not_called()
+        # Topic should still be updated (model changed)
+        rt.client.set_topic.assert_called_once()
 
     async def test_no_warning_below_75pct(self):
         session = make_session()
@@ -3285,7 +3510,10 @@ class TestFinalizeEscalatingWarnings:
                 "summon_claude.sessions.session.derive_transcript_path",
                 return_value=Path("/fake"),
             ),
-            patch("summon_claude.sessions.session._get_git_branch", return_value=None),
+            patch(
+                "summon_claude.sessions.session._detect_git",
+                return_value=(False, None),
+            ),
         ):
             await session._finalize_turn_result(
                 rt, self._make_streamer(), self._make_stream_result()
