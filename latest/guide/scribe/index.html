@@ -928,26 +928,15 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#step-1-enable-the-scribe" class="md-nav__link">
+  <a href="#step-1-configure-data-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1: Enable the scribe
+        Step 1: Configure data sources
       
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#step-2-enable-data-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 2: Enable data sources
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 2: Enable data sources">
+    <nav class="md-nav" aria-label="Step 1: Configure data sources">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -978,10 +967,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-3-start-the-scribe" class="md-nav__link">
+  <a href="#step-2-start-the-scribe" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 3: Start the scribe
+        Step 2: Start the scribe
       
     </span>
   </a>
@@ -2150,26 +2139,15 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#step-1-enable-the-scribe" class="md-nav__link">
+  <a href="#step-1-configure-data-sources" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 1: Enable the scribe
+        Step 1: Configure data sources
       
     </span>
   </a>
   
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#step-2-enable-data-sources" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Step 2: Enable data sources
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Step 2: Enable data sources">
+    <nav class="md-nav" aria-label="Step 1: Configure data sources">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2200,10 +2178,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#step-3-start-the-scribe" class="md-nav__link">
+  <a href="#step-2-start-the-scribe" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 3: Start the scribe
+        Step 2: Start the scribe
       
     </span>
   </a>
@@ -2441,26 +2419,25 @@
 </ul>
 <hr />
 <h2 id="setup">Setup<a class="headerlink" href="#setup" title="Permanent link">&para;</a></h2>
-<h3 id="step-1-enable-the-scribe">Step 1: Enable the scribe<a class="headerlink" href="#step-1-enable-the-scribe" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_ENABLED<span class="w"> </span><span class="nb">true</span>
-</code></pre></div>
-<h3 id="step-2-enable-data-sources">Step 2: Enable data sources<a class="headerlink" href="#step-2-enable-data-sources" title="Permanent link">&para;</a></h3>
-<p>The scribe has two data collectors, each with its own enable flag. Enable at least one.</p>
+<h3 id="step-1-configure-data-sources">Step 1: Configure data sources<a class="headerlink" href="#step-1-configure-data-sources" title="Permanent link">&para;</a></h3>
+<p>The scribe auto-enables when it detects any configured data source. Set up at least one.</p>
 <h4 id="google-workspace">Google Workspace<a class="headerlink" href="#google-workspace" title="Permanent link">&para;</a></h4>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
+<p>First, run the guided setup to create Google OAuth credentials:</p>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>setup
 </code></pre></div>
+<p>This walks you through creating a GCP project, enabling the required APIs, configuring the OAuth consent screen, and downloading your credentials.</p>
 <p>Then authenticate with Google:</p>
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
-<p>This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Once complete, credentials are stored in summon's config directory.</p>
+<p>This prompts which services need write access (all are read-only by default), then opens a browser for OAuth consent. Once complete, credentials are stored in summon's config directory and the scribe automatically detects them — no manual config flag needed.</p>
 <p>To verify authentication status:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
 </code></pre></div>
 <h4 id="external-slack-monitoring">External Slack monitoring<a class="headerlink" href="#external-slack-monitoring" title="Permanent link">&para;</a></h4>
 <p>See <a href="../scribe-integrations/#slack-browser-monitoring">Scribe Integrations — Slack Browser Monitoring</a> for full setup instructions.</p>
-<h3 id="step-3-start-the-scribe">Step 3: Start the scribe<a class="headerlink" href="#step-3-start-the-scribe" title="Permanent link">&para;</a></h3>
+<h3 id="step-2-start-the-scribe">Step 2: Start the scribe<a class="headerlink" href="#step-2-start-the-scribe" title="Permanent link">&para;</a></h3>
 <p>The scribe auto-spawns when you run:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
 </code></pre></div>
 <p>It creates (or reuses) a persistent private channel called <code>#0-summon-scribe</code>. No manual start or <code>/summon CODE</code> authentication is needed — the scribe inherits the authenticated user from <code>project up</code>.</p>
 <p>If the scribe was previously suspended by <code>project down</code>, <code>project up</code> resumes it with transcript continuity.</p>
@@ -2479,8 +2456,8 @@
 <tbody>
 <tr>
 <td><code>SUMMON_SCRIBE_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable the scribe agent</td>
+<td>auto-detect</td>
+<td>Enable the scribe agent (auto-enables when Google or Slack is detected)</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_MODEL</code></td>
@@ -2522,7 +2499,7 @@
 </tbody>
 </table>
 <p><strong>Example with keyword filtering and quiet hours:</strong></p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_IMPORTANCE_KEYWORDS<span class="w"> </span>urgent,outage,deploy,PagerDuty
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_IMPORTANCE_KEYWORDS<span class="w"> </span>urgent,outage,deploy,PagerDuty
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_QUIET_HOURS<span class="w"> </span><span class="m">23</span>:00-07:00
 </code></pre></div>
 <h3 id="google-workspace_1">Google Workspace<a class="headerlink" href="#google-workspace_1" title="Permanent link">&para;</a></h3>
@@ -2537,8 +2514,8 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <tbody>
 <tr>
 <td><code>SUMMON_SCRIBE_GOOGLE_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable the Google Workspace data collector</td>
+<td>auto-detect</td>
+<td>Enable the Google Workspace data collector (auto-detected when credentials exist)</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_GOOGLE_SERVICES</code></td>
@@ -2548,12 +2525,12 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 </tbody>
 </table>
 <p>The default services are <code>gmail</code>, <code>calendar</code>, <code>drive</code>. The full set of supported services is: <code>gmail</code>, <code>calendar</code>, <code>drive</code>, <code>docs</code>, <code>sheets</code>, <code>chat</code>, <code>forms</code>, <code>slides</code>, <code>tasks</code>, <code>contacts</code>, <code>search</code>, <code>appscript</code>.</p>
-<div class="notest highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_SERVICES<span class="w"> </span>gmail,calendar
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Requires workspace-mcp</p>
-<p>The Google collector requires the <code>google</code> extra: <code>uv tool install "summon-claude[google]"</code>. Google OAuth credentials must also be configured via <code>summon auth google login</code>.</p>
+<p>The Google collector requires the <code>google</code> extra: <code>uv tool install "summon-claude[google]"</code>. Google OAuth credentials must also be configured via <code>summon auth google setup</code> and <code>summon auth google login</code>.</p>
 </div>
 <h3 id="slack-channel-monitoring">Slack channel monitoring<a class="headerlink" href="#slack-channel-monitoring" title="Permanent link">&para;</a></h3>
 <p>The scribe can monitor an external Slack workspace using browser-based WebSocket interception. This is separate from the native Slack bot integration used for session interaction — it watches a different workspace (e.g., your company's Slack) via a real browser session.</p>
@@ -2568,8 +2545,8 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <tbody>
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable Slack channel monitoring</td>
+<td>auto-detect</td>
+<td>Enable Slack channel monitoring (auto-detected when Playwright and browser auth exist)</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_BROWSER</code></td>
@@ -2585,7 +2562,7 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 </table>
 <p>DMs and @mentions are always captured regardless of <code>SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS</code>. The channel list controls which channels have <em>all</em> messages monitored.</p>
 <p><strong>Example:</strong></p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_ENABLED<span class="w"> </span><span class="nb">true</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Slack auto-enables when browser auth exists; these are optional overrides</span>
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_BROWSER<span class="w"> </span>chrome
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS<span class="w"> </span>C01ABC123,C02DEF456
 </code></pre></div>
@@ -2665,10 +2642,10 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <p>The canvas is updated after each scan cycle. See <a href="../canvas/">Canvas Integration</a> for how the canvas sync works.</p>
 <hr />
 <h2 id="full-configuration-example">Full configuration example<a class="headerlink" href="#full-configuration-example" title="Permanent link">&para;</a></h2>
-<div class="notest highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env (or environment variables)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># ~/.config/summon/config.env (or environment variables)</span>
 
-<span class="c1"># Enable scribe</span>
-<span class="nv">SUMMON_SCRIBE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<span class="c1"># Scribe auto-enables when Google or Slack is configured.</span>
+<span class="c1"># To force on/off: SUMMON_SCRIBE_ENABLED=true/false</span>
 
 <span class="c1"># Use a lighter model to reduce cost</span>
 <span class="nv">SUMMON_SCRIBE_MODEL</span><span class="o">=</span>claude-haiku-4-5-20251001
@@ -2682,12 +2659,12 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <span class="c1"># Don&#39;t post non-critical items overnight</span>
 <span class="nv">SUMMON_SCRIBE_QUIET_HOURS</span><span class="o">=</span><span class="m">22</span>:00-08:00
 
-<span class="c1"># Google Workspace collector</span>
-<span class="nv">SUMMON_SCRIBE_GOOGLE_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<span class="c1"># Google Workspace collector (auto-detected when credentials exist)</span>
+<span class="c1"># SUMMON_SCRIBE_GOOGLE_ENABLED=true  # optional — auto-detected</span>
 <span class="nv">SUMMON_SCRIBE_GOOGLE_SERVICES</span><span class="o">=</span>gmail,calendar
 
-<span class="c1"># External Slack collector</span>
-<span class="nv">SUMMON_SCRIBE_SLACK_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+<span class="c1"># External Slack collector (auto-detected when browser auth exists)</span>
+<span class="c1"># SUMMON_SCRIBE_SLACK_ENABLED=true  # optional — auto-detected</span>
 <span class="nv">SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS</span><span class="o">=</span>C01ABC123,C02DEF456
 </code></pre></div>
 <hr />

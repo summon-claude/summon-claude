@@ -2334,8 +2334,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <tr>
 <td><code>SUMMON_SCRIBE_ENABLED</code></td>
 <td>boolean</td>
-<td><code>false</code></td>
-<td>Enable the background scribe agent.</td>
+<td><em>auto-detect</em></td>
+<td>Enable the background scribe agent. Auto-enables when Google or Slack collectors are detected.</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES</code></td>
@@ -2384,8 +2384,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <tr>
 <td><code>SUMMON_SCRIBE_GOOGLE_ENABLED</code></td>
 <td>boolean</td>
-<td><code>false</code></td>
-<td>Enable the Google Workspace data collector for scribe.</td>
+<td>auto-detect</td>
+<td>Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist.</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_GOOGLE_SERVICES</code></td>
@@ -2410,8 +2410,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_ENABLED</code></td>
 <td>boolean</td>
-<td><code>false</code></td>
-<td>Enable the Slack data collector (uses Playwright browser automation).</td>
+<td><em>auto-detect</em></td>
+<td>Enable the Slack data collector. Auto-detected when Playwright is installed and browser auth exists.</td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_BROWSER</code></td>

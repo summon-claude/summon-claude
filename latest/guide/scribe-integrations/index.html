@@ -2290,29 +2290,43 @@
 <div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">uv</label><label for="__tabbed_1_2">pipx</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;summon-claude[google]&#39;</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;summon-claude[google]&#39;</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="notest highlight"><pre><span></span><code>pipx<span class="w"> </span>inject<span class="w"> </span>summon-claude<span class="w"> </span>workspace-mcp
+<div class="highlight"><pre><span></span><code>pipx<span class="w"> </span>inject<span class="w"> </span>summon-claude<span class="w"> </span>workspace-mcp
 </code></pre></div>
 </div>
 </div>
+</div>
+<p>Run the guided setup to create Google OAuth credentials:</p>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>setup
+</code></pre></div>
+<p>The setup is an interactive wizard with a progress roadmap — each step gets a clean screen showing where you are and what's next:</p>
+<ol>
+<li><strong>Google Cloud Project</strong> — select an existing project or create a new one. If <code>gcloud</code> is installed, the wizard detects your current project and offers it as the default, and can create new projects for you. Console links route through Google's account chooser for multi-account users.</li>
+<li><strong>Enable APIs</strong> — enable Gmail, Calendar, and Drive APIs. If <code>gcloud</code> is installed, offers to run the command directly; otherwise provides browser links with an option to open them automatically.</li>
+<li><strong>OAuth Consent Screen</strong> — configure branding and set publishing status to Production (avoids 7-day token expiry). Links open directly in your browser.</li>
+<li><strong>Create OAuth Client</strong> — create a "Desktop app" OAuth client and download <code>client_secret.json</code>. The wizard accepts either the JSON file path or a manually pasted Client ID + Secret.</li>
+</ol>
+<div class="admonition tip">
+<p class="admonition-title">Already have a GCP project with OAuth configured?</p>
+<p>In step 1, choose "Skip this step" to proceed directly to API enablement and credentials.</p>
 </div>
 <p>Then authenticate with Google:</p>
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
-<p>This opens a browser for OAuth consent. Grant access to the Google services you want the scribe to monitor. Credentials are stored in summon's config directory (<code>google-credentials/</code>).</p>
+<p>This prompts which services need write access (all are read-only by default), then opens a browser for OAuth consent. Credentials are stored in summon's config directory (<code>google-credentials/</code>).</p>
+<p>To re-run later and change scope access (e.g., grant or revoke write access for a service), run <code>summon auth google login</code> again — prompt defaults match your current grants so you won't accidentally downgrade.</p>
 <p>To verify authentication status:</p>
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
 </code></pre></div>
-<p>This shows whether credentials exist, which scopes are granted, and whether the token is still valid.</p>
+<p>This shows whether credentials exist, which scopes are granted (read-only vs read-write per service), and whether the token is still valid.</p>
 <h3 id="enabling-the-google-collector">Enabling the Google collector<a class="headerlink" href="#enabling-the-google-collector" title="Permanent link">&para;</a></h3>
-<p>Once authenticated, enable the Google data collector in the scribe:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_ENABLED<span class="w"> </span><span class="nb">true</span>
-</code></pre></div>
+<p>The Google collector is <strong>auto-detected</strong>: when workspace-mcp is installed and Google credentials exist, the scribe automatically uses Google tools. No manual config flag is needed.</p>
+<p>To explicitly disable it: <code>summon config set SUMMON_SCRIBE_GOOGLE_ENABLED false</code></p>
 <p>By default the scribe monitors <code>gmail</code>, <code>calendar</code>, and <code>drive</code>. To customize:</p>
-<div class="notest highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_SERVICES<span class="w"> </span>gmail,calendar
 </code></pre></div>
 <p>The full set of supported services is: <code>gmail</code>, <code>calendar</code>, <code>drive</code>, <code>docs</code>, <code>sheets</code>, <code>chat</code>, <code>forms</code>, <code>slides</code>, <code>tasks</code>, <code>contacts</code>, <code>search</code>, <code>appscript</code>.</p>
@@ -2328,17 +2342,17 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">uv</label><label for="__tabbed_2_2">pipx</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;summon-claude[slack-browser]&#39;</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span><span class="s1">&#39;summon-claude[slack-browser]&#39;</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="notest highlight"><pre><span></span><code>pipx<span class="w"> </span>inject<span class="w"> </span>summon-claude<span class="w"> </span>playwright
+<div class="highlight"><pre><span></span><code>pipx<span class="w"> </span>inject<span class="w"> </span>summon-claude<span class="w"> </span>playwright
 </code></pre></div>
 </div>
 </div>
 </div>
 <h3 id="authenticate-with-a-slack-workspace">Authenticate with a Slack workspace<a class="headerlink" href="#authenticate-with-a-slack-workspace" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>login<span class="w"> </span>myteam
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>login<span class="w"> </span>myteam
 </code></pre></div>
 <p>This opens a visible browser window at your Slack workspace. Log in normally — the browser closes automatically after detecting your session. Auth state (cookies and localStorage) is saved to summon's data directory.</p>
 <p>The <code>WORKSPACE</code> argument accepts:</p>
@@ -2354,25 +2368,22 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 </div>
 <h3 id="select-monitored-channels">Select monitored channels<a class="headerlink" href="#select-monitored-channels" title="Permanent link">&para;</a></h3>
 <p>To change which channels are monitored without re-authenticating:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>channels
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>channels
 </code></pre></div>
 <p>This uses the cached channel list from the last authentication. To refresh the channel list from Slack:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>channels<span class="w"> </span>--refresh
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>channels<span class="w"> </span>--refresh
 </code></pre></div>
 <h3 id="check-auth-status">Check auth status<a class="headerlink" href="#check-auth-status" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>status
 </code></pre></div>
 <p>Shows the configured workspace URL, user ID, auth state age, and monitored channels.</p>
 <h3 id="remove-auth-state">Remove auth state<a class="headerlink" href="#remove-auth-state" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span><span class="nb">logout</span>
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span><span class="nb">logout</span>
 </code></pre></div>
 <p>Removes saved browser auth state and workspace config. This cannot be undone.</p>
 <h3 id="enabling-the-slack-collector">Enabling the Slack collector<a class="headerlink" href="#enabling-the-slack-collector" title="Permanent link">&para;</a></h3>
-<p>Once authenticated, enable the Slack data collector in the scribe:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_ENABLED<span class="w"> </span><span class="nb">true</span>
-</code></pre></div>
-<p>Optionally configure monitored channels and browser:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_BROWSER<span class="w"> </span>chrome
+<p>Once authenticated, the Slack collector auto-enables on the next <code>summon project up</code>. Optionally configure monitored channels and browser:</p>
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_BROWSER<span class="w"> </span>chrome
 summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS<span class="w"> </span>C01ABC123,C02DEF456
 </code></pre></div>
 <p>DMs and @mentions are always captured regardless of the channel list. The channel list controls which channels have <em>all</em> messages monitored.</p>

@@ -45,7 +45,7 @@ Core settings for the background scribe agent. See [Scribe](https://summon-claud
 
 | Config Key                            | Type    | Default                    | Description                                                                                                                     |
 | ------------------------------------- | ------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMON_SCRIBE_ENABLED`               | boolean | `false`                    | Enable the background scribe agent.                                                                                             |
+| `SUMMON_SCRIBE_ENABLED`               | boolean | *auto-detect*              | Enable the background scribe agent. Auto-enables when Google or Slack collectors are detected.                                  |
 | `SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES` | integer | `5`                        | How often the scribe scans for new information. Minimum 1.                                                                      |
 | `SUMMON_SCRIBE_CWD`                   | text    | *(data dir)/scribe*        | Working directory for the scribe session.                                                                                       |
 | `SUMMON_SCRIBE_MODEL`                 | text    | *(inherits default model)* | Model override for the scribe session.                                                                                          |
@@ -58,18 +58,18 @@ Google Workspace data collector settings. Requires the `google` optional extra (
 
 | Config Key                      | Type    | Default                | Description                                                                                                                                                                              |
 | ------------------------------- | ------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMON_SCRIBE_GOOGLE_ENABLED`  | boolean | `false`                | Enable the Google Workspace data collector for scribe.                                                                                                                                   |
+| `SUMMON_SCRIBE_GOOGLE_ENABLED`  | boolean | auto-detect            | Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist.                                                       |
 | `SUMMON_SCRIBE_GOOGLE_SERVICES` | text    | `gmail,calendar,drive` | Comma-separated list of Google services to monitor. Valid values: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`. |
 
 ### Scribe Slack
 
 Slack monitoring via browser automation. Requires the `slack-browser` optional extra (`uv tool install summon-claude[slack-browser]`).
 
-| Config Key                               | Type                                  | Default   | Description                                                           |
-| ---------------------------------------- | ------------------------------------- | --------- | --------------------------------------------------------------------- |
-| `SUMMON_SCRIBE_SLACK_ENABLED`            | boolean                               | `false`   | Enable the Slack data collector (uses Playwright browser automation). |
-| `SUMMON_SCRIBE_SLACK_BROWSER`            | choice: `chrome`, `firefox`, `webkit` | `chrome`  | Browser for Slack monitoring.                                         |
-| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | text                                  | *(empty)* | Comma-separated Slack channel names to monitor.                       |
+| Config Key                               | Type                                  | Default       | Description                                                                                          |
+| ---------------------------------------- | ------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `SUMMON_SCRIBE_SLACK_ENABLED`            | boolean                               | *auto-detect* | Enable the Slack data collector. Auto-detected when Playwright is installed and browser auth exists. |
+| `SUMMON_SCRIBE_SLACK_BROWSER`            | choice: `chrome`, `firefox`, `webkit` | `chrome`      | Browser for Slack monitoring.                                                                        |
+| `SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS` | text                                  | *(empty)*     | Comma-separated Slack channel names to monitor.                                                      |
 
 ______________________________________________________________________
 

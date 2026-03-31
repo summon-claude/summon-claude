@@ -120,6 +120,22 @@ summon auth google login [OPTIONS]
 | -------------- | ------- | --------------------------- | ------- |
 | `-h`, `--help` | boolean | Show this message and exit. | `False` |
 
+###### summon auth google setup
+
+Interactive guided setup for Google OAuth credentials.
+
+**Usage:**
+
+```
+summon auth google setup [OPTIONS]
+```
+
+**Options:**
+
+| Name           | Type    | Description                 | Default |
+| -------------- | ------- | --------------------------- | ------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+
 ###### summon auth google status
 
 Check Google Workspace authentication status.

@@ -376,29 +376,33 @@ Google OAuth flow fails or never completes
 
 **Fix:**
 
-1. Download `client_secret.json` from the Google Cloud Console for your OAuth app.
-1. Place it in your summon data directory (check `summon config path` for the location).
-1. Run the auth flow:
+1. Run the guided setup to create and configure credentials:
+
+```
+summon auth google setup
+```
+
+2. Then run the auth flow:
 
 ```
 summon auth google login
 ```
 
-4. Complete the browser-based consent flow.
+3. Complete the browser-based consent flow.
 
-Google scope validation fails
+Google scope error when using a tool
 
-**Symptom:** summon reports that required Google scopes are missing even after authorizing.
+**Symptom:** A Google tool fails with "this tool requires write access that was not granted."
 
-**Cause:** The OAuth consent was granted with insufficient scopes, or the stored credentials don't include all required scopes.
+**Cause:** The tool needs write scopes (e.g., `gmail.modify`) but only read-only scopes were granted during `summon auth google login`.
 
-**Fix:** Re-run the auth flow — it will request all required scopes:
+**Fix:** Re-run the auth flow and grant write access to the relevant service:
 
 ```
 summon auth google login
 ```
 
-If scope issues persist, revoke the app's access in your Google account settings and re-authorize.
+Answer `Y` to the write-access prompt for the needed service. The browser will re-open for consent with the broader scopes.
 
 Google credentials not found
 
@@ -412,7 +416,7 @@ Google credentials not found
 summon version
 ```
 
-The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon auth google login`.
+The `Data dir` line shows the base path. Google credentials are stored under `<data-dir>/google-credentials/`. If credentials are in a different location, re-run `summon auth google setup`.
 
 ______________________________________________________________________
 
@@ -444,14 +448,14 @@ Google Workspace collector not working
 
 **Symptom:** Scribe is running but not collecting Google Workspace data (Gmail, Calendar, Drive).
 
-**Cause:** The Google collector requires separate enablement and authentication.
+**Cause:** The Google collector auto-detects when workspace-mcp is installed and credentials exist. If either is missing, it stays disabled.
 
 **Fix:**
 
-1. Enable the Google collector:
+1. Ensure the `workspace-mcp` binary is available. If missing, install the Google extra:
 
 ```
-summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
+uv tool install "summon-claude[google]"
 ```
 
 2. Verify Google authentication status:
@@ -460,30 +464,31 @@ summon config set SUMMON_SCRIBE_GOOGLE_ENABLED true
 summon auth google status
 ```
 
-3. If not authenticated, run the auth flow:
+3. If not authenticated, run the setup and auth flow:
 
 ```
+summon auth google setup
 summon auth google login
 ```
 
-4. Ensure the `workspace-mcp` binary is available. If missing, install the Google extra:
+4. Restart the project to pick up the new credentials:
 
 ```
-uv tool install "summon-claude[google]"
+summon project down && summon project up
 ```
 
 Slack browser monitoring not working
 
 **Symptom:** Scribe is running but not capturing messages from external Slack workspaces.
 
-**Cause:** The Slack browser monitor requires separate enablement, Playwright, and browser authentication.
+**Cause:** The Slack browser monitor auto-detects when Playwright is installed and browser auth exists. If either is missing, it stays disabled.
 
 **Fix:**
 
-1. Enable the Slack browser monitor:
+1. Ensure Playwright is installed:
 
 ```
-summon config set SUMMON_SCRIBE_SLACK_ENABLED true
+uv tool install "summon-claude[slack-browser]"
 ```
 
 2. Check Slack browser authentication status:
@@ -546,15 +551,9 @@ ______________________________________________________________________
 
 If your issue isn't covered here:
 
-1. Run diagnostics: `summon doctor` (checks environment, daemon, database, Slack, logs, and MCP integrations)
-1. Run with verbose output: `summon -v doctor` (shows detailed findings and log tails)
 1. Check the session logs: `summon session logs <session-name>`
 1. Enable verbose logging: `summon -v start --name my-session`
 1. Run config validation: `summon config check`
 1. Check auth status across all providers: `summon auth status`
-1. Export a diagnostic report: `summon doctor --export report.json`
-1. Submit a report: `summon doctor --submit` (creates a redacted GitHub issue — requires `gh` CLI)
 1. Reset data or config if things are corrupted: `summon reset data` or `summon reset config`
 1. Open an issue at [github.com/summon-claude/summon-claude/issues](https://github.com/summon-claude/summon-claude/issues)
-
-See [Diagnostics](https://summon-claude.github.io/summon-claude/latest/guide/doctor/index.md) for full details on `summon doctor`.
