@@ -520,6 +520,14 @@ class TestProjectAddJQL:
         assert result.exit_code == 0, result.output
         mock_add.assert_called_once_with("myproj", ".", jira_jql=None)
 
+    def test_add_project_rejects_jql_too_long(self):
+        """project add --jql with >500 chars is rejected."""
+        long_jql = "x" * 501
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "add", "myproj", ".", "--jql", long_jql])
+        assert result.exit_code != 0
+        assert "too long" in result.output.lower()
+
 
 # ---------------------------------------------------------------------------
 # project update
@@ -568,6 +576,14 @@ class TestProjectUpdateCLI:
 
         assert result.exit_code != 0
         assert "no fields" in result.output.lower() or "No fields" in result.output
+
+    def test_update_rejects_jql_too_long(self):
+        """project update --jql with >500 chars is rejected."""
+        long_jql = "x" * 501
+        runner = CliRunner()
+        result = runner.invoke(cli, ["project", "update", "myproj", "--jql", long_jql])
+        assert result.exit_code != 0
+        assert "too long" in result.output.lower()
 
     def test_update_project_not_found(self):
         """project update with nonexistent project returns error."""

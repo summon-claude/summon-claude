@@ -162,14 +162,7 @@ Canvas state tracking prevents re-alerting on previously triaged issues. The PM 
 ## Scribe integration
 
 !!! info "Partial integration"
-    Scribe sessions are wired to the Jira MCP server and include Jira-aware domain prompts (untrusted-content warnings, Gmail dedup). However, the scribe **scan prompt does not yet include Jira-specific scan instructions** — Jira monitoring in scribe is domain-aware but not yet actively polled each scan cycle.
-
-When both Google Workspace and Jira are active, the scribe system prompt instructs Gmail deduplication:
-
-- The scribe is told to skip Gmail notifications from Jira (from addresses containing `jira@` or `noreply@` at `atlassian.net` domains) when Jira monitoring is also active.
-
-!!! note "Prompt-level dedup"
-    Gmail/Jira dedup is a prompt instruction, not application code. Its effectiveness depends on the scribe agent following the instruction. Active Jira scan polling (which would make the dedup instruction actionable) is not yet wired.
+    Scribe sessions are wired to the Jira MCP server and include Jira-aware domain prompts (untrusted-content warnings). However, the scribe **scan prompt does not yet include Jira-specific scan instructions** — Jira monitoring in scribe is domain-aware but not yet actively polled each scan cycle. Gmail/Jira dedup is planned but not yet implemented.
 
 ---
 
