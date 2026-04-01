@@ -337,6 +337,8 @@ Rules:
 
 Your domain: Gmail, Google Calendar, Google Drive — watch every inbox, every calendar event, every shared document.
 
+When checking Gmail, skip emails from Jira notification addresses (from addresses containing 'jira@' or 'noreply@' at atlassian.net domains). These notifications are covered by direct Jira monitoring and should not be reported twice.
+
 Your domain: External Slack channels, DMs, and @mentions — every message in your monitored workspaces passes through your watch.
 
 Your domain: Jira issues, comments, and status changes — every update involving you passes through your watch.

@@ -59,12 +59,17 @@ def _get_source_prompts() -> dict[str, str]:
     )
 
     # Scribe system: resolve internal template vars, keep user-facing ones.
+    # Gmail/Jira dedup appended to google_section (matches build_scribe_system_prompt).
+    _google_with_dedup = (
+        "Your domain: Gmail, Google Calendar, Google Drive \u2014 "
+        "watch every inbox, every calendar event, every shared document.\n\n"
+        "When checking Gmail, skip emails from Jira notification addresses "
+        "(from addresses containing 'jira@' or 'noreply@' at atlassian.net "
+        "domains). These notifications are covered by direct Jira monitoring "
+        "and should not be reported twice.\n\n"
+    )
     scribe_system = (
-        _SCRIBE_SYSTEM_PROMPT_APPEND.replace(
-            "{google_section}",
-            "Your domain: Gmail, Google Calendar, Google Drive \u2014 "
-            "watch every inbox, every calendar event, every shared document.\n\n",
-        )
+        _SCRIBE_SYSTEM_PROMPT_APPEND.replace("{google_section}", _google_with_dedup)
         .replace(
             "{external_slack_section}",
             "Your domain: External Slack channels, DMs, and @mentions \u2014 "

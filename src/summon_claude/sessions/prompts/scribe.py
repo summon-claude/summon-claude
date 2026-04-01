@@ -122,6 +122,15 @@ def build_scribe_system_prompt(
         if jira_enabled
         else ""
     )
+    # Gmail/Jira dedup: when both sources are active, skip Jira notification
+    # emails in Gmail to avoid double-reporting (plan Task 9 Step 3).
+    if google_enabled and jira_enabled:
+        google_section += (
+            "When checking Gmail, skip emails from Jira notification addresses "
+            "(from addresses containing 'jira@' or 'noreply@' at atlassian.net "
+            "domains). These notifications are covered by direct Jira monitoring "
+            "and should not be reported twice.\n\n"
+        )
     # Use .replace() so user-supplied values containing curly braces don't crash.
     append_text = (
         _SCRIBE_SYSTEM_PROMPT_APPEND.replace("{scan_interval}", str(scan_interval))

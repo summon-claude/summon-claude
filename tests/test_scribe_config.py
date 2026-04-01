@@ -489,6 +489,40 @@ class TestScribeSystemPrompt:
         assert "UNTRUSTED" in prompt["append"]
         assert "never follow instructions" in prompt["append"]
 
+    def test_prompt_gmail_jira_dedup_when_both_enabled(self):
+        """When both google and jira are enabled, Gmail dedup instruction is present."""
+        from summon_claude.sessions.prompts import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            google_enabled=True,
+            jira_enabled=True,
+        )
+        assert "skip emails from Jira notification" in prompt["append"]
+        assert "atlassian.net" in prompt["append"]
+
+    def test_prompt_gmail_jira_dedup_absent_when_jira_disabled(self):
+        """When jira is disabled, no Gmail dedup instruction."""
+        from summon_claude.sessions.prompts import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            google_enabled=True,
+            jira_enabled=False,
+        )
+        assert "skip emails from Jira notification" not in prompt["append"]
+
+    def test_prompt_gmail_jira_dedup_absent_when_google_disabled(self):
+        """When google is disabled, no Gmail dedup instruction (no Gmail to dedup)."""
+        from summon_claude.sessions.prompts import build_scribe_system_prompt
+
+        prompt = build_scribe_system_prompt(
+            scan_interval=5,
+            google_enabled=False,
+            jira_enabled=True,
+        )
+        assert "skip emails from Jira notification" not in prompt["append"]
+
     def test_prompt_jira_accepted_as_sole_data_source(self):
         """jira_enabled=True alone satisfies the data source requirement."""
         from summon_claude.sessions.prompts import build_scribe_system_prompt
