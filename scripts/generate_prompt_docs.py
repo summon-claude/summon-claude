@@ -98,7 +98,12 @@ def get_source_prompts() -> dict[str, str]:
 
     return {
         "pm-system": _PM_SYSTEM_PROMPT_APPEND,
-        "pm-scan": build_pm_scan_prompt(github_enabled=True),
+        "pm-scan": build_pm_scan_prompt(
+            github_enabled=True,
+            jira_enabled=True,
+            jira_jql="{jira_jql}",
+            jira_cloud_id="{cloud_id}",
+        ),
         "global-pm-system": _GLOBAL_PM_SYSTEM_PROMPT_APPEND,
         "global-pm-scan": build_global_pm_scan_prompt(),
         "scribe-system": scribe_system,
@@ -106,6 +111,9 @@ def get_source_prompts() -> dict[str, str]:
             nonce="{nonce}",
             google_enabled=True,
             slack_enabled=True,
+            jira_enabled=True,
+            jira_cloud_id="{cloud_id}",
+            scan_interval_minutes=15,
             user_mention="{user_mention}",
             importance_keywords="{importance_keywords}",
             quiet_hours="{quiet_hours}",

@@ -2044,6 +2044,12 @@ class SummonSession:
             except Exception as e:
                 logger.warning("Failed to fetch project Jira config: %s", e)
 
+        # Scribe Jira guard: disable if cloud_id is missing (plan T9 S4)
+        _scribe_jira_enabled = bool(jira_mcp) and is_scribe
+        if _scribe_jira_enabled and not _jira_cloud_id:
+            logger.warning("Jira enabled but no cloud_id — disabling Jira for scribe")
+            _scribe_jira_enabled = False
+
         while True:
             # Cancel any orphaned scheduler tasks from prior iteration and re-register
             scheduler.cancel_all()
@@ -2080,7 +2086,7 @@ class SummonSession:
                         google_enabled=google_mcp_wired,
                         google_accounts=google_accounts or None,
                         slack_enabled=bool(self._slack_monitors),
-                        jira_enabled=bool(jira_mcp),
+                        jira_enabled=_scribe_jira_enabled,
                         jira_cloud_id=_jira_cloud_id,
                         scan_interval_minutes=max(1, self._scan_interval_s // 60),
                         user_mention=scribe_user_mention,
@@ -2125,7 +2131,7 @@ class SummonSession:
                     google_enabled=google_mcp_wired,
                     google_accounts=google_accounts or None,
                     slack_enabled=bool(self._slack_monitors),
-                    jira_enabled=bool(jira_mcp),
+                    jira_enabled=_scribe_jira_enabled,
                 )
                 if self._system_prompt_append:
                     system_prompt["append"] += "\n\n" + self._system_prompt_append
