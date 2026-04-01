@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -366,6 +367,22 @@ class TestNormalizeSite:
     def test_url_with_deep_path_strips_path(self):
         assert _normalize_site("https://myorg.atlassian.net/wiki/spaces") == "myorg.atlassian.net"
 
+    def test_rejects_path_traversal(self):
+        with pytest.raises(click.BadParameter, match="does not look like a valid hostname"):
+            _normalize_site("../../etc/passwd")
+
+    def test_rejects_spaces_in_hostname(self):
+        with pytest.raises(click.BadParameter, match="does not look like a valid hostname"):
+            _normalize_site("my org")
+
+    def test_rejects_angle_brackets(self):
+        with pytest.raises(click.BadParameter, match="does not look like a valid hostname"):
+            _normalize_site("<script>alert(1)</script>")
+
+    def test_rejects_empty_after_strip(self):
+        with pytest.raises(click.BadParameter, match="does not look like a valid hostname"):
+            _normalize_site("   ")
+
 
 # ---------------------------------------------------------------------------
 # TestJiraLogin — multi-site selection
@@ -447,20 +464,14 @@ class TestProjectAddJQL:
     """Tests for project add --jql CLI path."""
 
     def test_add_project_with_jql(self):
-        """project add NAME DIR --jql 'filter' stores JQL via async_project_update."""
+        """project add NAME DIR --jql 'filter' passes jira_jql to async_project_add."""
         fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
 
-        with (
-            patch(
-                "summon_claude.cli.async_project_add",
-                new_callable=AsyncMock,
-                return_value=fake_project_id,
-            ) as mock_add,
-            patch(
-                "summon_claude.cli.async_project_update",
-                new_callable=AsyncMock,
-            ) as mock_update,
-        ):
+        with patch(
+            "summon_claude.cli.async_project_add",
+            new_callable=AsyncMock,
+            return_value=fake_project_id,
+        ) as mock_add:
             runner = CliRunner()
             result = runner.invoke(
                 cli,
@@ -468,54 +479,22 @@ class TestProjectAddJQL:
             )
 
         assert result.exit_code == 0, result.output
-        mock_add.assert_called_once_with("myproj", ".")
-        mock_update.assert_called_once_with(fake_project_id, jira_jql="project = FOO")
+        mock_add.assert_called_once_with("myproj", ".", jira_jql="project = FOO")
 
-    def test_add_project_without_jql_skips_update(self):
-        """project add NAME DIR without --jql does not call async_project_update."""
+    def test_add_project_without_jql_passes_none(self):
+        """project add NAME DIR without --jql passes jira_jql=None."""
         fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
 
-        with (
-            patch(
-                "summon_claude.cli.async_project_add",
-                new_callable=AsyncMock,
-                return_value=fake_project_id,
-            ),
-            patch(
-                "summon_claude.cli.async_project_update",
-                new_callable=AsyncMock,
-            ) as mock_update,
-        ):
+        with patch(
+            "summon_claude.cli.async_project_add",
+            new_callable=AsyncMock,
+            return_value=fake_project_id,
+        ) as mock_add:
             runner = CliRunner()
             result = runner.invoke(cli, ["project", "add", "myproj", "."])
 
         assert result.exit_code == 0, result.output
-        mock_update.assert_not_called()
-
-    def test_add_project_jql_update_failure_warns(self):
-        """If JQL update fails after project add, warn but exit 0."""
-        fake_project_id = "aaaabbbb-cccc-dddd-eeee-ffffffffffff"
-
-        with (
-            patch(
-                "summon_claude.cli.async_project_add",
-                new_callable=AsyncMock,
-                return_value=fake_project_id,
-            ),
-            patch(
-                "summon_claude.cli.async_project_update",
-                new_callable=AsyncMock,
-                side_effect=Exception("DB unavailable"),
-            ),
-        ):
-            runner = CliRunner()
-            result = runner.invoke(
-                cli,
-                ["project", "add", "myproj", ".", "--jql", "project = FOO"],
-            )
-
-        assert result.exit_code == 0, result.output
-        assert "Warning" in result.output or "warning" in result.output.lower()
+        mock_add.assert_called_once_with("myproj", ".", jira_jql=None)
 
 
 # ---------------------------------------------------------------------------
@@ -565,3 +544,71 @@ class TestProjectUpdateCLI:
 
         assert result.exit_code != 0
         assert "no fields" in result.output.lower() or "No fields" in result.output
+
+    def test_update_project_not_found(self):
+        """project update with nonexistent project returns error."""
+        with patch(
+            "summon_claude.cli.async_project_update",
+            new_callable=AsyncMock,
+            side_effect=click.ClickException("No project found: 'nosuch'"),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(
+                cli,
+                ["project", "update", "nosuch", "--jql", "project = X"],
+            )
+
+        assert result.exit_code != 0
+        assert "no project found" in result.output.lower()
+
+
+# ---------------------------------------------------------------------------
+# project list — JQL display
+# ---------------------------------------------------------------------------
+
+
+class TestProjectListJQLDisplay:
+    """Verify that project list shows JQL filter when set."""
+
+    def test_list_shows_jql_when_set(self):
+        projects = [
+            {
+                "name": "myproj",
+                "directory": "/tmp/myproj",
+                "pm_running": False,
+                "project_id": "abc123",
+                "channel_prefix": None,
+                "jira_jql": "project = MYPROJ AND status != Done",
+            }
+        ]
+        with patch(
+            "summon_claude.cli.async_project_list",
+            new_callable=AsyncMock,
+            return_value=projects,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "list"])
+
+        assert result.exit_code == 0
+        assert "JQL: project = MYPROJ AND status != Done" in result.output
+
+    def test_list_omits_jql_when_not_set(self):
+        projects = [
+            {
+                "name": "myproj",
+                "directory": "/tmp/myproj",
+                "pm_running": False,
+                "project_id": "abc123",
+                "channel_prefix": None,
+            }
+        ]
+        with patch(
+            "summon_claude.cli.async_project_list",
+            new_callable=AsyncMock,
+            return_value=projects,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["project", "list"])
+
+        assert result.exit_code == 0
+        assert "JQL" not in result.output

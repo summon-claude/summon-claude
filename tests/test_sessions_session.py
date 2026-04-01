@@ -1633,6 +1633,23 @@ class TestMCPRegistration:
             result = await self._capture_mcp_servers_with_config()
         assert "jira" not in result["mcp_servers"]
 
+    async def test_jira_mcp_not_wired_when_refresh_times_out(self):
+        """Token refresh timeout → session proceeds without Jira MCP."""
+
+        async def _hang_forever() -> None:
+            await asyncio.sleep(999)
+
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch(
+                "summon_claude.jira_auth.refresh_jira_token_if_needed",
+                side_effect=_hang_forever,
+            ),
+            patch("summon_claude.jira_auth.load_jira_token", return_value=None),
+        ):
+            result = await self._capture_mcp_servers_with_config()
+        assert "jira" not in result["mcp_servers"]
+
     async def test_jira_and_github_mcp_wired_independently(self):
         """Both Jira and GitHub MCP can be wired in the same session."""
         _jira_token = {
@@ -4352,40 +4369,34 @@ class TestZzzShutdownOrder:
 
 
 class TestPmJiraJqlIntegration:
-    """Verify that PM Jira JQL and cloud_id propagate into the PM system prompt."""
+    """Verify that PM Jira JQL and cloud_id propagate into the PM scan prompt."""
 
-    def test_jql_appears_in_pm_system_prompt(self):
-        from summon_claude.sessions.prompts.pm import build_pm_system_prompt
+    def test_jql_appears_in_pm_scan_prompt(self):
+        from summon_claude.sessions.prompts.pm import build_pm_scan_prompt
 
-        result = build_pm_system_prompt(
-            cwd="/tmp",
-            scan_interval_s=900,
+        result = build_pm_scan_prompt(
             jira_enabled=True,
             jira_jql="project = MYPROJECT AND status != Done",
             jira_cloud_id="abc-123",
         )
-        assert "project = MYPROJECT AND status != Done" in result["append"]
-        assert "abc-123" in result["append"]
+        assert "project = MYPROJECT AND status != Done" in result
+        assert "abc-123" in result
 
     def test_no_jql_shows_none_filter(self):
-        from summon_claude.sessions.prompts.pm import build_pm_system_prompt
+        from summon_claude.sessions.prompts.pm import build_pm_scan_prompt
 
-        result = build_pm_system_prompt(
-            cwd="/tmp",
-            scan_interval_s=900,
+        result = build_pm_scan_prompt(
             jira_enabled=True,
             jira_jql=None,
             jira_cloud_id="def-456",
         )
-        assert "none (all issues)" in result["append"]
-        assert "def-456" in result["append"]
+        assert "none (all issues)" in result
+        assert "def-456" in result
 
     def test_jira_disabled_excludes_jira_section(self):
-        from summon_claude.sessions.prompts.pm import build_pm_system_prompt
+        from summon_claude.sessions.prompts.pm import build_pm_scan_prompt
 
-        result = build_pm_system_prompt(
-            cwd="/tmp",
-            scan_interval_s=900,
+        result = build_pm_scan_prompt(
             jira_enabled=False,
         )
-        assert "Jira Triage" not in result["append"]
+        assert "Jira Triage" not in result

@@ -405,12 +405,7 @@ def cmd_project() -> None:
 @click.pass_context
 def project_add(ctx: click.Context, name: str, directory: str, jql: str | None) -> None:
     """Register a project directory for PM agent management."""
-    project_id = asyncio.run(async_project_add(name, directory))
-    if jql is not None:
-        try:
-            asyncio.run(async_project_update(project_id, jira_jql=jql or None))
-        except Exception as e:
-            click.echo(f"Warning: project registered but JQL update failed: {e}", err=True)
+    project_id = asyncio.run(async_project_add(name, directory, jira_jql=jql))
     if not ctx.obj.get("quiet"):
         click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
         click.echo("Run 'summon project up' to start a PM agent for this project.")
@@ -572,7 +567,7 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
     if jql is None:
         raise click.UsageError("No fields to update. Use --jql to set a JQL filter.")
     # Empty string clears the field; non-empty sets it.
-    asyncio.run(async_project_update(name_or_id, jira_jql=jql if jql else None))
+    asyncio.run(async_project_update(name_or_id, jira_jql=jql or None))
     if not ctx.obj.get("quiet"):
         if jql:
             click.echo(f"Project {name_or_id!r} updated: JQL filter set.")

@@ -441,13 +441,11 @@ async def _exchange_code(  # noqa: PLR0913
         return body
 
 
-def refresh_token_if_needed(token_data: dict[str, Any]) -> dict[str, Any] | None:
-    """Sync fast-path: return token if still fresh, otherwise None.
+def get_token_if_fresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
+    """Return token if still fresh (within expiry buffer), otherwise None.
 
-    Does NOT perform a refresh — call refresh_jira_token_if_needed() in an
-    async context (e.g. session startup) to actually refresh. This function
-    is retained for sync callers (tests, check_jira_status) that only need
-    to check freshness without triggering I/O.
+    This is a sync, no-I/O check. For async token refresh, call
+    ``refresh_jira_token_if_needed()`` before calling this.
 
     Args:
         token_data: Token dict loaded from disk.

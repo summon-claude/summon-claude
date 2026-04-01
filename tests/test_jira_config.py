@@ -60,34 +60,6 @@ class TestJiraEnabled:
 
 
 # ---------------------------------------------------------------------------
-# jira_cloud_id
-# ---------------------------------------------------------------------------
-
-
-class TestJiraCloudId:
-    def test_returns_cloud_id_from_token(self):
-        config = _make_config()
-        token = {
-            "access_token": "test-token",
-            "cloud_id": "abc-123-cloud",
-            "expires_at": 9999999999,
-        }
-        with patch("summon_claude.jira_auth.load_jira_token", return_value=token):
-            assert config.jira_cloud_id == "abc-123-cloud"
-
-    def test_returns_none_when_no_token(self):
-        config = _make_config()
-        with patch("summon_claude.jira_auth.load_jira_token", return_value=None):
-            assert config.jira_cloud_id is None
-
-    def test_returns_none_when_cloud_id_missing_from_token(self):
-        config = _make_config()
-        token = {"access_token": "test-token", "expires_at": 9999999999}
-        with patch("summon_claude.jira_auth.load_jira_token", return_value=token):
-            assert config.jira_cloud_id is None
-
-
-# ---------------------------------------------------------------------------
 # jira_mcp_config
 # ---------------------------------------------------------------------------
 

@@ -1704,8 +1704,7 @@ class SummonSession:
             profile = "scribe"
         else:
             profile = "agent"
-        _jira_enabled = self._config.jira_enabled
-        template = get_canvas_template(profile, jira_enabled=_jira_enabled)
+        template = get_canvas_template(profile, jira_enabled=self._config.jira_enabled)
         markdown = template.replace("{model}", self._model or "unknown").replace("{cwd}", self._cwd)
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
@@ -2061,6 +2060,9 @@ class SummonSession:
                     prompt=build_pm_scan_prompt(
                         github_enabled=bool(self._config.github_mcp_config()),
                         is_git_repo=is_git_repo,
+                        jira_enabled=pm_jira_enabled,
+                        jira_jql=pm_jira_jql,
+                        jira_cloud_id=pm_jira_cloud_id,
                     ),
                     internal=True,
                     max_lifetime_s=0,
@@ -2103,9 +2105,6 @@ class SummonSession:
                     scan_interval_s=self._scan_interval_s,
                     workflow_instructions=pm_workflow,
                     is_git_repo=is_git_repo,
-                    jira_enabled=pm_jira_enabled,
-                    jira_jql=pm_jira_jql,
-                    jira_cloud_id=pm_jira_cloud_id,
                 )
                 # PM prompt is built separately — inject compaction context if present
                 if restart_count > 0 and system_prompt_append != base_prompt:

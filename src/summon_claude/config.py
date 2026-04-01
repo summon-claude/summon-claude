@@ -871,16 +871,6 @@ class SummonConfig(BaseSettings):
 
         return jira_credentials_exist()
 
-    @property
-    def jira_cloud_id(self) -> str | None:
-        """Return the Atlassian cloud site ID from stored credentials, or None."""
-        from summon_claude.jira_auth import load_jira_token  # noqa: PLC0415
-
-        token = load_jira_token()
-        if token is None:
-            return None
-        return token.get("cloud_id")
-
     def jira_mcp_config(self) -> dict | None:
         """Return Jira remote MCP server config, or None if not configured.
 

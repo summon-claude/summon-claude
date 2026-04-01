@@ -248,6 +248,20 @@ def _normalize_site(site: str) -> str:
     return s
 
 
+def _extract_site_host(url: str) -> str:
+    """Extract hostname from an API-returned URL, returning '' on failure.
+
+    Unlike ``_normalize_site``, this never raises — it is used on API response
+    data (``discover_cloud_sites``), not user input.
+    """
+    from urllib.parse import urlparse  # noqa: PLC0415
+
+    if not url:
+        return ""
+    hostname = urlparse(url).hostname
+    return hostname or ""
+
+
 @cmd_auth.group("jira")
 def auth_jira() -> None:
     """Jira authentication (OAuth 2.1 with PKCE + DCR)."""
@@ -288,7 +302,7 @@ def auth_jira_login(site: str | None) -> None:
     if site:
         # --site narrows the discovery results by hostname match
         site_host = _normalize_site(site)
-        matched = [s for s in sites if _normalize_site(s.get("url", "")) == site_host]
+        matched = [s for s in sites if _extract_site_host(s.get("url", "")) == site_host]
         if matched:
             token_data["cloud_id"] = matched[0]["id"]
             token_data["cloud_name"] = matched[0].get("name", "")

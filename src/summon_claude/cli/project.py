@@ -54,8 +54,12 @@ def _resolve_directory(directory: str) -> str:
     return str(resolved)
 
 
-async def async_project_add(name: str, directory: str) -> str:
-    """Register a new project and return the project_id."""
+async def async_project_add(name: str, directory: str, *, jira_jql: str | None = None) -> str:
+    """Register a new project and return the project_id.
+
+    When *jira_jql* is provided, stores it in the same registry connection
+    used for project creation (single transaction).
+    """
     resolved = _resolve_directory(directory)
     project_id: str = ""
     async with SessionRegistry() as registry:
@@ -63,6 +67,8 @@ async def async_project_add(name: str, directory: str) -> str:
             project_id = await registry.add_project(name, resolved)
         except ValueError as e:
             raise click.ClickException(str(e)) from e
+        if jira_jql is not None:
+            await registry.update_project(project_id, jira_jql=jira_jql if jira_jql else None)
     return project_id
 
 

@@ -938,6 +938,7 @@ class SessionRegistry:
     async def update_project(self, project_id: str, **kwargs: Any) -> None:
         """Update mutable project fields (pm_channel_id, workflow_instructions, etc.).
 
+        Raises ``ValueError`` for unknown field names.
         Raises ``KeyError`` if the project_id does not exist.
         """
         updates: dict[str, Any] = {}

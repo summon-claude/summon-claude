@@ -161,8 +161,8 @@ Canvas state tracking prevents re-alerting on previously triaged issues. The PM 
 
 ## Scribe integration
 
-!!! info "Forward-compatible scaffolding"
-    The scribe system prompt includes Jira monitoring sections (scan protocol, Gmail dedup, untrusted-content warnings), but **scribe sessions are not yet wired to Jira MCP in production**. This scaffolding ensures the scribe prompts are ready when Jira monitoring is enabled in a future release.
+!!! info "Partial integration"
+    Scribe sessions are wired to the Jira MCP server and include Jira-aware domain prompts (untrusted-content warnings, Gmail dedup). However, the scribe **scan prompt does not yet include Jira-specific scan instructions** — Jira monitoring in scribe is domain-aware but not yet actively polled each scan cycle.
 
 When both Google Workspace and Jira are active, the scribe automatically deduplicates:
 
