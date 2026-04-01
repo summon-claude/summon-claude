@@ -68,7 +68,7 @@ async def async_project_add(name: str, directory: str, *, jira_jql: str | None =
         except ValueError as e:
             raise click.ClickException(str(e)) from e
         if jira_jql is not None:
-            await registry.update_project(project_id, jira_jql=jira_jql if jira_jql else None)
+            await registry.update_project(project_id, jira_jql=jira_jql or None)
     return project_id
 
 

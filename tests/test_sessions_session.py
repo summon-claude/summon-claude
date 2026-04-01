@@ -1634,16 +1634,16 @@ class TestMCPRegistration:
         assert "jira" not in result["mcp_servers"]
 
     async def test_jira_mcp_not_wired_when_refresh_times_out(self):
-        """Token refresh timeout → session proceeds without Jira MCP."""
+        """Token refresh timeout → session proceeds without Jira MCP.
 
-        async def _hang_forever() -> None:
-            await asyncio.sleep(999)
-
+        Uses side_effect=TimeoutError to simulate the timeout instantly
+        (not a real 35-second wait via asyncio.wait_for).
+        """
         with (
             patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
             patch(
                 "summon_claude.jira_auth.refresh_jira_token_if_needed",
-                side_effect=_hang_forever,
+                side_effect=TimeoutError("timed out"),
             ),
             patch("summon_claude.jira_auth.load_jira_token", return_value=None),
         ):

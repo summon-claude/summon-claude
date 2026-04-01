@@ -393,6 +393,9 @@ def session_cleanup(ctx: click.Context, archive: bool) -> None:
 # ---------------------------------------------------------------------------
 
 
+_MAX_JQL_LEN = 500
+
+
 @cli.group("project")
 def cmd_project() -> None:
     """Manage summon projects."""
@@ -405,6 +408,8 @@ def cmd_project() -> None:
 @click.pass_context
 def project_add(ctx: click.Context, name: str, directory: str, jql: str | None) -> None:
     """Register a project directory for PM agent management."""
+    if jql and len(jql) > _MAX_JQL_LEN:
+        raise click.BadParameter(f"JQL filter too long (max {_MAX_JQL_LEN} chars)")
     project_id = asyncio.run(async_project_add(name, directory, jira_jql=jql))
     if not ctx.obj.get("quiet"):
         click.echo(f"Project {name!r} registered (id: {project_id[:8]}...)")
@@ -566,6 +571,8 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
     """
     if jql is None:
         raise click.UsageError("No fields to update. Use --jql to set a JQL filter.")
+    if jql and len(jql) > _MAX_JQL_LEN:
+        raise click.BadParameter(f"JQL filter too long (max {_MAX_JQL_LEN} chars)")
     # Empty string clears the field; non-empty sets it.
     asyncio.run(async_project_update(name_or_id, jira_jql=jql or None))
     if not ctx.obj.get("quiet"):

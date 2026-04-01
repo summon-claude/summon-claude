@@ -304,18 +304,18 @@ class TestGetTokenIfFresh:
 
     def test_returns_same_token_when_still_fresh(self):
         token = _make_token(expires_at=time.time() + 3600)
-        result = jira_auth.get_token_if_fresh(token)
+        result = jira_auth._get_token_if_fresh(token)
         assert result is token
 
     def test_returns_none_when_expired(self):
         """Expired token returns None — sync path never performs refresh."""
         token = _make_token(expires_at=time.time() + 60)  # within 5-min buffer
-        result = jira_auth.get_token_if_fresh(token)
+        result = jira_auth._get_token_if_fresh(token)
         assert result is None
 
     def test_returns_none_when_already_expired(self):
         token = _make_token(expires_at=time.time() - 10)
-        result = jira_auth.get_token_if_fresh(token)
+        result = jira_auth._get_token_if_fresh(token)
         assert result is None
 
 

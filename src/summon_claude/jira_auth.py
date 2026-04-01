@@ -441,7 +441,7 @@ async def _exchange_code(  # noqa: PLR0913
         return body
 
 
-def get_token_if_fresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
+def _get_token_if_fresh(token_data: dict[str, Any]) -> dict[str, Any] | None:
     """Return token if still fresh (within expiry buffer), otherwise None.
 
     This is a sync, no-I/O check. For async token refresh, call

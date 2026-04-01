@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from summon_claude.cli import cli
 from summon_claude.cli.auth import (
+    _extract_site_host,
     _normalize_site,
     auth_jira_login,
     auth_jira_logout,
@@ -338,6 +339,29 @@ class TestJiraStatus:
 # ---------------------------------------------------------------------------
 # _normalize_site
 # ---------------------------------------------------------------------------
+
+
+class TestExtractSiteHost:
+    """Tests for _extract_site_host() — safe hostname extraction from API URLs."""
+
+    def test_https_url(self):
+        assert _extract_site_host("https://myorg.atlassian.net") == "myorg.atlassian.net"
+
+    def test_url_with_path(self):
+        assert _extract_site_host("https://myorg.atlassian.net/wiki") == "myorg.atlassian.net"
+
+    def test_url_with_query(self):
+        assert _extract_site_host("https://myorg.atlassian.net?q=1") == "myorg.atlassian.net"
+
+    def test_empty_string(self):
+        assert _extract_site_host("") == ""
+
+    def test_no_scheme(self):
+        # urlparse treats schemeless URLs as path-only — hostname is None
+        assert _extract_site_host("myorg.atlassian.net") == ""
+
+    def test_none_like_garbage(self):
+        assert _extract_site_host("not-a-url") == ""
 
 
 class TestNormalizeSite:
