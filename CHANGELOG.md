@@ -49,9 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Event health probe** — Active detection of Slack Events API failures at startup and runtime. `EventProbe` in `bolt.py` uses reaction-based round-trip verification in a private `summon-health-probe` channel. Startup probe hard-fails on definitive signals (`token_revoked`, `socket_disabled`), soft-fails on non-definitive. Runtime probe runs within `_HealthMonitor` with 3-consecutive-failure threshold. Diagnostic cascade provides specific remediation URLs. Sessions are suspended on health failure (resumable via `summon project up`). `summon config check` includes event health status when daemon is running (#76)
 - **Thinking block display** — `SUMMON_ENABLE_THINKING` (default `true`) enables adaptive thinking in Claude responses. `SUMMON_SHOW_THINKING` (default `false`) routes thinking content to Slack turn threads (#44)
 - **Channel reading MCP tools** — `slack/mcp.py` gained tools for reading channel history and message context (#33)
-- **Interactive session picker** — `summon session list` and related commands use `pick` for terminal-based interactive selection with `--no-interactive` fallback (#27)
-- **mrkdwn conversion** — `slack/formatting.py` converts Claude's markdown replies to Slack mrkdwn format before posting (#28)
-- **Declarative command dispatch** — `sessions/commands.py` uses a `COMMAND_ACTIONS` dict for declarative `!`-command definitions with mid-message detection (#26)
 
 #### Scribe & External Integrations
 
@@ -94,10 +91,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Signing secret validation** — `slack_signing_secret` now validated as hex at `config set` and startup time, not just during `config check`
 - **Context tracking via JSONL transcript** — `sessions/context.py` parses the Claude CLI JSONL transcript for accurate per-step token counts, avoiding the over-reporting from cumulative SDK usage (#44)
 - **Registry schema migrations** — Schema changes extracted into `sessions/migrations.py` as the single source of truth. Fresh databases create the v1 baseline and run all migrations. Migrations v1→v2 through v10→v11 covering parent sessions, workflow defaults, name uniqueness, canvases, context tracking, projects, hooks, and scheduled jobs (#39, #42, #45, #51, #58, #90)
-- **CLI module extraction** — Business logic moved from `cli/__init__.py` into focused modules: `cli/start.py`, `cli/stop.py`, `cli/session.py`, `cli/db.py`, `cli/formatting.py`, `cli/helpers.py`, `cli/interactive.py`, `cli/google_auth.py` (#30, #88)
-- **Schema versioning and DB CLI** — `summon db` subcommands: `status`, `vacuum`, `purge --older-than N --yes`. Migrations apply automatically on connect (#29)
+- **CLI module extraction (continued)** — `cli/google_auth.py` extracted from `cli/config.py` for Google OAuth setup wizard and auth flow (#88)
 - **Google OAuth credentials location** — Now stored in config dir (`~/.config/summon/google-credentials/`) instead of data dir
-- **`update_status` field validation** — `_UPDATABLE_FIELDS` frozenset guards which columns `update_status()` can modify; `_VALID_STATUSES` frozenset guards valid status values (#31)
 - **Agent system prompt restructuring** — All agent system prompts (PM, scribe, global PM) audited and restructured for consistency, clarity, and reduced prompt injection surface (#92)
 
 ### Removed

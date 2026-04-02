@@ -124,15 +124,19 @@ class TestConfigOptionVisibility:
     def test_scribe_options_hidden_when_disabled(self):
         """Scribe sub-options should not be visible when scribe_enabled is false."""
         cfg: dict[str, str] = {}
-        for opt in CONFIG_OPTIONS:
-            if (
-                opt.group.startswith("Scribe")
-                and opt.field_name != "scribe_enabled"
-                and opt.visible is not None
-            ):
-                assert not opt.visible(cfg), (
-                    f"ConfigOption {opt.env_key!r} should be hidden when scribe is disabled"
-                )
+        with (
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config.is_extra_installed", return_value=False),
+        ):
+            for opt in CONFIG_OPTIONS:
+                if (
+                    opt.group.startswith("Scribe")
+                    and opt.field_name != "scribe_enabled"
+                    and opt.visible is not None
+                ):
+                    assert not opt.visible(cfg), (
+                        f"ConfigOption {opt.env_key!r} should be hidden when scribe is disabled"
+                    )
 
     def test_scribe_options_visible_when_enabled(self):
         """Scribe core sub-options should be visible when scribe_enabled is true."""
@@ -186,7 +190,10 @@ class TestVisibilityGracefulDegradation:
         """scribe_google_services hidden when SCRIBE_GOOGLE_ENABLED is false."""
         cfg = {"SUMMON_SCRIBE_ENABLED": "true"}  # GOOGLE_ENABLED not set
         google_opt = next(o for o in CONFIG_OPTIONS if o.field_name == "scribe_google_services")
-        with patch("summon_claude.config._workspace_mcp_installed", return_value=True):
+        with (
+            patch("summon_claude.config._workspace_mcp_installed", return_value=True),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+        ):
             assert not google_opt.visible(cfg)
 
     def test_scribe_google_services_visible_when_all_enabled(self):
@@ -230,7 +237,11 @@ class TestConfigShowIntegration:
         config_file = tmp_path / "config.env"
         config_file.write_text("")
 
-        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config.is_extra_installed", return_value=False),
+        ):
             config_show(color=False)
 
         out = capsys.readouterr().out
