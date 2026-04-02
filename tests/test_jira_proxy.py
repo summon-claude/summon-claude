@@ -1,4 +1,4 @@
-"""Tests for summon_claude.jira_proxy — JiraAuthProxy reverse proxy."""
+"""Tests for summon_claude.jira_proxy -- JiraAuthProxy reverse proxy."""
 
 from __future__ import annotations
 
@@ -22,18 +22,28 @@ from summon_claude.jira_proxy import JiraAuthProxy
 
 def _make_token_data(
     *,
-    token: str = "test-access-token",  # noqa: S107
+    access_token: str = "test-access-token",  # noqa: S107
     expires_at: float | None = None,
 ) -> dict[str, Any]:
     if expires_at is None:
         expires_at = time.time() + 7200  # fresh
-    return {"access_token": token, "expires_at": expires_at}
+    return {"access_token": access_token, "expires_at": expires_at}
 
 
-def _make_stat(mtime: float = 1000.0) -> MagicMock:
-    stat = MagicMock()
-    stat.st_mtime = mtime
-    return stat
+def _make_mock_path(mtime: float = 1000.0) -> MagicMock:
+    """Return a MagicMock that behaves like a Path with a controllable .stat() mtime."""
+    mock_path = MagicMock(spec=Path)
+    mock_stat = MagicMock()
+    mock_stat.st_mtime = mtime
+    mock_path.stat.return_value = mock_stat
+    return mock_path
+
+
+def _make_missing_path() -> MagicMock:
+    """Return a MagicMock Path whose .stat() raises FileNotFoundError."""
+    mock_path = MagicMock(spec=Path)
+    mock_path.stat.side_effect = FileNotFoundError
+    return mock_path
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +53,7 @@ def _make_stat(mtime: float = 1000.0) -> MagicMock:
 
 @pytest.fixture
 def proxy(tmp_path: Path):
-    """Return a JiraAuthProxy with token_path pointing to tmp_path."""
+    """Return a JiraAuthProxy. Token path set to a non-existent tmp file by default."""
     p = JiraAuthProxy()
     p._token_path = tmp_path / "token.json"
     return p
@@ -98,9 +108,9 @@ class TestTokenCache:
         proxy._cached_token = "cached-token"
         proxy._token_expires_at = time.time() + 7200
         proxy._token_file_mtime = 1000.0
+        proxy._token_path = _make_mock_path(mtime=1000.0)  # same mtime, no invalidation
 
         with (
-            patch("pathlib.Path.stat", return_value=_make_stat(1000.0)),
             patch(
                 "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                 new_callable=AsyncMock,
@@ -118,11 +128,11 @@ class TestTokenCache:
         proxy._cached_token = "old-token"
         proxy._token_expires_at = time.time() - 10  # expired
         proxy._token_file_mtime = 1000.0
+        proxy._token_path = _make_mock_path(mtime=1000.0)
 
-        token_data = _make_token_data(token="new-token")
+        token_data = _make_token_data(access_token="new-token")
 
         with (
-            patch("pathlib.Path.stat", return_value=_make_stat(1000.0)),
             patch(
                 "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                 new_callable=AsyncMock,
@@ -137,9 +147,9 @@ class TestTokenCache:
     async def test_token_refresh_failure_returns_none(self, proxy: JiraAuthProxy):
         """When load_jira_token returns None after refresh attempt, result is None."""
         proxy._token_expires_at = 0  # expired
+        proxy._token_path = _make_mock_path(mtime=1000.0)
 
         with (
-            patch("pathlib.Path.stat", return_value=_make_stat(1000.0)),
             patch(
                 "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                 new_callable=AsyncMock,
@@ -153,15 +163,13 @@ class TestTokenCache:
     async def test_mtime_cache_invalidation(self, proxy: JiraAuthProxy):
         """Changed file mtime forces a re-read even if expiry appears fresh."""
         proxy._cached_token = "stale-token"
-        # Set expiry far in future so it looks fresh
         proxy._token_expires_at = time.time() + 7200
         proxy._token_file_mtime = 1000.0  # old mtime
+        proxy._token_path = _make_mock_path(mtime=2000.0)  # new mtime, invalidates cache
 
-        token_data = _make_token_data(token="fresh-token")
+        token_data = _make_token_data(access_token="fresh-token")
 
         with (
-            # New mtime — different from cached
-            patch("pathlib.Path.stat", return_value=_make_stat(2000.0)),
             patch(
                 "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                 new_callable=AsyncMock,
@@ -174,15 +182,15 @@ class TestTokenCache:
 
     async def test_token_file_not_found_returns_none(self, proxy: JiraAuthProxy):
         """Missing token file returns None immediately."""
-        with patch("pathlib.Path.stat", side_effect=FileNotFoundError):
-            result = await proxy._get_fresh_token()
-
+        proxy._token_path = _make_missing_path()
+        result = await proxy._get_fresh_token()
         assert result is None
 
     async def test_concurrent_refresh_serialization(self, proxy: JiraAuthProxy):
         """Multiple concurrent callers trigger only one refresh call."""
         proxy._token_expires_at = 0  # expired
         proxy._token_file_mtime = 1000.0
+        proxy._token_path = _make_mock_path(mtime=1000.0)
         refresh_call_count = 0
 
         async def _fake_refresh() -> None:
@@ -190,10 +198,9 @@ class TestTokenCache:
             refresh_call_count += 1
             await asyncio.sleep(0.01)  # simulate network delay
 
-        token_data = _make_token_data(token="refreshed-token")
+        token_data = _make_token_data(access_token="refreshed-token")
 
         with (
-            patch("pathlib.Path.stat", return_value=_make_stat(1000.0)),
             patch(
                 "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                 side_effect=_fake_refresh,
@@ -235,16 +242,15 @@ class TestProxyAuthentication:
 
     async def test_proxy_token_correct_proceeds(self, started_proxy: JiraAuthProxy):
         """Correct proxy token passes auth gate (proceeds to token check, not 403)."""
-        with (
-            patch("pathlib.Path.stat", side_effect=FileNotFoundError),
+        # token_path is a real non-existent path, stat() raises FileNotFoundError -> 502
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"http://127.0.0.1:{started_proxy.port}/test",
+                headers={"X-Summon-Proxy-Token": started_proxy.access_token},
+            ) as resp,
         ):
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"http://127.0.0.1:{started_proxy.port}/test",
-                    headers={"X-Summon-Proxy-Token": started_proxy.access_token},
-                ) as resp:
-                    # Should not be 403 — auth passed, but no token → 502
-                    assert resp.status != 403
+            assert resp.status != 403
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +260,7 @@ class TestProxyAuthentication:
 
 class TestRequestForwarding:
     async def test_request_forwarding(self, proxy: JiraAuthProxy):
-        """Method, path, query string, and body are all forwarded upstream."""
+        """Method, path, query string, body, and Authorization forwarded upstream."""
         received: dict[str, Any] = {}
 
         async def _upstream_handler(request: web.Request) -> web.Response:
@@ -268,35 +274,35 @@ class TestRequestForwarding:
         upstream_app = web.Application()
         upstream_app.router.add_route("*", "/{path_info:.*}", _upstream_handler)
 
+        proxy._token_path = _make_mock_path(mtime=1000.0)
+        token_data = _make_token_data(access_token="my-access-token")
+
         async with TestServer(upstream_app) as upstream_server:
-            with patch(
-                "summon_claude.jira_proxy._TARGET_URL",
-                f"http://127.0.0.1:{upstream_server.port}",
+            with (
+                patch(
+                    "summon_claude.jira_proxy._TARGET_URL",
+                    f"http://127.0.0.1:{upstream_server.port}",
+                ),
+                patch(
+                    "summon_claude.jira_proxy.refresh_jira_token_if_needed",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "summon_claude.jira_proxy.load_jira_token",
+                    return_value=token_data,
+                ),
             ):
                 port = await proxy.start()
                 try:
-                    token_data = _make_token_data(token="my-access-token")
-                    with (
-                        patch(
-                            "pathlib.Path.stat",
-                            return_value=_make_stat(1000.0),
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.refresh_jira_token_if_needed",
-                            new_callable=AsyncMock,
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.load_jira_token",
-                            return_value=token_data,
-                        ),
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.post(
+                            f"http://127.0.0.1:{port}/api/v1/resource?key=val",
+                            headers={"X-Summon-Proxy-Token": proxy.access_token},
+                            data=b"request-body",
+                        ) as resp,
                     ):
-                        async with aiohttp.ClientSession() as session:
-                            async with session.post(
-                                f"http://127.0.0.1:{port}/api/v1/resource?key=val",
-                                headers={"X-Summon-Proxy-Token": proxy.access_token},
-                                data=b"request-body",
-                            ) as resp:
-                                assert resp.status == 200
+                        assert resp.status == 200
                 finally:
                     await proxy.stop()
 
@@ -307,7 +313,7 @@ class TestRequestForwarding:
         assert received["auth"] == "Bearer my-access-token"
 
     async def test_proxy_token_not_forwarded_upstream(self, proxy: JiraAuthProxy):
-        """X-Summon-Proxy-Token header must not be forwarded to the upstream server."""
+        """X-Summon-Proxy-Token header must not appear in the upstream request."""
         received_headers: dict[str, str] = {}
 
         async def _upstream_handler(request: web.Request) -> web.Response:
@@ -317,34 +323,34 @@ class TestRequestForwarding:
         upstream_app = web.Application()
         upstream_app.router.add_route("*", "/{path_info:.*}", _upstream_handler)
 
+        proxy._token_path = _make_mock_path(mtime=1000.0)
+        token_data = _make_token_data()
+
         async with TestServer(upstream_app) as upstream_server:
-            with patch(
-                "summon_claude.jira_proxy._TARGET_URL",
-                f"http://127.0.0.1:{upstream_server.port}",
+            with (
+                patch(
+                    "summon_claude.jira_proxy._TARGET_URL",
+                    f"http://127.0.0.1:{upstream_server.port}",
+                ),
+                patch(
+                    "summon_claude.jira_proxy.refresh_jira_token_if_needed",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "summon_claude.jira_proxy.load_jira_token",
+                    return_value=token_data,
+                ),
             ):
                 port = await proxy.start()
                 try:
-                    token_data = _make_token_data()
-                    with (
-                        patch(
-                            "pathlib.Path.stat",
-                            return_value=_make_stat(1000.0),
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.refresh_jira_token_if_needed",
-                            new_callable=AsyncMock,
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.load_jira_token",
-                            return_value=token_data,
-                        ),
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.get(
+                            f"http://127.0.0.1:{port}/test",
+                            headers={"X-Summon-Proxy-Token": proxy.access_token},
+                        ) as resp,
                     ):
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(
-                                f"http://127.0.0.1:{port}/test",
-                                headers={"X-Summon-Proxy-Token": proxy.access_token},
-                            ) as resp:
-                                assert resp.status == 200
+                        assert resp.status == 200
                 finally:
                     await proxy.stop()
 
@@ -360,36 +366,36 @@ class TestRequestForwarding:
         upstream_app = web.Application()
         upstream_app.router.add_route("*", "/{path_info:.*}", _upstream_handler)
 
+        proxy._token_path = _make_mock_path(mtime=1000.0)
+        token_data = _make_token_data()
+
         async with TestServer(upstream_app) as upstream_server:
-            with patch(
-                "summon_claude.jira_proxy._TARGET_URL",
-                f"http://127.0.0.1:{upstream_server.port}",
+            with (
+                patch(
+                    "summon_claude.jira_proxy._TARGET_URL",
+                    f"http://127.0.0.1:{upstream_server.port}",
+                ),
+                patch(
+                    "summon_claude.jira_proxy.refresh_jira_token_if_needed",
+                    new_callable=AsyncMock,
+                ),
+                patch(
+                    "summon_claude.jira_proxy.load_jira_token",
+                    return_value=token_data,
+                ),
             ):
                 port = await proxy.start()
                 try:
-                    token_data = _make_token_data()
-                    with (
-                        patch(
-                            "pathlib.Path.stat",
-                            return_value=_make_stat(1000.0),
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.refresh_jira_token_if_needed",
-                            new_callable=AsyncMock,
-                        ),
-                        patch(
-                            "summon_claude.jira_proxy.load_jira_token",
-                            return_value=token_data,
-                        ),
+                    async with (
+                        aiohttp.ClientSession() as session,
+                        session.get(
+                            f"http://127.0.0.1:{port}/test",
+                            headers={"X-Summon-Proxy-Token": proxy.access_token},
+                        ) as resp,
                     ):
-                        async with aiohttp.ClientSession() as session:
-                            async with session.get(
-                                f"http://127.0.0.1:{port}/test",
-                                headers={"X-Summon-Proxy-Token": proxy.access_token},
-                            ) as resp:
-                                assert resp.status == 201
-                                body = await resp.text()
-                                assert body == "created-body"
+                        assert resp.status == 201
+                        body = await resp.text()
+                        assert body == "created-body"
                 finally:
                     await proxy.stop()
 
@@ -401,15 +407,13 @@ class TestRequestForwarding:
 
 class TestErrorHandling:
     async def test_upstream_network_error_returns_502(self, proxy: JiraAuthProxy):
-        """ClientError from upstream → 502."""
+        """ClientError from upstream -> 502."""
+        proxy._token_path = _make_mock_path(mtime=1000.0)
+        token_data = _make_token_data()
+
         port = await proxy.start()
         try:
-            token_data = _make_token_data()
             with (
-                patch(
-                    "pathlib.Path.stat",
-                    return_value=_make_stat(1000.0),
-                ),
                 patch(
                     "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                     new_callable=AsyncMock,
@@ -418,23 +422,15 @@ class TestErrorHandling:
                     "summon_claude.jira_proxy.load_jira_token",
                     return_value=token_data,
                 ),
-                # Make the upstream request raise a ClientError
-                patch.object(
-                    proxy,
-                    "_http_session",
-                    create=True,
-                ),
             ):
-                # Replace _http_session with a mock that raises ClientError
                 mock_session = MagicMock()
+                mock_session.close = AsyncMock()
                 mock_ctx = MagicMock()
                 mock_ctx.__aenter__ = AsyncMock(
                     side_effect=aiohttp.ClientConnectionError("refused")
                 )
                 mock_ctx.__aexit__ = AsyncMock(return_value=False)
                 mock_session.request = MagicMock(return_value=mock_ctx)
-                mock_session.close = AsyncMock()
-                real_session = proxy._http_session
                 proxy._http_session = mock_session
 
                 async with (
@@ -445,20 +441,17 @@ class TestErrorHandling:
                     ) as resp,
                 ):
                     assert resp.status == 502
-                proxy._http_session = real_session
         finally:
             await proxy.stop()
 
     async def test_upstream_timeout_returns_504(self, proxy: JiraAuthProxy):
-        """TimeoutError from upstream → 504."""
+        """TimeoutError from upstream -> 504."""
+        proxy._token_path = _make_mock_path(mtime=1000.0)
+        token_data = _make_token_data()
+
         port = await proxy.start()
         try:
-            token_data = _make_token_data()
             with (
-                patch(
-                    "pathlib.Path.stat",
-                    return_value=_make_stat(1000.0),
-                ),
                 patch(
                     "summon_claude.jira_proxy.refresh_jira_token_if_needed",
                     new_callable=AsyncMock,
@@ -469,12 +462,11 @@ class TestErrorHandling:
                 ),
             ):
                 mock_session = MagicMock()
+                mock_session.close = AsyncMock()
                 mock_ctx = MagicMock()
                 mock_ctx.__aenter__ = AsyncMock(side_effect=TimeoutError())
                 mock_ctx.__aexit__ = AsyncMock(return_value=False)
                 mock_session.request = MagicMock(return_value=mock_ctx)
-                mock_session.close = AsyncMock()
-                real_session = proxy._http_session
                 proxy._http_session = mock_session
 
                 async with (
@@ -485,18 +477,19 @@ class TestErrorHandling:
                     ) as resp,
                 ):
                     assert resp.status == 504
-                proxy._http_session = real_session
         finally:
             await proxy.stop()
 
     async def test_jira_token_unavailable_returns_502(self, started_proxy: JiraAuthProxy):
-        """No Jira token → 502 before forwarding."""
-        with patch("pathlib.Path.stat", side_effect=FileNotFoundError):
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"http://127.0.0.1:{started_proxy.port}/test",
-                    headers={"X-Summon-Proxy-Token": started_proxy.access_token},
-                ) as resp:
-                    assert resp.status == 502
-                    text = await resp.text()
-                    assert "unavailable" in text
+        """No Jira token file -> 502 before forwarding."""
+        # _token_path is a real non-existent path (set in proxy fixture)
+        async with (
+            aiohttp.ClientSession() as session,
+            session.get(
+                f"http://127.0.0.1:{started_proxy.port}/test",
+                headers={"X-Summon-Proxy-Token": started_proxy.access_token},
+            ) as resp,
+        ):
+            assert resp.status == 502
+            text = await resp.text()
+            assert "unavailable" in text
