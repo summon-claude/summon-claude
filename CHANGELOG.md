@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PM session control** — PM agents can inject messages into child sessions via `session_message` MCP tool. Channel reuse for recurring sessions — `project up` reconnects to existing channels instead of creating new ones (#55)
 - **Workflow injection into PM system prompt** — PM sessions receive project workflow instructions in their system prompt. PM welcome message posted to channel on session start (#53)
 - **PR review orchestration** — PM agents can spawn review sessions with `system_prompt_append` for targeted code review instructions (#61)
-- **Global PM** — Cross-project PM agent that manages all registered projects. Auto-created by `summon project up`. `slack_post_to_channel` MCP tool for cross-channel posting with `[Global PM]` attribution (#77)
+- **Global PM** — Cross-project PM agent that manages all registered projects. Auto-created by `summon project up` (#77)
 - **Channel archiving and resume** — Sessions rename channels to `zzz-` prefix on stop for visual archiving. `summon project up` resumes suspended sessions deterministically (#63)
 - **PM status messages** — `session_status_update` MCP tool enables PM agents to update a pinned status message in their channel with current session state. Includes mention sanitization, secret redaction, and audit logging
 - **Dynamic channel scoping** — PM sessions use registry-driven channel resolvers: project PMs see own channel + child session channels; global PMs see all user channels. Replaces inline Python filtering with SQL-level `authenticated_user_id` scoping
@@ -90,7 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Channel prefix validation** — `channel_prefix` now validated against Slack naming rules (lowercase alphanumeric, hyphens, underscores, non-empty) at both `config set` and startup time. Previously-accepted invalid prefixes (uppercase, spaces) are now rejected
 - **Signing secret validation** — `slack_signing_secret` now validated as hex at `config set` and startup time, not just during `config check`
 - **Context tracking via JSONL transcript** — `sessions/context.py` parses the Claude CLI JSONL transcript for accurate per-step token counts, avoiding the over-reporting from cumulative SDK usage (#44)
-- **Registry schema migrations** — Schema changes extracted into `sessions/migrations.py` as the single source of truth. Fresh databases create the v1 baseline and run all migrations. Migrations v1→v2 through v10→v11 covering parent sessions, workflow defaults, name uniqueness, canvases, context tracking, projects, hooks, and scheduled jobs (#39, #42, #45, #51, #58, #90)
+- **Registry schema migrations** — Schema changes extracted into `sessions/migrations.py` as the single source of truth. Fresh databases create the v1 baseline and run all migrations. Migrations v1→v2 through v14→v15 covering parent sessions, workflow defaults, name uniqueness, canvases, context tracking, projects, hooks, and scheduled jobs (#39, #42, #45, #51, #58, #90)
 - **CLI module extraction (continued)** — `cli/google_auth.py` extracted from `cli/config.py` for Google OAuth setup wizard and auth flow (#88)
 - **Google OAuth credentials location** — Now stored in config dir (`~/.config/summon/google-credentials/`) instead of data dir
 - **Agent system prompt restructuring** — All agent system prompts (PM, scribe, global PM) audited and restructured for consistency, clarity, and reduced prompt injection surface (#92)
