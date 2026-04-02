@@ -126,7 +126,8 @@ class TestConfigOptionVisibility:
         cfg: dict[str, str] = {}
         with (
             patch("summon_claude.config._workspace_mcp_installed", return_value=False),
-            patch("summon_claude.config.is_extra_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
         ):
             for opt in CONFIG_OPTIONS:
                 if (
@@ -240,7 +241,8 @@ class TestConfigShowIntegration:
         with (
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch("summon_claude.config._workspace_mcp_installed", return_value=False),
-            patch("summon_claude.config.is_extra_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
         ):
             config_show(color=False)
 
