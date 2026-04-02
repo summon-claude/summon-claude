@@ -30,6 +30,7 @@ from claude_agent_sdk import (
 
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.types import ChangeType, FileChange
+from summon_claude.slack.client import redact_secrets
 from summon_claude.slack.formatting import snippet_type_for_extension
 from summon_claude.slack.markdown_split import split_markdown
 from summon_claude.slack.router import ThreadRouter
@@ -792,7 +793,14 @@ def _format_tool_result(block: ToolResultBlock) -> tuple[str, list[dict[str, Any
     content = block.content
     if not content:
         return "", []
-    if isinstance(content, str):
+    if block.is_error:
+        if isinstance(content, str):
+            redacted = redact_secrets(content)
+            preview = redacted[:200] + ("..." if len(redacted) > 200 else "")
+            text = f":x: Tool error: {preview}"
+        else:
+            text = ":x: Tool error"
+    elif isinstance(content, str):
         preview = content[:200] + ("..." if len(content) > 200 else "")
         text = f":white_check_mark: {preview}"
     else:

@@ -16,7 +16,11 @@ from claude_agent_sdk import (
 )
 
 from helpers import make_mock_slack_client
-from summon_claude.sessions.response import ResponseStreamer, _format_tool_summary
+from summon_claude.sessions.response import (
+    ResponseStreamer,
+    _format_tool_result,
+    _format_tool_summary,
+)
 from summon_claude.sessions.response import split_text as _split_text
 from summon_claude.slack.router import ThreadRouter
 
@@ -1257,3 +1261,71 @@ class TestWorktreeDetectionCallback:
         await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         # No error = pass
+
+
+class TestFormatToolResult:
+    """Tests for _format_tool_result."""
+
+    def test_success_string_content_shows_check_mark(self):
+        block = ToolResultBlock(tool_use_id="tu_1", content="some output", is_error=False)
+        text, blocks = _format_tool_result(block)
+        assert text == "Tool result"
+        assert len(blocks) == 1
+        assert ":white_check_mark:" in blocks[0]["elements"][0]["text"]
+        assert ":x:" not in blocks[0]["elements"][0]["text"]
+
+    def test_none_is_error_treated_as_success(self):
+        block = ToolResultBlock(tool_use_id="tu_1", content="some output", is_error=None)
+        text, blocks = _format_tool_result(block)
+        assert ":white_check_mark:" in blocks[0]["elements"][0]["text"]
+
+    def test_error_string_content_shows_x_emoji(self):
+        block = ToolResultBlock(tool_use_id="tu_1", content="something went wrong", is_error=True)
+        text, blocks = _format_tool_result(block)
+        assert text == "Tool result"
+        assert len(blocks) == 1
+        element_text = blocks[0]["elements"][0]["text"]
+        assert ":x:" in element_text
+        assert ":white_check_mark:" not in element_text
+        assert "Tool error:" in element_text
+        assert "something went wrong" in element_text
+
+    def test_error_content_is_redacted(self):
+        secret = "sk-ant-abc123secret"
+        block = ToolResultBlock(tool_use_id="tu_1", content=f"auth failed: {secret}", is_error=True)
+        text, blocks = _format_tool_result(block)
+        element_text = blocks[0]["elements"][0]["text"]
+        assert secret not in element_text
+
+    def test_error_content_truncated_at_200_chars(self):
+        long_error = "x" * 250
+        block = ToolResultBlock(tool_use_id="tu_1", content=long_error, is_error=True)
+        text, blocks = _format_tool_result(block)
+        element_text = blocks[0]["elements"][0]["text"]
+        assert element_text.endswith("...")
+        # prefix + 200 chars + "..."
+        assert len(element_text) < 230
+
+    def test_empty_content_returns_empty(self):
+        block = ToolResultBlock(tool_use_id="tu_1", content="", is_error=False)
+        text, blocks = _format_tool_result(block)
+        assert text == ""
+        assert blocks == []
+
+    def test_error_non_string_content_shows_generic_error(self):
+        block = ToolResultBlock(
+            tool_use_id="tu_1", content=[{"type": "text", "text": "err"}], is_error=True
+        )
+        text, blocks = _format_tool_result(block)
+        element_text = blocks[0]["elements"][0]["text"]
+        assert ":x:" in element_text
+        assert "Tool error" in element_text
+
+    def test_success_non_string_content_shows_completed(self):
+        block = ToolResultBlock(
+            tool_use_id="tu_1", content=[{"type": "text", "text": "ok"}], is_error=False
+        )
+        text, blocks = _format_tool_result(block)
+        element_text = blocks[0]["elements"][0]["text"]
+        assert ":white_check_mark:" in element_text
+        assert "Tool completed" in element_text
