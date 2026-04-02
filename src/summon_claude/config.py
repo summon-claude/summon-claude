@@ -969,11 +969,15 @@ def _google_credentials_exist() -> bool:
     creds_dir = get_google_credentials_dir()
     if not creds_dir.exists():
         return False
-    # Check for subdirectory layout (post-migration)
+    # Check for subdirectory layout (post-migration) — validate labels to
+    # stay consistent with discover_google_accounts() (prevents auto-enabling
+    # scribe for directories that discover_google_accounts would skip).
     for item in creds_dir.iterdir():
         if (
             item.is_dir()
             and not item.name.startswith(".")
+            and _ACCOUNT_LABEL_RE.match(item.name)
+            and item.name not in _RESERVED_ACCOUNT_LABELS
             and (item / "client_env").exists()
             and any(f.suffix == ".json" and "@" in f.stem for f in item.glob("*.json"))
         ):
