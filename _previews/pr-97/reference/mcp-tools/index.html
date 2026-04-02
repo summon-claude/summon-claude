@@ -1,0 +1,3651 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://summon-claude.github.io/summon-claude/reference/mcp-tools/">
+      
+      
+        <link rel="prev" href="../environment-variables/">
+      
+      
+        <link rel="next" href="../commands/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>MCP Tools - summon-claude</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#mcp-tool-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="summon-claude" class="md-header__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            summon-claude
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              MCP Tools
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guide/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../troubleshooting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../development/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="summon-claude" class="md-nav__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    summon-claude
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/slack-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../guide/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/projects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/pm-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PM Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/github-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe-integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe Integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/cron-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cron & Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/canvas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Canvas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lifecycle Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Tools
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summon-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-slack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-slack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#slack_upload_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_upload_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_create_thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_create_thread
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_react" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_react
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_post_snippet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_post_snippet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_update_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_update_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_read_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_read_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_fetch_thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_fetch_thread
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_get_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_get_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summon-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-cli
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-cli">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tools-available-to-all-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools available to all sessions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tools available to all sessions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_info" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_info
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#croncreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronCreate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crondelete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronDelete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cronlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronList
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taskcreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskCreate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taskupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tasklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskList
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-tools-for-pm-sessions-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional tools for PM sessions only
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Additional tools for PM sessions only">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_log_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_log_status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_status_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_status_update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summon-canvas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-canvas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-canvas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_read
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_update_section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_update_section
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-Session Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../concepts/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/threading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threading & Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/slack-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_7" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../development/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_7" id="__nav_7_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#summon-slack" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-slack
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-slack">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#slack_upload_file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_upload_file
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_create_thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_create_thread
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_react" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_react
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_post_snippet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_post_snippet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_update_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_update_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_read_history" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_read_history
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_fetch_thread" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_fetch_thread
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#slack_get_context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        slack_get_context
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summon-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-cli
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-cli">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tools-available-to-all-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tools available to all sessions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tools available to all sessions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_info" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_info
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#croncreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronCreate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#crondelete" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronDelete
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cronlist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CronList
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taskcreate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskCreate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#taskupdate" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskUpdate
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tasklist" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        TaskList
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#additional-tools-for-pm-sessions-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Additional tools for PM sessions only
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Additional tools for PM sessions only">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session_start" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_start
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_stop" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_stop
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_log_status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_log_status
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_message" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_message
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_resume" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_resume
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#session_status_update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_status_update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summon-canvas" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon-canvas
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="summon-canvas">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_read" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_read
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_write
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon_canvas_update_section" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        summon_canvas_update_section
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Reference
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="mcp-tool-reference">MCP Tool Reference<a class="headerlink" href="#mcp-tool-reference" title="Permanent link">&para;</a></h1>
+<p>summon provides three internal MCP servers that Claude uses within sessions. These are <strong>not</strong> user-facing CLI commands — they are tools available to Claude's agent loop during a running session.</p>
+<table>
+<thead>
+<tr>
+<th>Server</th>
+<th>Available to</th>
+<th>Tools</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>summon-slack</code></td>
+<td>All sessions</td>
+<td>8 tools — Slack actions and reading</td>
+</tr>
+<tr>
+<td><code>summon-cli</code></td>
+<td>All sessions (8 tools) + PM sessions (5–6 additional)</td>
+<td>Session lifecycle, scheduling, tasks</td>
+</tr>
+<tr>
+<td><code>summon-canvas</code></td>
+<td>Sessions with a canvas</td>
+<td>3 tools — canvas read/write</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="summon-slack">summon-slack<a class="headerlink" href="#summon-slack" title="Permanent link">&para;</a></h2>
+<p>Provides Slack posting and reading actions. All tools operate on the session's own channel by default. Cross-channel reads are gated by the allowed-channels list.</p>
+<h3 id="slack_upload_file"><code>slack_upload_file</code><a class="headerlink" href="#slack_upload_file" title="Permanent link">&para;</a></h3>
+<p>Upload a file to the Slack session channel.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>File text content</td>
+</tr>
+<tr>
+<td><code>filename</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Filename with extension (e.g. <code>output.txt</code>)</td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Display title shown in Slack</td>
+</tr>
+<tr>
+<td><code>snippet_type</code></td>
+<td>string</td>
+<td>No</td>
+<td>Syntax highlighting type (e.g. <code>diff</code>, <code>python</code>, <code>json</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation message with the uploaded filename.</p>
+<p><strong>Notes:</strong> Maximum file size is 10 MB. The <code>snippet_type</code> enables Slack's native syntax highlighting.</p>
+<hr />
+<h3 id="slack_create_thread"><code>slack_create_thread</code><a class="headerlink" href="#slack_create_thread" title="Permanent link">&para;</a></h3>
+<p>Reply in a thread to a specific Slack message.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parent_ts</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Message timestamp in <code>seconds.microseconds</code> format (e.g. <code>1234567890.123456</code>)</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Reply text (max 3000 characters)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the thread reply was posted.</p>
+<hr />
+<h3 id="slack_react"><code>slack_react</code><a class="headerlink" href="#slack_react" title="Permanent link">&para;</a></h3>
+<p>Add an emoji reaction to a Slack message.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>timestamp</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Message timestamp in <code>seconds.microseconds</code> format</td>
+</tr>
+<tr>
+<td><code>emoji</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Emoji name without colons (e.g. <code>thumbsup</code>, <code>white_check_mark</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation showing the emoji name added.</p>
+<hr />
+<h3 id="slack_post_snippet"><code>slack_post_snippet</code><a class="headerlink" href="#slack_post_snippet" title="Permanent link">&para;</a></h3>
+<p>Post a formatted code snippet with syntax highlighting to the channel.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>code</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Source code content</td>
+</tr>
+<tr>
+<td><code>language</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Slack snippet type for syntax highlighting. Valid values: <code>python</code>, <code>javascript</code>, <code>typescript</code>, <code>shell</code>, <code>go</code>, <code>rust</code>, <code>ruby</code>, <code>java</code>, <code>kotlin</code>, <code>swift</code>, <code>c</code>, <code>cpp</code>, <code>csharp</code>, <code>html</code>, <code>css</code>, <code>json</code>, <code>yaml</code>, <code>toml</code>, <code>xml</code>, <code>sql</code>, <code>diff</code>, <code>markdown</code>, <code>text</code></td>
+</tr>
+<tr>
+<td><code>title</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Display title for the snippet</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the snippet was posted.</p>
+<p><strong>Notes:</strong> Content up to 12K characters is posted as a <code>type: markdown</code> block. Larger content is uploaded as a file (max 10 MB).</p>
+<hr />
+<h3 id="slack_update_message"><code>slack_update_message</code><a class="headerlink" href="#slack_update_message" title="Permanent link">&para;</a></h3>
+<p>Update an existing Slack message.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ts</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Message timestamp in <code>seconds.microseconds</code> format</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>New message text (max 3000 characters)</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td>No</td>
+<td>Session channel</td>
+<td>Channel ID containing the message</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the message was updated.</p>
+<hr />
+<h3 id="slack_read_history"><code>slack_read_history</code><a class="headerlink" href="#slack_read_history" title="Permanent link">&para;</a></h3>
+<p>Read recent messages from a Slack channel. Returns top-level messages only (no thread replies), in newest-first order.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>limit</code></td>
+<td>integer</td>
+<td>No</td>
+<td><code>50</code></td>
+<td>Max messages to return (1–200)</td>
+</tr>
+<tr>
+<td><code>oldest</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Only return messages after this Unix timestamp (e.g. <code>1234567890.123456</code>)</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td>No</td>
+<td>Session channel</td>
+<td>Channel ID to read</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>summary</code></td>
+<td>Output format: <code>summary</code> (compact), <code>raw</code> (full Slack API data), or <code>ai</code> (AI-generated summary using Haiku; slower)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Formatted message list or AI summary. System messages (joins, leaves, topic changes) are filtered in <code>summary</code> format.</p>
+<hr />
+<h3 id="slack_fetch_thread"><code>slack_fetch_thread</code><a class="headerlink" href="#slack_fetch_thread" title="Permanent link">&para;</a></h3>
+<p>Read replies in a Slack message thread. Results include the parent message as the first entry, followed by replies in chronological order.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>parent_ts</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Timestamp of the thread's parent message</td>
+</tr>
+<tr>
+<td><code>limit</code></td>
+<td>integer</td>
+<td>No</td>
+<td><code>50</code></td>
+<td>Max replies to return (1–200)</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td>No</td>
+<td>Session channel</td>
+<td>Channel ID</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>summary</code></td>
+<td>Output format: <code>summary</code>, <code>raw</code>, or <code>ai</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Formatted thread messages.</p>
+<hr />
+<h3 id="slack_get_context"><code>slack_get_context</code><a class="headerlink" href="#slack_get_context" title="Permanent link">&para;</a></h3>
+<p>Get messages surrounding a specific Slack message, identified by URL or channel+timestamp. Makes 2–3 API calls per invocation.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>url</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Slack message URL (e.g. <code>https://workspace.slack.com/archives/C0123/p1234567890123456</code>)</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Channel ID (alternative to URL)</td>
+</tr>
+<tr>
+<td><code>message_ts</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Message timestamp (alternative to URL; requires <code>channel</code>)</td>
+</tr>
+<tr>
+<td><code>surrounding</code></td>
+<td>integer</td>
+<td>No</td>
+<td><code>5</code></td>
+<td>Number of messages before and after the target (1–20)</td>
+</tr>
+<tr>
+<td><code>format</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>summary</code></td>
+<td>Output format: <code>summary</code>, <code>raw</code>, or <code>ai</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Channel context around the target message, plus thread replies if the message has a thread.</p>
+<p><strong>Notes:</strong> Provide either <code>url</code>, or both <code>channel</code> and <code>message_ts</code>. Threaded URLs automatically fetch the full thread.</p>
+<hr />
+<h2 id="summon-cli">summon-cli<a class="headerlink" href="#summon-cli" title="Permanent link">&para;</a></h2>
+<p>Provides session lifecycle management, cron scheduling, and task tracking. All sessions receive 8 tools; PM (project manager) sessions receive 5 additional tools.</p>
+<h3 id="tools-available-to-all-sessions">Tools available to all sessions<a class="headerlink" href="#tools-available-to-all-sessions" title="Permanent link">&para;</a></h3>
+<h4 id="session_list"><code>session_list</code><a class="headerlink" href="#session_list" title="Permanent link">&para;</a></h4>
+<p>List summon-claude sessions.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>filter</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>active</code></td>
+<td>One of: <code>active</code> (active sessions only), <code>all</code> (including completed/errored), <code>mine</code> (spawned by the calling session)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> One line per session: <code>[session_id] name (status) channel=# turns=N cost=$0.0000</code></p>
+<p><strong>Notes:</strong> Scope-guarded — only shows sessions belonging to the authenticated user.</p>
+<hr />
+<h4 id="session_info"><code>session_info</code><a class="headerlink" href="#session_info" title="Permanent link">&para;</a></h4>
+<p>Get detailed information about a specific session.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Full session ID to look up</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Key-value pairs for all non-sensitive session fields.</p>
+<p><strong>Notes:</strong> Sensitive fields (<code>pid</code>, <code>error_message</code>, <code>authenticated_user_id</code>) are omitted. Scope-guarded to the authenticated user.</p>
+<hr />
+<h4 id="croncreate"><code>CronCreate</code><a class="headerlink" href="#croncreate" title="Permanent link">&para;</a></h4>
+<p>Schedule a prompt to be enqueued on a recurring or one-shot basis. Uses standard 5-field cron syntax.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cron</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>5-field cron expression (minute hour day-of-month month day-of-week). Example: <code>*/5 * * * *</code> = every 5 minutes</td>
+</tr>
+<tr>
+<td><code>prompt</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Prompt text to inject into the session</td>
+</tr>
+<tr>
+<td><code>recurring</code></td>
+<td>boolean</td>
+<td>No</td>
+<td><code>true</code></td>
+<td>Whether the job repeats after firing</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Job ID, human-readable schedule description, and whether recurring. Use the job ID with <code>CronDelete</code> to cancel.</p>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p><code>CronCreate</code>, <code>CronDelete</code>, and <code>CronList</code> are absent from SDK sessions (e.g. worktree child sessions). They are only available in sessions with a <code>SessionScheduler</code> (i.e. summon-managed sessions).</p>
+</div>
+<hr />
+<h4 id="crondelete"><code>CronDelete</code><a class="headerlink" href="#crondelete" title="Permanent link">&para;</a></h4>
+<p>Cancel a scheduled job by ID.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Job ID returned by <code>CronCreate</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the job was cancelled, or an error if not found.</p>
+<hr />
+<h4 id="cronlist"><code>CronList</code><a class="headerlink" href="#cronlist" title="Permanent link">&para;</a></h4>
+<p>List all scheduled jobs in this session.</p>
+<p>No parameters.</p>
+<p><strong>Returns:</strong> A markdown table with columns: ID, Schedule, Prompt, Type (System/Agent), Next Fire, Recurring.</p>
+<hr />
+<h4 id="taskcreate"><code>TaskCreate</code><a class="headerlink" href="#taskcreate" title="Permanent link">&para;</a></h4>
+<p>Create a task to track work items. Tasks persist across context compaction and are visible in the channel canvas.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>content</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Task description</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td>string</td>
+<td>No</td>
+<td><code>medium</code></td>
+<td>Priority level: <code>high</code>, <code>medium</code>, or <code>low</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> The created task ID.</p>
+<p><strong>Notes:</strong> Maximum 100 active tasks per session. When the limit is reached, existing tasks must be updated before new ones can be created.</p>
+<hr />
+<h4 id="taskupdate"><code>TaskUpdate</code><a class="headerlink" href="#taskupdate" title="Permanent link">&para;</a></h4>
+<p>Update a task's status, content, or priority. Only provided fields are changed.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Task ID returned by <code>TaskCreate</code></td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>No</td>
+<td>New status: <code>pending</code>, <code>in_progress</code>, or <code>completed</code></td>
+</tr>
+<tr>
+<td><code>content</code></td>
+<td>string</td>
+<td>No</td>
+<td>New task description</td>
+</tr>
+<tr>
+<td><code>priority</code></td>
+<td>string</td>
+<td>No</td>
+<td>New priority: <code>high</code>, <code>medium</code>, or <code>low</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the task was updated.</p>
+<hr />
+<h4 id="tasklist"><code>TaskList</code><a class="headerlink" href="#tasklist" title="Permanent link">&para;</a></h4>
+<p>List all tasks in this session. PM sessions can also query child session tasks.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>No</td>
+<td><em>(all)</em></td>
+<td>Filter by status: <code>pending</code>, <code>in_progress</code>, or <code>completed</code></td>
+</tr>
+<tr>
+<td><code>session_ids</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Comma-separated session IDs to query (PM sessions only; max 20)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> A markdown table of tasks with ID, status, priority, content, and last-updated time. Cross-session results are grouped by session.</p>
+<hr />
+<h3 id="additional-tools-for-pm-sessions-only">Additional tools for PM sessions only<a class="headerlink" href="#additional-tools-for-pm-sessions-only" title="Permanent link">&para;</a></h3>
+<p>PM (project manager) sessions are started with <code>--pm-profile</code> or via <code>summon project up</code>. They receive 5 additional tools, plus a 6th (<code>session_status_update</code>) when a pinned status message exists.</p>
+<h4 id="session_start"><code>session_start</code><a class="headerlink" href="#session_start" title="Permanent link">&para;</a></h4>
+<p>Start a new summon-claude session. Generates a spawn token and creates a pre-authenticated session via daemon IPC.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Session name. Must be lowercase alphanumeric + hyphens, 1–20 characters, starting with alphanumeric</td>
+</tr>
+<tr>
+<td><code>cwd</code></td>
+<td>string</td>
+<td>No</td>
+<td>Calling session's cwd</td>
+<td>Working directory for the new session. Must be within the calling session's directory (symlink-safe ancestor check)</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>string</td>
+<td>No</td>
+<td><em>(inherited)</em></td>
+<td>Model override</td>
+</tr>
+<tr>
+<td><code>system_prompt</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Additional system prompt text appended to the session (max 10,000 characters)</td>
+</tr>
+<tr>
+<td><code>initial_prompt</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>First message injected into the session after startup (max 10,000 characters). Eliminates the need for a follow-up <code>session_message</code> call</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> The new session ID and a note that the Slack channel will appear shortly. If the active session cap is reached and the caller is a PM, the session is queued and starts automatically when a slot opens.</p>
+<p><strong>Constraints:</strong>
+- Cannot spawn sessions outside the calling session's directory tree
+- Spawn depth is capped at 2 (root → child → grandchild)
+- Maximum active children per PM session is enforced (PM sessions queue when at cap; non-PM sessions receive an error)
+- Project ID is auto-propagated from the calling session</p>
+<hr />
+<h4 id="session_stop"><code>session_stop</code><a class="headerlink" href="#session_stop" title="Permanent link">&para;</a></h4>
+<p>Stop a running session. Cannot stop your own session.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Session ID to stop</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the session was stopped.</p>
+<p><strong>Notes:</strong> Scope-guarded to the authenticated user. The target session must be <code>pending_auth</code> or <code>active</code>.</p>
+<hr />
+<h4 id="session_log_status"><code>session_log_status</code><a class="headerlink" href="#session_log_status" title="Permanent link">&para;</a></h4>
+<p>Log a status update to the session registry audit trail. Does not post to Slack — use <code>slack_post_snippet</code> or the main channel for that.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>One of: <code>active</code>, <code>idle</code>, <code>blocked</code>, <code>error</code></td>
+</tr>
+<tr>
+<td><code>summary</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Brief status summary (max 500 characters)</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Structured details in markdown (max 2000 characters)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the status was recorded.</p>
+<hr />
+<h4 id="session_message"><code>session_message</code><a class="headerlink" href="#session_message" title="Permanent link">&para;</a></h4>
+<p>Send a message to a running session. The message is injected into the target session's processing queue as a new turn. Also posts an observability message to the target session's Slack channel with source attribution.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Target session ID</td>
+</tr>
+<tr>
+<td><code>text</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Message text (max 10,000 characters; truncated if longer)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation with the target session name and Slack channel.</p>
+<p><strong>Notes:</strong> Can only message sessions that the calling session spawned (parent-child scope guard). Target must be <code>active</code>.</p>
+<hr />
+<h4 id="session_resume"><code>session_resume</code><a class="headerlink" href="#session_resume" title="Permanent link">&para;</a></h4>
+<p>Resume a completed or errored session. Creates a new summon session connected to the same Slack channel with Claude SDK transcript continuity.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>ID of the stopped session to resume</td>
+</tr>
+<tr>
+<td><code>model</code></td>
+<td>string</td>
+<td>No</td>
+<td>Model override for the resumed session</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> The new session ID and the Slack channel link.</p>
+<p><strong>Notes:</strong> Can only resume sessions that the calling session spawned. Target must be <code>completed</code> or <code>errored</code>. The Slack channel is reused — all resumes continue the same conversation history.</p>
+<hr />
+<h4 id="session_status_update"><code>session_status_update</code><a class="headerlink" href="#session_status_update" title="Permanent link">&para;</a></h4>
+<p>Update the pinned status message in the PM channel. Only available when the PM session has a pinned status message (<code>pm_status_ts</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>summary</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>—</td>
+<td>Brief status text (max 500 characters)</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Detailed breakdown (max 2000 characters)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the status message was updated with a preview of the summary.</p>
+<p><strong>Notes:</strong> Updates the existing pinned message in-place using <code>chat_update</code>. Mentions (<code>@channel</code>, <code>@here</code>, <code>@everyone</code>, user mentions, group mentions) are sanitized before posting. The message is formatted as <code>*Project Manager Status*</code> with a timestamp. Secrets are redacted at the output boundary.</p>
+<hr />
+<h2 id="summon-canvas">summon-canvas<a class="headerlink" href="#summon-canvas" title="Permanent link">&para;</a></h2>
+<p>Provides canvas read/write operations for sessions with a <code>CanvasStore</code>. Available to all sessions (not just PM) when a canvas exists for the session's Slack channel.</p>
+<h3 id="summon_canvas_read"><code>summon_canvas_read</code><a class="headerlink" href="#summon_canvas_read" title="Permanent link">&para;</a></h3>
+<p>Read the channel canvas. Returns the full markdown content of the persistent work-tracking document.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>channel</code></td>
+<td>string</td>
+<td>No</td>
+<td>Session channel</td>
+<td>Channel ID to read another channel's canvas</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Full markdown content of the canvas.</p>
+<p><strong>Notes:</strong> Cross-channel reads are scope-guarded — only canvases owned by the same authenticated user are accessible.</p>
+<hr />
+<h3 id="summon_canvas_write"><code>summon_canvas_write</code><a class="headerlink" href="#summon_canvas_write" title="Permanent link">&para;</a></h3>
+<p>Replace the entire channel canvas with new markdown content.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>markdown</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Full canvas content (max 100,000 characters; whitespace-only is rejected)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the canvas was updated.</p>
+<p><strong>Warning:</strong> This overwrites all existing canvas content. Use <code>summon_canvas_update_section</code> for partial updates.</p>
+<hr />
+<h3 id="summon_canvas_update_section"><code>summon_canvas_update_section</code><a class="headerlink" href="#summon_canvas_update_section" title="Permanent link">&para;</a></h3>
+<p>Update a single section of the channel canvas by heading name. If the section exists, its content is replaced. If not found, a new section is appended.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>heading</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>Section heading text WITHOUT the <code>##</code> prefix</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>New section body content (max 100,000 characters; pass empty string to clear the section while keeping the heading)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that the section was updated.</p>
+<p>See <a href="../../guide/canvas/">Canvas</a> for details on how the canvas is structured and synced to Slack.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../environment-variables/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Configuration Reference">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Configuration Reference
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../commands/" class="md-footer__link md-footer__link--next" aria-label="Next: In-Session Commands">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                In-Session Commands
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
