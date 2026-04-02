@@ -368,19 +368,14 @@ def _migrate_flat_credentials() -> None:
     if not has_flat_files:
         return  # Nothing to migrate
 
-    if subdirs and has_flat_files:
-        # Mixed layout — check if it's a partial migration we can recover
-        default_dir = creds_dir / "default"
-        if default_dir.is_dir():
-            # Partial migration recovery: move remaining flat files
-            pass  # Fall through to migration logic below
-        else:
-            # Non-default subdirs exist alongside flat files — don't migrate (safety)
-            logger.warning(
-                "Google credentials directory has mixed layout (flat files + subdirs). "
-                "Skipping auto-migration. Move files manually to a subdirectory."
-            )
-            return
+    if subdirs and has_flat_files and not (creds_dir / "default").is_dir():
+        # Non-default subdirs exist alongside flat files — don't migrate (safety)
+        logger.warning(
+            "Google credentials directory has mixed layout (flat files + subdirs). "
+            "Skipping auto-migration. Move files manually to a subdirectory."
+        )
+        return
+    # Either no subdirs (fresh migration) or default/ exists (partial recovery)
 
     default_dir = creds_dir / "default"
     default_dir.mkdir(mode=0o700, exist_ok=True)
@@ -566,9 +561,9 @@ VALID_GOOGLE_SERVICES = frozenset(
 )
 
 _ACCOUNT_LABEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
-_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]{1,64}@[a-zA-Z0-9.\-]{1,253}\.[a-zA-Z]{2,}$")
 
-# Reserved labels that would collide with summon's internal MCP server keys
+# Reserved labels that could create confusing MCP tool namespaces
 _RESERVED_ACCOUNT_LABELS = frozenset({"cli", "slack", "canvas"})
 
 

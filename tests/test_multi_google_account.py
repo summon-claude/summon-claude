@@ -814,7 +814,7 @@ class TestGuardTests:
         assert _ACCOUNT_LABEL_RE.pattern == r"^[a-z][a-z0-9-]{0,19}$"
 
     def test_email_re_pinned(self) -> None:
-        assert _EMAIL_RE.pattern == r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$"
+        assert _EMAIL_RE.pattern == r"^[a-zA-Z0-9._%+\-]{1,64}@[a-zA-Z0-9.\-]{1,253}\.[a-zA-Z]{2,}$"
 
     def test_reserved_labels_pinned(self) -> None:
         assert frozenset({"cli", "slack", "canvas"}) == _RESERVED_ACCOUNT_LABELS
@@ -960,3 +960,80 @@ class TestEmailValidation:
             stem = Path(f"{email}.json").stem
             assert stem == email
             assert _EMAIL_RE.match(stem), f"{stem!r} should match _EMAIL_RE"
+
+    def test_email_re_length_bounded(self) -> None:
+        """_EMAIL_RE rejects emails with local part > 64 chars."""
+        long_local = "a" * 65 + "@example.com"
+        assert _EMAIL_RE.match(long_local) is None
+
+
+# ---------- Test detect_account_services ----------
+
+
+class TestDetectAccountServices:
+    def test_returns_none_when_no_users(self, google_creds_dir: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from summon_claude.config import detect_account_services
+
+        account_dir = _make_account_dir(google_creds_dir, "default")
+        account = GoogleAccount(label="default", creds_dir=account_dir, email="u@x.com")
+        mock_store = MagicMock()
+        mock_store.list_users.return_value = []
+        with patch(
+            "auth.credential_store.LocalDirectoryCredentialStore",
+            return_value=mock_store,
+        ):
+            result = detect_account_services(account)
+        assert result is None
+
+    def test_returns_services_from_scopes(self, google_creds_dir: Path) -> None:
+        from unittest.mock import MagicMock
+
+        from summon_claude.config import detect_account_services
+
+        account_dir = _make_account_dir(google_creds_dir, "personal")
+        account = GoogleAccount(label="personal", creds_dir=account_dir, email="u@x.com")
+        mock_cred = MagicMock()
+        mock_cred.scopes = [
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.readonly",
+        ]
+        mock_store = MagicMock()
+        mock_store.list_users.return_value = ["u@x.com"]
+        mock_store.get_credential.return_value = mock_cred
+        with patch(
+            "auth.credential_store.LocalDirectoryCredentialStore",
+            return_value=mock_store,
+        ):
+            result = detect_account_services(account)
+        assert result is not None
+        assert "gmail" in result
+        assert "calendar" in result
+
+
+# ---------- Test session-cache exclusion ----------
+
+
+class TestSessionCacheExclusion:
+    def test_google_write_tool_not_session_cached(self) -> None:
+        """Google write tools approved via HITL must NOT be session-cached."""
+        from summon_claude.sessions.permissions import (
+            _GOOGLE_MCP_PREFIX,
+            _is_google_read_tool,
+        )
+
+        write_tool = "mcp__workspace-default__send_gmail_message"
+        assert write_tool.startswith(_GOOGLE_MCP_PREFIX)
+        assert not _is_google_read_tool(write_tool)
+
+    def test_google_read_tool_would_be_session_cached(self) -> None:
+        """Google read tools should pass the cache exclusion check."""
+        from summon_claude.sessions.permissions import (
+            _GOOGLE_MCP_PREFIX,
+            _is_google_read_tool,
+        )
+
+        read_tool = "mcp__workspace-default__get_gmail_message"
+        assert read_tool.startswith(_GOOGLE_MCP_PREFIX)
+        assert _is_google_read_tool(read_tool)
