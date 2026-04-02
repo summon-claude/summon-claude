@@ -344,18 +344,207 @@ def get_google_credentials_dir() -> Path:
     return get_config_dir() / "google-credentials"
 
 
-def google_mcp_env() -> dict[str, str]:
-    """Build env var overrides so workspace-mcp uses summon's credential dir.
+def _migrate_flat_credentials() -> None:
+    """Auto-migrate flat google-credentials/ layout to google-credentials/default/.
 
-    Also sets ``GOOGLE_CLIENT_SECRETS_PATH`` if a ``client_secret.json``
-    has been saved in the credentials directory.
+    Triggers when: google-credentials/ exists AND contains client_env or *.json
+    files at the top level AND no subdirectories exist yet.
+    Idempotent: skips if migration is already complete.
     """
     creds_dir = get_google_credentials_dir()
-    env: dict[str, str] = {"WORKSPACE_MCP_CREDENTIALS_DIR": str(creds_dir)}
-    json_path = creds_dir / "client_secret.json"
+    if not creds_dir.exists():
+        return
+
+    # Check for existing subdirectories (non-hidden)
+    subdirs = [d for d in creds_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+
+    # Check for flat credential files
+    has_client_env = (creds_dir / "client_env").exists()
+    has_credential_json = any(
+        f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json")
+    )
+    has_flat_files = has_client_env or has_credential_json
+
+    if not has_flat_files:
+        return  # Nothing to migrate
+
+    if subdirs and has_flat_files:
+        # Mixed layout — check if it's a partial migration we can recover
+        default_dir = creds_dir / "default"
+        if default_dir.is_dir():
+            # Partial migration recovery: move remaining flat files
+            pass  # Fall through to migration logic below
+        else:
+            # Non-default subdirs exist alongside flat files — don't migrate (safety)
+            logger.warning(
+                "Google credentials directory has mixed layout (flat files + subdirs). "
+                "Skipping auto-migration. Move files manually to a subdirectory."
+            )
+            return
+
+    default_dir = creds_dir / "default"
+    default_dir.mkdir(mode=0o700, exist_ok=True)
+
+    # Files to migrate: client_env, client_secret.json, *.json with @ in stem
+    files_to_move: list[Path] = []
+    if (creds_dir / "client_env").exists():
+        files_to_move.append(creds_dir / "client_env")
+    if (creds_dir / "client_secret.json").exists():
+        files_to_move.append(creds_dir / "client_secret.json")
+    for f in creds_dir.glob("*.json"):
+        if "@" in f.stem and f.parent == creds_dir:
+            files_to_move.append(f)
+
+    for src in files_to_move:
+        dest = default_dir / src.name
+        try:
+            src.rename(dest)
+            dest.chmod(0o600)
+        except FileNotFoundError:
+            pass  # Concurrent migration — file already moved
+
+    if files_to_move:
+        logger.info(
+            "Migrated %d Google credential files to default/ subdirectory. "
+            "MCP tool names changed from mcp__workspace__* to mcp__workspace-default__*.",
+            len(files_to_move),
+        )
+
+
+def discover_google_accounts() -> list[GoogleAccount]:
+    """Scan google-credentials/ for account subdirectories with valid credentials.
+
+    An account is wirable if its subdirectory contains BOTH:
+    (a) a client_env file (setup completed), AND
+    (b) at least one *.json file with @ in the stem (login completed).
+
+    Calls _migrate_flat_credentials() first for backward compatibility.
+    Returns a sorted list of GoogleAccount objects.
+    """
+    _migrate_flat_credentials()
+
+    creds_dir = get_google_credentials_dir()
+    if not creds_dir.exists():
+        return []
+
+    accounts: list[GoogleAccount] = []
+    for item in sorted(creds_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith("."):
+            continue
+
+        # Validate label
+        if not _ACCOUNT_LABEL_RE.match(item.name):
+            logger.warning("Skipping Google account directory with invalid label: %s", item.name)
+            continue
+
+        if item.name in _RESERVED_ACCOUNT_LABELS:
+            logger.warning("Skipping Google account with reserved label: %s", item.name)
+            continue
+
+        # Check for required files
+        if not (item / "client_env").exists():
+            continue  # Setup not completed
+
+        # Find credential JSON (login completed)
+        cred_files = sorted(f for f in item.glob("*.json") if "@" in f.stem)
+        if not cred_files:
+            continue  # Login not completed
+
+        # Extract and validate email from first credential file
+        raw_email = cred_files[0].stem
+        email: str | None = raw_email if _EMAIL_RE.match(raw_email) else None
+        if email is None and raw_email:
+            logger.warning(
+                "Google account %s has credential file with invalid email format: %s",
+                item.name,
+                cred_files[0].name,
+            )
+
+        accounts.append(GoogleAccount(label=item.name, creds_dir=item, email=email))
+
+    return accounts
+
+
+def google_mcp_env_for_account(account: GoogleAccount) -> dict[str, str]:
+    """Build env var overrides for a specific Google account's workspace-mcp process.
+
+    Each account gets its own WORKSPACE_MCP_CREDENTIALS_DIR pointing to its
+    credential subdirectory, ensuring process-level credential isolation.
+
+    Raises ValueError if account.creds_dir is outside the google-credentials directory.
+    """
+    # Path containment guard — defense-in-depth
+    google_dir = get_google_credentials_dir()
+    if not account.creds_dir.resolve().is_relative_to(google_dir.resolve()):
+        raise ValueError(f"Account credential dir {account.creds_dir} is outside {google_dir}")
+
+    env: dict[str, str] = {"WORKSPACE_MCP_CREDENTIALS_DIR": str(account.creds_dir)}
+    json_path = account.creds_dir / "client_secret.json"
     if json_path.exists():
         env["GOOGLE_CLIENT_SECRETS_PATH"] = str(json_path)
     return env
+
+
+# Read-only by default.  Append `:rw` to a service name to opt into write
+# scopes (e.g. "calendar:rw").  This keeps the consent screen minimal while
+# still being compatible with workspace-mcp's has_required_scopes() hierarchy.
+_GOOGLE_SCOPE_PREFIX = "https://www.googleapis.com/auth/"
+_GOOGLE_SERVICE_SCOPES: dict[str, dict[str, list[str]]] = {
+    "gmail": {
+        "ro": ["gmail.readonly"],
+        "rw": ["gmail.modify", "gmail.settings.basic"],
+    },
+    "drive": {
+        "ro": ["drive.readonly"],
+        "rw": ["drive"],
+    },
+    "calendar": {
+        "ro": ["calendar.readonly"],
+        "rw": ["calendar"],
+    },
+}
+
+
+def _scopes_to_services(granted: set[str]) -> list[str]:
+    """Invert _GOOGLE_SERVICE_SCOPES: granted scopes -> list of service names."""
+    services = []
+    for service, scope_sets in _GOOGLE_SERVICE_SCOPES.items():
+        all_scopes = scope_sets.get("ro", []) + scope_sets.get("rw", [])
+        full_scopes = {
+            s if s.startswith("https://") else f"{_GOOGLE_SCOPE_PREFIX}{s}" for s in all_scopes
+        }
+        if granted & full_scopes:
+            services.append(service)
+    return sorted(services)
+
+
+def detect_account_services(account: GoogleAccount) -> str | None:
+    """Detect which Google services an account's credential supports.
+
+    Returns a comma-separated service string (e.g., "gmail,calendar,drive")
+    or None if the credential can't be read.
+
+    Uses a deferred import of LocalDirectoryCredentialStore to avoid making
+    workspace-mcp a hard dependency.
+    """
+    try:
+        from auth.credential_store import LocalDirectoryCredentialStore  # noqa: PLC0415
+    except ImportError:
+        return None
+
+    try:
+        store = LocalDirectoryCredentialStore(str(account.creds_dir))
+        users = store.list_users()
+        if not users:
+            return None
+        cred = store.load(users[0])
+        if not cred or not cred.scopes:
+            return None
+        services = _scopes_to_services(set(cred.scopes))
+        return ",".join(services) if services else None
+    except Exception:
+        logger.warning("Failed to detect services for account %s", account.label, exc_info=True)
+        return None
 
 
 VALID_GOOGLE_SERVICES = frozenset(
@@ -374,6 +563,23 @@ VALID_GOOGLE_SERVICES = frozenset(
         "appscript",
     }
 )
+
+_ACCOUNT_LABEL_RE = re.compile(r"^[a-z][a-z0-9-]{0,19}$")
+_EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
+
+# Reserved labels that would collide with summon's internal MCP server keys
+_RESERVED_ACCOUNT_LABELS = frozenset({"cli", "slack", "canvas"})
+
+
+@dataclass(frozen=True)
+class GoogleAccount:
+    """A discovered Google account with isolated credentials."""
+
+    label: str  # user-chosen directory name (e.g., "personal")
+    creds_dir: Path  # absolute path to the account's credential subdirectory
+    email: (
+        str | None
+    )  # extracted from credential filename ({email}.json), None if no credential yet
 
 
 _SLACK_WORKSPACE_FILE = "slack_workspace.json"
@@ -758,9 +964,28 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
 
 
 def _google_credentials_exist() -> bool:
-    """Check if a user has completed Google OAuth (credential file exists)."""
+    """Check if a user has completed Google OAuth (credential file exists).
+
+    Lightweight check that does NOT trigger migration — used as a visibility
+    callback in the config wizard where side effects are undesirable.
+    Checks both subdirectory layout (post-migration) and flat layout (pre-migration).
+    """
     creds_dir = get_google_credentials_dir()
-    return any(f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json"))
+    if not creds_dir.exists():
+        return False
+    # Check for subdirectory layout (post-migration)
+    for item in creds_dir.iterdir():
+        if (
+            item.is_dir()
+            and not item.name.startswith(".")
+            and (item / "client_env").exists()
+            and any(f.suffix == ".json" and "@" in f.stem for f in item.glob("*.json"))
+        ):
+            return True
+    # Check for flat layout (pre-migration, backward compat)
+    return (creds_dir / "client_env").exists() and any(
+        f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json")
+    )
 
 
 def _slack_browser_auth_exists() -> bool:

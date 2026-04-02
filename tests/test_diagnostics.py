@@ -636,7 +636,7 @@ class TestWorkspaceMcpCheck:
         assert result.status == "skip"
 
     async def test_binary_not_found(self, check: WorkspaceMcpCheck) -> None:
-        config = SummonConfig(scribe_enabled=True)
+        config = SummonConfig(scribe_enabled=True, scribe_google_enabled=True)
         mock_bin = MagicMock(spec=Path)
         mock_bin.exists.return_value = False
         with (
@@ -651,7 +651,7 @@ class TestWorkspaceMcpCheck:
         assert "not found" in result.message.lower()
 
     async def test_binary_found_no_creds(self, check: WorkspaceMcpCheck, tmp_path: Path) -> None:
-        config = SummonConfig(scribe_enabled=True)
+        config = SummonConfig(scribe_enabled=True, scribe_google_enabled=True)
         mock_bin = MagicMock(spec=Path)
         mock_bin.exists.return_value = True
         creds_dir = tmp_path / "nonexistent_creds"
@@ -662,33 +662,28 @@ class TestWorkspaceMcpCheck:
             result = await check.run(config)
         assert result.status == "warn"
 
-    async def test_binary_found_import_error(
+    async def test_binary_found_service_detection_fails(
         self, check: WorkspaceMcpCheck, tmp_path: Path
     ) -> None:
-        config = SummonConfig(scribe_enabled=True)
+        config = SummonConfig(scribe_enabled=True, scribe_google_enabled=True)
         mock_bin = MagicMock(spec=Path)
         mock_bin.exists.return_value = True
         creds_dir = tmp_path / "creds"
         creds_dir.mkdir()
-        (creds_dir / "client_secret.json").write_text("{}")
-
-        import builtins
-
-        real_import = builtins.__import__
-
-        def _block_auth(name, *args, **kwargs):
-            if name.startswith("auth."):
-                raise ImportError(f"No module named '{name}'")
-            return real_import(name, *args, **kwargs)
+        # Create a valid account subdirectory
+        account_dir = creds_dir / "default"
+        account_dir.mkdir()
+        (account_dir / "client_env").write_text("CLIENT_ID=x\nCLIENT_SECRET=y")
+        (account_dir / "user@test.com.json").write_text("{}")
 
         with (
             patch("summon_claude.config.find_workspace_mcp_bin", return_value=mock_bin),
             patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
-            patch("builtins.__import__", side_effect=_block_auth),
+            patch("summon_claude.config.detect_account_services", return_value=None),
         ):
             result = await check.run(config)
         assert result.status == "warn"
-        assert any("not importable" in d.lower() for d in result.details)
+        assert any("no services detected" in d.lower() for d in result.details)
 
 
 # ---------------------------------------------------------------------------

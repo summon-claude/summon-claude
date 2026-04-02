@@ -103,20 +103,34 @@ _GITHUB_MCP_REQUIRE_APPROVAL = frozenset(
     ]
 )
 
-# Google Workspace MCP (workspace-mcp) — read-only prefixes are auto-approved,
-# everything else requires Slack approval. Prefix-based rather than enumerated
+# Google Workspace MCP (workspace-mcp) — read-only tools are auto-approved,
+# everything else requires Slack approval. Suffix-based rather than enumerated
 # so new write tools added by workspace-mcp are fail-closed (require approval).
-_GOOGLE_MCP_PREFIX = "mcp__workspace__"
-_GOOGLE_MCP_AUTO_APPROVE_PREFIXES = (
-    "mcp__workspace__get_",
-    "mcp__workspace__list_",
-    "mcp__workspace__search_",
-    "mcp__workspace__query_",
-    "mcp__workspace__read_",
-    "mcp__workspace__check_",
-    "mcp__workspace__debug_",
-    "mcp__workspace__inspect_",
+_GOOGLE_MCP_PREFIX = "mcp__workspace-"
+_GOOGLE_READ_TOOL_PREFIXES = (
+    "get_",
+    "list_",
+    "search_",
+    "query_",
+    "read_",
+    "check_",
+    "debug_",
+    "inspect_",
 )
+
+
+def _is_google_read_tool(tool_name: str) -> bool:
+    """Check if a Google MCP tool is read-only by parsing the tool suffix.
+
+    Uses split('__', 2) to extract the bare tool name after the MCP namespace,
+    then checks if it starts with a known read-only prefix.
+    """
+    parts = tool_name.split("__", 2)
+    if len(parts) < 3:
+        return False  # malformed — fail closed
+    suffix = parts[2]
+    return suffix.startswith(_GOOGLE_READ_TOOL_PREFIXES)
+
 
 _PERMISSION_TIMEOUT_S = 600  # 10 minutes
 
@@ -357,10 +371,10 @@ class PermissionHandler:
             logger.debug("Auto-approving GitHub MCP tool: %s", tool_name)
             return PermissionResultAllow()
 
-        # 2d. Google Workspace MCP (workspace-mcp): read-only prefixes auto-approved,
+        # 2d. Google Workspace MCP (workspace-mcp): read-only tools auto-approved,
         # all write/modify/create/send/manage tools require Slack HITL approval.
         if tool_name.startswith(_GOOGLE_MCP_PREFIX):
-            if tool_name.startswith(_GOOGLE_MCP_AUTO_APPROVE_PREFIXES):
+            if _is_google_read_tool(tool_name):
                 logger.debug("Auto-approving Google Workspace read tool: %s", tool_name)
                 return PermissionResultAllow()
             logger.info("Google Workspace write tool requires approval: %s", tool_name)
@@ -375,10 +389,14 @@ class PermissionHandler:
             return PermissionResultAllow()
 
         # 2f. Session-lifetime cached approvals (defense-in-depth:
-        # GitHub require-approval tools are never session-cached)
+        # GitHub require-approval tools are never session-cached;
+        # Google Workspace write tools are never session-cached)
         if (
             tool_name in self._session_approved_tools
             and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
+            and not (
+                tool_name.startswith(_GOOGLE_MCP_PREFIX) and not _is_google_read_tool(tool_name)
+            )
         ):
             logger.debug("Session-approved tool: %s", tool_name)
             return PermissionResultAllow()
@@ -391,6 +409,9 @@ class PermissionHandler:
         if (
             cacheable_arg
             and tool_name not in _GITHUB_MCP_REQUIRE_APPROVAL
+            and not (
+                tool_name.startswith(_GOOGLE_MCP_PREFIX) and not _is_google_read_tool(tool_name)
+            )
             and cacheable_arg in self._session_approved_tool_args.get(tool_name, set())
         ):
             logger.debug("Session-approved %s arg: %s", tool_name, cacheable_arg)
@@ -796,6 +817,9 @@ class PermissionHandler:
         tool_inputs_list = self._batch.tool_inputs.get(batch_id, [])
         for i, name in enumerate(tool_names_list):
             if name in _GITHUB_MCP_REQUIRE_APPROVAL:
+                continue
+            # Google Workspace write tools — never session-cached
+            if name.startswith(_GOOGLE_MCP_PREFIX) and not _is_google_read_tool(name):
                 continue
             if name in _WRITE_GATED_TOOLS:
                 inp = tool_inputs_list[i] if i < len(tool_inputs_list) else {}

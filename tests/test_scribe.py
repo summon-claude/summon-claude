@@ -5,6 +5,7 @@ Covers C12 (Phase 1) and C13 (Phase 2) test requirements.
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -998,8 +999,8 @@ class TestScribePreflight:
 
         mock_cls.assert_not_called()
 
-    def test_scribe_preflight_missing_google_creds(self, tmp_path):
-        """_start_scribe_if_enabled returns early when Google creds directory has no .json files."""
+    def test_scribe_preflight_missing_google_creds_warns(self, tmp_path, caplog):
+        """_start_scribe_if_enabled warns when no Google accounts discovered but continues."""
         manager = make_manager(
             scribe_enabled=True, scribe_google_enabled=True, scribe_google_services="gmail"
         )
@@ -1007,18 +1008,21 @@ class TestScribePreflight:
         present_bin = MagicMock()
         present_bin.exists.return_value = True
 
-        # Create an empty creds directory (no .json files)
+        # Create an empty creds directory (no account subdirs)
         creds_dir = tmp_path / "google-creds"
         creds_dir.mkdir()
 
+        import logging
+
         with (
-            patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
+            patch("summon_claude.sessions.manager.SummonSession"),
             patch("summon_claude.config.find_workspace_mcp_bin", return_value=present_bin),
             patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
+            caplog.at_level(logging.WARNING, logger="summon_claude.sessions.manager"),
+            contextlib.suppress(RuntimeError),
         ):
             manager._start_scribe_if_enabled("U123")
-
-        mock_cls.assert_not_called()
+        assert any("no accounts discovered" in r.message.lower() for r in caplog.records)
 
     def test_scribe_preflight_missing_playwright(self, tmp_path):
         """_start_scribe_if_enabled returns early when playwright not installed.
