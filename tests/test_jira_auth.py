@@ -755,7 +755,7 @@ class TestSecurityConstraints:
 
 
 class TestModuleConstants:
-    def test_trusted_token_hosts_pinned(self):
+    def test_trusted_atlassian_hosts_pinned(self):
         assert (
             frozenset({"cf.mcp.atlassian.com", "auth.atlassian.com"})
             == jira_auth._TRUSTED_ATLASSIAN_HOSTS

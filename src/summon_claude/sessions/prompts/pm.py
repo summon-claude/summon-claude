@@ -6,10 +6,10 @@ import re
 
 from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
 
-# Characters allowed in JQL values embedded in prompts.  Rejects markdown
-# structural characters (# * _ [ ] ` { } < >) that could alter prompt rendering.
-# Note: ! is preserved (JQL uses != operator).
-_JQL_UNSAFE_RE = re.compile(r"[^\x20-\x7E]|[#*_\[\]`{}<>]")
+# Rejects markdown structural characters (# * [ ] ` { } < >) that could alter
+# prompt rendering. Note: _ is preserved (valid in JQL custom field names, and
+# backtick fence neutralizes italic). ! is preserved (JQL uses != operator).
+_JQL_UNSAFE_RE = re.compile(r"[^\x20-\x7E]|[#*\[\]`{}<>]")
 
 
 def sanitize_prompt_value(value: str) -> str:

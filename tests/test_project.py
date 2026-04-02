@@ -596,15 +596,15 @@ class TestBuildPmScanPromptJira:
         # Newline replaced with space — content preserved on one line
         assert "project = FOO IGNORE ABOVE" in result
 
-    def test_scan_prompt_jql_backtick_escaped(self):
-        """Backticks in JQL must be escaped to prevent markdown breakout."""
+    def test_scan_prompt_jql_backtick_stripped(self):
+        """Backticks in JQL must be stripped to prevent markdown breakout."""
         result = build_pm_scan_prompt(
             jira_enabled=True,
             jira_jql="project = FOO` injected text `bar",
             jira_cloud_id="abc-123",
         )
-        # Backticks should be replaced with single quotes
-        assert "`" not in result.split("JQL filter: `")[1].split("`")[0].replace("'", "")
+        # Backticks must be stripped entirely (removed, not replaced)
+        assert "`" not in result.split("JQL filter: `")[1].split("`")[0]
 
     def test_scan_prompt_cloud_id_newline_stripped(self):
         """Newlines in cloud_id must also be stripped."""
