@@ -423,7 +423,7 @@ def discover_google_accounts() -> list[GoogleAccount]:
         return []
 
     accounts: list[GoogleAccount] = []
-    for item in sorted(creds_dir.iterdir()):
+    for item in sorted(creds_dir.iterdir(), key=lambda p: p.name):
         if not item.is_dir() or item.name.startswith("."):
             continue
 
@@ -983,10 +983,10 @@ def _google_credentials_exist() -> bool:
             and any(f.suffix == ".json" and "@" in f.stem for f in item.glob("*.json"))
         ):
             return True
-    # Check for flat layout (pre-migration, backward compat)
-    return (creds_dir / "client_env").exists() and any(
-        f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json")
-    )
+    # Check for flat layout (pre-migration, backward compat).
+    # Only requires credential JSON — NOT client_env — because users who set
+    # client credentials via env vars never get a client_env file.
+    return any(f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json"))
 
 
 def _slack_browser_auth_exists() -> bool:

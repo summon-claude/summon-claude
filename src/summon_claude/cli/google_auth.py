@@ -744,13 +744,13 @@ _GOOGLE_WRITE_PROMPTS: dict[str, str] = {
 }
 
 
-def _load_google_client_credentials(account_dir: Path | None = None) -> tuple[str, str]:
+def _load_google_client_credentials(account_dir: Path) -> tuple[str, str]:
     """Return (client_id, client_secret) or sys.exit."""
     client_id = os.environ.get("GOOGLE_OAUTH_CLIENT_ID", "")
     client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
     if not (client_id and client_secret):
-        search_dir = account_dir if account_dir is not None else get_google_credentials_dir()
+        search_dir = account_dir
         secrets_file = search_dir / "client_env"
         if secrets_file.exists():
             for line in secrets_file.read_text().splitlines():
@@ -767,10 +767,9 @@ def _load_google_client_credentials(account_dir: Path | None = None) -> tuple[st
     return client_id, client_secret
 
 
-def _secure_credential_files(directory: Path | None = None) -> None:
+def _secure_credential_files(directory: Path) -> None:
     """Ensure all credential JSON files are owner-readable only (0600)."""
-    target_dir = directory if directory is not None else get_google_credentials_dir()
-    for p in target_dir.glob("*.json"):
+    for p in directory.glob("*.json"):
         p.chmod(0o600)
 
 

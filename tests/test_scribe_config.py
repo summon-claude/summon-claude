@@ -877,13 +877,15 @@ class TestGoogleScopeHelpers:
 
     def test_load_google_client_credentials_from_env(self):
         """_load_google_client_credentials reads from environment variables."""
+        from pathlib import Path
+
         from summon_claude.cli.google_auth import _load_google_client_credentials
 
         with patch.dict(
             "os.environ",
             {"GOOGLE_OAUTH_CLIENT_ID": "env-id", "GOOGLE_OAUTH_CLIENT_SECRET": "env-secret"},
         ):
-            cid, csecret = _load_google_client_credentials()
+            cid, csecret = _load_google_client_credentials(Path("/dummy"))
         assert cid == "env-id"
         assert csecret == "env-secret"
 
@@ -898,13 +900,9 @@ class TestGoogleScopeHelpers:
                 "os.environ",
                 {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
             ),
-            patch(
-                "summon_claude.cli.google_auth.get_google_credentials_dir",
-                return_value=Path("/nonexistent"),
-            ),
             pytest.raises(SystemExit),
         ):
-            _load_google_client_credentials()
+            _load_google_client_credentials(Path("/nonexistent"))
 
     def test_load_google_client_credentials_from_file(self):
         """_load_google_client_credentials reads from client_env file."""
@@ -920,17 +918,11 @@ class TestGoogleScopeHelpers:
             client_env.write_text(
                 "GOOGLE_OAUTH_CLIENT_ID=file-id\nGOOGLE_OAUTH_CLIENT_SECRET=file-secret\n"
             )
-            with (
-                patch.dict(
-                    "os.environ",
-                    {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
-                ),
-                patch(
-                    "summon_claude.cli.google_auth.get_google_credentials_dir",
-                    return_value=creds_dir,
-                ),
+            with patch.dict(
+                "os.environ",
+                {"GOOGLE_OAUTH_CLIENT_ID": "", "GOOGLE_OAUTH_CLIENT_SECRET": ""},
             ):
-                cid, csecret = _load_google_client_credentials()
+                cid, csecret = _load_google_client_credentials(creds_dir)
             assert cid == "file-id"
             assert csecret == "file-secret"
 
