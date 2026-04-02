@@ -322,8 +322,7 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0915
             jira_proxy_token = jira_proxy.access_token
             logger.info("Jira auth proxy started on port %d", jira_proxy_port)
             # Proactive token check at startup
-            token = await jira_proxy._get_fresh_token()  # noqa: SLF001
-            if token is None:
+            if not await jira_proxy.warmup():
                 logger.warning(
                     "Jira proxy started but token refresh failed — "
                     "Jira tools will return 502 until re-auth"

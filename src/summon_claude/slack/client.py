@@ -64,6 +64,7 @@ _SECRET_RE = re.compile(
     r"|ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+"
     r"|gho_[A-Za-z0-9_]+|ghu_[A-Za-z0-9_]+|ghs_[A-Za-z0-9_]+|ghr_[A-Za-z0-9_]+"
     r"|eyJhbGci[A-Za-z0-9._\-]{20,}"
+    r"|X-Summon-Proxy-Token:\s*\S+"
 )
 
 

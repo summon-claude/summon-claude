@@ -490,7 +490,7 @@ class SessionOptions:
     resume_from_session_id: str | None = None
     initial_prompt: str | None = None
     jira_proxy_port: int | None = None
-    jira_proxy_token: str | None = None
+    jira_proxy_token: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True, slots=True)

@@ -88,6 +88,10 @@ class JiraAuthProxy:
             self._runner = None
         self._port = 0
 
+    async def warmup(self) -> bool:
+        """Pre-warm token cache at startup. Returns True if a token is available."""
+        return await self._get_fresh_token() is not None
+
     async def _get_fresh_token(self) -> str | None:
         """Get a fresh Jira access token, refreshing if needed.
 

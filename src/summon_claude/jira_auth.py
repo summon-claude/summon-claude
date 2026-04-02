@@ -760,7 +760,8 @@ def check_jira_status() -> str | None:  # noqa: PLR0911
     expires_at = token_data.get("expires_at", 0)
     if time.time() >= expires_at:
         if token_data.get("refresh_token"):
-            # Proxy will refresh at next session startup — report as OK
+            # Proxy will refresh at next request — report as OK
+            logger.debug("Jira token expired but refresh_token present — proxy will refresh")
             return None
         return (
             "Jira token is expired and has no refresh_token. "

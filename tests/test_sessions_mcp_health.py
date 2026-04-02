@@ -203,3 +203,19 @@ class TestRecordToolResult:
         for _ in range(_CONSECUTIVE_FAILURE_THRESHOLD):
             await tracker.record_tool_result("mcp__jira__getIssue", is_error=True)
         assert callback.call_count == 2
+
+
+class TestProviderPrefixGuard:
+    """Guard test: _PROVIDER_PREFIXES keys match known MCP server keys."""
+
+    def test_provider_prefixes_match_mcp_server_keys(self) -> None:
+        """Each prefix mcp__{key}__ corresponds to a real MCP server key."""
+        known_mcp_keys = {"jira", "workspace", "github"}
+        for prefix in _PROVIDER_PREFIXES:
+            # Extract key from prefix: "mcp__jira__" → "jira"
+            assert prefix.startswith("mcp__") and prefix.endswith("__")
+            key = prefix[5:-2]
+            assert key in known_mcp_keys, f"Prefix {prefix!r} has no matching MCP server key"
+
+    def test_display_names_match_prefixes(self) -> None:
+        assert set(_PROVIDER_PREFIXES.keys()) == set(_PROVIDER_DISPLAY_NAMES.keys())

@@ -1329,3 +1329,81 @@ class TestFormatToolResult:
         element_text = blocks[0]["elements"][0]["text"]
         assert ":white_check_mark:" in element_text
         assert "Tool completed" in element_text
+
+
+class TestToolNameTracking:
+    """Tests for tool_use_id → tool name tracking in _TurnState."""
+
+    def test_tool_use_block_stores_name(self):
+        """ToolUseBlock id→name stored in _turn.tool_names."""
+        from summon_claude.sessions.response import _TurnState
+
+        turn = _TurnState()
+        assert turn.tool_names == {}
+        turn.tool_names["tu_abc"] = "mcp__jira__getIssue"
+        assert turn.tool_names["tu_abc"] == "mcp__jira__getIssue"
+
+    def test_turn_state_reset_clears_tool_names(self):
+        """New _TurnState resets tool_names dict."""
+        from summon_claude.sessions.response import _TurnState
+
+        turn1 = _TurnState()
+        turn1.tool_names["tu_1"] = "Read"
+        turn2 = _TurnState()
+        assert turn2.tool_names == {}
+
+
+class TestStreamerHealthTrackerIntegration:
+    """Tests for ResponseStreamer + McpHealthTracker wiring."""
+
+    async def test_error_tool_result_fires_health_tracker(self):
+        """Error ToolResultBlock triggers health tracker record."""
+        from summon_claude.sessions.mcp_health import McpHealthTracker
+
+        callback = AsyncMock()
+        tracker = McpHealthTracker(on_degraded=callback)
+        router = MagicMock()
+        router.post_to_active_thread = AsyncMock()
+        streamer = ResponseStreamer(router=router, mcp_health=tracker)
+        # Simulate tool use then result
+        streamer._turn.tool_names["tu_1"] = "mcp__jira__getIssue"
+        block = ToolResultBlock(tool_use_id="tu_1", content="HTTP 401", is_error=True)
+        await streamer._handle_tool_result_block(block, parent_id=None)
+        # Auth error should trigger immediate notification
+        callback.assert_called_once()
+
+    async def test_success_resets_health_tracker(self):
+        """Success ToolResultBlock resets health tracker counter."""
+        from summon_claude.sessions.mcp_health import McpHealthTracker
+
+        callback = AsyncMock()
+        tracker = McpHealthTracker(on_degraded=callback)
+        router = MagicMock()
+        router.post_to_active_thread = AsyncMock()
+        streamer = ResponseStreamer(router=router, mcp_health=tracker)
+        # 2 errors then success
+        streamer._turn.tool_names["tu_1"] = "mcp__jira__getIssue"
+        streamer._turn.tool_names["tu_2"] = "mcp__jira__getIssue"
+        streamer._turn.tool_names["tu_3"] = "mcp__jira__getIssue"
+        await streamer._handle_tool_result_block(
+            ToolResultBlock(tool_use_id="tu_1", content="err", is_error=True), None
+        )
+        await streamer._handle_tool_result_block(
+            ToolResultBlock(tool_use_id="tu_2", content="err", is_error=True), None
+        )
+        await streamer._handle_tool_result_block(
+            ToolResultBlock(tool_use_id="tu_3", content="ok", is_error=False), None
+        )
+        assert tracker._failures.get("mcp__jira__") == 0
+        callback.assert_not_called()
+
+    async def test_no_tracker_means_no_tracking(self):
+        """When mcp_health is None, no tracking occurs."""
+        router = MagicMock()
+        router.post_to_active_thread = AsyncMock()
+        streamer = ResponseStreamer(router=router, mcp_health=None)
+        streamer._turn.tool_names["tu_1"] = "mcp__jira__getIssue"
+        # Should not raise
+        await streamer._handle_tool_result_block(
+            ToolResultBlock(tool_use_id="tu_1", content="err", is_error=True), None
+        )
