@@ -223,7 +223,12 @@ class TestConfigShowIntegration:
         config_file = tmp_path / "config.env"
         config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-test\n")
 
-        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
+        ):
             config_show(color=False)
 
         out = capsys.readouterr().out
@@ -257,7 +262,12 @@ class TestConfigShowIntegration:
         config_file = tmp_path / "config.env"
         config_file.write_text("SUMMON_SLACK_BOT_TOKEN=xoxb-test\n")
 
-        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
+        ):
             config_show(color=False)
 
         out = capsys.readouterr().out
@@ -274,7 +284,12 @@ class TestConfigShowBoolSourceLabel:
         config_file = tmp_path / "config.env"
         config_file.write_text("SUMMON_ENABLE_THINKING=true\n")
 
-        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
+        ):
             config_show(color=False)
 
         out = capsys.readouterr().out
@@ -291,7 +306,12 @@ class TestConfigShowBoolSourceLabel:
         config_file = tmp_path / "config.env"
         config_file.write_text("SUMMON_ENABLE_THINKING=false\n")
 
-        with patch("summon_claude.cli.config.get_config_file", return_value=config_file):
+        with (
+            patch("summon_claude.cli.config.get_config_file", return_value=config_file),
+            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
+            patch("summon_claude.config._google_credentials_exist", return_value=False),
+            patch("summon_claude.config._slack_browser_auth_exists", return_value=False),
+        ):
             config_show(color=False)
 
         out = capsys.readouterr().out
