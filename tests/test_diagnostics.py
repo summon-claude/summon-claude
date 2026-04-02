@@ -631,7 +631,7 @@ class TestWorkspaceMcpCheck:
         assert result.status == "skip"
 
     async def test_skip_scribe_disabled(self, check: WorkspaceMcpCheck) -> None:
-        config = SummonConfig(scribe_enabled=False)
+        config = SummonConfig(scribe_enabled=False, scribe_google_enabled=False)
         result = await check.run(config)
         assert result.status == "skip"
 

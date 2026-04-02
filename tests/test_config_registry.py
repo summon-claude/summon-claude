@@ -123,7 +123,7 @@ class TestConfigOptionVisibility:
 
     def test_scribe_options_hidden_when_disabled(self):
         """Scribe sub-options should not be visible when scribe_enabled is false."""
-        cfg: dict[str, str] = {}
+        cfg: dict[str, str] = {"SUMMON_SCRIBE_ENABLED": "false"}
         with (
             patch("summon_claude.config._workspace_mcp_installed", return_value=False),
             patch("summon_claude.config._google_credentials_exist", return_value=False),
