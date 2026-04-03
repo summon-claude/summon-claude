@@ -281,6 +281,7 @@ def _make_callback_handler(result: dict[str, str | None]) -> type[BaseHTTPReques
 
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Security-Policy", "default-src 'none'")
             self.end_headers()
             msg = (
                 b"<html><body><h2>Jira authentication complete."

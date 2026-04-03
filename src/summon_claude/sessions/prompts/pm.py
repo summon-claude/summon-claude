@@ -2,21 +2,10 @@
 
 from __future__ import annotations
 
-import re
-
-from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
-
-# Rejects markdown structural characters (# * [ ] ` { } < >) that could alter
-# prompt rendering. Note: _ is preserved (valid in JQL custom field names, and
-# backtick fence neutralizes italic). ! is preserved (JQL uses != operator).
-_PROMPT_UNSAFE_RE = re.compile(r"[^\x20-\x7E]|[#*\[\]`{}<>\\]")
-
-
-def sanitize_prompt_value(value: str) -> str:
-    """Sanitize an operator-supplied value for safe prompt embedding."""
-    s = value.replace("\n", " ").replace("\r", " ")
-    return _PROMPT_UNSAFE_RE.sub("", s).strip()
-
+from summon_claude.sessions.prompts.shared import (
+    _HEADLESS_BOILERPLATE,
+    sanitize_prompt_value,
+)
 
 _REVIEWER_SYSTEM_PROMPT_TEMPLATE = """\
 Review PR #{number} on {owner}/{repo}. The branch is checked out \
