@@ -166,6 +166,18 @@ class TestWriteGateBehavior:
         result = await handler.handle("Bash", {"command": "ls"}, None)
         assert isinstance(result, PermissionResultDeny)
 
+    async def test_str_replace_editor_denied_not_in_worktree(self):
+        """str_replace_editor should be write-gated like Edit."""
+        handler, _ = _make_handler()
+        result = await handler.handle("str_replace_editor", {"path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+
+    async def test_notebookedit_denied_not_in_worktree(self):
+        """NotebookEdit should be write-gated."""
+        handler, _ = _make_handler()
+        result = await handler.handle("NotebookEdit", {"notebook_path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+
     async def test_sdk_deny_inside_gate_honored(self):
         """SDK deny should fire even for safe-dir files."""
         handler, _ = _make_handler()
@@ -333,6 +345,30 @@ class TestCWDContainment:
         handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         result = await handler.handle("Write", {"file_path": str(wt_dir / "main.py")}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_str_replace_editor_within_worktree_auto_approved(self, tmp_path: Path):
+        """str_replace_editor uses 'path' key — containment should work with that key order."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        result = await handler.handle("str_replace_editor", {"path": str(wt_dir / "main.py")}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_notebookedit_within_worktree_auto_approved(self, tmp_path: Path):
+        """NotebookEdit uses 'notebook_path' key — containment should work with that key."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        result = await handler.handle(
+            "NotebookEdit", {"notebook_path": str(wt_dir / "nb.ipynb")}, None
+        )
         assert isinstance(result, PermissionResultAllow)
         client.post_interactive.assert_not_called()
 

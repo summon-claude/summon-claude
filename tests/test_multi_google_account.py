@@ -1673,6 +1673,25 @@ class TestCheckGoogleStatusSetupDoneLoginPending:
         assert result is None
         assert capsys.readouterr().out == ""
 
+    def test_empty_base_dir_quiet_returns_none(self, google_creds_dir: Path, capsys) -> None:
+        """When quiet=True with empty base_dir (no subdirs), return None silently."""
+        from summon_claude.cli.google_auth import _check_google_status
+
+        # base_dir exists but has no subdirectories
+        with (
+            patch(
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+            patch(
+                "summon_claude.config.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+        ):
+            result = _check_google_status(quiet=True)
+        assert result is None
+        assert capsys.readouterr().out == ""
+
     def test_no_client_env_shows_setup_guidance(self, google_creds_dir: Path, capsys) -> None:
         """When no client_env exists, guide to 'setup' not 'login'."""
         from summon_claude.cli.google_auth import _check_google_status
