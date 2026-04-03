@@ -785,3 +785,13 @@ class TestGetCacheableArg:
         result = _get_cacheable_arg("Bash", {"command": long_cmd})
         assert result == long_cmd
         assert len(result) == 200
+
+    def test_str_replace_editor_uses_path_key(self):
+        """str_replace_editor uses 'path' as primary key, not 'file_path'."""
+        result = _get_cacheable_arg("str_replace_editor", {"path": "/home/user/../user/file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_notebookedit_uses_notebook_path_key(self):
+        """NotebookEdit uses 'notebook_path' as primary key."""
+        result = _get_cacheable_arg("NotebookEdit", {"notebook_path": "/home//user//nb.ipynb"})
+        assert result == "/home/user/nb.ipynb"

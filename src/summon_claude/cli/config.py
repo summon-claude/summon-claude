@@ -669,12 +669,11 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
 
         settings = read_settings()
         hooks_section = settings.get("hooks", {})
-        for hook_type in ("PreToolUse", "PostToolUse"):
-            for entry in hooks_section.get(hook_type, []):
-                entry_str = str(entry)
-                if "summon-pre-worktree" in entry_str or "summon-post-worktree" in entry_str:
-                    has_bridge = True
-                    break
+        has_bridge = any(
+            "summon-pre-worktree" in str(entry) or "summon-post-worktree" in str(entry)
+            for hook_type in ("PreToolUse", "PostToolUse")
+            for entry in hooks_section.get(hook_type, [])
+        )
         if has_bridge:
             click.echo("  [PASS] Hook bridge: installed")
         else:

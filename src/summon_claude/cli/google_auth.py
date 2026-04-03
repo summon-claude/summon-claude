@@ -1000,14 +1000,10 @@ def _check_google_status(
         if not discovered:
             if not quiet:
                 # Distinguish "setup done, login pending" from "not configured".
-                has_client_env = (
-                    any(
-                        (base_dir / d / "client_env").exists()
-                        for d in base_dir.iterdir()
-                        if d.is_dir() and not d.name.startswith(".")
-                    )
-                    if base_dir.exists()
-                    else False
+                has_client_env = any(
+                    (base_dir / d / "client_env").exists()
+                    for d in base_dir.iterdir()
+                    if d.is_dir() and not d.name.startswith(".")
                 )
                 if has_client_env:
                     click.echo(

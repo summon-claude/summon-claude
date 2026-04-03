@@ -1291,7 +1291,7 @@ class TestProcessIncomingEvent:
             _ALIAS_LOOKUP.pop("short-cmd", None)
 
     async def test_plain_text_fast_path(self):
-        """Text with no '!' or '/' should return unchanged (no find_commands called)."""
+        """Text with no '!' should return unchanged (no find_commands called)."""
         session = self._make_session()
         rt = self._make_rt()
 
@@ -1304,6 +1304,20 @@ class TestProcessIncomingEvent:
         assert text == "just plain text here"
         assert ts == "42"
         # find_commands should NOT have been called (fast path)
+        mock_find.assert_not_called()
+
+    async def test_slash_only_text_takes_fast_path(self):
+        """Text with '/' but no '!' should take the fast path (BUG-081)."""
+        session = self._make_session()
+        rt = self._make_rt()
+
+        with patch("summon_claude.sessions.session.find_commands") as mock_find:
+            event = {"user": "U001", "text": "edit /usr/local/bin please", "ts": "43"}
+            result = await session._process_incoming_event(event, rt)
+
+        assert result is not None
+        text, _ = result
+        assert text == "edit /usr/local/bin please"
         mock_find.assert_not_called()
 
 
@@ -1327,7 +1341,7 @@ class TestIdentityVerification:
         """Messages from a user who is not the session owner are silently dropped."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         event = {"user": "U_INTRUDER", "text": "Hello Claude", "ts": "1"}
         result = await session._process_incoming_event(event, rt)
@@ -1338,7 +1352,7 @@ class TestIdentityVerification:
         """Commands from a non-owner user are rejected before dispatch."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         with patch.object(session, "_dispatch_command", new=AsyncMock()) as mock_dispatch:
             event = {"user": "U_INTRUDER", "text": "!end", "ts": "1"}
@@ -1379,7 +1393,7 @@ class TestIdentityVerification:
         """Synthetic (internal) events bypass identity verification."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         event = {"text": "Scheduled scan", "_synthetic": True, "user": "U_DIFFERENT"}
         result = await session._process_incoming_event(event, rt)
@@ -1393,7 +1407,7 @@ class TestIdentityVerification:
         session = make_session()
         # _authenticated_user_id is None by default
         assert session._authenticated_user_id is None
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         event = {"user": "U_ANYONE", "text": "Hello", "ts": "1"}
         result = await session._process_incoming_event(event, rt)
@@ -2404,7 +2418,7 @@ class TestHandleSpawn:
         """_handle_spawn posts rejection when caller is not the session owner."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         await session._handle_spawn(rt, user_id="U_INTRUDER", thread_ts=None)
 
@@ -2416,7 +2430,7 @@ class TestHandleSpawn:
         """Rejection short-circuits before generating spawn token."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         # Patch at the source module since _handle_spawn uses lazy import
         gen_path = "summon_claude.sessions.session.generate_spawn_token"
@@ -2429,7 +2443,7 @@ class TestHandleSpawn:
         """_dispatch_command with spawn metadata should call _handle_spawn."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         spawn_result = CommandResult(text=None, metadata={"spawn": True})
 
@@ -2515,7 +2529,7 @@ class TestHandleSpawn:
         """_handle_spawn posts error when _ipc_spawn callback is not registered."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
         await session._handle_spawn(rt, user_id="U_OWNER", thread_ts=None)
         rt.client.post.assert_awaited_once()
         assert "callback missing" in rt.client.post.call_args[0][0]
@@ -2524,7 +2538,7 @@ class TestHandleSpawn:
         """_handle_spawn posts limit message when active children >= limit."""
         session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         # Mock list_children returning 5 active children (at the regular limit)
         rt.registry.list_children = AsyncMock(
@@ -2549,7 +2563,7 @@ class TestHandleSpawn:
         session._authenticated_user_id = "U_OWNER"
         session._channel_id = "C_PM"
 
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         # 10 active children — over regular limit (5) but under PM limit (15)
         rt.registry.list_children = AsyncMock(
@@ -2571,7 +2585,7 @@ class TestHandleSpawn:
         """PM sessions should be blocked when active children >= PM limit."""
         session = make_session(pm_profile=True, ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         # 15 active children — at the PM limit
         rt.registry.list_children = AsyncMock(
@@ -2595,7 +2609,7 @@ class TestHandleSpawn:
         """_handle_spawn posts depth message when depth >= MAX_SPAWN_DEPTH."""
         session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         rt.registry.compute_spawn_depth = AsyncMock(return_value=2)
 
@@ -2617,7 +2631,7 @@ class TestHandleSpawn:
         )
         session._authenticated_user_id = "U_OWNER"
         session._channel_id = "C_TEST"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         rt.registry.compute_spawn_depth = AsyncMock(return_value=1)
         rt.registry.list_children = AsyncMock(return_value=[])
@@ -2636,7 +2650,7 @@ class TestHandleSpawn:
         """If list_children raises, spawn should be blocked (fail-closed)."""
         session = make_session(ipc_spawn=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         rt.registry.list_children = AsyncMock(side_effect=RuntimeError("DB locked"))
 
@@ -2728,7 +2742,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_missing_ipc_resume(self):
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
         await session._handle_resume_from_active(rt, "U_OWNER", "some-id", None)
         rt.client.post.assert_awaited_once()
         assert "callback missing" in rt.client.post.call_args[0][0]
@@ -2736,7 +2750,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_wrong_user(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
         await session._handle_resume_from_active(rt, "U_INTRUDER", "some-id", None)
         rt.client.post.assert_awaited_once()
         assert "Only the session owner" in rt.client.post.call_args[0][0]
@@ -2744,7 +2758,7 @@ class TestHandleResumeFromActive:
     async def test_no_target_shows_usage(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
         await session._handle_resume_from_active(rt, "U_OWNER", None, None)
         rt.client.post.assert_awaited_once()
         assert "Specify a session ID" in rt.client.post.call_args[0][0]
@@ -2752,7 +2766,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_target_owned_by_different_user(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
         rt.registry.get_session = AsyncMock(
             return_value={
                 "status": "completed",
@@ -4464,18 +4478,12 @@ class TestPmJiraJqlIntegration:
 class TestHandleDiffFileNonGit:
     """BUG-084: _handle_diff_file should guard against non-git directories."""
 
-    def _make_rt(self):
-        client = make_mock_client()
-        registry = AsyncMock()
-        ph = AsyncMock()
-        return _SessionRuntime(registry=registry, client=client, permission_handler=ph)
-
     async def test_non_git_no_tracked_change_posts_message(self, tmp_path):
         """In non-git dir with no tracked change, should post 'not in git' message."""
         session = make_session(cwd=str(tmp_path))
         session._is_git_repo = False
         session._changed_files = {}
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         await session._handle_diff_file(rt, "some_file.py", "thread_1")
 
@@ -4487,8 +4495,6 @@ class TestHandleDiffFileNonGit:
 
     async def test_non_git_with_tracked_change_shows_info_only(self, tmp_path):
         """In non-git dir with tracked change info, should show change but no diff."""
-        from datetime import UTC, datetime
-
         from summon_claude.sessions.types import FileChange
 
         session = make_session(cwd=str(tmp_path))
@@ -4502,7 +4508,7 @@ class TestHandleDiffFileNonGit:
             turn_number=1,
         )
         session._changed_files = {"src/main.py": change}
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             await session._handle_diff_file(rt, "src/main.py", "thread_1")
@@ -4521,7 +4527,7 @@ class TestHandleDiffFileNonGit:
         session = make_session(cwd=str(tmp_path))
         session._is_git_repo = True
         session._changed_files = {}
-        rt = self._make_rt()
+        rt = make_rt(AsyncMock())
 
         with patch("asyncio.create_subprocess_exec") as mock_exec:
             mock_proc = AsyncMock()
@@ -4533,3 +4539,24 @@ class TestHandleDiffFileNonGit:
 
             # Should have called git diff
             mock_exec.assert_called_once()
+
+    async def test_git_repo_uploads_nonempty_diff(self, tmp_path):
+        """In a git repo with actual changes, should upload the diff."""
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (
+                b"diff --git a/f b/f\n+added line",
+                b"",
+            )
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await session._handle_diff_file(rt, "some_file.py", "thread_1")
+
+            mock_exec.assert_called_once()
+            rt.client.upload.assert_called_once()
