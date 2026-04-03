@@ -4555,3 +4555,4 @@ class TestHandleDiffFileNonGit:
             rt.client.upload.assert_called_once()
             call_kwargs = rt.client.upload.call_args.kwargs
             assert call_kwargs.get("snippet_type") == "diff"
+            assert "filetype" not in call_kwargs
