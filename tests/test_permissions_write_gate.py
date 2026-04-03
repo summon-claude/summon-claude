@@ -14,6 +14,7 @@ from summon_claude.sessions.permissions import (
     _WRITE_GATED_TOOLS,
     _WRITE_TOOL_PATH_KEYS,
     PermissionHandler,
+    _get_cacheable_arg,
     _is_in_safe_dir,
 )
 from summon_claude.slack.router import ThreadRouter
@@ -163,6 +164,18 @@ class TestWriteGateBehavior:
     async def test_bash_denied_not_in_worktree(self):
         handler, _ = _make_handler()
         result = await handler.handle("Bash", {"command": "ls"}, None)
+        assert isinstance(result, PermissionResultDeny)
+
+    async def test_str_replace_editor_denied_not_in_worktree(self):
+        """str_replace_editor should be write-gated like Edit."""
+        handler, _ = _make_handler()
+        result = await handler.handle("str_replace_editor", {"path": "/f"}, None)
+        assert isinstance(result, PermissionResultDeny)
+
+    async def test_notebookedit_denied_not_in_worktree(self):
+        """NotebookEdit should be write-gated."""
+        handler, _ = _make_handler()
+        result = await handler.handle("NotebookEdit", {"notebook_path": "/f"}, None)
         assert isinstance(result, PermissionResultDeny)
 
     async def test_sdk_deny_inside_gate_honored(self):
@@ -332,6 +345,30 @@ class TestCWDContainment:
         handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         result = await handler.handle("Write", {"file_path": str(wt_dir / "main.py")}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_str_replace_editor_within_worktree_auto_approved(self, tmp_path: Path):
+        """str_replace_editor uses 'path' key — containment should work with that key order."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        result = await handler.handle("str_replace_editor", {"path": str(wt_dir / "main.py")}, None)
+        assert isinstance(result, PermissionResultAllow)
+        client.post_interactive.assert_not_called()
+
+    async def test_notebookedit_within_worktree_auto_approved(self, tmp_path: Path):
+        """NotebookEdit uses 'notebook_path' key — containment should work with that key."""
+        wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
+        wt_dir.mkdir(parents=True)
+        handler, client = _make_handler(project_root=str(tmp_path))
+        handler.notify_entered_worktree("feat")
+        handler._write_access_granted = True
+        result = await handler.handle(
+            "NotebookEdit", {"notebook_path": str(wt_dir / "nb.ipynb")}, None
+        )
         assert isinstance(result, PermissionResultAllow)
         client.post_interactive.assert_not_called()
 
@@ -731,3 +768,66 @@ class TestContainmentGitProperty:
         assert handler._in_containment is True
         assert handler._is_git_repo is True
         assert handler._containment_root == tmp_path.resolve()
+
+
+class TestGetCacheableArg:
+    """Tests for _get_cacheable_arg path normalization (BUG-086)."""
+
+    def test_bash_command_returned_verbatim(self):
+        """Bash commands must NOT be normalized — exact match required."""
+        cmd = "cd /tmp/../tmp && echo hello"
+        result = _get_cacheable_arg("Bash", {"command": cmd})
+        assert result == cmd
+
+    def test_file_path_normpath_applied(self):
+        """File paths should be normalized via os.path.normpath."""
+        result = _get_cacheable_arg("Edit", {"file_path": "/home/user/../user/file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_file_path_trailing_slash_stripped(self):
+        """Trailing slashes on file paths should be stripped."""
+        result = _get_cacheable_arg("Write", {"file_path": "/home/user/dir/"})
+        assert result == "/home/user/dir"
+
+    def test_file_path_whitespace_stripped(self):
+        """Leading/trailing whitespace on file paths should be stripped."""
+        result = _get_cacheable_arg("Edit", {"file_path": "  /home/user/file.py  "})
+        assert result == "/home/user/file.py"
+
+    def test_file_path_double_slash_collapsed(self):
+        """Double slashes in file paths should be collapsed."""
+        result = _get_cacheable_arg("Write", {"file_path": "/home//user//file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_equivalent_paths_produce_same_cache_key(self):
+        """Two semantically identical paths must produce the same cache key (BUG-086 root cause)."""
+        a = _get_cacheable_arg("Edit", {"file_path": "/project/src/../src/main.py"})
+        b = _get_cacheable_arg("Edit", {"file_path": "/project/src/main.py"})
+        assert a == b
+
+    def test_empty_path_returned_as_is(self):
+        """Empty file path returns empty string without normpath."""
+        result = _get_cacheable_arg("Edit", {"file_path": ""})
+        assert result == ""
+
+    def test_no_file_path_key_returns_empty(self):
+        """Tool input without a recognized path key returns empty string."""
+        result = _get_cacheable_arg("Edit", {"other_key": "value"})
+        assert result == ""
+
+    def test_bash_long_command_not_truncated(self):
+        """Bash commands are NOT truncated — unlike display, cache uses full value."""
+        long_cmd = "x" * 200
+        result = _get_cacheable_arg("Bash", {"command": long_cmd})
+        assert result == long_cmd
+        assert len(result) == 200
+
+    def test_str_replace_editor_uses_path_key(self):
+        """str_replace_editor uses 'path' as primary key, not 'file_path'."""
+        result = _get_cacheable_arg("str_replace_editor", {"path": "/home/user/../user/file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_notebookedit_uses_notebook_path_key(self):
+        """NotebookEdit uses 'notebook_path' as primary key."""
+        result = _get_cacheable_arg("NotebookEdit", {"notebook_path": "/home//user//nb.ipynb"})
+        assert result == "/home/user/nb.ipynb"

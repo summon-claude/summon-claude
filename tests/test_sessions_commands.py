@@ -571,6 +571,16 @@ class TestFindCommands:
         matches = find_commands("check https://example.com/help")
         assert len(matches) == 0
 
+    def test_slash_prefixed_path_not_matched(self):
+        """A /path arg after a word should NOT be parsed as a command (BUG-081)."""
+        matches = find_commands("edit /main.py please")
+        assert len(matches) == 0
+
+    def test_slash_prefixed_word_not_matched(self):
+        """Bare /command should NOT match — only !command is supported (BUG-081)."""
+        matches = find_commands("/help")
+        assert len(matches) == 0
+
     def test_blocked_mid_message(self):
         """Blocked command mid-message should still be found."""
         matches = find_commands("try !config please")
@@ -599,12 +609,10 @@ class TestFindCommands:
         matches = find_commands("just regular text here")
         assert len(matches) == 0
 
-    def test_slash_prefix_detected(self):
-        """/command should also be detected."""
+    def test_slash_prefix_not_detected(self):
+        """/command should NOT be detected — only ! prefix is supported (BUG-081)."""
         matches = find_commands("/review")
-        assert len(matches) == 1
-        assert matches[0].prefix == "/"
-        assert matches[0].name == "review"
+        assert len(matches) == 0
 
     def test_command_after_newline(self):
         """Command after newline should be found."""
@@ -623,10 +631,8 @@ class TestFindCommands:
     def test_file_path_resistance(self):
         """/usr/local/bin should not match as a command."""
         matches = find_commands("/usr/local/bin")
-        # /usr might match, but /local and /bin should not (preceded by /)
-        # The key point: this should not produce a match for "local" or "bin"
-        for m in matches:
-            assert m.name not in ("local", "bin")
+        # No matches — slash prefix is not supported (BUG-081)
+        assert len(matches) == 0
 
     def test_bang_in_url(self):
         """http://example.com!help should not match."""
@@ -850,11 +856,10 @@ class TestColonCommandNames:
         assert len(matches) == 1
         assert matches[0].name == "dev-essentials:session-start"
 
-    def test_slash_prefix_colon_name(self):
-        """/dev-essentials:session-start should also match."""
+    def test_slash_prefix_not_matched(self):
+        """/dev-essentials:session-start should NOT match — only ! prefix is supported (BUG-081)."""
         matches = find_commands("/dev-essentials:session-start")
-        assert len(matches) == 1
-        assert matches[0].name == "dev-essentials:session-start"
+        assert len(matches) == 0
 
     def test_colon_name_mid_message(self):
         """Colon commands found mid-message."""

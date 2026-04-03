@@ -668,9 +668,11 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         from summon_claude.cli.hooks import read_settings  # noqa: PLC0415
 
         settings = read_settings()
-        hooks_list = settings.get("hooks", [])
+        hooks_section = settings.get("hooks", {})
         has_bridge = any(
-            "summon-pre-worktree" in str(h) or "summon-post-worktree" in str(h) for h in hooks_list
+            "summon-pre-worktree" in str(entry) or "summon-post-worktree" in str(entry)
+            for hook_type in ("PreToolUse", "PostToolUse")
+            for entry in hooks_section.get(hook_type, [])
         )
         if has_bridge:
             click.echo("  [PASS] Hook bridge: installed")

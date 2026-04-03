@@ -999,9 +999,21 @@ def _check_google_status(
         discovered = discover_google_accounts()
         if not discovered:
             if not quiet:
-                click.echo(
-                    f"{prefix}[INFO] Google: not configured (run `summon auth google setup`)"
+                # Distinguish "setup done, login pending" from "not configured".
+                has_client_env = any(
+                    (base_dir / d / "client_env").exists()
+                    for d in base_dir.iterdir()
+                    if d.is_dir() and not d.name.startswith(".")
                 )
+                if has_client_env:
+                    click.echo(
+                        f"{prefix}[INFO] Google: setup complete, run"
+                        " `summon auth google login` to authenticate"
+                    )
+                else:
+                    click.echo(
+                        f"{prefix}[INFO] Google: not configured (run `summon auth google setup`)"
+                    )
             return None
         dirs_to_check = [(a.label, base_dir / a.label) for a in discovered]
 
