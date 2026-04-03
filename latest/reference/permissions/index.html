@@ -742,6 +742,8 @@
       
         
       
+        
+      
     
     
     
@@ -895,6 +897,34 @@
     
   
     GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
   
 
     
@@ -1495,6 +1525,17 @@
     <span class="md-ellipsis">
       
         GitHub MCP permissions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jira-mcp-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jira MCP permissions
       
     </span>
   </a>
@@ -2229,6 +2270,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#jira-mcp-permissions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jira MCP permissions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#askuserquestion" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2576,6 +2628,75 @@
 <p>The require-approval list is checked before prefix-based auto-approve. Even if your <code>~/.claude/settings.json</code> has a broad <code>allowedTools</code> pattern that would normally permit these tools, summon still routes them to Slack for approval.</p>
 </div>
 <hr />
+<h2 id="jira-mcp-permissions">Jira MCP permissions<a class="headerlink" href="#jira-mcp-permissions" title="Permanent link">&para;</a></h2>
+<p>When Jira is authenticated (via <code>summon auth jira login</code>), Claude has access to Jira tools via the Atlassian Rovo MCP server. Jira uses a <strong>strictly read-only</strong> permission model — all write operations are hard-denied, not routed to Slack for approval.</p>
+<p><strong>Auto-approved (read-only):</strong> Tools matching <code>get*</code>, <code>search*</code>, or <code>lookup*</code> prefixes, plus the exact match <code>atlassianUserInfo</code>.</p>
+<p><strong>Hard-denied (always blocked)</strong> — checked before auto-approve prefixes:</p>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>createJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>editJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>transitionJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>addCommentToJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>addWorklogToJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createIssueLink</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createConfluencePage</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createConfluenceFooterComment</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createConfluenceInlineComment</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>updateConfluencePage</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>fetchAtlassian</code></td>
+<td>Generic ARI accessor — bypasses per-tool gating</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition warning">
+<p class="admonition-title"><code>fetchAtlassian</code> is not a read-only tool</p>
+<p>Despite its name, <code>fetchAtlassian</code> is a generic Atlassian Resource Identifier (ARI) accessor that can fetch arbitrary resources across projects and products. It bypasses the per-tool permission model and is always blocked.</p>
+</div>
+<p>Any Jira MCP tool not in either list is denied by default (fail-closed). New tools from future Rovo MCP updates require explicit classification before they can be used.</p>
+<div class="admonition note">
+<p class="admonition-title">No HITL tier for Jira</p>
+<p>Unlike GitHub, Jira has no "requires Slack approval" tier. The OAuth scope is <code>read:jira-work</code> — write operations would fail at the API level even if summon allowed them. The hard-deny list provides defense-in-depth.</p>
+</div>
+<p>For the full integration guide, see <a href="../../guide/jira-integration/">Jira Integration</a>.</p>
+<hr />
 <h2 id="askuserquestion">AskUserQuestion<a class="headerlink" href="#askuserquestion" title="Permanent link">&para;</a></h2>
 <p>Claude can ask you structured questions mid-task using the <code>AskUserQuestion</code> tool. This appears as an interactive message in the session channel:</p>
 <div class="highlight"><pre><span></span><code>Claude has a question for you
@@ -2652,6 +2773,21 @@ Which database should I use for the session store?
 <tr>
 <td>6</td>
 <td>GitHub auto-approve (prefix matching)</td>
+<td>Allow</td>
+</tr>
+<tr>
+<td>6a</td>
+<td>Google MCP (read-only prefix → Allow; all others → HITL)</td>
+<td>Allow or HITL</td>
+</tr>
+<tr>
+<td>6b</td>
+<td>Jira hard-deny (<code>_JIRA_MCP_HARD_DENY</code>)</td>
+<td>Always Deny</td>
+</tr>
+<tr>
+<td>6c</td>
+<td>Jira auto-approve (prefix + exact matching)</td>
 <td>Allow</td>
 </tr>
 <tr>

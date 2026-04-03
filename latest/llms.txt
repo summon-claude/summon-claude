@@ -22,6 +22,7 @@
 - [Diagnostics](https://summon-claude.github.io/summon-claude/latest/guide/doctor/index.md)
 - [GitHub Integration](https://summon-claude.github.io/summon-claude/latest/guide/github-integration/index.md)
 - [Lifecycle Hooks](https://summon-claude.github.io/summon-claude/latest/guide/hooks/index.md)
+- [Jira Integration](https://summon-claude.github.io/summon-claude/latest/guide/jira-integration/index.md)
 - [PM Agents](https://summon-claude.github.io/summon-claude/latest/guide/pm-agents/index.md)
 - [Projects](https://summon-claude.github.io/summon-claude/latest/guide/projects/index.md)
 - [Scribe Integrations](https://summon-claude.github.io/summon-claude/latest/guide/scribe-integrations/index.md)

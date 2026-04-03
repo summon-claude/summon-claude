@@ -18,6 +18,10 @@ Learn how to use summon-claude effectively. Most users work through **projects**
 
   PR review, code search, and GitHub tools.
 
+- **[Jira Integration](https://summon-claude.github.io/summon-claude/latest/guide/jira-integration/index.md)**
+
+  Read-only Jira access, PM triage, and JQL filters.
+
 - **[Scribe Integrations](https://summon-claude.github.io/summon-claude/latest/guide/scribe-integrations/index.md)**
 
   Google Workspace and Slack browser monitoring.

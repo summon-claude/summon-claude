@@ -45,6 +45,12 @@ summon project add my-api
 summon project add frontend ~/work/acme-frontend
 ```
 
+To associate a [Jira JQL filter](https://summon-claude.github.io/summon-claude/latest/guide/jira-integration/#per-project-jql-filters) with the project:
+
+```
+summon project add my-api --jql "project = MYAPI AND status != Done"
+```
+
 After registering, set workflow instructions and other project settings using the `summon project workflow` subcommands documented [below](#managing-workflow-instructions).
 
 ### `summon project list`
@@ -231,5 +237,6 @@ ______________________________________________________________________
 
 ## See also
 
+- [Jira Integration](https://summon-claude.github.io/summon-claude/latest/guide/jira-integration/index.md) — JQL filters and PM triage
 - [Scribe](https://summon-claude.github.io/summon-claude/latest/guide/scribe/index.md) — background monitoring agent
 - [Configuration](https://summon-claude.github.io/summon-claude/latest/guide/configuration/index.md) — project-level config options

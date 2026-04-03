@@ -744,6 +744,8 @@
       
         
       
+        
+      
     
     
     
@@ -1102,6 +1104,34 @@
     
   
     GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
   
 
     
@@ -2356,6 +2386,9 @@ summon<span class="w"> </span>project<span class="w"> </span>add<span class="w">
 <span class="c1"># Register a different directory</span>
 summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>frontend<span class="w"> </span>~/work/acme-frontend
 </code></pre></div>
+<p>To associate a <a href="../jira-integration/#per-project-jql-filters">Jira JQL filter</a> with the project:</p>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>--jql<span class="w"> </span><span class="s2">&quot;project = MYAPI AND status != Done&quot;</span>
+</code></pre></div>
 <p>After registering, set workflow instructions and other project settings using the <code>summon project workflow</code> subcommands documented <a href="#managing-workflow-instructions">below</a>.</p>
 <h3 id="summon-project-list"><code>summon project list</code><a class="headerlink" href="#summon-project-list" title="Permanent link">&para;</a></h3>
 <p>Show all registered projects:</p>
@@ -2485,6 +2518,7 @@ $INCLUDE_GLOBAL
 <hr />
 <h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
 <ul>
+<li><a href="../jira-integration/">Jira Integration</a> — JQL filters and PM triage</li>
 <li><a href="../scribe/">Scribe</a> — background monitoring agent</li>
 <li><a href="../configuration/">Configuration</a> — project-level config options</li>
 </ul>

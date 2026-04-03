@@ -742,6 +742,8 @@
       
         
       
+        
+      
     
     
     
@@ -895,6 +897,34 @@
     
   
     GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
   
 
     
@@ -2570,6 +2600,11 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Context compaction</strong> — Automatic context management with custom summarization and Claude CLI client restart. Tracks context percentage via JSONL transcript parsing, triggers compaction at configurable threshold, injects recovery context on restart (#49)</li>
 <li><strong>Spawn sessions from Slack</strong> — <code>!summon start</code> command within a running session spawns child sessions with spawn token authentication and CWD enforcement (#50)</li>
 <li><strong>Initial prompt and session queue</strong> — <code>initial_prompt</code> parameter on <code>session_start</code> MCP tool allows PM agents to provide startup instructions. FIFO session queue ensures ordered startup when multiple sessions are requested concurrently (#96)</li>
+<li><strong>Jira integration</strong> — Atlassian Rovo MCP integration with OAuth 2.1 (PKCE + dynamic client registration). Authenticate via <code>summon auth jira login</code> — opens a browser for OAuth consent, auto-discovers cloud sites, and stores credentials locally with 0600 permissions (#94)</li>
+<li><strong>Jira read-only enforcement</strong> — Permission handler classifies all 31 Jira MCP tools: read-only prefixes (<code>get</code>, <code>search</code>, <code>lookup</code>) auto-approved, write tools and <code>fetchAtlassian</code> hard-denied, fail-closed on unknown tools. Defense-in-depth: hard-deny list checked before auto-approve prefixes (#94)</li>
+<li><strong>Jira PM triage</strong> — PM agents scan Jira issues on each periodic cycle using per-project JQL filters (<code>summon project add --jql</code>, <code>summon project update --jql</code>). Canvas state tracking avoids re-alerting on previously triaged issues. Prompt injection defense for untrusted issue content (#94)</li>
+<li><strong>Jira scribe integration</strong> — Jira MCP wired to scribe sessions with system prompt (untrusted-content warnings, Gmail/Jira dedup) and scan prompt (Jira monitoring for mentions, assignments, and status changes via JQL) (#94)</li>
+<li><strong>Jira DB migration</strong> — Schema v15-&gt;v16 adds <code>jira_jql TEXT</code> column to <code>projects</code> table for per-project JQL issue filters (#94)</li>
 <li><strong>Unique session names</strong> — <code>summon start --name</code> now auto-generates names with a 6-hex-char suffix (e.g. <code>myproject-a1b2c3</code>) to prevent collisions. Active session names are unique at the DB level via a partial unique index (#40)</li>
 <li><strong>Effort configuration</strong> — <code>summon start --effort LEVEL</code> and <code>SUMMON_DEFAULT_EFFORT</code> config variable. In-session <code>!effort</code> command to switch effort dynamically via SDK <code>/effort</code> (#40)</li>
 <li><strong>Spawn tokens</strong> — <code>generate_spawn_token()</code> / <code>verify_spawn_token()</code> infrastructure for pre-authenticated session creation. <code>SessionManager.create_session_with_spawn_token()</code> daemon IPC method with cwd enforcement and audit logging (#32)</li>

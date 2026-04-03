@@ -742,6 +742,8 @@
       
         
       
+        
+      
     
     
     
@@ -895,6 +897,34 @@
     
   
     GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../guide/jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
   
 
     
@@ -1815,6 +1845,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#jira" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jira
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#project-lifecycle" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2154,6 +2195,17 @@
     <span class="md-ellipsis">
       
         Scribe
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#jira" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Jira
       
     </span>
   </a>
@@ -2549,6 +2601,44 @@ summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w">
 <p><strong>Symptom:</strong> Slack browser monitor fails to load workspace or shows a workspace picker instead of the client.</p>
 <p><strong>Cause:</strong> Enterprise Grid workspaces serve a workspace picker page at their enterprise domain (e.g., <code>gtest.enterprise.slack.com</code>). The actual Slack SPA client lives at <code>app.slack.com/client/{TEAM_ID}</code>.</p>
 <p><strong>Fix:</strong> Use <code>summon auth slack login</code> to authenticate — it handles Enterprise Grid URL resolution automatically. The monitor extracts team IDs from localStorage in the saved browser state and navigates directly to <code>app.slack.com/client/{TEAM_ID}</code>, bypassing the workspace picker.</p>
+</details>
+<hr />
+<h2 id="jira">Jira<a class="headerlink" href="#jira" title="Permanent link">&para;</a></h2>
+<details class="tip" open="open">
+<summary><code>summon auth jira status</code> says 'no cloud_id'</summary>
+<p><strong>Symptom:</strong> Jira status check reports missing cloud_id despite successful login.</p>
+<p><strong>Cause:</strong> Cloud site discovery failed during login (network issue or no accessible sites).</p>
+<p><strong>Fix:</strong> Re-run <code>summon auth jira login</code>. If using <code>--site</code>, verify the hostname matches one of your Atlassian cloud sites.</p>
+</details>
+<details class="tip" open="open">
+<summary>Browser doesn't open during Jira login</summary>
+<p><strong>Symptom:</strong> Running <code>summon auth jira login</code> prints nothing and hangs.</p>
+<p><strong>Cause:</strong> The <code>$BROWSER</code> environment variable is not set, or summon can't find a browser.</p>
+<p><strong>Fix:</strong> Check that <code>$BROWSER</code> is set, or look for a URL printed to the terminal and open it manually.</p>
+</details>
+<details class="tip" open="open">
+<summary>'DCR failed' error during Jira login</summary>
+<p><strong>Symptom:</strong> Login fails with "DCR failed with HTTP..." error.</p>
+<p><strong>Cause:</strong> Atlassian's Dynamic Client Registration endpoint may be temporarily unavailable.</p>
+<p><strong>Fix:</strong> Retry after a few minutes. If persistent, check that the Atlassian MCP endpoint is reachable from your network.</p>
+</details>
+<details class="tip" open="open">
+<summary>Token refresh failures in session logs</summary>
+<p><strong>Symptom:</strong> Session logs show "Token refresh failed" warnings, and Jira tools are unavailable.</p>
+<p><strong>Cause:</strong> The refresh token may have been revoked, or the Atlassian token endpoint is unreachable.</p>
+<p><strong>Fix:</strong> Sessions proceed without Jira tools when refresh fails (graceful degradation). If persistent, re-authenticate:
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>jira<span class="w"> </span>login
+</code></pre></div></p>
+</details>
+<details class="tip" open="open">
+<summary>Jira tools not available in session</summary>
+<p><strong>Symptom:</strong> Claude reports Jira tools are not found or returns errors when using them.</p>
+<p><strong>Cause:</strong> Credentials may not exist, the token may be expired without a valid refresh token, or the Rovo MCP server may be unreachable.</p>
+<p><strong>Fix:</strong>
+1. Check status: <code>summon auth jira status</code>
+2. Check config: <code>summon config check</code>
+3. If status shows issues, re-authenticate: <code>summon auth jira login</code>
+4. If the MCP server is unreachable, individual tool calls will return errors — Claude adapts automatically.</p>
 </details>
 <hr />
 <h2 id="project-lifecycle">Project Lifecycle<a class="headerlink" href="#project-lifecycle" title="Permanent link">&para;</a></h2>
