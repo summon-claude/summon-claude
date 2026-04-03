@@ -49,7 +49,7 @@ summon-claude follows [semantic versioning](https://semver.org/):
 - **Minor releases** (1.x.0): New features, backward-compatible. Upgrade freely.
 - **Major releases** (x.0.0): May include breaking changes. Read the changelog before upgrading.
 
-Breaking changes are documented in the [GitHub releases](https://github.com/summon-claude/summon-claude/releases) page with migration instructions.
+Breaking changes are documented in the [changelog](https://summon-claude.github.io/summon-claude/latest/changelog/index.md) and on the [GitHub releases](https://github.com/summon-claude/summon-claude/releases) page with migration instructions.
 
 Config file changes
 

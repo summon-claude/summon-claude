@@ -53,6 +53,10 @@
 
 - [Troubleshooting](https://summon-claude.github.io/summon-claude/latest/troubleshooting/index.md)
 
+## Changelog
+
+- [Changelog](https://summon-claude.github.io/summon-claude/latest/changelog/index.md)
+
 ## Development
 
 - [Development](https://summon-claude.github.io/summon-claude/latest/development/index.md)
