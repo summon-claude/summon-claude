@@ -398,15 +398,15 @@ class TestGoogleCredentialsExist:
         ):
             assert _google_credentials_exist() is True
 
-    def test_flat_layout_env_var_only(self, google_creds_dir: Path) -> None:
-        """Backward compat: credential JSON without client_env (env-var-only setup)."""
+    def test_flat_layout_env_var_only_returns_false(self, google_creds_dir: Path) -> None:
+        """Env-var-only setup (no client_env) returns False — user must run setup."""
         # User configured client credentials via env vars, ran google login,
         # but never ran google setup — so client_env doesn't exist.
         (google_creds_dir / "user@gmail.com.json").write_text('{"token":"x"}')
         with patch(
             "summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir
         ):
-            assert _google_credentials_exist() is True
+            assert _google_credentials_exist() is False
 
     def test_empty_dir(self, google_creds_dir: Path) -> None:
         with patch(
@@ -461,17 +461,18 @@ class TestGoogleCredentialsExist:
         ):
             assert _google_credentials_exist() is False
 
-    def test_flat_without_client_env_returns_true(self, google_creds_dir: Path) -> None:
-        """Flat layout with credential JSON but no client_env still returns True.
+    def test_flat_without_client_env_returns_false(self, google_creds_dir: Path) -> None:
+        """Flat layout with credential JSON but no client_env returns False.
 
-        Backward compat: users who configured client credentials via env vars
-        (never ran google_setup) have credential JSON but no client_env file.
+        Env-var-only users must run ``summon auth google setup`` to create
+        client_env before scribe auto-enables — consistent with
+        discover_google_accounts() which also requires client_env.
         """
         (google_creds_dir / "user@example.com.json").write_text("{}")
         with patch(
             "summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir
         ):
-            assert _google_credentials_exist() is True
+            assert _google_credentials_exist() is False
 
 
 # ---------- Test permission matching ----------

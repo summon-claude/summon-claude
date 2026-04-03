@@ -574,9 +574,7 @@ class GoogleAccount:
 
     label: str  # user-chosen directory name (e.g., "personal")
     creds_dir: Path  # absolute path to the account's credential subdirectory
-    email: (
-        str | None
-    )  # extracted from credential filename ({email}.json), None if no credential yet
+    email: str | None  # extracted from credential filename ({email}.json)
 
 
 _SLACK_WORKSPACE_FILE = "slack_workspace.json"
@@ -661,7 +659,6 @@ class SummonConfig(BaseSettings):
     # credential exists (from ``summon auth google login``).  Can be
     # explicitly disabled with SUMMON_SCRIBE_GOOGLE_ENABLED=false.
     scribe_google_enabled: bool | None = None  # None = auto-detect
-    scribe_google_services: str = "gmail,calendar,drive"  # comma-separated service list
 
     # External Slack data collector
     # Auto-detected: enabled when Playwright is installed AND valid browser
@@ -737,21 +734,6 @@ class SummonConfig(BaseSettings):
         valid = {"low", "medium", "high", "max"}
         if v not in valid:
             raise ValueError(f"SUMMON_DEFAULT_EFFORT must be one of {sorted(valid)}, got {v!r}")
-        return v
-
-    @field_validator("scribe_google_services")
-    @classmethod
-    def validate_scribe_google_services(cls, v: str) -> str:
-        """Validate that all service names are recognized by workspace-mcp."""
-        if not v:
-            return v
-        services = [s.strip() for s in v.split(",") if s.strip()]
-        invalid = set(services) - VALID_GOOGLE_SERVICES
-        if invalid:
-            raise ValueError(
-                f"SUMMON_SCRIBE_GOOGLE_SERVICES contains unknown services: {sorted(invalid)}. "
-                f"Valid: {sorted(VALID_GOOGLE_SERVICES)}"
-            )
         return v
 
     @field_validator("scribe_scan_interval_minutes")
@@ -953,8 +935,8 @@ def _scribe_enabled(cfg: dict[str, str]) -> bool:
     if explicit:
         return _is_truthy(explicit)
     # Auto-detect: enabled when any sub-feature's prerequisites are met.
-    # Uses raw detection primitives (not _scribe_google_enabled/_scribe_slack_enabled)
-    # to avoid circular dependency — those functions gate on _scribe_enabled.
+    # Uses raw detection primitives (not _scribe_slack_enabled)
+    # to avoid circular dependency — that function gates on _scribe_enabled.
     google_detected = _workspace_mcp_installed() and _google_credentials_exist()
     slack_detected = is_extra_installed("playwright") and _slack_browser_auth_exists()
     return google_detected or slack_detected
@@ -984,9 +966,12 @@ def _google_credentials_exist() -> bool:
         ):
             return True
     # Check for flat layout (pre-migration, backward compat).
-    # Only requires credential JSON — NOT client_env — because users who set
-    # client credentials via env vars never get a client_env file.
-    return any(f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json"))
+    # Requires both client_env AND credential JSON — consistent with
+    # discover_google_accounts() which also requires both.  Env-var-only
+    # users (no client_env) must run ``summon auth google setup`` first.
+    return (creds_dir / "client_env").exists() and any(
+        f.suffix == ".json" and "@" in f.stem for f in creds_dir.glob("*.json")
+    )
 
 
 def _slack_browser_auth_exists() -> bool:
@@ -1007,16 +992,6 @@ def _slack_browser_auth_exists() -> bool:
         return False
     state_path = Path(data.get("auth_state_path", ""))
     return state_path.is_file()
-
-
-def _scribe_google_enabled(cfg: dict[str, str]) -> bool:
-    # Explicit config takes precedence.  If unset, auto-detect from
-    # credentials: if workspace-mcp is installed AND a user credential
-    # file exists, Google is enabled automatically.
-    explicit = cfg.get("SUMMON_SCRIBE_GOOGLE_ENABLED", "")
-    if explicit:
-        return _scribe_enabled(cfg) and _is_truthy(explicit) and _workspace_mcp_installed()
-    return _scribe_enabled(cfg) and _workspace_mcp_installed() and _google_credentials_exist()
 
 
 def _scribe_slack_enabled(cfg: dict[str, str]) -> bool:
@@ -1057,16 +1032,6 @@ def _validate_quiet_hours(v: str) -> str | None:
             datetime.strptime(part, "%H:%M")  # noqa: DTZ007
         except ValueError:
             return "Must be in HH:MM-HH:MM format"
-    return None
-
-
-def _validate_google_services(v: str) -> str | None:
-    if not v:
-        return None
-    services = [s.strip() for s in v.split(",") if s.strip()]
-    invalid = set(services) - VALID_GOOGLE_SERVICES
-    if invalid:
-        return f"Unknown services: {sorted(invalid)}. Valid: {sorted(VALID_GOOGLE_SERVICES)}"
     return None
 
 
@@ -1204,16 +1169,6 @@ CONFIG_OPTIONS: list[ConfigOption] = [
         help_text="Enable the Google Workspace data collector for scribe",
         input_type="flag",
         visible=lambda cfg: _scribe_enabled(cfg) and _workspace_mcp_installed(),
-    ),
-    ConfigOption(
-        field_name="scribe_google_services",
-        env_key="SUMMON_SCRIBE_GOOGLE_SERVICES",
-        group="Scribe Google",
-        label="Google Services",
-        help_text="Comma-separated Google services for scribe (e.g. gmail,calendar,drive)",
-        input_type="text",
-        visible=_scribe_google_enabled,
-        validate_fn=_validate_google_services,
     ),
     # Scribe Slack
     ConfigOption(

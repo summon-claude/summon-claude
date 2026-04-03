@@ -750,8 +750,7 @@ def _load_google_client_credentials(account_dir: Path) -> tuple[str, str]:
     client_secret = os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET", "")
 
     if not (client_id and client_secret):
-        search_dir = account_dir
-        secrets_file = search_dir / "client_env"
+        secrets_file = account_dir / "client_env"
         if secrets_file.exists():
             for line in secrets_file.read_text().splitlines():
                 if line.startswith("GOOGLE_OAUTH_CLIENT_ID="):
@@ -1049,6 +1048,4 @@ def google_status(account: str | None = None) -> None:
     """Check Google Workspace authentication status (CLI entry point)."""
     if account is not None:
         account = _validate_account_label(account)
-        _check_google_status(account=account)
-    else:
-        _check_google_status()
+    _check_google_status(account=account)

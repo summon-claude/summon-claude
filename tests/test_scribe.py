@@ -5,7 +5,6 @@ Covers C12 (Phase 1) and C13 (Phase 2) test requirements.
 
 from __future__ import annotations
 
-import contextlib
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -306,13 +305,11 @@ class TestStartScribeSpawnsSession:
     def test_start_scribe_spawns_session(self):
         """With scribe_enabled=True and no existing scribe, a session is registered.
 
-        Disables all preflight checks by: setting scribe_google_services="" and
-        scribe_slack_enabled=False, then mocking asyncio.create_task to avoid
-        needing a running event loop.
+        Disables all preflight checks by: disabling Google and Slack,
+        then mocking asyncio.create_task to avoid needing a running event loop.
         """
-        # Bypass google preflight: empty services string and slack disabled
         manager = make_manager(
-            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+            scribe_enabled=True, scribe_google_enabled=False, scribe_slack_enabled=False
         )
 
         with (
@@ -984,9 +981,7 @@ class TestProjectDownStopsScribe:
 class TestScribePreflight:
     def test_scribe_preflight_missing_google(self):
         """_start_scribe_if_enabled returns early when workspace-mcp binary missing."""
-        manager = make_manager(
-            scribe_enabled=True, scribe_google_enabled=True, scribe_google_services="gmail"
-        )
+        manager = make_manager(scribe_enabled=True, scribe_google_enabled=True)
 
         missing_bin = MagicMock()
         missing_bin.exists.return_value = False
@@ -999,11 +994,9 @@ class TestScribePreflight:
 
         mock_cls.assert_not_called()
 
-    def test_scribe_preflight_missing_google_creds_warns(self, tmp_path, caplog):
-        """_start_scribe_if_enabled warns when no Google accounts discovered but continues."""
-        manager = make_manager(
-            scribe_enabled=True, scribe_google_enabled=True, scribe_google_services="gmail"
-        )
+    def test_scribe_preflight_missing_google_creds_fatal(self, tmp_path):
+        """_start_scribe_if_enabled returns early when no Google accounts discovered."""
+        manager = make_manager(scribe_enabled=True, scribe_google_enabled=True)
 
         present_bin = MagicMock()
         present_bin.exists.return_value = True
@@ -1012,17 +1005,14 @@ class TestScribePreflight:
         creds_dir = tmp_path / "google-creds"
         creds_dir.mkdir()
 
-        import logging
-
         with (
-            patch("summon_claude.sessions.manager.SummonSession"),
+            patch("summon_claude.sessions.manager.SummonSession") as mock_cls,
             patch("summon_claude.config.find_workspace_mcp_bin", return_value=present_bin),
             patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
-            caplog.at_level(logging.WARNING, logger="summon_claude.sessions.manager"),
-            contextlib.suppress(RuntimeError),
         ):
             manager._start_scribe_if_enabled("U123")
-        assert any("no accounts discovered" in r.message.lower() for r in caplog.records)
+
+        mock_cls.assert_not_called()
 
     def test_scribe_preflight_missing_playwright(self, tmp_path):
         """_start_scribe_if_enabled returns early when playwright not installed.
@@ -1149,7 +1139,7 @@ class TestResumeOrStartScribe:
     async def test_falls_through_to_fresh_start(self):
         """When no suspended scribe exists, falls through to _start_scribe_if_enabled."""
         manager = make_manager(
-            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+            scribe_enabled=True, scribe_google_enabled=False, scribe_slack_enabled=False
         )
 
         mock_reg = _mock_registry_with_suspended_scribe(None)  # no suspended scribe
@@ -1195,7 +1185,7 @@ class TestResumeOrStartScribe:
     async def test_resume_failure_marks_errored_and_falls_through(self):
         """If resume fails, marks old session errored and falls through to fresh start."""
         manager = make_manager(
-            scribe_enabled=True, scribe_google_services="", scribe_slack_enabled=False
+            scribe_enabled=True, scribe_google_enabled=False, scribe_slack_enabled=False
         )
 
         suspended_scribe = {

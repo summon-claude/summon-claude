@@ -61,7 +61,6 @@ Google Workspace data collector settings. Requires the `google` optional extra (
 | Config Key | Type | Default | Description |
 |------------|------|---------|-------------|
 | `SUMMON_SCRIBE_GOOGLE_ENABLED` | boolean | auto-detect | Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist. |
-| `SUMMON_SCRIBE_GOOGLE_SERVICES` | text | `gmail,calendar,drive` | Comma-separated list of Google services to monitor. Valid values: `gmail`, `drive`, `calendar`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`. |
 
 ### Scribe Slack
 

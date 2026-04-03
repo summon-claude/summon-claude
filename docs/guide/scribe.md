@@ -103,14 +103,8 @@ summon config set SUMMON_SCRIBE_QUIET_HOURS 23:00-07:00
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SUMMON_SCRIBE_GOOGLE_ENABLED` | auto-detect | Enable the Google Workspace data collector (auto-detected when credentials exist) |
-| `SUMMON_SCRIBE_GOOGLE_SERVICES` | `gmail,calendar,drive` | Comma-separated list of Google services to monitor |
 
-The default services are `gmail`, `calendar`, `drive`. The full set of supported services is: `gmail`, `calendar`, `drive`, `docs`, `sheets`, `chat`, `forms`, `slides`, `tasks`, `contacts`, `search`, `appscript`.
-
-```bash
-# Monitor only Gmail and Calendar, not Drive
-summon config set SUMMON_SCRIBE_GOOGLE_SERVICES gmail,calendar
-```
+Available services are auto-detected from the OAuth scopes granted during `summon auth google login`.
 
 !!! note "Requires workspace-mcp"
     The Google collector requires the `google` extra: `uv tool install "summon-claude[google]"`. Google OAuth credentials must also be configured via `summon auth google setup` and `summon auth google login`.
@@ -220,7 +214,6 @@ SUMMON_SCRIBE_QUIET_HOURS=22:00-08:00
 
 # Google Workspace collector (auto-detected when credentials exist)
 # SUMMON_SCRIBE_GOOGLE_ENABLED=true  # optional — auto-detected
-SUMMON_SCRIBE_GOOGLE_SERVICES=gmail,calendar
 
 # External Slack collector (auto-detected when browser auth exists)
 # SUMMON_SCRIBE_SLACK_ENABLED=true  # optional — auto-detected

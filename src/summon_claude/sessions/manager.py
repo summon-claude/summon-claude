@@ -1288,7 +1288,11 @@ class SessionManager:
                 return
             accounts = discover_google_accounts()
             if not accounts:
-                logger.warning("Scribe Google enabled but no accounts discovered")
+                logger.error(
+                    "Scribe Google enabled but no accounts discovered. "
+                    "Run 'summon auth google setup' then 'summon auth google login'"
+                )
+                return
 
         if self._config.scribe_slack_enabled:
             import importlib.util  # noqa: PLC0415

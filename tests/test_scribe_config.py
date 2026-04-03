@@ -89,17 +89,9 @@ class TestScribeConfigDefaults:
 
     def test_google_enabled_explicit_false_overrides(self):
         """Explicit SUMMON_SCRIBE_GOOGLE_ENABLED=false disables even with credentials."""
-        from summon_claude.config import _scribe_google_enabled
-
         with _with_auto_detect(google_mcp=True, google_creds=True):
-            result = _scribe_google_enabled(
-                {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_GOOGLE_ENABLED": "false"}
-            )
-        assert result is False
-
-    def test_google_services_default(self):
-        cfg = _make_config()
-        assert cfg.scribe_google_services == "gmail,calendar,drive"
+            cfg = _make_config(scribe_google_enabled=False)
+        assert cfg.scribe_google_enabled is False
 
     def test_slack_disabled_by_default(self):
         with _no_auto_detect():
@@ -222,18 +214,6 @@ class TestScribeConfigValidation:
         with pytest.raises(ValueError, match="at least 1"):
             _make_config(scribe_scan_interval_minutes=-5)
 
-    def test_valid_google_services(self):
-        cfg = _make_config(scribe_google_services="gmail,calendar")
-        assert cfg.scribe_google_services == "gmail,calendar"
-
-    def test_invalid_google_services(self):
-        with pytest.raises(ValueError, match="unknown services"):
-            _make_config(scribe_google_services="gmail,fakesvc")
-
-    def test_empty_google_services_valid(self):
-        cfg = _make_config(scribe_google_services="")
-        assert cfg.scribe_google_services == ""
-
 
 class TestScribeConfigSettableKeys:
     """Verify all scribe keys are in CONFIG_OPTIONS."""
@@ -250,7 +230,6 @@ class TestScribeConfigSettableKeys:
             "SUMMON_SCRIBE_IMPORTANCE_KEYWORDS",
             "SUMMON_SCRIBE_QUIET_HOURS",
             "SUMMON_SCRIBE_GOOGLE_ENABLED",
-            "SUMMON_SCRIBE_GOOGLE_SERVICES",
             "SUMMON_SCRIBE_SLACK_ENABLED",
             "SUMMON_SCRIBE_SLACK_BROWSER",
             "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS",
@@ -982,19 +961,6 @@ class TestGoogleScopeHelpers:
             return_value=Path("/nonexistent/google-credentials"),
         ):
             assert _google_credentials_exist() is False
-
-    def test_google_enabled_explicit_true_no_mcp(self):
-        """Explicit GOOGLE_ENABLED=true still requires workspace-mcp."""
-        from summon_claude.config import _scribe_google_enabled
-
-        with (
-            patch("summon_claude.config._workspace_mcp_installed", return_value=False),
-            patch("summon_claude.config._google_credentials_exist", return_value=True),
-        ):
-            result = _scribe_google_enabled(
-                {"SUMMON_SCRIBE_ENABLED": "true", "SUMMON_SCRIBE_GOOGLE_ENABLED": "true"}
-            )
-        assert result is False
 
 
 class TestGoogleOptionalDep:
