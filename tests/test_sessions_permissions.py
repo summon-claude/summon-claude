@@ -1041,6 +1041,27 @@ class TestGoogleWorkspaceMCPGuardTests:
         assert _is_google_read_tool("malformed_tool_name") is False
 
 
+class TestGoogleWriteToolNeverSessionCached:
+    """End-to-end: Google write tools require HITL on every invocation (never session-cached)."""
+
+    async def test_second_call_still_requires_hitl(self):
+        """Calling handle() twice for a Google write tool should prompt HITL both times."""
+        handler, provider, _ = make_handler()
+        provider.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
+
+        tool = "mcp__workspace-default__send_gmail_message"
+
+        # First call — requires HITL
+        result1 = await handler.handle(tool, {}, None)
+        assert isinstance(result1, PermissionResultAllow)
+        assert provider.post_interactive.call_count == 1
+
+        # Second call — must still require HITL (not session-cached)
+        result2 = await handler.handle(tool, {}, None)
+        assert isinstance(result2, PermissionResultAllow)
+        assert provider.post_interactive.call_count == 2
+
+
 class TestIdentityVerificationFailClosed:
     """Guard tests: identity checks are fail-closed (no truthy bypass)."""
 

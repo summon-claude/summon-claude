@@ -685,6 +685,32 @@ class TestWorkspaceMcpCheck:
         assert result.status == "warn"
         assert any("no services detected" in d.lower() for d in result.details)
 
+    async def test_pass_with_accounts_and_services(
+        self, check: WorkspaceMcpCheck, tmp_path: Path
+    ) -> None:
+        config = SummonConfig(scribe_enabled=True, scribe_google_enabled=True)
+        mock_bin = MagicMock(spec=Path)
+        mock_bin.exists.return_value = True
+        creds_dir = tmp_path / "creds"
+        creds_dir.mkdir()
+        # Create two valid account subdirectories
+        for label in ("personal", "work"):
+            account_dir = creds_dir / label
+            account_dir.mkdir()
+            (account_dir / "client_env").write_text("CLIENT_ID=x\nCLIENT_SECRET=y")
+            (account_dir / "user@test.com.json").write_text("{}")
+
+        with (
+            patch("summon_claude.config.find_workspace_mcp_bin", return_value=mock_bin),
+            patch("summon_claude.config.get_google_credentials_dir", return_value=creds_dir),
+            patch("summon_claude.config.detect_account_services", return_value="gmail,calendar"),
+        ):
+            result = await check.run(config)
+        assert result.status == "pass"
+        assert "2 account(s)" in result.message
+        assert "personal" in result.message
+        assert "work" in result.message
+
 
 # ---------------------------------------------------------------------------
 # GitHubMcpCheck tests

@@ -314,7 +314,7 @@ class TestGoogleMcpEnvForAccount:
             "summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir
         ):
             env = google_mcp_env_for_account(account)
-        assert env["WORKSPACE_MCP_CREDENTIALS_DIR"] == str(account_dir)
+        assert env["WORKSPACE_MCP_CREDENTIALS_DIR"] == str(account_dir.resolve())
 
     def test_client_secret_set_when_exists(self, google_creds_dir: Path) -> None:
         account_dir = _make_account_dir(google_creds_dir, "personal")
@@ -377,7 +377,9 @@ class TestGoogleMcpEnvForAccount:
             "summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir
         ):
             env = google_mcp_env_for_account(account)
-        assert env["GOOGLE_CLIENT_SECRETS_PATH"] == str(account_dir / "client_secret.json")
+        assert env["GOOGLE_CLIENT_SECRETS_PATH"] == str(
+            (account_dir / "client_secret.json").resolve()
+        )
 
 
 # ---------- Test _google_credentials_exist ----------
@@ -1267,16 +1269,29 @@ class TestSessionMcpWiringLoop:
         assert "workspace-good" in mcp_servers
         assert "workspace-bad" not in mcp_servers
 
-    def test_no_services_means_account_skipped(self) -> None:
-        """When detect_account_services returns None, account is not wired."""
-        # This tests the session.py logic: if not services: continue
-        account = GoogleAccount(label="empty", creds_dir=Path("/fake/empty"), email="e@e.com")
-        services = None  # simulates detect_account_services returning None
+    def test_no_services_means_account_skipped(self, tmp_path: Path) -> None:
+        """When detect_account_services returns None, the account is not wired."""
+        from summon_claude.sessions.session import _build_google_workspace_mcp_untrusted
+
+        good_dir = tmp_path / "google-credentials" / "good"
+        good_dir.mkdir(parents=True)
+        (good_dir / "client_env").write_text("id=x")
+
+        good = GoogleAccount(label="good", creds_dir=good_dir, email="g@g.com")
+        empty = GoogleAccount(label="empty", creds_dir=good_dir, email="e@e.com")
 
         mcp_servers: dict[str, dict] = {}
-        if services:
-            mcp_servers[f"workspace-{account.label}"] = {}
+        for account, services in [(good, "gmail"), (empty, None)]:
+            if not services:
+                continue
+            with patch(
+                "summon_claude.config.get_google_credentials_dir",
+                return_value=tmp_path / "google-credentials",
+            ):
+                mcp = _build_google_workspace_mcp_untrusted(services, account)
+            mcp_servers[f"workspace-{account.label}"] = mcp
 
+        assert "workspace-good" in mcp_servers
         assert "workspace-empty" not in mcp_servers
 
 
@@ -1379,3 +1394,173 @@ class TestWorkspaceMcpCredentialStoreAPI:
 
         # Must be None — no silent fallback to global config
         assert result is None
+
+
+# ---------- Test google_auth() multi-account routing ----------
+
+
+class TestGoogleAuthMultiAccountRouting:
+    def test_auto_selects_single_account(self, google_creds_dir: Path) -> None:
+        """google_auth(account=None) auto-selects when exactly one account exists."""
+        from summon_claude.cli.google_auth import google_auth
+
+        _make_account_dir(google_creds_dir, "solo", "solo@example.com")
+        p_config = patch(
+            "summon_claude.config.get_google_credentials_dir",
+            return_value=google_creds_dir,
+        )
+        p_cli = patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=google_creds_dir,
+        )
+        p_modules = patch.dict(
+            "sys.modules",
+            {"auth.credential_store": None, "auth.google_auth": None},
+        )
+        with p_config, p_cli, pytest.raises(SystemExit), p_modules:
+            google_auth(account=None)
+        # Reaches ImportError for auth.credential_store → sys.exit(1)
+        # The key assertion: it did NOT raise click.UsageError (which would
+        # happen if it hit the >1 account branch)
+
+    def test_usage_error_with_multiple_accounts(self, google_creds_dir: Path) -> None:
+        """google_auth(account=None) raises UsageError when multiple accounts exist."""
+        import click
+
+        from summon_claude.cli.google_auth import google_auth
+
+        _make_account_dir(google_creds_dir, "alpha", "a@a.com")
+        _make_account_dir(google_creds_dir, "beta", "b@b.com")
+        with (
+            patch("summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir),
+            pytest.raises(click.UsageError, match="Multiple Google accounts"),
+        ):
+            google_auth(account=None)
+
+
+# ---------- Test _validate_account_label error paths ----------
+
+
+class TestValidateAccountLabel:
+    def test_invalid_label_raises_bad_parameter(self) -> None:
+        import click
+
+        from summon_claude.cli.google_auth import _validate_account_label
+
+        with pytest.raises(click.BadParameter, match="lowercase alphanumeric"):
+            _validate_account_label("UPPERCASE")
+
+    def test_reserved_label_raises_bad_parameter(self) -> None:
+        import click
+
+        from summon_claude.cli.google_auth import _validate_account_label
+
+        with pytest.raises(click.BadParameter, match="reserved"):
+            _validate_account_label("slack")
+
+    def test_valid_label_returns_label(self) -> None:
+        from summon_claude.cli.google_auth import _validate_account_label
+
+        assert _validate_account_label("personal") == "personal"
+
+
+# ---------- Test _check_google_status multi-account paths ----------
+
+
+class TestCheckGoogleStatusMultiAccount:
+    def test_specific_account_not_found_returns_none(self, google_creds_dir: Path) -> None:
+        """_check_google_status(account='nonexistent') returns None."""
+        from summon_claude.cli.google_auth import _check_google_status
+
+        with patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=google_creds_dir,
+        ):
+            result = _check_google_status(account="nonexistent", quiet=True)
+        assert result is None
+
+    def test_discovered_accounts_no_users_returns_false(self, google_creds_dir: Path) -> None:
+        """No-account mode with accounts that have no users returns False."""
+        from summon_claude.cli.google_auth import _check_google_status
+
+        # Create account dir with client_env but an empty credential store
+        _make_account_dir(google_creds_dir, "default", "user@example.com")
+        with (
+            patch(
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+            patch("summon_claude.config.get_google_credentials_dir", return_value=google_creds_dir),
+            patch("auth.credential_store.LocalDirectoryCredentialStore") as mock_cls,
+        ):
+            mock_store = mock_cls.return_value
+            mock_store.list_users.return_value = []
+            result = _check_google_status(quiet=True)
+        assert result is False
+
+    def test_specific_account_valid_returns_true(self, google_creds_dir: Path) -> None:
+        """_check_google_status(account='default') returns True with valid creds."""
+        from unittest.mock import MagicMock
+
+        from summon_claude.cli.google_auth import _check_google_status
+
+        _make_account_dir(google_creds_dir, "default", "u@test.com")
+        mock_cred = MagicMock()
+        mock_cred.valid = True
+        mock_cred.scopes = ["https://www.googleapis.com/auth/gmail.readonly"]
+        with (
+            patch(
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+            patch("auth.credential_store.LocalDirectoryCredentialStore") as mock_cls,
+        ):
+            mock_store = mock_cls.return_value
+            mock_store.list_users.return_value = ["u@test.com"]
+            mock_store.get_credential.return_value = mock_cred
+            result = _check_google_status(account="default", quiet=True)
+        assert result is True
+
+
+# ---------- Test config_check multi-account display ----------
+
+
+class TestConfigCheckMultiAccountDisplay:
+    """Test the label-building logic used in config_check for Google account display."""
+
+    @staticmethod
+    def _build_label(accounts: list[GoogleAccount], bin_exists: bool) -> tuple[str, bool]:
+        """Replicate the label logic from cli/config.py config_check."""
+        label = (
+            f"workspace-mcp (Google: {len(accounts)} account{'s' if len(accounts) != 1 else ''})"
+            if accounts
+            else "workspace-mcp (Google)"
+        )
+        installed = bin_exists and len(accounts) > 0
+        return label, installed
+
+    def test_zero_accounts_shows_not_installed(self) -> None:
+        label, installed = self._build_label([], bin_exists=True)
+        assert label == "workspace-mcp (Google)"
+        assert installed is False
+
+    def test_one_account_singular(self) -> None:
+        accounts = [GoogleAccount(label="default", creds_dir=Path("/fake"), email="a@a.com")]
+        label, installed = self._build_label(accounts, bin_exists=True)
+        assert label == "workspace-mcp (Google: 1 account)"
+        assert installed is True
+
+    def test_two_accounts_plural(self) -> None:
+        accounts = [
+            GoogleAccount(label="personal", creds_dir=Path("/fake/p"), email="a@a.com"),
+            GoogleAccount(label="work", creds_dir=Path("/fake/w"), email="b@b.com"),
+        ]
+        label, installed = self._build_label(accounts, bin_exists=True)
+        assert label == "workspace-mcp (Google: 2 accounts)"
+        assert installed is True
+
+    def test_bin_missing_shows_not_installed(self) -> None:
+        accounts = [GoogleAccount(label="default", creds_dir=Path("/fake"), email="a@a.com")]
+        label, installed = self._build_label(accounts, bin_exists=False)
+        assert "1 account" in label
+        assert installed is False

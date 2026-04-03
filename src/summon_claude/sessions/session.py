@@ -2024,7 +2024,7 @@ class SummonSession:
                     prompt=build_scribe_scan_prompt(
                         nonce=_scribe_scan_nonce,
                         google_enabled=google_mcp_wired,
-                        google_accounts=google_accounts if google_mcp_wired else None,
+                        google_accounts=google_accounts or None,
                         slack_enabled=bool(self._slack_monitors),
                         user_mention=scribe_user_mention,
                         importance_keywords=self._config.scribe_importance_keywords,
@@ -2066,7 +2066,7 @@ class SummonSession:
                 system_prompt = build_scribe_system_prompt(
                     scan_interval=max(1, self._scan_interval_s // 60),
                     google_enabled=google_mcp_wired,
-                    google_accounts=google_accounts if google_mcp_wired else None,
+                    google_accounts=google_accounts or None,
                     slack_enabled=bool(self._slack_monitors),
                 )
                 if self._system_prompt_append:
