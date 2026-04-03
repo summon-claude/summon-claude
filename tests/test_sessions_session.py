@@ -1341,7 +1341,7 @@ class TestIdentityVerification:
         """Messages from a user who is not the session owner are silently dropped."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
 
         event = {"user": "U_INTRUDER", "text": "Hello Claude", "ts": "1"}
         result = await session._process_incoming_event(event, rt)
@@ -1352,7 +1352,7 @@ class TestIdentityVerification:
         """Commands from a non-owner user are rejected before dispatch."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
 
         with patch.object(session, "_dispatch_command", new=AsyncMock()) as mock_dispatch:
             event = {"user": "U_INTRUDER", "text": "!end", "ts": "1"}
@@ -1393,7 +1393,7 @@ class TestIdentityVerification:
         """Synthetic (internal) events bypass identity verification."""
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
 
         event = {"text": "Scheduled scan", "_synthetic": True, "user": "U_DIFFERENT"}
         result = await session._process_incoming_event(event, rt)
@@ -1407,7 +1407,7 @@ class TestIdentityVerification:
         session = make_session()
         # _authenticated_user_id is None by default
         assert session._authenticated_user_id is None
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
 
         event = {"user": "U_ANYONE", "text": "Hello", "ts": "1"}
         result = await session._process_incoming_event(event, rt)
@@ -2407,13 +2407,6 @@ class TestSecretPatternRedaction:
 class TestHandleSpawn:
     """Tests for _handle_spawn and !summon dispatch."""
 
-    def _make_rt(self, channel_id: str = "C_TEST") -> _SessionRuntime:
-        return _SessionRuntime(
-            registry=AsyncMock(),
-            client=make_mock_client(channel_id),
-            permission_handler=AsyncMock(),
-        )
-
     async def test_spawn_rejects_wrong_user(self):
         """_handle_spawn posts rejection when caller is not the session owner."""
         session = make_session()
@@ -2742,7 +2735,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_missing_ipc_resume(self):
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
         await session._handle_resume_from_active(rt, "U_OWNER", "some-id", None)
         rt.client.post.assert_awaited_once()
         assert "callback missing" in rt.client.post.call_args[0][0]
@@ -2750,7 +2743,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_wrong_user(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
         await session._handle_resume_from_active(rt, "U_INTRUDER", "some-id", None)
         rt.client.post.assert_awaited_once()
         assert "Only the session owner" in rt.client.post.call_args[0][0]
@@ -2758,7 +2751,7 @@ class TestHandleResumeFromActive:
     async def test_no_target_shows_usage(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
         await session._handle_resume_from_active(rt, "U_OWNER", None, None)
         rt.client.post.assert_awaited_once()
         assert "Specify a session ID" in rt.client.post.call_args[0][0]
@@ -2766,7 +2759,7 @@ class TestHandleResumeFromActive:
     async def test_rejects_target_owned_by_different_user(self):
         session = make_session(ipc_resume=AsyncMock())
         session._authenticated_user_id = "U_OWNER"
-        rt = make_rt(AsyncMock())
+        rt = self._make_rt()
         rt.registry.get_session = AsyncMock(
             return_value={
                 "status": "completed",
@@ -4560,3 +4553,5 @@ class TestHandleDiffFileNonGit:
 
             mock_exec.assert_called_once()
             rt.client.upload.assert_called_once()
+            call_kwargs = rt.client.upload.call_args.kwargs
+            assert call_kwargs.get("snippet_type") == "diff"
