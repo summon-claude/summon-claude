@@ -281,7 +281,7 @@ async def _migrate_15_to_16(db: aiosqlite.Connection) -> None:
 
     Stored on the projects table (not a separate table) because JQL is the only
     per-project Jira config field. PM sessions read this via registry.get_project()
-    to build the triage prompt in session.py _build_pm_prompt(). Set via CLI:
+    to build the triage prompt via build_pm_scan_prompt(). Set via CLI:
     ``summon project add --jql`` or ``summon project update --jql``.
     """
     try:
