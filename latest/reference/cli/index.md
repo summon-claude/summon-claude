@@ -22,7 +22,7 @@ summon [OPTIONS] COMMAND [ARGS]...
 | `--no-color`       | boolean | Disable colored output        | `False` |
 | `--config`         | file    | Override config file path     | None    |
 | `--no-interactive` | boolean | Disable interactive prompts   | `False` |
-| `-h`, `--help`     | boolean | Show this message and exit.   | `False` |
+| `--help`, `-h`     | boolean | Show this message and exit.   | `False` |
 
 #### summon auth
 
@@ -38,7 +38,7 @@ summon auth [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon auth github
 
@@ -54,7 +54,7 @@ summon auth github [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth github login
 
@@ -70,7 +70,7 @@ summon auth github login [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth github logout
 
@@ -86,7 +86,7 @@ summon auth github logout [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon auth google
 
@@ -102,7 +102,7 @@ summon auth google [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth google login
 
@@ -116,9 +116,10 @@ summon auth google login [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                          | Default |
+| -------------- | ------- | ------------------------------------ | ------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None    |
+| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
 
 ###### summon auth google setup
 
@@ -132,9 +133,10 @@ summon auth google setup [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                          | Default |
+| -------------- | ------- | ------------------------------------ | ------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None    |
+| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
 
 ###### summon auth google status
 
@@ -148,9 +150,10 @@ summon auth google status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                          | Default |
+| -------------- | ------- | ------------------------------------ | ------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None    |
+| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
 
 ##### summon auth slack
 
@@ -166,7 +169,7 @@ summon auth slack [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth slack channels
 
@@ -183,7 +186,7 @@ summon auth slack channels [OPTIONS]
 | Name           | Type    | Description                  | Default |
 | -------------- | ------- | ---------------------------- | ------- |
 | `--refresh`    | boolean | Re-fetch channels from Slack | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.  | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.  | `False` |
 
 ###### summon auth slack login
 
@@ -201,7 +204,7 @@ summon auth slack login [OPTIONS] WORKSPACE
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth slack logout
 
@@ -217,7 +220,7 @@ summon auth slack logout [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon auth slack status
 
@@ -233,7 +236,7 @@ summon auth slack status [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon auth status
 
@@ -249,7 +252,7 @@ summon auth status [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon config
 
@@ -265,7 +268,7 @@ summon config [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon config check
 
@@ -281,7 +284,7 @@ summon config check [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon config edit
 
@@ -297,7 +300,7 @@ summon config edit [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon config path
 
@@ -313,7 +316,7 @@ summon config path [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon config set
 
@@ -329,7 +332,7 @@ summon config set [OPTIONS] KEY VALUE
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon config show
 
@@ -345,7 +348,7 @@ summon config show [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon db
 
@@ -361,7 +364,7 @@ summon db [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon db purge
 
@@ -379,7 +382,7 @@ summon db purge [OPTIONS]
 | -------------- | ----------------------------- | ------------------------------- | ------- |
 | `--older-than` | integer range (`1` and above) | Purge records older than N days | `30`    |
 | `--yes`, `-y`  | boolean                       | Skip confirmation prompt        | `False` |
-| `-h`, `--help` | boolean                       | Show this message and exit.     | `False` |
+| `--help`, `-h` | boolean                       | Show this message and exit.     | `False` |
 
 ##### summon db status
 
@@ -395,7 +398,7 @@ summon db status [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon db vacuum
 
@@ -411,7 +414,7 @@ summon db vacuum [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon doctor
 
@@ -429,7 +432,7 @@ summon doctor [OPTIONS]
 | -------------- | ------- | ------------------------------------------------------------ | ------- |
 | `--export`     | file    | Export results as JSON to this file path                     | None    |
 | `--submit`     | boolean | Submit a redacted report as a GitHub issue (requires gh CLI) | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.                                  | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                                  | `False` |
 
 #### summon hooks
 
@@ -445,7 +448,7 @@ summon hooks [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon hooks clear
 
@@ -462,7 +465,7 @@ summon hooks clear [OPTIONS]
 | Name           | Type    | Description                                     | Default |
 | -------------- | ------- | ----------------------------------------------- | ------- |
 | `--project`    | text    | Project ID to clear hooks for (default: global) | None    |
-| `-h`, `--help` | boolean | Show this message and exit.                     | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                     | `False` |
 
 ##### summon hooks install
 
@@ -480,7 +483,7 @@ summon hooks install [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon hooks set
 
@@ -503,7 +506,7 @@ summon hooks set [OPTIONS] [HOOKS_JSON]
 | Name           | Type    | Description                                   | Default |
 | -------------- | ------- | --------------------------------------------- | ------- |
 | `--project`    | text    | Project ID to set hooks for (default: global) | None    |
-| `-h`, `--help` | boolean | Show this message and exit.                   | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                   | `False` |
 
 ##### summon hooks show
 
@@ -520,7 +523,7 @@ summon hooks show [OPTIONS]
 | Name           | Type    | Description                                    | Default |
 | -------------- | ------- | ---------------------------------------------- | ------- |
 | `--project`    | text    | Project ID to show hooks for (default: global) | None    |
-| `-h`, `--help` | boolean | Show this message and exit.                    | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                    | `False` |
 
 ##### summon hooks uninstall
 
@@ -536,7 +539,7 @@ summon hooks uninstall [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon init
 
@@ -552,7 +555,7 @@ summon init [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon project
 
@@ -568,7 +571,7 @@ summon project [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon project add
 
@@ -584,7 +587,7 @@ summon project add [OPTIONS] NAME [DIRECTORY]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon project down
 
@@ -602,7 +605,7 @@ summon project down [OPTIONS] [NAME]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon project list
 
@@ -619,7 +622,7 @@ summon project list [OPTIONS]
 | Name             | Type           | Description                 | Default       |
 | ---------------- | -------------- | --------------------------- | ------------- |
 | `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `-h`, `--help`   | boolean        | Show this message and exit. | `False`       |
+| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
 
 ##### summon project remove
 
@@ -635,7 +638,7 @@ summon project remove [OPTIONS] NAME_OR_ID
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon project up
 
@@ -651,7 +654,7 @@ summon project up [OPTIONS]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon project workflow
 
@@ -667,7 +670,7 @@ summon project workflow [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon project workflow clear
 
@@ -683,7 +686,7 @@ summon project workflow clear [OPTIONS] [PROJECT_NAME]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon project workflow set
 
@@ -699,7 +702,7 @@ summon project workflow set [OPTIONS] [PROJECT_NAME]
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ###### summon project workflow show
 
@@ -716,7 +719,7 @@ summon project workflow show [OPTIONS] [PROJECT_NAME]
 | Name           | Type    | Description                                         | Default |
 | -------------- | ------- | --------------------------------------------------- | ------- |
 | `--raw`        | boolean | Show raw template without expanding $INCLUDE_GLOBAL | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.                         | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                         | `False` |
 
 #### summon reset
 
@@ -732,7 +735,7 @@ summon reset [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon reset config
 
@@ -749,7 +752,7 @@ summon reset config [OPTIONS]
 | Name           | Type    | Description                                                             | Default |
 | -------------- | ------- | ----------------------------------------------------------------------- | ------- |
 | `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.                                             | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                                             | `False` |
 
 ##### summon reset data
 
@@ -766,7 +769,7 @@ summon reset data [OPTIONS]
 | Name           | Type    | Description                                                             | Default |
 | -------------- | ------- | ----------------------------------------------------------------------- | ------- |
 | `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.                                             | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                                             | `False` |
 
 #### summon session
 
@@ -782,7 +785,7 @@ summon session [OPTIONS] COMMAND [ARGS]...
 
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 ##### summon session cleanup
 
@@ -799,7 +802,7 @@ summon session cleanup [OPTIONS]
 | Name           | Type    | Description                                                                  | Default |
 | -------------- | ------- | ---------------------------------------------------------------------------- | ------- |
 | `--archive`    | boolean | Archive Slack channels of stale sessions (channels are preserved by default) | `False` |
-| `-h`, `--help` | boolean | Show this message and exit.                                                  | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.                                                  | `False` |
 
 ##### summon session info
 
@@ -816,7 +819,7 @@ summon session info [OPTIONS] SESSION
 | Name             | Type           | Description                 | Default       |
 | ---------------- | -------------- | --------------------------- | ------------- |
 | `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `-h`, `--help`   | boolean        | Show this message and exit. | `False`       |
+| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
 
 ##### summon session list
 
@@ -835,7 +838,7 @@ summon session list [OPTIONS]
 | `--all`, `-a`    | boolean        | Show all recent sessions (not just active) | `False`       |
 | `--name`         | text           | Filter sessions by name                    | None          |
 | `-o`, `--output` | choice (`json` | `table`)                                   | Output format |
-| `-h`, `--help`   | boolean        | Show this message and exit.                | `False`       |
+| `--help`, `-h`   | boolean        | Show this message and exit.                | `False`       |
 
 ##### summon session logs
 
@@ -852,7 +855,7 @@ summon session logs [OPTIONS] SESSION
 | Name           | Type    | Description                           | Default |
 | -------------- | ------- | ------------------------------------- | ------- |
 | `--tail`, `-n` | integer | Number of lines to show (default: 50) | `50`    |
-| `-h`, `--help` | boolean | Show this message and exit.           | `False` |
+| `--help`, `-h` | boolean | Show this message and exit.           | `False` |
 
 #### summon start
 
@@ -873,7 +876,7 @@ summon start [OPTIONS]
 | `--name`       | text          | Session name (used for Slack channel naming)              | None    |
 | `--model`      | text          | Model override (default: from config)                     | None    |
 | `--effort`     | choice (`low` | `medium`                                                  | `high`  |
-| `-h`, `--help` | boolean       | Show this message and exit.                               | `False` |
+| `--help`, `-h` | boolean       | Show this message and exit.                               | `False` |
 
 #### summon stop
 
@@ -890,7 +893,7 @@ summon stop [OPTIONS] SESSION
 | Name           | Type    | Description                 | Default |
 | -------------- | ------- | --------------------------- | ------- |
 | `--all`, `-a`  | boolean | Stop all active sessions    | `False` |
-| `-h`, `--help` | boolean | Show this message and exit. | `False` |
+| `--help`, `-h` | boolean | Show this message and exit. | `False` |
 
 #### summon version
 
@@ -907,7 +910,7 @@ summon version [OPTIONS]
 | Name             | Type           | Description                 | Default       |
 | ---------------- | -------------- | --------------------------- | ------------- |
 | `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `-h`, `--help`   | boolean        | Show this message and exit. | `False`       |
+| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
 
 Command Aliases
 

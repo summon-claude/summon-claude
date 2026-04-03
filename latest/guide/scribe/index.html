@@ -2450,7 +2450,7 @@
 <summary>Prerequisites</summary>
 <p>This guide assumes you've completed the <a href="../../getting-started/quickstart/">Quick Start</a> and have a working <code>summon config check</code>.</p>
 </details>
-<p>The scribe is a background monitoring agent that keeps an eye on your inboxes so you don't have to. It periodically checks Gmail, Google Calendar, Google Drive, and optionally external Slack channels, then posts alerts, daily summaries, and important signals to its persistent <code>#0-summon-scribe</code> channel.</p>
+<p>The scribe is a background monitoring agent that keeps an eye on your inboxes so you don't have to. It periodically checks Gmail, Google Calendar, Google Drive, and optionally external Slack channels, then posts alerts, daily summaries, and important signals to its persistent <code>#0-scribe</code> channel.</p>
 <hr />
 <h2 id="what-the-scribe-does">What the scribe does<a class="headerlink" href="#what-the-scribe-does" title="Permanent link">&para;</a></h2>
 <p>The scribe runs as a persistent Claude session that wakes up on a configurable interval (default: every 5 minutes), scans connected data sources, and posts notable items to Slack. It triages items by importance on a 1--5 scale, respects quiet hours, tracks notes and action items, and produces daily summary reports.</p>
@@ -2485,7 +2485,7 @@
 <p>The scribe auto-spawns when you run:</p>
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>up
 </code></pre></div>
-<p>It creates (or reuses) a persistent private channel called <code>#0-summon-scribe</code>. No manual start or <code>/summon CODE</code> authentication is needed — the scribe inherits the authenticated user from <code>project up</code>.</p>
+<p>It creates (or reuses) a persistent private channel called <code>#0-scribe</code>. No manual start or <code>/summon CODE</code> authentication is needed — the scribe inherits the authenticated user from <code>project up</code>.</p>
 <p>If the scribe was previously suspended by <code>project down</code>, <code>project up</code> resumes it with transcript continuity.</p>
 <hr />
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
@@ -2563,17 +2563,9 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <td>auto-detect</td>
 <td>Enable the Google Workspace data collector (auto-detected when credentials exist)</td>
 </tr>
-<tr>
-<td><code>SUMMON_SCRIBE_GOOGLE_SERVICES</code></td>
-<td><code>gmail,calendar,drive</code></td>
-<td>Comma-separated list of Google services to monitor</td>
-</tr>
 </tbody>
 </table>
-<p>The default services are <code>gmail</code>, <code>calendar</code>, <code>drive</code>. The full set of supported services is: <code>gmail</code>, <code>calendar</code>, <code>drive</code>, <code>docs</code>, <code>sheets</code>, <code>chat</code>, <code>forms</code>, <code>slides</code>, <code>tasks</code>, <code>contacts</code>, <code>search</code>, <code>appscript</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
-summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_SERVICES<span class="w"> </span>gmail,calendar
-</code></pre></div>
+<p>Available services are auto-detected from the OAuth scopes granted during <code>summon auth google login</code>.</p>
 <div class="admonition note">
 <p class="admonition-title">Requires workspace-mcp</p>
 <p>The Google collector requires the <code>google</code> extra: <code>uv tool install "summon-claude[google]"</code>. Google OAuth credentials must also be configured via <code>summon auth google setup</code> and <code>summon auth google login</code>.</p>
@@ -2597,7 +2589,7 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_BROWSER</code></td>
 <td><code>chrome</code></td>
-<td>Browser to use: <code>chrome</code>, <code>chromium</code>, <code>firefox</code>, or <code>webkit</code></td>
+<td>Browser to use: <code>chrome</code>, <code>firefox</code>, or <code>webkit</code></td>
 </tr>
 <tr>
 <td><code>SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS</code></td>
@@ -2707,7 +2699,6 @@ summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set
 
 <span class="c1"># Google Workspace collector (auto-detected when credentials exist)</span>
 <span class="c1"># SUMMON_SCRIBE_GOOGLE_ENABLED=true  # optional — auto-detected</span>
-<span class="nv">SUMMON_SCRIBE_GOOGLE_SERVICES</span><span class="o">=</span>gmail,calendar
 
 <span class="c1"># External Slack collector (auto-detected when browser auth exists)</span>
 <span class="c1"># SUMMON_SCRIBE_SLACK_ENABLED=true  # optional — auto-detected</span>

@@ -2371,11 +2371,7 @@
 <h3 id="enabling-the-google-collector">Enabling the Google collector<a class="headerlink" href="#enabling-the-google-collector" title="Permanent link">&para;</a></h3>
 <p>The Google collector is <strong>auto-detected</strong>: when workspace-mcp is installed and Google credentials exist, the scribe automatically uses Google tools. No manual config flag is needed.</p>
 <p>To explicitly disable it: <code>summon config set SUMMON_SCRIBE_GOOGLE_ENABLED false</code></p>
-<p>By default the scribe monitors <code>gmail</code>, <code>calendar</code>, and <code>drive</code>. To customize:</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># Monitor only Gmail and Calendar, not Drive</span>
-summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SCRIBE_GOOGLE_SERVICES<span class="w"> </span>gmail,calendar
-</code></pre></div>
-<p>The full set of supported services is: <code>gmail</code>, <code>calendar</code>, <code>drive</code>, <code>docs</code>, <code>sheets</code>, <code>chat</code>, <code>forms</code>, <code>slides</code>, <code>tasks</code>, <code>contacts</code>, <code>search</code>, <code>appscript</code>.</p>
+<p>Available Google services are auto-detected from the OAuth scopes granted during <code>summon auth google login</code>. The scribe automatically monitors whichever services the credential supports (e.g., Gmail, Calendar, Drive).</p>
 <hr />
 <h2 id="slack-browser-monitoring">Slack Browser Monitoring<a class="headerlink" href="#slack-browser-monitoring" title="Permanent link">&para;</a></h2>
 <p>The Scribe can monitor an external Slack workspace using browser-based WebSocket interception. This is separate from the native Slack bot integration used for session interaction — it watches a different workspace (e.g., your company's Slack) via a real browser session.</p>
