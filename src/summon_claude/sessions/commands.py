@@ -58,7 +58,7 @@ class CommandDef:
 class CommandMatch:
     """A command found in message text by ``find_commands``."""
 
-    prefix: str  # "!" or "/"
+    prefix: str  # always "!"
     name: str  # canonical (after alias resolution)
     raw_name: str  # as typed
     args: list[str]  # consumed args (LOCAL with max_args)
@@ -80,7 +80,7 @@ async def _handle_help(args: list[str], _ctx: CommandContext) -> CommandResult: 
             skill_grouped.setdefault(plugin, []).append(skill)
 
     if args:
-        cmd_name = args[0].lower().lstrip("!/")
+        cmd_name = args[0].lower().lstrip("!")
         canonical = _ALIAS_LOOKUP.get(cmd_name, cmd_name)
 
         # Check if arg is a plugin name — list its skills
@@ -593,15 +593,15 @@ def parse(text: str) -> tuple[str, list[str]] | None:
 # Mid-message command detection
 # ------------------------------------------------------------------
 
-# Match !cmd or /cmd after whitespace or start-of-string.
+# Match !cmd after whitespace or start-of-string.
 # Negative lookbehind (?<![:/]) prevents matching inside URLs (https://...)
-# or path-like tokens (repo/review).
+# or path-like tokens (repo/review).  Slash (/) is NOT a valid prefix.
 # Colons allowed for plugin:skill-name syntax (e.g. !dev-essentials:session-start).
-_COMMAND_RE = re.compile(r"(?:^|(?<=\s))(?<![:/])([!/])([a-zA-Z][a-zA-Z0-9_:-]{0,63})")
+_COMMAND_RE = re.compile(r"(?:^|(?<=\s))(?<![:/])(!)([a-zA-Z][a-zA-Z0-9_:-]{0,63})")
 
 
 def find_commands(text: str) -> list[CommandMatch]:
-    """Find all !cmd and /cmd tokens in text, with alias resolution and arg consumption."""
+    """Find all !cmd tokens in text, with alias resolution and arg consumption."""
     matches: list[CommandMatch] = []
     consumed_ranges: list[tuple[int, int]] = []
 

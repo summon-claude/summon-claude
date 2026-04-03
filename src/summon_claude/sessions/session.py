@@ -2978,7 +2978,15 @@ class SummonSession:
             except Exception:
                 logger.debug("Failed to post tracked change info for %s", user_path)
 
-        # Git diff for the file
+        # Git diff for the file — skip entirely when not in a git repo.
+        if not self._is_git_repo:
+            if not change:
+                await rt.client.post(
+                    f"_Not in a git repository — cannot show diff for `{user_path}`._",
+                    thread_ts=thread_ts,
+                )
+            return
+
         basename = resolved.rsplit("/", 1)[-1]
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -3757,9 +3765,9 @@ class SummonSession:
             await rt.permission_handler.receive_text_input(text, user_id=user_id)
             return None
 
-        # 7: Detect commands (!cmd or /cmd) anywhere in the message
-        # Fast path: skip regex scan if no command prefixes present
-        if "!" not in full_text and "/" not in full_text:
+        # 7: Detect !cmd commands anywhere in the message
+        # Fast path: skip regex scan if no command prefix present
+        if "!" not in full_text:
             return full_text, thread_ts
 
         matches = find_commands(full_text)

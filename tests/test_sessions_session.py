@@ -4459,3 +4459,77 @@ class TestPmJiraJqlIntegration:
         )
         assert "Jira Triage" in result
         assert "Cloud ID:" not in result
+
+
+class TestHandleDiffFileNonGit:
+    """BUG-084: _handle_diff_file should guard against non-git directories."""
+
+    def _make_rt(self):
+        client = make_mock_client()
+        registry = AsyncMock()
+        ph = AsyncMock()
+        return _SessionRuntime(registry=registry, client=client, permission_handler=ph)
+
+    async def test_non_git_no_tracked_change_posts_message(self, tmp_path):
+        """In non-git dir with no tracked change, should post 'not in git' message."""
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = False
+        session._changed_files = {}
+        rt = self._make_rt()
+
+        await session._handle_diff_file(rt, "some_file.py", "thread_1")
+
+        # Should post a message about not being in a git repo
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("not in a git repository" in p.lower() for p in posted)
+        # Should NOT attempt git diff (no subprocess)
+        rt.client.upload.assert_not_called()
+
+    async def test_non_git_with_tracked_change_shows_info_only(self, tmp_path):
+        """In non-git dir with tracked change info, should show change but no diff."""
+        from datetime import UTC, datetime
+
+        from summon_claude.sessions.types import FileChange
+
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = False
+        change = FileChange(
+            path="src/main.py",
+            change_type="modified",
+            additions=5,
+            deletions=2,
+            timestamp=datetime.now(tz=UTC),
+            turn_number=1,
+        )
+        session._changed_files = {"src/main.py": change}
+        rt = self._make_rt()
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            await session._handle_diff_file(rt, "src/main.py", "thread_1")
+
+            # Should NOT attempt git diff at all
+            mock_exec.assert_not_called()
+
+        # Should post the tracked change info
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("modified" in p.lower() for p in posted)
+        # Should NOT post the "not in git" message (tracked info suffices)
+        assert not any("not in a git repository" in p.lower() for p in posted)
+
+    async def test_git_repo_attempts_diff(self, tmp_path):
+        """In a git repo, should attempt git diff (existing behavior preserved)."""
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = self._make_rt()
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            mock_proc = AsyncMock()
+            mock_proc.communicate.return_value = (b"", b"")
+            mock_proc.returncode = 0
+            mock_exec.return_value = mock_proc
+
+            await session._handle_diff_file(rt, "some_file.py", "thread_1")
+
+            # Should have called git diff
+            mock_exec.assert_called_once()

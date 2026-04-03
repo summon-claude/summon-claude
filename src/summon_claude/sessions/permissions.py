@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -1215,16 +1216,20 @@ def _extract_file_path(tool_name: str, input_data: dict[str, Any]) -> str:
 
 
 def _get_cacheable_arg(tool_name: str, input_data: dict[str, Any]) -> str:
-    """Return the full, untruncated primary argument for session caching.
+    """Return the normalized primary argument for session caching.
 
-    Unlike ``get_tool_primary_arg`` (which truncates Bash commands for
-    display), this returns the raw value to ensure exact-match fidelity.
-    Two commands sharing the first 120 chars but differing after that
-    must NOT collide in the cache.
+    Bash commands are returned verbatim (exact-match required — two commands
+    sharing the first 120 chars but differing after that must NOT collide).
+    File paths are normalized via ``os.path.normpath`` + strip to collapse
+    ``/../``, trailing slashes/whitespace, and double slashes so that
+    semantically identical paths produce cache hits.
     """
     if tool_name == "Bash":
         return input_data.get("command", "")
-    return _extract_file_path(tool_name, input_data)
+    raw = _extract_file_path(tool_name, input_data)
+    if raw:
+        return os.path.normpath(raw.strip())
+    return raw
 
 
 def _sdk_suggests_deny(context: ToolPermissionContext | None, tool_name: str) -> bool:

@@ -1622,6 +1622,57 @@ class TestConfigCheckMultiAccountDisplay:
         assert installed is False
 
 
+class TestCheckGoogleStatusSetupDoneLoginPending:
+    """BUG-067: Distinguish 'setup done, login pending' from 'not configured'."""
+
+    def test_client_env_only_shows_login_guidance(self, google_creds_dir: Path, capsys) -> None:
+        """When client_env exists but no credential JSON, guide to 'login' not 'setup'."""
+        from summon_claude.cli.google_auth import _check_google_status
+
+        # Create account dir with client_env but NO credential JSON
+        acct_dir = google_creds_dir / "default"
+        acct_dir.mkdir(mode=0o700)
+        (acct_dir / "client_env").write_text("CLIENT_ID=xxx\nCLIENT_SECRET=yyy")
+        # No *.json file — discover_google_accounts() will return empty
+
+        with (
+            patch(
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+            patch(
+                "summon_claude.config.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+        ):
+            result = _check_google_status(quiet=False)
+        assert result is None
+        output = capsys.readouterr().out
+        assert "login" in output.lower()
+        assert "setup complete" in output.lower()
+
+    def test_no_client_env_shows_setup_guidance(self, google_creds_dir: Path, capsys) -> None:
+        """When no client_env exists, guide to 'setup' not 'login'."""
+        from summon_claude.cli.google_auth import _check_google_status
+
+        # Empty base dir — no account subdirectories at all
+        with (
+            patch(
+                "summon_claude.cli.google_auth.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+            patch(
+                "summon_claude.config.get_google_credentials_dir",
+                return_value=google_creds_dir,
+            ),
+        ):
+            result = _check_google_status(quiet=False)
+        assert result is None
+        output = capsys.readouterr().out
+        assert "not configured" in output.lower()
+        assert "summon auth google setup" in output
+
+
 # ---------- Test _check_google_status internal validation ----------
 
 

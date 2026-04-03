@@ -593,6 +593,63 @@ class TestBoolTrueConstant:
 
 
 # ---------------------------------------------------------------------------
+# Config check: hook bridge detection (BUG-076)
+# ---------------------------------------------------------------------------
+
+
+class TestHookBridgeDetection:
+    """BUG-076: Hook bridge detection must iterate hook entry values, not dict keys."""
+
+    def test_detects_installed_hooks(self, capsys):
+        """config_check should detect summon hooks in PreToolUse/PostToolUse lists."""
+        from summon_claude.cli.config import config_check
+
+        settings = {
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "EnterWorktree", "command": "/path/to/summon-pre-worktree.sh"}
+                ],
+                "PostToolUse": [
+                    {"matcher": "EnterWorktree", "command": "/path/to/summon-post-worktree.sh"}
+                ],
+            }
+        }
+        with (
+            patch("summon_claude.cli.hooks.read_settings", return_value=settings),
+            patch("summon_claude.daemon.is_daemon_running", return_value=False),
+        ):
+            config_check(quiet=False)
+        output = capsys.readouterr().out
+        assert "Hook bridge: installed" in output
+
+    def test_no_hooks_shows_not_installed(self, capsys):
+        """config_check should show 'not installed' when no summon hooks exist."""
+        from summon_claude.cli.config import config_check
+
+        settings = {"hooks": {"PreToolUse": [], "PostToolUse": []}}
+        with (
+            patch("summon_claude.cli.hooks.read_settings", return_value=settings),
+            patch("summon_claude.daemon.is_daemon_running", return_value=False),
+        ):
+            config_check(quiet=False)
+        output = capsys.readouterr().out
+        assert "Hook bridge: not installed" in output
+
+    def test_empty_hooks_section_shows_not_installed(self, capsys):
+        """config_check handles missing hooks section gracefully."""
+        from summon_claude.cli.config import config_check
+
+        settings = {}
+        with (
+            patch("summon_claude.cli.hooks.read_settings", return_value=settings),
+            patch("summon_claude.daemon.is_daemon_running", return_value=False),
+        ):
+            config_check(quiet=False)
+        output = capsys.readouterr().out
+        assert "Hook bridge: not installed" in output
+
+
+# ---------------------------------------------------------------------------
 # Config check: event health probe section
 # ---------------------------------------------------------------------------
 

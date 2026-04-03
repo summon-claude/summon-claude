@@ -14,6 +14,7 @@ from summon_claude.sessions.permissions import (
     _WRITE_GATED_TOOLS,
     _WRITE_TOOL_PATH_KEYS,
     PermissionHandler,
+    _get_cacheable_arg,
     _is_in_safe_dir,
 )
 from summon_claude.slack.router import ThreadRouter
@@ -731,3 +732,56 @@ class TestContainmentGitProperty:
         assert handler._in_containment is True
         assert handler._is_git_repo is True
         assert handler._containment_root == tmp_path.resolve()
+
+
+class TestGetCacheableArg:
+    """Tests for _get_cacheable_arg path normalization (BUG-086)."""
+
+    def test_bash_command_returned_verbatim(self):
+        """Bash commands must NOT be normalized — exact match required."""
+        cmd = "cd /tmp/../tmp && echo hello"
+        result = _get_cacheable_arg("Bash", {"command": cmd})
+        assert result == cmd
+
+    def test_file_path_normpath_applied(self):
+        """File paths should be normalized via os.path.normpath."""
+        result = _get_cacheable_arg("Edit", {"file_path": "/home/user/../user/file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_file_path_trailing_slash_stripped(self):
+        """Trailing slashes on file paths should be stripped."""
+        result = _get_cacheable_arg("Write", {"file_path": "/home/user/dir/"})
+        assert result == "/home/user/dir"
+
+    def test_file_path_whitespace_stripped(self):
+        """Leading/trailing whitespace on file paths should be stripped."""
+        result = _get_cacheable_arg("Edit", {"file_path": "  /home/user/file.py  "})
+        assert result == "/home/user/file.py"
+
+    def test_file_path_double_slash_collapsed(self):
+        """Double slashes in file paths should be collapsed."""
+        result = _get_cacheable_arg("Write", {"file_path": "/home//user//file.py"})
+        assert result == "/home/user/file.py"
+
+    def test_equivalent_paths_produce_same_cache_key(self):
+        """Two semantically identical paths must produce the same cache key (BUG-086 root cause)."""
+        a = _get_cacheable_arg("Edit", {"file_path": "/project/src/../src/main.py"})
+        b = _get_cacheable_arg("Edit", {"file_path": "/project/src/main.py"})
+        assert a == b
+
+    def test_empty_path_returned_as_is(self):
+        """Empty file path returns empty string without normpath."""
+        result = _get_cacheable_arg("Edit", {"file_path": ""})
+        assert result == ""
+
+    def test_no_file_path_key_returns_empty(self):
+        """Tool input without a recognized path key returns empty string."""
+        result = _get_cacheable_arg("Edit", {"other_key": "value"})
+        assert result == ""
+
+    def test_bash_long_command_not_truncated(self):
+        """Bash commands are NOT truncated — unlike display, cache uses full value."""
+        long_cmd = "x" * 200
+        result = _get_cacheable_arg("Bash", {"command": long_cmd})
+        assert result == long_cmd
+        assert len(result) == 200
