@@ -629,3 +629,44 @@ class TestRunDeviceFlow:
             pytest.raises(GitHubAuthError, match="HTTP 403"),
         ):
             await run_device_flow(client_id="test-client")
+
+
+class TestLoadTokenEnvFallback:
+    """Tests for load_token() SUMMON_GITHUB_PAT env var fallback (BUG-049)."""
+
+    def test_file_token_takes_priority(self, tmp_path):
+        token_file = tmp_path / "token.json"
+        token_file.write_text(json.dumps({"access_token": "gho_file_token"}))
+        with (
+            patch("summon_claude.github_auth.get_github_token_path", return_value=token_file),
+            patch.dict("os.environ", {"SUMMON_GITHUB_PAT": "ghp_env_token"}),
+        ):
+            assert load_token() == "gho_file_token"
+
+    def test_env_var_fallback_when_no_file(self, tmp_path):
+        token_file = tmp_path / "nonexistent.json"
+        with (
+            patch("summon_claude.github_auth.get_github_token_path", return_value=token_file),
+            patch.dict("os.environ", {"SUMMON_GITHUB_PAT": "ghp_env_token"}),
+        ):
+            assert load_token() == "ghp_env_token"
+
+    def test_none_when_no_file_no_env(self, tmp_path):
+        token_file = tmp_path / "nonexistent.json"
+        with (
+            patch("summon_claude.github_auth.get_github_token_path", return_value=token_file),
+            patch.dict("os.environ", {}, clear=False),
+        ):
+            # Ensure SUMMON_GITHUB_PAT is not set
+            import os
+
+            os.environ.pop("SUMMON_GITHUB_PAT", None)
+            assert load_token() is None
+
+    def test_env_var_strips_crlf(self, tmp_path):
+        token_file = tmp_path / "nonexistent.json"
+        with (
+            patch("summon_claude.github_auth.get_github_token_path", return_value=token_file),
+            patch.dict("os.environ", {"SUMMON_GITHUB_PAT": "ghp_token\r\n"}),
+        ):
+            assert load_token() == "ghp_token"

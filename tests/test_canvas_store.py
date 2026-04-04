@@ -512,3 +512,44 @@ class TestCanvasStoreRestoreWithChannel:
             channel_id="C_EMPTY",
         )
         assert store is None
+
+
+class TestCanvasStoreUpdateTableField:
+    """Tests for update_table_field method (BUG-080)."""
+
+    async def test_updates_status_field(self, canvas_registry):
+        client = _make_mock_client()
+        md = (
+            "# Session Status\n\n"
+            "| Field | Value |\n"
+            "|-------|-------|\n"
+            "| Status | Starting... |\n"
+            "| Model | opus |\n"
+        )
+        store = CanvasStore(
+            session_id="sess-cv",
+            canvas_id="F_1",
+            client=client,
+            registry=canvas_registry,
+            channel_id="C_TEST",
+            markdown=md,
+        )
+        await store.update_table_field("Status", "Active")
+        result = store.read()
+        assert "| Status | Active |" in result
+        assert "Starting..." not in result
+        assert "| Model | opus |" in result
+
+    async def test_no_match_is_noop(self, canvas_registry):
+        client = _make_mock_client()
+        md = "# Title\n\nNo table here.\n"
+        store = CanvasStore(
+            session_id="sess-cv",
+            canvas_id="F_1",
+            client=client,
+            registry=canvas_registry,
+            channel_id="C_TEST",
+            markdown=md,
+        )
+        await store.update_table_field("Status", "Active")
+        assert store.read() == md

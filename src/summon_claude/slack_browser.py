@@ -653,11 +653,11 @@ async def interactive_slack_auth(
                 timeout=_AUTH_TIMEOUT_S * 1000,
                 wait_until="commit",
             )
-        except Exception as exc:
+        except Exception:
             await browser.close()
             raise TimeoutError(
                 f"Slack login not completed within {_AUTH_TIMEOUT_S}s for {workspace_url}"
-            ) from exc
+            ) from None
 
         logger.info("Authenticated at %s", page.url)
 

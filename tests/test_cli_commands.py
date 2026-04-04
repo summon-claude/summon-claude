@@ -761,9 +761,12 @@ class TestGitHubAuthCLI:
             scopes="repo",
             token_path=Path("/fake/path"),
         )
-        with patch(
-            "summon_claude.github_auth.run_device_flow",
-            new=AsyncMock(return_value=mock_result),
+        with (
+            patch(
+                "summon_claude.github_auth.run_device_flow",
+                new=AsyncMock(return_value=mock_result),
+            ),
+            patch("summon_claude.cli.config.click.launch"),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["auth", "github", "login"])
@@ -789,9 +792,12 @@ class TestGitHubAuthCLI:
                 on_code("AB\x1b[31mCD", "https://github.com/login/device\x1b[0m")
             return mock_result
 
-        with patch(
-            "summon_claude.github_auth.run_device_flow",
-            new=AsyncMock(side_effect=_fake_flow),
+        with (
+            patch(
+                "summon_claude.github_auth.run_device_flow",
+                new=AsyncMock(side_effect=_fake_flow),
+            ),
+            patch("summon_claude.cli.config.click.launch"),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["auth", "github", "login"])
@@ -1008,3 +1014,59 @@ class TestCleanupCommand:
 
             # Verify archive was called
             mock_web_client.conversations_archive.assert_called_once_with(channel="C_STALE")
+
+
+class TestMaskSecret:
+    """Tests for _mask_secret helper (BUG-046)."""
+
+    def test_normal_token(self):
+        from summon_claude.cli import _mask_secret
+
+        result = _mask_secret("xoxb-1234567890-abcdefghij")
+        assert result.startswith("xoxb-")
+        assert "ghij" in result
+        assert "26 chars" in result
+
+    def test_short_value(self):
+        from summon_claude.cli import _mask_secret
+
+        result = _mask_secret("abc")
+        assert "***" in result
+        assert "3 chars" in result
+
+    def test_empty_value(self):
+        from summon_claude.cli import _mask_secret
+
+        result = _mask_secret("")
+        assert "0 chars" in result
+
+    def test_exact_boundary(self):
+        from summon_claude.cli import _mask_secret
+
+        result = _mask_secret("123456789")  # exactly prefix_len + suffix_len
+        assert "9 chars" in result
+
+
+class TestGetUpgradeCommand:
+    """Tests for get_upgrade_command helper (BUG-069)."""
+
+    def test_default_is_uv(self):
+        from summon_claude.cli.config import get_upgrade_command
+
+        with patch("summon_claude.cli.config.sys") as mock_sys:
+            mock_sys.executable = "/home/user/.local/share/uv/tools/summon-claude/bin/python"
+            assert "uv tool upgrade" in get_upgrade_command()
+
+    def test_homebrew_detected(self):
+        from summon_claude.cli.config import get_upgrade_command
+
+        with patch("summon_claude.cli.config.sys") as mock_sys:
+            mock_sys.executable = "/opt/homebrew/Cellar/summon-claude/1.0/libexec/bin/python"
+            assert "brew upgrade" in get_upgrade_command()
+
+    def test_pipx_detected(self):
+        from summon_claude.cli.config import get_upgrade_command
+
+        with patch("summon_claude.cli.config.sys") as mock_sys:
+            mock_sys.executable = "/home/user/.local/pipx/venvs/summon-claude/bin/python"
+            assert "pipx upgrade" in get_upgrade_command()

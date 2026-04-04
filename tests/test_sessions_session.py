@@ -4556,3 +4556,40 @@ class TestHandleDiffFileNonGit:
             call_kwargs = rt.client.upload.call_args.kwargs
             assert call_kwargs.get("snippet_type") == "diff"
             assert "filetype" not in call_kwargs
+
+
+class TestDisplayPath:
+    """Tests for SummonSession._display_path (BUG-085)."""
+
+    def _make_session_with_cwd(self, cwd: str):
+        """Create a minimal object with _cwd for testing _display_path."""
+        from summon_claude.sessions.session import SummonSession
+
+        # Use __new__ to skip __init__, set only what _display_path needs
+        session = object.__new__(SummonSession)
+        session._cwd = cwd
+        return session
+
+    def test_file_in_cwd(self):
+        s = self._make_session_with_cwd("/home/user/project")
+        assert s._display_path("/home/user/project/foo.py") == "foo.py"
+
+    def test_file_in_cwd_subdirectory(self):
+        s = self._make_session_with_cwd("/home/user/project")
+        assert s._display_path("/home/user/project/src/main.py") == "src/main.py"
+
+    def test_file_outside_cwd_in_home(self):
+        from pathlib import Path
+
+        s = self._make_session_with_cwd("/home/user/project")
+        result = s._display_path(str(Path.home() / "Documents" / "test.txt"))
+        assert result.startswith("~/")
+        assert result.endswith("Documents/test.txt")
+
+    def test_file_outside_home(self):
+        s = self._make_session_with_cwd("/home/user/project")
+        assert s._display_path("/tmp/scratch.txt") == "/tmp/scratch.txt"
+
+    def test_file_is_cwd_itself(self):
+        s = self._make_session_with_cwd("/home/user/project")
+        assert s._display_path("/home/user/project") == "."

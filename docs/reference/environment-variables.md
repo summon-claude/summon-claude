@@ -115,7 +115,7 @@ See [GitHub Integration](../guide/github-integration.md) for setup details.
 |------------|------|---------|-------------|
 | `SUMMON_PERMISSION_DEBOUNCE_MS` | integer | `2000` | Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message. |
 | `SUMMON_NO_UPDATE_CHECK` | boolean | `false` | Disable the background PyPI update check on `summon start`. |
-| `SUMMON_SAFE_WRITE_DIRS` | text | `` | Comma-separated directories where writes are allowed without entering containment (e.g. `hack/`). Paths resolved with symlink protection. |
+| `SUMMON_SAFE_WRITE_DIRS` | text | `` | Comma-separated directories where writes are allowed without entering containment (e.g. `hack/,.dev/`). Relative paths resolve against the session's working directory; absolute paths also work. Tilde (`~`) is expanded to the home directory. |
 
 ---
 

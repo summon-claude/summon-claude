@@ -310,7 +310,9 @@ class PermissionHandler:
         # Write gate state
         self._project_root: Path | None = Path(project_root) if project_root else None
         self._safe_dirs: list[str] = [
-            d.strip() for d in config.safe_write_dirs.split(",") if d.strip()
+            str(Path(d.strip()).expanduser())
+            for d in config.safe_write_dirs.split(",")
+            if d.strip()
         ]
         self._in_containment = False
         self._in_worktree = False  # worktree-specific flag for classifier gating
