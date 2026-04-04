@@ -423,6 +423,7 @@ class TestInteractiveSlackAuth:
     @pytest.mark.asyncio
     async def test_non_timeout_exception_reraises_original(self, tmp_path):
         """Non-timeout exceptions from wait_for_url must propagate unchanged."""
+        pytest.importorskip("playwright")
         from unittest.mock import AsyncMock, MagicMock
         from unittest.mock import patch as _patch
 
