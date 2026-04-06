@@ -74,7 +74,13 @@ ______________________________________________________________________
 
 ## GitHub
 
-GitHub integration uses OAuth device flow authentication — no environment variable needed. Run `summon auth github login` to authenticate.
+GitHub integration uses OAuth device flow authentication. Run `summon auth github login` to authenticate interactively.
+
+For CI/CD and enterprise environments where interactive auth is unavailable, you can set a personal access token via environment variable:
+
+| Config Key          | Type | Default  | Description                                                                                                                                                                                                                                                                      |
+| ------------------- | ---- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SUMMON_GITHUB_PAT` | text | *(none)* | GitHub personal access token (fallback when OAuth token file is absent). Should use a recognized prefix (`ghp_`, `github_pat_`, `gho_`, `ghu_`, `ghs_`, `ghr_`); unrecognized formats trigger a warning but are accepted. OAuth token file takes priority when both are present. |
 
 See [GitHub Integration](https://summon-claude.github.io/summon-claude/latest/guide/github-integration/index.md) for setup details.
 
@@ -112,11 +118,11 @@ Advanced
 
 These options are hidden behind "Configure advanced settings?" in the `summon init` wizard. They can always be set directly with `summon config set`.
 
-| Config Key                      | Type    | Default | Description                                                                                                                               |
-| ------------------------------- | ------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMON_PERMISSION_DEBOUNCE_MS` | integer | `2000`  | Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message.                    |
-| `SUMMON_NO_UPDATE_CHECK`        | boolean | `false` | Disable the background PyPI update check on `summon start`.                                                                               |
-| `SUMMON_SAFE_WRITE_DIRS`        | text    | \`\`    | Comma-separated directories where writes are allowed without entering containment (e.g. `hack/`). Paths resolved with symlink protection. |
+| Config Key                      | Type    | Default | Description                                                                                                                                                                                                                                                         |
+| ------------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SUMMON_PERMISSION_DEBOUNCE_MS` | integer | `2000`  | Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message.                                                                                                                                              |
+| `SUMMON_NO_UPDATE_CHECK`        | boolean | `false` | Disable the background PyPI update check on `summon start`.                                                                                                                                                                                                         |
+| `SUMMON_SAFE_WRITE_DIRS`        | text    | \`\`    | Comma-separated directories where writes are allowed without entering containment (e.g. `hack/,.dev/`). Relative paths resolve against the project root (the `cwd` passed to the session); absolute paths also work. Tilde (`~`) is expanded to the home directory. |
 
 ______________________________________________________________________
 

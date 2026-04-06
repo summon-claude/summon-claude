@@ -2454,6 +2454,7 @@
 <p>You can configure directories where writes are allowed <strong>without entering containment</strong>:</p>
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_SAFE_WRITE_DIRS<span class="w"> </span><span class="s2">&quot;hack/,.dev/&quot;</span>
 </code></pre></div>
+<p>Paths are <strong>comma-separated</strong>. Relative paths (e.g. <code>hack/</code>) are resolved relative to the project root (the <code>cwd</code> passed to the session). Absolute paths (e.g. <code>/opt/shared/config/</code>) are also supported. Tilde (<code>~</code>) is expanded to the home directory. Trailing slashes are optional — <code>hack</code> and <code>hack/</code> are equivalent.</p>
 <p>Files written to these directories bypass the containment requirement entirely. Paths are resolved with symlink protection (<code>Path.resolve()</code> on both sides) to prevent escapes. Setting <code>safe_write_dirs=.</code> exempts the entire project directory for file-targeting tools (Bash remains gated regardless).</p>
 <hr />
 <h2 id="auto-approved-tools">Auto-approved tools<a class="headerlink" href="#auto-approved-tools" title="Permanent link">&para;</a></h2>

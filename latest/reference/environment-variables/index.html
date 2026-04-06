@@ -2499,7 +2499,26 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </table>
 <hr />
 <h2 id="github">GitHub<a class="headerlink" href="#github" title="Permanent link">&para;</a></h2>
-<p>GitHub integration uses OAuth device flow authentication — no environment variable needed. Run <code>summon auth github login</code> to authenticate.</p>
+<p>GitHub integration uses OAuth device flow authentication. Run <code>summon auth github login</code> to authenticate interactively.</p>
+<p>For CI/CD and enterprise environments where interactive auth is unavailable, you can set a personal access token via environment variable:</p>
+<table>
+<thead>
+<tr>
+<th>Config Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SUMMON_GITHUB_PAT</code></td>
+<td>text</td>
+<td><em>(none)</em></td>
+<td>GitHub personal access token (fallback when OAuth token file is absent). Should use a recognized prefix (<code>ghp_</code>, <code>github_pat_</code>, <code>gho_</code>, <code>ghu_</code>, <code>ghs_</code>, <code>ghr_</code>); unrecognized formats trigger a warning but are accepted. OAuth token file takes priority when both are present.</td>
+</tr>
+</tbody>
+</table>
 <p>See <a href="../../guide/github-integration/">GitHub Integration</a> for setup details.</p>
 <hr />
 <h2 id="global-pm">Global PM<a class="headerlink" href="#global-pm" title="Permanent link">&para;</a></h2>
@@ -2593,7 +2612,7 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <td><code>SUMMON_SAFE_WRITE_DIRS</code></td>
 <td>text</td>
 <td>``</td>
-<td>Comma-separated directories where writes are allowed without entering containment (e.g. <code>hack/</code>). Paths resolved with symlink protection.</td>
+<td>Comma-separated directories where writes are allowed without entering containment (e.g. <code>hack/,.dev/</code>). Relative paths resolve against the project root (the <code>cwd</code> passed to the session); absolute paths also work. Tilde (<code>~</code>) is expanded to the home directory.</td>
 </tr>
 </tbody>
 </table>
