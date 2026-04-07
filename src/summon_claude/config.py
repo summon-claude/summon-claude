@@ -1131,7 +1131,7 @@ def get_model_choices() -> list[str]:
 
         cached = load_cached_models()
         if cached is not None:
-            values = [m.get("value") for m in cached if m.get("value")]
+            values = [v for m in cached if (v := m.get("value"))]
             if values:
                 return ["default (auto)", *values, "other"]
     except Exception:
@@ -1151,7 +1151,10 @@ def _warn_unrecognized_model(value: str) -> str | None:
         from summon_claude.sessions.context import CONTEXT_WINDOW_SIZES  # noqa: PLC0415
 
         if not any(value.startswith(prefix) for prefix in CONTEXT_WINDOW_SIZES):
-            click.echo(f"Warning: '{value}' is not a recognized model. It will be used as-is.")
+            click.echo(
+                f"Warning: '{value}' is not a recognized model. It will be used as-is.",
+                err=True,
+            )
     except Exception:
         logger.debug("Failed to warn unrecognized model", exc_info=True)
     return None

@@ -521,7 +521,7 @@ class TestModelChoices:
         mock_echo.assert_not_called()
 
     def test_warn_unrecognized_model_unknown(self):
-        """Unknown model (no CONTEXT_WINDOW_SIZES prefix match) → returns None, emits warning."""
+        """Unknown model (no CONTEXT_WINDOW_SIZES match) → returns None, warns to stderr."""
         from unittest.mock import patch as _patch
 
         from summon_claude.config import _warn_unrecognized_model
@@ -531,6 +531,7 @@ class TestModelChoices:
         assert result is None
         mock_echo.assert_called_once()
         assert "totally-unknown-model-xyz" in mock_echo.call_args[0][0]
+        assert mock_echo.call_args[1].get("err") is True
 
     def test_warn_unrecognized_model_prefix_match_no_warning(self):
         """Dated snapshot prefix-matches CONTEXT_WINDOW_SIZES → no warning."""

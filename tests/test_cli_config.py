@@ -44,9 +44,9 @@ class TestConfigSetModelValidation:
 
         content = config_file.read_text()
         assert "SUMMON_DEFAULT_MODEL=my-custom-model" in content
-        # Warning is printed via click.echo (captured in stdout)
+        # Warning is printed via click.echo(err=True) → captured in stderr
         captured = capsys.readouterr()
-        assert "Warning" in captured.out or "my-custom-model" in captured.out
+        assert "Warning" in captured.err and "my-custom-model" in captured.err
 
     def test_config_set_other_sentinel_blocked(self, tmp_path):
         """Literal 'other' sent to a model field → hard rejection."""
