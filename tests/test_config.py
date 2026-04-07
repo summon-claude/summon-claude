@@ -510,55 +510,36 @@ class TestModelChoices:
         assert choices == ["default (auto)", *list(_FALLBACK_MODEL_CHOICES), "other"]
 
     def test_warn_unrecognized_model_known(self):
-        """Known model in choices → returns None, no warning."""
+        """Known model (prefix-matches CONTEXT_WINDOW_SIZES) → returns None, no warning."""
         from unittest.mock import patch as _patch
 
         from summon_claude.config import _warn_unrecognized_model
 
-        with (
-            _patch(
-                "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[{"value": "claude-opus-4-6"}],
-            ),
-            _patch("click.echo") as mock_echo,
-        ):
+        with _patch("click.echo") as mock_echo:
             result = _warn_unrecognized_model("claude-opus-4-6")
         assert result is None
         mock_echo.assert_not_called()
 
     def test_warn_unrecognized_model_unknown(self):
-        """Unknown model → returns None but emits click.echo warning."""
+        """Unknown model (no CONTEXT_WINDOW_SIZES prefix match) → returns None, emits warning."""
         from unittest.mock import patch as _patch
 
         from summon_claude.config import _warn_unrecognized_model
 
-        with (
-            _patch(
-                "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[],
-            ),
-            _patch("click.echo") as mock_echo,
-        ):
+        with _patch("click.echo") as mock_echo:
             result = _warn_unrecognized_model("totally-unknown-model-xyz")
         assert result is None
         mock_echo.assert_called_once()
         assert "totally-unknown-model-xyz" in mock_echo.call_args[0][0]
 
     def test_warn_unrecognized_model_prefix_match_no_warning(self):
-        """Model not in choices but prefix-matches CONTEXT_WINDOW_SIZES → no warning."""
+        """Dated snapshot prefix-matches CONTEXT_WINDOW_SIZES → no warning."""
         from unittest.mock import patch as _patch
 
         from summon_claude.config import _warn_unrecognized_model
 
-        # Empty cache → no model in choices list
-        with (
-            _patch(
-                "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[],
-            ),
-            _patch("click.echo") as mock_echo,
-        ):
-            # "claude-opus-4-6-20260401" not in choices, but starts with "claude-opus-4-6"
+        with _patch("click.echo") as mock_echo:
+            # "claude-opus-4-6-20260401" starts with "claude-opus-4-6" in CONTEXT_WINDOW_SIZES
             result = _warn_unrecognized_model("claude-opus-4-6-20260401")
         assert result is None
         mock_echo.assert_not_called()

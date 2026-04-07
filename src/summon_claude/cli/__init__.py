@@ -631,7 +631,7 @@ def cmd_init(ctx: click.Context) -> None:
         cached = load_cached_models()
         if cached is None:
             click.echo("  Discovering available models...", nl=False)
-            sdk_result = asyncio.run(query_sdk_models())
+            sdk_result = asyncio.run(query_sdk_models(cli_version=cli_status.version))
             if sdk_result is not None:
                 sdk_models, sdk_cli_version = sdk_result
                 cache_sdk_models(sdk_models, sdk_cli_version)

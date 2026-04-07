@@ -83,12 +83,19 @@ def load_cached_models(current_cli_version: str | None = None) -> list[dict[str,
         return None
 
 
-async def query_sdk_models() -> tuple[list[dict[str, str]], str | None] | None:
+async def query_sdk_models(
+    cli_version: str | None = None,
+) -> tuple[list[dict[str, str]], str | None] | None:
     """Spawn a throwaway SDK session to extract server_info.models.
 
     CLI-only: must be called via asyncio.run() in a single-threaded context.
     Do NOT call from the daemon or any async context with concurrent tasks —
     use the _ai_env_lock pattern from slack/mcp.py instead.
+
+    Args:
+        cli_version: CLI version string from check_claude_cli().version.
+            Passed through to the return tuple — avoids re-running
+            check_claude_cli() when the caller already has it.
 
     Returns (models_list, cli_version) on success, None on any failure.
     """
@@ -96,12 +103,6 @@ async def query_sdk_models() -> tuple[list[dict[str, str]], str | None] | None:
 
     try:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # noqa: PLC0415
-
-        from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
-
-        cli_status = check_claude_cli()
-        if not cli_status.found:
-            return None
 
         saved = os.environ.pop("CLAUDECODE", None)
         try:
@@ -118,7 +119,7 @@ async def query_sdk_models() -> tuple[list[dict[str, str]], str | None] | None:
                     if server_info is None:
                         return None
                     models = server_info.get("models", [])
-                    return (models, cli_status.version)
+                    return (models, cli_version)
 
             return await asyncio.wait_for(_do_query(), timeout=10)
         finally:

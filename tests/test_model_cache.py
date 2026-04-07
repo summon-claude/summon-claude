@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -135,11 +135,7 @@ class TestLoadCachedModels:
 
 class TestQuerySdkModels:
     def test_query_sdk_models_success(self, tmp_path):
-        """Mock ClaudeSDKClient → verify returns (models, version).
-
-        Lazy imports inside query_sdk_models() mean mock targets are the
-        source modules, not summon_claude.cli.model_cache.
-        """
+        """Mock ClaudeSDKClient → verify returns (models, cli_version)."""
         import asyncio
 
         mock_server_info = {"models": _SAMPLE_MODELS}
@@ -148,21 +144,11 @@ class TestQuerySdkModels:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=None)
 
-        mock_cli_status = MagicMock()
-        mock_cli_status.found = True
-        mock_cli_status.version = "1.2.3"
-
-        with (
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                return_value=mock_client,
-            ),
-            patch(
-                "summon_claude.cli.preflight.check_claude_cli",
-                return_value=mock_cli_status,
-            ),
+        with patch(
+            "claude_agent_sdk.ClaudeSDKClient",
+            return_value=mock_client,
         ):
-            result = asyncio.run(query_sdk_models())
+            result = asyncio.run(query_sdk_models(cli_version="1.2.3"))
 
         assert result is not None
         models, version = result
@@ -173,35 +159,10 @@ class TestQuerySdkModels:
         """Mock exception from ClaudeSDKClient → returns None."""
         import asyncio
 
-        mock_cli_status = MagicMock()
-        mock_cli_status.found = True
-        mock_cli_status.version = "1.2.3"
-
-        with (
-            patch(
-                "claude_agent_sdk.ClaudeSDKClient",
-                side_effect=RuntimeError("SDK error"),
-            ),
-            patch(
-                "summon_claude.cli.preflight.check_claude_cli",
-                return_value=mock_cli_status,
-            ),
-        ):
-            result = asyncio.run(query_sdk_models())
-
-        assert result is None
-
-    def test_query_sdk_models_cli_not_found(self, tmp_path):
-        """CLI not found → returns None without spawning SDK."""
-        import asyncio
-
-        mock_cli_status = MagicMock()
-        mock_cli_status.found = False
-
         with patch(
-            "summon_claude.cli.preflight.check_claude_cli",
-            return_value=mock_cli_status,
+            "claude_agent_sdk.ClaudeSDKClient",
+            side_effect=RuntimeError("SDK error"),
         ):
-            result = asyncio.run(query_sdk_models())
+            result = asyncio.run(query_sdk_models(cli_version="1.2.3"))
 
         assert result is None

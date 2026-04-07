@@ -448,6 +448,48 @@ class TestCmdInit:
         assert "SUMMON_DEFAULT_MODEL=my-fine-tuned-model" in content
         assert "other" not in content
 
+    def test_init_model_picker_other_empty_fresh_install(self, tmp_path):
+        """Selecting 'other' then pressing Enter on fresh install stores nothing (skips)."""
+        config_file = tmp_path / "config.env"
+
+        inputs = (
+            "\n".join(
+                [
+                    "xoxb-valid-bot-token",
+                    "xapp-valid-app-token",
+                    "abcdef012345",
+                    "other",  # default_model: select "other" sentinel
+                    "",  # default_model (custom): empty → skip
+                    "high",  # default_effort
+                    "",  # channel_prefix
+                    "n",  # scribe_enabled
+                    "n",  # Configure advanced settings?
+                ]
+            )
+            + "\n"
+        )
+
+        with (
+            patch("summon_claude.cli.get_config_file", return_value=config_file),
+            patch("summon_claude.config.get_config_file", return_value=config_file),
+            patch(
+                "summon_claude.cli.preflight.check_claude_cli",
+                return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch("summon_claude.cli.config.config_check"),
+            patch(
+                "summon_claude.cli.model_cache.query_sdk_models",
+                return_value=None,
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["init"], input=inputs)
+
+        assert result.exit_code == 0, f"Init failed: {result.output}"
+        content = config_file.read_text()
+        # Empty "other" input on fresh install → value is "" → not stored (skipped)
+        assert "SUMMON_DEFAULT_MODEL" not in content
+
     def test_init_reinit_custom_model_preserved(self, tmp_path):
         """Re-init with existing custom model inserts it into choices and preserves it on Enter."""
         config_file = tmp_path / "config.env"
