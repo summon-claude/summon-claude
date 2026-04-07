@@ -1171,6 +1171,89 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
 
         _pm_status_tool = session_status_update
 
+    _wf_tool: SdkMcpTool | None = None
+    if is_global_pm:
+
+        @tool(
+            "get_workflow_instructions",
+            (
+                "Retrieve workflow instructions for a project or the global defaults. "
+                "project_name: project name to look up (optional). "
+                "If omitted, returns global default instructions. "
+                "If provided, returns effective instructions for that project "
+                "(project-specific override if set, otherwise global defaults)."
+            ),
+            {
+                "type": "object",
+                "properties": {"project_name": {"type": "string"}},
+                "required": [],
+            },
+        )
+        async def get_workflow_instructions(args: dict) -> dict:
+            project_name = args.get("project_name")
+            try:
+                if project_name:
+                    projects = await registry.list_projects()
+                    project = next(
+                        (p for p in projects if p["name"] == project_name),
+                        None,
+                    )
+                    if not project:
+                        # Fall back to project_id prefix match
+                        project = next(
+                            (p for p in projects if p["project_id"].startswith(project_name)),
+                            None,
+                        )
+                    if not project:
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Error: project '{project_name}' not found.",
+                                }
+                            ],
+                            "is_error": True,
+                        }
+                    instructions = await registry.get_effective_workflow(project["project_id"])
+                    source = (
+                        "project-specific"
+                        if project.get("workflow_instructions") is not None
+                        else "global default"
+                    )
+                else:
+                    instructions = await registry.get_workflow_defaults()
+                    source = "global default"
+
+                if not instructions:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "No workflow instructions configured.",
+                            }
+                        ]
+                    }
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"[Source: {source}]\n\n{instructions}",
+                        }
+                    ]
+                }
+            except Exception as e:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error retrieving workflow instructions: {e}",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+        _wf_tool = get_workflow_instructions
+
     # Common tools: session info (2) + cron (3) + task (3) = 8; PM adds 5 more
     tools: list[SdkMcpTool] = [
         session_list,
@@ -1195,6 +1278,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
+        if _wf_tool is not None:
+            tools.append(_wf_tool)
     return tools
 
 

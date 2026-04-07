@@ -199,6 +199,14 @@ class TestGlobalPMSystemPrompt:
         assert "TaskList" in text
         assert "CronList" in text
 
+    def test_prompt_contains_workflow_tool(self):
+        prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
+        assert "get_workflow_instructions" in prompt["append"]
+
+    def test_prompt_contains_workflow_compliance_section(self):
+        prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
+        assert "Workflow Compliance" in prompt["append"]
+
 
 # ---------------------------------------------------------------------------
 # C3: Profile wiring tests
@@ -271,6 +279,27 @@ class TestGlobalPMProfile:
         tool_names = [t.name for t in tools]
         assert "session_start" in tool_names
         assert "session_message" in tool_names
+
+    def test_get_workflow_instructions_in_gpm_tools(self):
+        """Guard test: get_workflow_instructions MUST be in GPM's CLI MCP tool list."""
+        import asyncio
+
+        from summon_claude.sessions.scheduler import SessionScheduler
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        scheduler = SessionScheduler(asyncio.Queue(), asyncio.Event())
+        tools = create_summon_cli_mcp_tools(
+            registry=MagicMock(),
+            session_id="gpm-test",
+            authenticated_user_id="U001",
+            channel_id="C001",
+            cwd="/tmp",
+            is_pm=True,
+            is_global_pm=True,
+            scheduler=scheduler,
+        )
+        tool_names = [t.name for t in tools]
+        assert "get_workflow_instructions" in tool_names
 
 
 # ---------------------------------------------------------------------------
@@ -558,3 +587,7 @@ class TestGlobalPMScanPrompt:
     def test_gpm_scan_prompt_corrective_examples(self):
         result = build_global_pm_scan_prompt()
         assert "errored for" in result
+
+    def test_gpm_scan_prompt_workflow_compliance(self):
+        result = build_global_pm_scan_prompt()
+        assert "get_workflow_instructions" in result

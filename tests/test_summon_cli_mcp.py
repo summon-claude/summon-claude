@@ -1268,3 +1268,127 @@ class TestSessionStatusUpdate:
         result = await tools["session_status_update"].handler({"summary": "Status update"})
         assert result.get("is_error") is True
         assert "Error updating status" in result["content"][0]["text"]
+
+
+class TestGetWorkflowInstructions:
+    """Tests for the get_workflow_instructions MCP tool (GPM-only)."""
+
+    @pytest.fixture
+    async def gpm_tools_with_workflows(self, populated_registry):
+        """Create GPM tools with workflow data pre-configured."""
+        project_id = await populated_registry.add_project("test-proj", "/tmp/test-proj")
+        await populated_registry.set_workflow_defaults("Always run tests.")
+        await populated_registry.set_project_workflow(project_id, "Use TDD for this project.")
+
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+        return tools, project_id
+
+    async def test_global_defaults(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "global default" in text.lower()
+        assert "Always run tests." in text
+
+    async def test_project_override(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({"project_name": "test-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "project-specific" in text.lower()
+        assert "Use TDD for this project." in text
+
+    async def test_project_fallback_to_global(self, populated_registry):
+        """Project with no override falls back to global."""
+        await populated_registry.add_project("fallback-proj", "/tmp/fb-proj")
+        await populated_registry.set_workflow_defaults("Global rules.")
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+        result = await tools["get_workflow_instructions"].handler({"project_name": "fallback-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "global default" in text.lower()
+        assert "Global rules." in text
+
+    async def test_project_not_found(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({"project_name": "nonexistent"})
+        assert result.get("is_error") is True
+        assert "not found" in result["content"][0]["text"]
+
+    async def test_none_configured(self, populated_registry):
+        """Returns 'no workflow instructions' when nothing is set."""
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+        result = await tools["get_workflow_instructions"].handler({})
+        assert not result.get("is_error")
+        assert "No workflow instructions configured." in result["content"][0]["text"]
+
+    async def test_not_available_to_regular_pm(self, populated_registry):
+        """Tool is NOT registered for regular PM sessions."""
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="pm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_PM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=False,
+                scheduler=make_scheduler(),
+            )
+        }
+        assert "get_workflow_instructions" not in tools
+
+    async def test_not_available_to_regular_session(self, populated_registry):
+        """Tool is NOT registered for regular (non-PM) sessions."""
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="regular-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_REG",
+                cwd="/tmp",
+                is_pm=False,
+                is_global_pm=False,
+                scheduler=make_scheduler(),
+            )
+        }
+        assert "get_workflow_instructions" not in tools
