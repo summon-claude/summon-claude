@@ -282,12 +282,10 @@ class TestGlobalPMProfile:
 
     def test_get_workflow_instructions_in_gpm_tools(self):
         """Guard test: get_workflow_instructions MUST be in GPM's CLI MCP tool list."""
-        import asyncio
+        from conftest import make_scheduler
 
-        from summon_claude.sessions.scheduler import SessionScheduler
         from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
 
-        scheduler = SessionScheduler(asyncio.Queue(), asyncio.Event())
         tools = create_summon_cli_mcp_tools(
             registry=MagicMock(),
             session_id="gpm-test",
@@ -296,7 +294,7 @@ class TestGlobalPMProfile:
             cwd="/tmp",
             is_pm=True,
             is_global_pm=True,
-            scheduler=scheduler,
+            scheduler=make_scheduler(),
         )
         tool_names = [t.name for t in tools]
         assert "get_workflow_instructions" in tool_names

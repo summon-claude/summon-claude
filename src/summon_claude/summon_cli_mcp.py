@@ -1193,17 +1193,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             project_name = args.get("project_name")
             try:
                 if project_name:
-                    projects = await registry.list_projects()
-                    project = next(
-                        (p for p in projects if p["name"] == project_name),
-                        None,
-                    )
-                    if not project:
-                        # Fall back to project_id prefix match
-                        project = next(
-                            (p for p in projects if p["project_id"].startswith(project_name)),
-                            None,
-                        )
+                    project = await registry.get_project(project_name)
                     if not project:
                         return {
                             "content": [
@@ -1254,7 +1244,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
 
         _wf_tool = get_workflow_instructions
 
-    # Common tools: session info (2) + cron (3) + task (3) = 8; PM adds 5 more
+    # Common tools: session info (2) + cron (3) + task (3) = 8
     tools: list[SdkMcpTool] = [
         session_list,
         session_info,

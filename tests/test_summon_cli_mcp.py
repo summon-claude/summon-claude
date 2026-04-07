@@ -1392,3 +1392,54 @@ class TestGetWorkflowInstructions:
             )
         }
         assert "get_workflow_instructions" not in tools
+
+    async def test_include_global_token_expansion(self, populated_registry):
+        """$INCLUDE_GLOBAL token in project instructions is expanded."""
+        project_id = await populated_registry.add_project("token-proj", "/tmp/token-proj")
+        await populated_registry.set_workflow_defaults("Global rules.")
+        await populated_registry.set_project_workflow(
+            project_id, "Before.\n$INCLUDE_GLOBAL\nAfter."
+        )
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+        result = await tools["get_workflow_instructions"].handler({"project_name": "token-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "Global rules." in text
+        assert "Before." in text
+        assert "After." in text
+        assert "$INCLUDE_GLOBAL" not in text
+
+    async def test_registry_error_returns_error(self, populated_registry):
+        """Registry exception is caught and returned as error."""
+        mock_registry = AsyncMock()
+        mock_registry.get_workflow_defaults = AsyncMock(
+            side_effect=RuntimeError("DB connection lost")
+        )
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=mock_registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+        result = await tools["get_workflow_instructions"].handler({})
+        assert result.get("is_error") is True
+        assert "Error retrieving workflow instructions" in result["content"][0]["text"]
