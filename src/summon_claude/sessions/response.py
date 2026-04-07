@@ -396,8 +396,11 @@ class ResponseStreamer:
             try:
                 fut = self._bridge.create_future(block.name)
                 approval = await asyncio.wait_for(fut, timeout=660.0)
-            except TimeoutError:
-                logger.warning("Approval bridge timeout for %s — posting without label", block.name)
+            except (TimeoutError, asyncio.CancelledError):
+                logger.warning(
+                    "Approval bridge timeout for %s — posting without label",
+                    block.name,
+                )
 
         if approval is not None and approval.is_denial:
             self._turn.denied_tool_use_ids.add(block.id)
