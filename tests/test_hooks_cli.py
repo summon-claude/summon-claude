@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import stat
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -26,19 +27,22 @@ from summon_claude.cli import cli
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
 def _patch_paths(tmp_path: Path):
     """Return a context manager that redirects all path constants to tmp_path."""
     hooks_dir = tmp_path / ".claude" / "hooks"
     settings_path = tmp_path / ".claude" / "settings.json"
     pre_script = hooks_dir / "summon-pre-worktree.sh"
     post_script = hooks_dir / "summon-post-worktree.sh"
+    state_file = hooks_dir / ".summon-state.json"
 
-    return (
-        patch.object(hooks_module, "_HOOKS_DIR", hooks_dir),
-        patch.object(hooks_module, "_SETTINGS_PATH", settings_path),
-        patch.object(hooks_module, "_PRE_SCRIPT", pre_script),
-        patch.object(hooks_module, "_POST_SCRIPT", post_script),
-    )
+    with ExitStack() as stack:
+        stack.enter_context(patch.object(hooks_module, "_HOOKS_DIR", hooks_dir))
+        stack.enter_context(patch.object(hooks_module, "_SETTINGS_PATH", settings_path))
+        stack.enter_context(patch.object(hooks_module, "_PRE_SCRIPT", pre_script))
+        stack.enter_context(patch.object(hooks_module, "_POST_SCRIPT", post_script))
+        stack.enter_context(patch.object(hooks_module, "_STATE_FILE", state_file))
+        yield
 
 
 def _invoke_install(
@@ -48,14 +52,7 @@ def _invoke_install(
 ) -> object:
     """Invoke install_hooks with all paths redirected to tmp_path."""
     which_map = {"summon": summon_bin, "sqlite3": sqlite3_bin}
-    patches = _patch_paths(tmp_path)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patch("shutil.which", side_effect=which_map.get),
-    ):
+    with _patch_paths(tmp_path), patch("shutil.which", side_effect=which_map.get):
         from summon_claude.cli.hooks import install_hooks
 
         install_hooks()
@@ -298,14 +295,7 @@ class TestInstallWarnsNoSqlite3:
     def test_install_warns_when_sqlite3_missing(self, tmp_path, capsys):
         """A warning is printed to stderr when sqlite3 CLI is not on PATH."""
         which_map = {"summon": "/usr/local/bin/summon", "sqlite3": None}
-        patches = _patch_paths(tmp_path)
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patches[3],
-            patch("shutil.which", side_effect=which_map.get),
-        ):
+        with _patch_paths(tmp_path), patch("shutil.which", side_effect=which_map.get):
             from summon_claude.cli.hooks import install_hooks
 
             install_hooks()
@@ -335,8 +325,7 @@ class TestHooksUninstallRemovesEntries:
         assert settings["hooks"]["PreToolUse"]
 
         # Now uninstall
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -354,8 +343,7 @@ class TestHooksUninstallRemovesEntries:
         """uninstall_hooks removes the PostToolUse summon entry from settings.json."""
         _invoke_install(tmp_path)
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -382,8 +370,7 @@ class TestHooksUninstallRemovesScripts:
         pre = tmp_path / ".claude" / "hooks" / "summon-pre-worktree.sh"
         assert pre.exists()
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -396,8 +383,7 @@ class TestHooksUninstallRemovesScripts:
         post = tmp_path / ".claude" / "hooks" / "summon-post-worktree.sh"
         assert post.exists()
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -411,8 +397,7 @@ class TestHooksUninstallRemovesScripts:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text("{}")
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()  # Should not raise
@@ -435,8 +420,7 @@ class TestHooksUninstallSafe:
         _invoke_install(tmp_path)
 
         # Uninstall
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -458,8 +442,7 @@ class TestHooksUninstallSafe:
 
         _invoke_install(tmp_path)
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             from summon_claude.cli.hooks import uninstall_hooks
 
             uninstall_hooks()
@@ -480,14 +463,7 @@ class TestHooksCliInstallCommand:
         """'summon hooks install' exits 0 on success."""
         runner = CliRunner()
         which_map = {"summon": "/usr/local/bin/summon", "sqlite3": "/usr/bin/sqlite3"}
-        patches = _patch_paths(tmp_path)
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patches[3],
-            patch("shutil.which", side_effect=which_map.get),
-        ):
+        with _patch_paths(tmp_path), patch("shutil.which", side_effect=which_map.get):
             result = runner.invoke(cli, ["hooks", "install"])
         assert result.exit_code == 0
 
@@ -495,28 +471,14 @@ class TestHooksCliInstallCommand:
         """'summon hooks install' prints confirmation with hook paths."""
         runner = CliRunner()
         which_map = {"summon": "/usr/local/bin/summon", "sqlite3": "/usr/bin/sqlite3"}
-        patches = _patch_paths(tmp_path)
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patches[3],
-            patch("shutil.which", side_effect=which_map.get),
-        ):
+        with _patch_paths(tmp_path), patch("shutil.which", side_effect=which_map.get):
             result = runner.invoke(cli, ["hooks", "install"])
         assert "Installed" in result.output or "settings.json" in result.output
 
     def test_hooks_install_fails_without_summon_on_path(self, tmp_path):
         """'summon hooks install' exits non-zero when summon binary not on PATH."""
         runner = CliRunner()
-        patches = _patch_paths(tmp_path)
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patches[3],
-            patch("shutil.which", return_value=None),
-        ):
+        with _patch_paths(tmp_path), patch("shutil.which", return_value=None):
             result = runner.invoke(cli, ["hooks", "install"])
         assert result.exit_code != 0
 
@@ -524,14 +486,7 @@ class TestHooksCliInstallCommand:
         """'summon hooks install' exits non-zero when summon path has a single quote."""
         runner = CliRunner()
         which_map = {"summon": "/path/with'quote/summon", "sqlite3": "/usr/bin/sqlite3"}
-        patches = _patch_paths(tmp_path)
-        with (
-            patches[0],
-            patches[1],
-            patches[2],
-            patches[3],
-            patch("shutil.which", side_effect=which_map.get),
-        ):
+        with _patch_paths(tmp_path), patch("shutil.which", side_effect=which_map.get):
             result = runner.invoke(cli, ["hooks", "install"])
         assert result.exit_code != 0
         assert "single quote" in result.output.lower()
@@ -543,7 +498,146 @@ class TestHooksCliInstallCommand:
         settings_path.parent.mkdir(parents=True, exist_ok=True)
         settings_path.write_text("{}")
 
-        patches = _patch_paths(tmp_path)
-        with patches[0], patches[1], patches[2], patches[3]:
+        with _patch_paths(tmp_path):
             result = runner.invoke(cli, ["hooks", "uninstall"])
         assert result.exit_code == 0
+
+
+# ---------------------------------------------------------------------------
+# showThinkingSummaries management
+# ---------------------------------------------------------------------------
+
+
+class TestShowThinkingSummariesManagement:
+    def test_install_sets_show_thinking_summaries_when_absent(self, tmp_path):
+        """install_hooks sets showThinkingSummaries=True and writes state file when key absent."""
+        _invoke_install(tmp_path)
+
+        settings = _read_settings(tmp_path)
+        assert settings.get("showThinkingSummaries") is True
+
+        state_file = tmp_path / ".claude" / "hooks" / ".summon-state.json"
+        assert state_file.exists()
+        state = json.loads(state_file.read_text())
+        assert "showThinkingSummaries" in state.get("managed_settings", [])
+
+    def test_install_does_not_overwrite_existing_show_thinking_summaries(self, tmp_path):
+        """install_hooks leaves showThinkingSummaries untouched if already present (even false)."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"showThinkingSummaries": False}))
+
+        _invoke_install(tmp_path)
+
+        settings = _read_settings(tmp_path)
+        assert settings.get("showThinkingSummaries") is False
+
+        state_file = tmp_path / ".claude" / "hooks" / ".summon-state.json"
+        if state_file.exists():
+            state = json.loads(state_file.read_text())
+            assert "showThinkingSummaries" not in state.get("managed_settings", [])
+
+    def test_uninstall_removes_managed_show_thinking_summaries(self, tmp_path):
+        """uninstall_hooks removes showThinkingSummaries when it is managed."""
+        _invoke_install(tmp_path)
+        assert _read_settings(tmp_path).get("showThinkingSummaries") is True
+
+        with _patch_paths(tmp_path):
+            from summon_claude.cli.hooks import uninstall_hooks
+
+            uninstall_hooks()
+
+        settings = _read_settings(tmp_path)
+        assert "showThinkingSummaries" not in settings
+
+    def test_uninstall_preserves_non_managed_show_thinking_summaries(self, tmp_path):
+        """uninstall_hooks leaves showThinkingSummaries if user set it (not in state)."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"showThinkingSummaries": True}))
+
+        # Uninstall without prior install — no state file exists
+        with _patch_paths(tmp_path):
+            from summon_claude.cli.hooks import uninstall_hooks
+
+            uninstall_hooks()
+
+        settings = _read_settings(tmp_path)
+        assert settings.get("showThinkingSummaries") is True
+
+    def test_idempotent_install_no_duplicate_managed_settings(self, tmp_path):
+        """Installing twice does not duplicate managed_settings entries."""
+        _invoke_install(tmp_path)
+        _invoke_install(tmp_path)
+
+        state_file = tmp_path / ".claude" / "hooks" / ".summon-state.json"
+        state = json.loads(state_file.read_text())
+        managed = state.get("managed_settings", [])
+        assert managed.count("showThinkingSummaries") == 1
+
+    def test_uninstall_cleans_up_state_file(self, tmp_path):
+        """uninstall_hooks deletes the state file."""
+        _invoke_install(tmp_path)
+        state_file = tmp_path / ".claude" / "hooks" / ".summon-state.json"
+        assert state_file.exists()
+
+        with _patch_paths(tmp_path):
+            from summon_claude.cli.hooks import uninstall_hooks
+
+            uninstall_hooks()
+
+        assert not state_file.exists()
+
+    def test_uninstall_ignores_unknown_managed_settings(self, tmp_path):
+        """uninstall_hooks ignores managed_settings keys not in the allowlist."""
+        _invoke_install(tmp_path)
+        # Tamper with state file to add unknown key
+        state_file = tmp_path / ".claude" / "hooks" / ".summon-state.json"
+        state = json.loads(state_file.read_text())
+        state["managed_settings"].append("model")
+        state_file.write_text(json.dumps(state))
+        # Also add 'model' to settings.json
+        settings = _read_settings(tmp_path)
+        settings["model"] = "claude-opus-4-6"
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps(settings))
+
+        with _patch_paths(tmp_path):
+            from summon_claude.cli.hooks import uninstall_hooks
+
+            uninstall_hooks()
+
+        # 'model' should NOT have been removed
+        final_settings = _read_settings(tmp_path)
+        assert final_settings.get("model") == "claude-opus-4-6"
+
+    def test_corrupt_state_file_does_not_prevent_install(self, tmp_path):
+        """A corrupt state file (invalid JSON) does not prevent install from succeeding."""
+        hooks_dir = tmp_path / ".claude" / "hooks"
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        state_file = hooks_dir / ".summon-state.json"
+        state_file.write_text("not-valid-json{{{")
+
+        _invoke_install(tmp_path)
+
+        settings = _read_settings(tmp_path)
+        assert settings.get("showThinkingSummaries") is True
+
+    def test_explicit_false_lifecycle_preserved(self, tmp_path):
+        """User's explicit showThinkingSummaries=false is preserved through install+uninstall."""
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        settings_path.write_text(json.dumps({"showThinkingSummaries": False}))
+
+        _invoke_install(tmp_path)
+        # Install should not touch it
+        assert _read_settings(tmp_path).get("showThinkingSummaries") is False
+
+        with _patch_paths(tmp_path):
+            from summon_claude.cli.hooks import uninstall_hooks
+
+            uninstall_hooks()
+
+        # Uninstall should not remove it either (not in managed state)
+        settings = _read_settings(tmp_path)
+        assert settings.get("showThinkingSummaries") is False
