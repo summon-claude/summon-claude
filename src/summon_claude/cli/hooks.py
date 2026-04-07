@@ -258,7 +258,10 @@ def uninstall_hooks() -> None:
             changed = True
             hooks_changed = True
 
-    for key in state.get("managed_settings", []):
+    managed = state.get("managed_settings", [])
+    if not isinstance(managed, list):
+        managed = []
+    for key in managed:
         if key in _MANAGED_SETTING_ALLOWLIST and key in settings:
             settings.pop(key)
             changed = True
