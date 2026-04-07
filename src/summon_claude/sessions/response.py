@@ -44,6 +44,9 @@ logger = logging.getLogger(__name__)
 _MAX_MESSAGE_CHARS = 3000
 _FLUSH_HEADROOM_CHARS = 100
 _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
+# Bridge timeout must exceed _PERMISSION_TIMEOUT_S (600s) so the permission
+# handler always resolves the bridge before the streamer's timeout fires.
+_BRIDGE_TIMEOUT_S = 660.0  # _PERMISSION_TIMEOUT_S (600) + 60s buffer
 
 # Maps tool names to the keys where their primary argument lives (tried in order).
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
@@ -395,7 +398,7 @@ class ResponseStreamer:
         if self._bridge is not None and parent_id is None:
             try:
                 fut = self._bridge.create_future(block.name)
-                approval = await asyncio.wait_for(fut, timeout=660.0)
+                approval = await asyncio.wait_for(fut, timeout=_BRIDGE_TIMEOUT_S)
             except (TimeoutError, asyncio.CancelledError):
                 logger.warning(
                     "Approval bridge timeout for %s — posting without label",
@@ -651,7 +654,12 @@ class ResponseStreamer:
         label_suffix = ""
         if approval is not None:
             if approval.reason:
-                safe_reason = sanitize_for_mrkdwn(approval.reason, 60).replace("_", " ")
+                safe_reason = (
+                    sanitize_for_mrkdwn(approval.reason, 60)
+                    .replace("_", " ")
+                    .replace("<", "")
+                    .replace(">", "")
+                )
                 approval_text = f"{approval.label}: {safe_reason}"
             else:
                 approval_text = approval.label

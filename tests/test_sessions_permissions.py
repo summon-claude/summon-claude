@@ -1685,3 +1685,112 @@ class TestApprovalBridgeResolution:
         handler, _, _ = make_handler(bridge=None)
         result = await handler.handle("Read", {}, None)
         assert isinstance(result, PermissionResultAllow)
+
+    async def test_classifier_allow_resolves_bridge(self):
+        """Classifier allow resolves bridge with 'auto-mode' and reason."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        handler._classifier_enabled = True
+        handler._in_worktree = True
+        mock_classifier = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.decision = "allow"
+        mock_result.reason = "safe read operation"
+        mock_classifier.classify = AsyncMock(return_value=mock_result)
+        handler._classifier = mock_classifier
+        result = await handler.handle("Agent", {}, None)
+        assert isinstance(result, PermissionResultAllow)
+        fut = bridge.create_future("Agent")
+        assert fut.done()
+        info = fut.result()
+        assert info.label == "auto-mode"
+        assert info.reason == "safe read operation"
+
+    async def test_classifier_block_resolves_bridge(self):
+        """Classifier block resolves bridge with 'blocked' and denial flag."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        handler._classifier_enabled = True
+        handler._in_worktree = True
+        mock_classifier = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.decision = "block"
+        mock_result.reason = "dangerous operation"
+        mock_classifier.classify = AsyncMock(return_value=mock_result)
+        handler._classifier = mock_classifier
+        result = await handler.handle("Agent", {}, None)
+        assert isinstance(result, PermissionResultDeny)
+        fut = bridge.create_future("Agent")
+        assert fut.done()
+        info = fut.result()
+        assert info.label == "blocked"
+        assert info.is_denial is True
+
+    async def test_write_gate_containment_resolves_bridge(self, tmp_path):
+        """Write within containment resolves bridge with 'within project'."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / "src").mkdir()
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        # Re-enable real write gate (make_handler mocks it out)
+        handler._check_write_gate = PermissionHandler._check_write_gate.__get__(
+            handler, PermissionHandler
+        )
+        handler._in_containment = True
+        handler._write_access_granted = True
+        handler._containment_root = project.resolve()
+        file_path = str((project / "src" / "foo.py").resolve())
+        result = await handler.handle("Write", {"file_path": file_path}, None)
+        assert isinstance(result, PermissionResultAllow)
+        fut = bridge.create_future("Write")
+        assert fut.done()
+        assert fut.result().label == "within project"
+
+    async def test_write_gate_safe_dir_resolves_bridge(self, tmp_path):
+        """Write to safe dir resolves bridge with 'auto-allowed'."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        project = tmp_path / "project"
+        project.mkdir()
+        hack_dir = project / "hack"
+        hack_dir.mkdir()
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        handler._check_write_gate = PermissionHandler._check_write_gate.__get__(
+            handler, PermissionHandler
+        )
+        handler._project_root = project.resolve()
+        handler._safe_dirs = [str(hack_dir.resolve())]
+        file_path = str((hack_dir / "notes.md").resolve())
+        result = await handler.handle("Write", {"file_path": file_path}, None)
+        assert isinstance(result, PermissionResultAllow)
+        fut = bridge.create_future("Write")
+        assert fut.done()
+        assert fut.result().label == "auto-allowed"
+
+    async def test_hitl_approve_resolves_bridge(self):
+        """HITL approval resolves bridge with 'approved by' label."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        batch_id = "test-approve"
+        handler._batch.events[batch_id] = asyncio.Event()
+        handler._batch.tool_names[batch_id] = ["Edit"]
+        handler._batch.tool_inputs[batch_id] = [{"file_path": "/f"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+        await handler.handle_action(value=f"approve:{batch_id}", user_id="U_TEST")
+        fut = bridge.create_future("Edit")
+        assert fut.done()
+        info = fut.result()
+        assert "approved by" in info.label
+        assert info.is_denial is False
