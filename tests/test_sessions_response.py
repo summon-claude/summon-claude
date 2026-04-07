@@ -1551,6 +1551,20 @@ class TestApprovalVisibility:
 
         bridge.create_future.assert_not_called()
 
+    async def test_enter_worktree_skips_bridge(self):
+        """EnterWorktree bypasses can_use_tool — must skip bridge to prevent 660s hang."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        bridge.create_future = MagicMock()
+        streamer, router, client = make_streamer()
+        streamer._bridge = bridge
+        block = ToolUseBlock(id="tu_wt", name="EnterWorktree", input={"name": "test"})
+
+        await streamer._handle_tool_use_block(block, None)
+
+        bridge.create_future.assert_not_called()
+
     async def test_denied_tool_result_suppressed(self):
         """Denied tool results (is_error=True) are suppressed — no :x: Tool error."""
         from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
@@ -1609,3 +1623,10 @@ class TestBridgeTimeoutGuard:
             f"_BRIDGE_TIMEOUT_S ({_BRIDGE_TIMEOUT_S}) must exceed "
             f"_PERMISSION_TIMEOUT_S ({_PERMISSION_TIMEOUT_S})"
         )
+
+    def test_bridge_skip_tools_contains_builtin_bypass_tools(self):
+        """Guard: _BRIDGE_SKIP_TOOLS must include tools that bypass can_use_tool."""
+        from summon_claude.sessions.response import _BRIDGE_SKIP_TOOLS
+
+        assert "EnterWorktree" in _BRIDGE_SKIP_TOOLS
+        assert "ExitWorktree" in _BRIDGE_SKIP_TOOLS

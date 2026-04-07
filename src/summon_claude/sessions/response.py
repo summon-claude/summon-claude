@@ -48,6 +48,11 @@ _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
 # handler always resolves the bridge before the streamer's timeout fires.
 _BRIDGE_TIMEOUT_S = 660.0  # _PERMISSION_TIMEOUT_S (600) + 60s buffer
 
+# Built-in tools that bypass can_use_tool — the SDK never fires the callback
+# for these, so a bridge Future would never resolve (660s hang). Skip the
+# bridge entirely for these tools. Spike-confirmed 2026-03-20.
+_BRIDGE_SKIP_TOOLS = frozenset(["EnterWorktree", "ExitWorktree"])
+
 # Maps tool names to the keys where their primary argument lives (tried in order).
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
     "Read": ("file_path", "path"),
@@ -395,7 +400,7 @@ class ResponseStreamer:
         # (parent_id != None). If the callback is never called, the Future would
         # never resolve, causing a 660s hang.
         approval: ApprovalInfo | None = None
-        if self._bridge is not None and parent_id is None:
+        if self._bridge is not None and parent_id is None and block.name not in _BRIDGE_SKIP_TOOLS:
             try:
                 fut = self._bridge.create_future(block.name)
                 approval = await asyncio.wait_for(fut, timeout=_BRIDGE_TIMEOUT_S)
