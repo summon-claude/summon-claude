@@ -1596,3 +1596,16 @@ class TestApprovalVisibility:
 
         # post SHOULD have been called for the approved result
         client.post.assert_called()
+
+
+class TestBridgeTimeoutGuard:
+    """Guard test: bridge timeout must exceed permission timeout."""
+
+    def test_bridge_timeout_exceeds_permission_timeout(self):
+        from summon_claude.sessions.permissions import _PERMISSION_TIMEOUT_S
+        from summon_claude.sessions.response import _BRIDGE_TIMEOUT_S
+
+        assert _BRIDGE_TIMEOUT_S > _PERMISSION_TIMEOUT_S, (
+            f"_BRIDGE_TIMEOUT_S ({_BRIDGE_TIMEOUT_S}) must exceed "
+            f"_PERMISSION_TIMEOUT_S ({_PERMISSION_TIMEOUT_S})"
+        )
