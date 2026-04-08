@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -793,3 +794,124 @@ class TestNextSteps:
         out = capsys.readouterr().out
         assert "Next steps:" in out
         assert "summon doctor" in out
+
+
+_BRIDGE_SETTINGS = types.MappingProxyType(
+    {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "EnterWorktree",
+                    "hooks": [{"type": "command", "command": "summon-pre-worktree.sh"}],
+                }
+            ]
+        }
+    }
+)
+
+
+class TestShowThinkingSummariesWarn:
+    """Tests for showThinkingSummaries WARN line in _print_feature_inventory."""
+
+    def test_warn_emitted_when_conditions_met(self, tmp_path, capsys):
+        """WARN emitted when bridge installed, show_thinking=true, showThinkingSummaries absent."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(True, True, 1),
+            ),
+            patch("summon_claude.cli.hooks.read_settings", return_value=_BRIDGE_SETTINGS),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SHOW_THINKING": "true"})
+
+        out = capsys.readouterr().out
+        assert "showThinkingSummaries" in out
+        assert "WARN" in out
+
+    def test_no_warn_when_set_to_true(self, tmp_path, capsys):
+        """No WARN when showThinkingSummaries is explicitly True in settings."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        settings = {**_BRIDGE_SETTINGS, "showThinkingSummaries": True}
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(True, True, 1),
+            ),
+            patch("summon_claude.cli.hooks.read_settings", return_value=settings),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SHOW_THINKING": "true"})
+
+        out = capsys.readouterr().out
+        assert "showThinkingSummaries" not in out
+
+    def test_no_warn_when_bridge_not_installed(self, tmp_path, capsys):
+        """No WARN when hook bridge is not installed (even with show_thinking=true)."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(True, True, 1),
+            ),
+            patch("summon_claude.cli.hooks.read_settings", return_value={}),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SHOW_THINKING": "true"})
+
+        out = capsys.readouterr().out
+        assert "showThinkingSummaries" not in out
+
+    def test_no_warn_when_show_thinking_disabled(self, tmp_path, capsys):
+        """No WARN when show_thinking is disabled (even with bridge installed)."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(True, True, 1),
+            ),
+            patch("summon_claude.cli.hooks.read_settings", return_value=_BRIDGE_SETTINGS),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SHOW_THINKING": "false"})
+
+        out = capsys.readouterr().out
+        assert "showThinkingSummaries" not in out
+
+    def test_no_warn_when_explicitly_false(self, tmp_path, capsys):
+        """No WARN when showThinkingSummaries=False (key present, user chose false)."""
+        from unittest.mock import AsyncMock
+
+        from summon_claude.cli.config import _print_feature_inventory
+
+        settings = {**_BRIDGE_SETTINGS, "showThinkingSummaries": False}
+        with (
+            patch(
+                "summon_claude.cli.config._check_features",
+                new_callable=AsyncMock,
+                return_value=(True, True, 1),
+            ),
+            patch("summon_claude.cli.hooks.read_settings", return_value=settings),
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+        ):
+            _print_feature_inventory(tmp_path / "r.db", {"SUMMON_SHOW_THINKING": "true"})
+
+        out = capsys.readouterr().out
+        assert "showThinkingSummaries" not in out

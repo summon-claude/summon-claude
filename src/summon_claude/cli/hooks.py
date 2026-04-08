@@ -80,10 +80,14 @@ _SETTINGS_PATH = _CLAUDE_DIR / "settings.json"
 _HOOKS_DIR = _CLAUDE_DIR / "hooks"
 _PRE_SCRIPT = _HOOKS_DIR / "summon-pre-worktree.sh"
 _POST_SCRIPT = _HOOKS_DIR / "summon-post-worktree.sh"
+_STATE_FILE = _HOOKS_DIR / ".summon-state.json"
 
 # Markers used to identify summon-owned hook entries when reading settings.json.
 _PRE_MARKER = "summon-pre-worktree"
 _POST_MARKER = "summon-post-worktree"
+
+# Allowlist of top-level settings.json keys that summon may manage.
+_MANAGED_SETTING_ALLOWLIST = frozenset({"showThinkingSummaries"})
 
 
 def read_settings() -> dict[str, Any]:
@@ -102,6 +106,23 @@ def _write_settings(settings: dict[str, Any]) -> None:
     """Write settings dict back to ~/.claude/settings.json with 2-space indent."""
     _SETTINGS_PATH.parent.mkdir(parents=True, exist_ok=True)
     _SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
+
+
+def _read_state() -> dict[str, Any]:
+    """Read ~/.claude/hooks/.summon-state.json, returning {} if missing or unreadable."""
+    try:
+        data = json.loads(_STATE_FILE.read_text())
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError) as exc:
+        if not isinstance(exc, FileNotFoundError):
+            click.echo(f"Warning: could not read state file: {exc}", err=True)
+        return {}
+
+
+def _write_state(state: dict[str, Any]) -> None:
+    """Write state dict to ~/.claude/hooks/.summon-state.json with 2-space indent."""
+    _STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
 
 
 def _build_hook_entry(matcher: str, command: str) -> dict[str, Any]:
@@ -187,6 +208,21 @@ def install_hooks() -> None:
     settings = read_settings()
     settings.setdefault("hooks", {})
 
+    # showThinkingSummaries: required since CC v2.1.69 (redact-thinking beta header)
+    if "showThinkingSummaries" not in settings:
+        settings["showThinkingSummaries"] = True
+        state = _read_state()
+        managed = state.get("managed_settings")
+        if not isinstance(managed, list):
+            managed = []
+        state["managed_settings"] = managed
+        if "showThinkingSummaries" not in managed:
+            managed.append("showThinkingSummaries")
+        _write_state(state)
+        click.echo(
+            "Enabled showThinkingSummaries in settings.json (required for show_thinking feature)."
+        )
+
     pre_command = str(_PRE_SCRIPT)
     post_command = str(_POST_SCRIPT)
 
@@ -211,8 +247,11 @@ def uninstall_hooks() -> None:
     Only removes entries it owns — never touches other hooks.
     """
     settings = read_settings()
+    state = _read_state()
     hooks_section: dict[str, Any] = settings.get("hooks", {})
     changed = False
+    hooks_changed = False
+    state_file_existed = _STATE_FILE.exists()
 
     for hook_type in ("PreToolUse", "PostToolUse"):
         marker = _PRE_MARKER if hook_type == "PreToolUse" else _POST_MARKER
@@ -221,13 +260,30 @@ def uninstall_hooks() -> None:
         if after != before:
             hooks_section[hook_type] = after
             changed = True
+            hooks_changed = True
+
+    managed = state.get("managed_settings", [])
+    if not isinstance(managed, list):
+        managed = []
+    for key in managed:
+        if key in _MANAGED_SETTING_ALLOWLIST and key in settings:
+            settings.pop(key)
+            changed = True
+            click.echo(f"Removed managed setting: {key}")
 
     if changed:
-        settings["hooks"] = hooks_section
+        if hooks_changed:
+            settings["hooks"] = hooks_section
         _write_settings(settings)
-        click.echo("Removed summon entries from ~/.claude/settings.json.")
-    else:
+        click.echo(
+            "Removed summon hook entries from ~/.claude/settings.json."
+            if hooks_changed
+            else "Updated ~/.claude/settings.json."
+        )
+    elif not state_file_existed:
         click.echo("No summon entries found in ~/.claude/settings.json.")
+
+    _STATE_FILE.unlink(missing_ok=True)
 
     for script in (_PRE_SCRIPT, _POST_SCRIPT):
         if script.exists():

@@ -742,6 +742,13 @@ def _print_feature_inventory(db_path: Path, config_values: dict[str, str]) -> No
         )
         if has_bridge:
             click.echo(f"  {format_tag('PASS')} Hook bridge: installed")
+            # Warn if show_thinking is on but showThinkingSummaries not configured
+            show_thinking_on = config_values.get("SUMMON_SHOW_THINKING", "").lower() in _BOOL_TRUE
+            if show_thinking_on and "showThinkingSummaries" not in settings:
+                click.echo(
+                    f"  {format_tag('WARN')} showThinkingSummaries not set in"
+                    " settings.json (re-run: summon hooks install)"
+                )
         else:
             click.echo(f"  {format_tag('INFO')} Hook bridge: not installed (summon hooks install)")
     except Exception:
