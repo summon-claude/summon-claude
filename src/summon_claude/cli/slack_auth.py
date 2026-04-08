@@ -325,7 +325,7 @@ def _save_workspace_config(
     parsed = urlparse(workspace_url)
     if not (
         parsed.scheme == "https"
-        and parsed.netloc.endswith(".slack.com")
+        and (parsed.netloc.endswith(".slack.com") or parsed.netloc == "slack.com")
         and "@" not in parsed.netloc
     ):
         raise ValueError(f"Refusing to save invalid workspace URL: {workspace_url!r}")

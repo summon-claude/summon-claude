@@ -641,7 +641,8 @@ class TestEnterpriseGridAuth:
             ]
         )
 
-        result = await _resolve_workspace_url_from_page(mock_page, "T123")
+        with _patch("summon_claude.slack_browser.asyncio.sleep", new=AsyncMock()):
+            result = await _resolve_workspace_url_from_page(mock_page, "T123")
         assert result == "https://ext.slack.com"
         assert mock_page.evaluate.call_count == 2
 
@@ -930,6 +931,69 @@ class TestEnterpriseGridAuth:
         assert result.team_id == "T555"
         # Email input focus WAS attempted (no .enterprise.slack.com in redirected URL)
         locator_mock.first.click.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_first_writer_guard_prevents_overwrite(self, tmp_path):
+        """Second page completing auth does not overwrite auth_page_ref[0]."""
+        from summon_claude.slack_browser import interactive_slack_auth
+
+        # Original page: redirect detection, then domain validation, log, regex
+        page_urls = [
+            "https://myteam.slack.com",
+            "https://app.slack.com/client/T111/C111",
+        ]
+        auth_dir, mock_page, mock_context, mock_browser, mock_pw_cm, _ = (
+            _make_interactive_auth_mocks(tmp_path, page_urls)
+        )
+
+        # Create a second page that also reaches /client/ (different team)
+        mock_second_page = AsyncMock()
+        second_url_mock = PropertyMock(return_value="https://app.slack.com/client/T222/C222")
+        type(mock_second_page).url = second_url_mock
+        mock_second_page.wait_for_url = AsyncMock()  # also completes immediately
+
+        # When the original page's wait_for_url fires, inject the second page
+        # so both monitors run — but the first should win
+        original_wait = mock_page.wait_for_url
+
+        async def inject_second_page(*args, **kwargs):
+            # Fire the new-page callback (captured from mock_context.on)
+            on_page_calls = [c for c in mock_context.on.call_args_list if c[0][0] == "page"]
+            on_new_page_cb = on_page_calls[0][0][1]
+            on_new_page_cb(mock_second_page)
+            # Then let the original page's monitor complete immediately
+            return await original_wait(*args, **kwargs)
+
+        mock_page.wait_for_url = AsyncMock(side_effect=inject_second_page)
+
+        captured_extract_user_id_page = []
+
+        async def capture_page(page, url=""):
+            captured_extract_user_id_page.append(page)
+            return "U111"
+
+        with (
+            _patch("summon_claude.slack_browser.get_browser_auth_dir", return_value=auth_dir),
+            _patch("playwright.async_api.async_playwright", return_value=mock_pw_cm),
+            _patch(
+                "summon_claude.slack_browser._resolve_workspace_url_from_page",
+                new=AsyncMock(return_value=None),
+            ),
+            _patch(
+                "summon_claude.slack_browser._extract_user_id",
+                new=AsyncMock(side_effect=capture_page),
+            ),
+            _patch(
+                "summon_claude.slack_browser._extract_channels",
+                new=AsyncMock(return_value=[]),
+            ),
+        ):
+            result = await interactive_slack_auth("https://myteam.slack.com")
+
+        # The first page (original) should win — team T111, not T222
+        assert result.team_id == "T111"
+        # _extract_user_id was called with the original page, not the second
+        assert captured_extract_user_id_page[0] is mock_page
 
     # -----------------------------------------------------------------------
     # CLI: resolved_url propagation to _save_workspace_config
