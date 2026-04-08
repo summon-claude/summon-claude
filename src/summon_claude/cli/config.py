@@ -304,8 +304,10 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
     config_file.write_text("\n".join(new_lines) + "\n")
     try:
         fd = os.open(str(config_file), os.O_RDONLY)
-        os.fchmod(fd, 0o600)
-        os.close(fd)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
     except OSError:
         pass
     click.echo(f"Set {key} in {config_file}")
