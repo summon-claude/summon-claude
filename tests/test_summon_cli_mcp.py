@@ -1055,6 +1055,22 @@ class TestMCPServerCreation:
         # session_list, session_info, cron x3, task x3 = 8 (no PM tools)
         assert len(tools) == 8
 
+    def test_gpm_tool_count(self, populated_registry):
+        tools = create_summon_cli_mcp_tools(
+            populated_registry,
+            "gpm-sid",
+            "uid",
+            "cid",
+            "/tmp",
+            is_pm=True,
+            is_global_pm=True,
+            scheduler=make_scheduler(),
+        )
+        # 8 base + session_stop, session_log_status, session_resume, session_message = 4 PM
+        # (no session_start for GPM) + get_workflow_instructions = 1 GPM-only
+        # session_status_update excluded (no pm_status_ts)
+        assert len(tools) == 13
+
 
 class TestSessionStatusUpdate:
     """Tests for the session_status_update MCP tool."""
@@ -1268,3 +1284,227 @@ class TestSessionStatusUpdate:
         result = await tools["session_status_update"].handler({"summary": "Status update"})
         assert result.get("is_error") is True
         assert "Error updating status" in result["content"][0]["text"]
+
+
+class TestGetWorkflowInstructions:
+    """Tests for the get_workflow_instructions MCP tool (GPM-only)."""
+
+    @staticmethod
+    def _make_gpm_tools(registry) -> dict:
+        """Build a GPM tools dict with standard test parameters."""
+        return {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=registry,
+                session_id="gpm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=True,
+                scheduler=make_scheduler(),
+            )
+        }
+
+    @pytest.fixture
+    async def gpm_tools_with_workflows(self, populated_registry):
+        """Create GPM tools with workflow data pre-configured."""
+        project_id = await populated_registry.add_project("test-proj", "/tmp/test-proj")
+        await populated_registry.set_workflow_defaults("Always run tests.")
+        await populated_registry.set_project_workflow(project_id, "Use TDD for this project.")
+
+        tools = self._make_gpm_tools(populated_registry)
+        return tools, project_id
+
+    async def test_global_defaults(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "global default" in text.lower()
+        assert "Always run tests." in text
+
+    async def test_project_override(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({"project": "test-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "project-specific" in text.lower()
+        assert "Use TDD for this project." in text
+        # Global defaults must NOT bleed through when project has its own instructions
+        assert "Always run tests." not in text
+
+    async def test_project_fallback_to_global(self, populated_registry):
+        """Project with no override falls back to global."""
+        await populated_registry.add_project("fallback-proj", "/tmp/fb-proj")
+        await populated_registry.set_workflow_defaults("Global rules.")
+        tools = self._make_gpm_tools(populated_registry)
+        result = await tools["get_workflow_instructions"].handler({"project": "fallback-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "global default" in text.lower()
+        assert "Global rules." in text
+
+    async def test_project_not_found(self, gpm_tools_with_workflows):
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({"project": "nonexistent"})
+        assert result.get("is_error") is True
+        assert "not found" in result["content"][0]["text"]
+
+    async def test_none_configured(self, populated_registry):
+        """Returns 'no workflow instructions' when nothing is set."""
+        tools = self._make_gpm_tools(populated_registry)
+        result = await tools["get_workflow_instructions"].handler({})
+        assert not result.get("is_error")
+        assert "No workflow instructions configured." in result["content"][0]["text"]
+
+    async def test_not_available_to_regular_pm(self, populated_registry):
+        """Tool is NOT registered for regular PM sessions."""
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="pm-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_PM",
+                cwd="/tmp",
+                is_pm=True,
+                is_global_pm=False,
+                scheduler=make_scheduler(),
+            )
+        }
+        assert "get_workflow_instructions" not in tools
+
+    async def test_not_available_to_regular_session(self, populated_registry):
+        """Tool is NOT registered for regular (non-PM) sessions."""
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="regular-test",
+                authenticated_user_id="U_OWNER",
+                channel_id="C_REG",
+                cwd="/tmp",
+                is_pm=False,
+                is_global_pm=False,
+                scheduler=make_scheduler(),
+            )
+        }
+        assert "get_workflow_instructions" not in tools
+
+    async def test_include_global_token_expansion(self, populated_registry):
+        """$INCLUDE_GLOBAL token in project instructions is expanded."""
+        project_id = await populated_registry.add_project("token-proj", "/tmp/token-proj")
+        await populated_registry.set_workflow_defaults("Global rules.")
+        await populated_registry.set_project_workflow(
+            project_id, "Before.\n$INCLUDE_GLOBAL\nAfter."
+        )
+        tools = self._make_gpm_tools(populated_registry)
+        result = await tools["get_workflow_instructions"].handler({"project": "token-proj"})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "Global rules." in text
+        assert "Before." in text
+        assert "After." in text
+        assert "$INCLUDE_GLOBAL" not in text
+        assert "project-specific" in text.lower()
+
+    async def test_registry_error_returns_error(self, populated_registry):
+        """Registry exception is caught and returned as error."""
+        mock_registry = AsyncMock()
+        mock_registry.get_workflow_defaults = AsyncMock(
+            side_effect=RuntimeError("DB connection lost")
+        )
+        tools = self._make_gpm_tools(mock_registry)
+        result = await tools["get_workflow_instructions"].handler({})
+        assert result.get("is_error") is True
+        text = result["content"][0]["text"]
+        assert "Error retrieving workflow instructions:" in text
+        assert "DB connection lost" in text
+
+    async def test_get_workflow_instructions_strips_markdown_images(self, populated_registry):
+        """Workflow instructions must strip markdown images via validate_agent_output."""
+        await populated_registry.set_workflow_defaults(
+            "Rules: ![stolen](https://evil.com/steal) must not leak."
+        )
+        tools = self._make_gpm_tools(populated_registry)
+        result = await tools["get_workflow_instructions"].handler({})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "![stolen]" not in text
+        assert "[image removed by security filter]" in text
+
+    async def test_get_project_error_returns_error(self, populated_registry):
+        """get_project() raising is caught and returned as error."""
+        mock_registry = AsyncMock()
+        mock_registry.get_project = AsyncMock(side_effect=RuntimeError("DB gone"))
+        tools = self._make_gpm_tools(mock_registry)
+        result = await tools["get_workflow_instructions"].handler({"project": "some-proj"})
+        assert result.get("is_error") is True
+        text = result["content"][0]["text"]
+        assert "Error retrieving workflow instructions:" in text
+        assert "DB gone" in text
+
+    async def test_get_effective_workflow_error_returns_error(self, populated_registry):
+        """get_effective_workflow() raising is caught and returned as error."""
+        mock_registry = AsyncMock()
+        mock_registry.get_project = AsyncMock(
+            return_value={"project_id": "proj-uuid-123", "workflow_instructions": "some text"}
+        )
+        mock_registry.get_effective_workflow = AsyncMock(
+            side_effect=RuntimeError("Workflow DB gone")
+        )
+        tools = self._make_gpm_tools(mock_registry)
+        result = await tools["get_workflow_instructions"].handler({"project": "some-proj"})
+        assert result.get("is_error") is True
+        text = result["content"][0]["text"]
+        assert "Error retrieving workflow instructions:" in text
+        assert "Workflow DB gone" in text
+
+    async def test_project_lookup_by_uuid(self, populated_registry):
+        """Handler accepts project_id (UUID) in addition to project name."""
+        project_id = await populated_registry.add_project("uuid-proj", "/tmp/uuid-proj")
+        await populated_registry.set_project_workflow(project_id, "UUID-based lookup works.")
+        tools = self._make_gpm_tools(populated_registry)
+        result = await tools["get_workflow_instructions"].handler({"project": project_id})
+        assert not result.get("is_error")
+        text = result["content"][0]["text"]
+        assert "UUID-based lookup works." in text
+        assert "project-specific" in text.lower()
+
+    async def test_whitespace_project_uses_global_defaults(self, populated_registry):
+        """Whitespace-only project string is normalized to None, returning global defaults."""
+        await populated_registry.set_workflow_defaults("Global WS rule.")
+        tools = self._make_gpm_tools(populated_registry)
+        for value in ("   ", ""):
+            result = await tools["get_workflow_instructions"].handler({"project": value})
+            assert not result.get("is_error"), f"Expected success for project={value!r}"
+            text = result["content"][0]["text"]
+            assert "global default" in text.lower()
+            assert "Global WS rule." in text
+
+    async def test_source_prefix_format(self, gpm_tools_with_workflows):
+        """Response text starts with [Source: ...] prefix (exact format)."""
+        tools, _ = gpm_tools_with_workflows
+        result = await tools["get_workflow_instructions"].handler({})
+        text = result["content"][0]["text"]
+        assert text.startswith("[Source: global default]\n\n")
+
+        result = await tools["get_workflow_instructions"].handler({"project": "test-proj"})
+        text = result["content"][0]["text"]
+        assert text.startswith("[Source: project-specific]\n\n")
+
+
+def test_is_global_pm_requires_is_pm(populated_registry):
+    """is_global_pm=True with is_pm=False must raise ValueError."""
+    with pytest.raises(ValueError, match="is_global_pm requires is_pm=True"):
+        create_summon_cli_mcp_tools(
+            registry=populated_registry,
+            session_id="gpm-test",
+            authenticated_user_id="U_OWNER",
+            channel_id="C_GPM",
+            cwd="/tmp",
+            is_pm=False,
+            is_global_pm=True,
+            scheduler=make_scheduler(),
+        )

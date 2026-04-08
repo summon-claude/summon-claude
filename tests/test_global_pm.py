@@ -199,6 +199,14 @@ class TestGlobalPMSystemPrompt:
         assert "TaskList" in text
         assert "CronList" in text
 
+    def test_prompt_contains_workflow_tool(self):
+        prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
+        assert "get_workflow_instructions" in prompt["append"]
+
+    def test_prompt_contains_workflow_compliance_section(self):
+        prompt = build_global_pm_system_prompt(reports_dir="/tmp/reports")
+        assert "Workflow Compliance" in prompt["append"]
+
 
 # ---------------------------------------------------------------------------
 # C3: Profile wiring tests
@@ -271,6 +279,25 @@ class TestGlobalPMProfile:
         tool_names = [t.name for t in tools]
         assert "session_start" in tool_names
         assert "session_message" in tool_names
+
+    def test_get_workflow_instructions_in_gpm_tools(self):
+        """Guard test: get_workflow_instructions MUST be in GPM's CLI MCP tool list."""
+        from conftest import make_scheduler
+
+        from summon_claude.summon_cli_mcp import create_summon_cli_mcp_tools
+
+        tools = create_summon_cli_mcp_tools(
+            registry=MagicMock(),
+            session_id="gpm-test",
+            authenticated_user_id="U001",
+            channel_id="C001",
+            cwd="/tmp",
+            is_pm=True,
+            is_global_pm=True,
+            scheduler=make_scheduler(),
+        )
+        tool_names = [t.name for t in tools]
+        assert "get_workflow_instructions" in tool_names
 
 
 # ---------------------------------------------------------------------------
@@ -558,3 +585,140 @@ class TestGlobalPMScanPrompt:
     def test_gpm_scan_prompt_corrective_examples(self):
         result = build_global_pm_scan_prompt()
         assert "errored for" in result
+
+    def test_gpm_scan_prompt_workflow_compliance(self):
+        result = build_global_pm_scan_prompt()
+        assert "get_workflow_instructions" in result
+
+
+# ---------------------------------------------------------------------------
+# T9: Scan timer tests
+# ---------------------------------------------------------------------------
+
+
+class TestScanTimer:
+    @pytest.mark.asyncio
+    async def test_scan_timer_injects_messages(self):
+        """Scan timer injects synthetic events into the queue."""
+        import asyncio
+        from datetime import datetime
+
+        from summon_claude.sessions.scheduler import SessionScheduler
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        ev = asyncio.Event()
+
+        # Pin datetime.now() to 1s before the next minute boundary so
+        # CronSim's next fire time for "* * * * *" is ~1s away, avoiding
+        # up to 60s of wall-clock wait in CI.
+        real_now = datetime.now().astimezone()
+        pinned = real_now.replace(second=59, microsecond=0)
+
+        with patch("summon_claude.sessions.scheduler.datetime") as mock_dt:
+            mock_dt.now = MagicMock(
+                side_effect=lambda tz=None: pinned.astimezone(tz) if tz else pinned
+            )
+            mock_dt.fromisoformat = datetime.fromisoformat
+
+            scheduler = SessionScheduler(q, ev)
+
+            job = await scheduler.create(
+                cron_expr="* * * * *",
+                prompt="test scan",
+                recurring=False,
+                internal=True,
+            )
+            assert job.internal is True
+
+            # With time pinned to second 59, delay is ~1s — job fires quickly.
+            try:
+                event = await asyncio.wait_for(q.get(), timeout=5)
+                assert event.get("_synthetic") is True
+                assert "test scan" in event["text"]
+            finally:
+                ev.set()
+                scheduler.cancel_all()
+
+    @pytest.mark.asyncio
+    async def test_scan_timer_respects_shutdown(self):
+        """Timer stops when shutdown event is set."""
+        import asyncio
+
+        from summon_claude.sessions.scheduler import SessionScheduler
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        ev = asyncio.Event()
+        scheduler = SessionScheduler(q, ev)
+
+        await scheduler.create(
+            cron_expr="* * * * *",
+            prompt="should not fire",
+            recurring=True,
+            internal=True,
+        )
+        # Set shutdown immediately
+        ev.set()
+        # Give task a moment to notice
+        await asyncio.sleep(0.1)
+        # Queue should be empty — job should have exited without firing
+        assert q.empty()
+        scheduler.cancel_all()
+
+    @pytest.mark.asyncio
+    async def test_scan_timer_drops_on_full_queue(self):
+        """When queue is full, timer logs warning and drops event."""
+        import asyncio
+        from datetime import datetime
+
+        from summon_claude.sessions.scheduler import SessionScheduler
+
+        q: asyncio.Queue = asyncio.Queue(maxsize=1)
+        # Pre-fill the queue
+        q.put_nowait({"text": "filler"})
+        ev = asyncio.Event()
+
+        # Pin datetime.now() to 1s before minute boundary (same pattern as
+        # test_scan_timer_injects_messages) to avoid up to 60s wall-clock wait.
+        real_now = datetime.now().astimezone()
+        pinned = real_now.replace(second=59, microsecond=0)
+
+        with patch("summon_claude.sessions.scheduler.datetime") as mock_dt:
+            mock_dt.now = MagicMock(
+                side_effect=lambda tz=None: pinned.astimezone(tz) if tz else pinned
+            )
+            mock_dt.fromisoformat = datetime.fromisoformat
+
+            scheduler = SessionScheduler(q, ev)
+
+            job = await scheduler.create(
+                cron_expr="* * * * *",
+                prompt="overflow test",
+                recurring=False,
+                internal=True,
+            )
+
+            # Wait for the job task to complete (it fires, hits QueueFull, and returns)
+            try:
+                await asyncio.wait_for(
+                    asyncio.ensure_future(self._wait_for_job_done(job)),
+                    timeout=5,
+                )
+            except TimeoutError:
+                pytest.fail("Job task did not complete within 5s — job may never have fired")
+            finally:
+                ev.set()
+                scheduler.cancel_all()
+
+        # Job must have fired (task done) — queue must still hold only the filler
+        assert job.task is not None and job.task.done(), "Job task should be done after firing"
+        assert q.qsize() == 1
+        filler = q.get_nowait()
+        assert filler["text"] == "filler"
+
+    @staticmethod
+    async def _wait_for_job_done(job) -> None:
+        """Poll until the job's task is done."""
+        import asyncio
+
+        while job.task and not job.task.done():
+            await asyncio.sleep(0.1)

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Workflow compliance auditing** — Global PM can query workflow instructions on demand via `get_workflow_instructions` MCP tool during scans, compare PM behavior against project rules, and send corrective messages for violations (#TBD)
+
 ## [1.0.0] - 2026-04-02
 
 ### Added

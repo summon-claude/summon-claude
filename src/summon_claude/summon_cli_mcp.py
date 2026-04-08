@@ -88,6 +88,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         _ipc_queue_session: Override for daemon queue_session (testing).
         _web_client: AsyncWebClient for cross-channel Slack posts (testing).
     """
+    if is_global_pm and not is_pm:
+        raise ValueError("is_global_pm requires is_pm=True")
 
     @tool(
         "session_list",
@@ -1171,7 +1173,88 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
 
         _pm_status_tool = session_status_update
 
-    # Common tools: session info (2) + cron (3) + task (3) = 8; PM adds 5 more
+    _wf_tool: SdkMcpTool | None = None
+    if is_global_pm:
+
+        @tool(
+            "get_workflow_instructions",
+            (
+                "Retrieve workflow instructions for a project or the global defaults. "
+                "project: project name or project_id to look up (optional, accepts either). "
+                "If omitted, returns global default instructions. "
+                "If provided, returns effective instructions for that project "
+                "(project-specific override if set, otherwise global defaults)."
+            ),
+            {
+                "type": "object",
+                "properties": {"project": {"type": "string"}},
+                "required": [],
+            },
+        )
+        async def get_workflow_instructions(args: dict) -> dict:
+            project_ref = (args.get("project") or "").strip() or None
+            try:
+                if project_ref:
+                    project = await registry.get_project(project_ref)
+                    if not project:
+                        return {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": f"Error: project '{project_ref}' not found.",
+                                }
+                            ],
+                            "is_error": True,
+                        }
+                    instructions = await registry.get_effective_workflow(project["project_id"])
+                    source = (
+                        "project-specific"
+                        if project.get("workflow_instructions") is not None
+                        else "global default"
+                    )
+                else:
+                    instructions = await registry.get_workflow_defaults()
+                    source = "global default"
+
+                if not instructions:
+                    return {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "No workflow instructions configured.",
+                            }
+                        ]
+                    }
+                # Workflow instructions are trusted operator config (set via
+                # `summon project workflow set`, requires CLI access).  Not wrapped
+                # with mark_untrusted() because the GPM must act on them as
+                # authoritative rules.  validate_agent_output strips exfiltration
+                # vectors and redacts secrets as defense-in-depth.
+                marked, sec_warnings = validate_agent_output(instructions)
+                for w in sec_warnings:
+                    logger.warning("get_workflow_instructions output validation: %s", w)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"[Source: {source}]\n\n{marked}",
+                        }
+                    ]
+                }
+            except Exception as e:
+                logger.warning("get_workflow_instructions failed: %s", e)
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Error retrieving workflow instructions: {e}",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+        _wf_tool = get_workflow_instructions
+
     tools: list[SdkMcpTool] = [
         session_list,
         session_info,
@@ -1195,6 +1278,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
+        # _wf_tool is set iff is_global_pm (is_global_pm → is_pm, so append here)
+        if _wf_tool is not None:
+            tools.append(_wf_tool)
     return tools
 
 
