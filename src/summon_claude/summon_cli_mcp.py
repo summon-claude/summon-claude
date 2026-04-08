@@ -1223,6 +1223,11 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                             }
                         ]
                     }
+                # Workflow instructions are trusted operator config (set via
+                # `summon project workflow set`, requires CLI access).  Not wrapped
+                # with mark_untrusted() because the GPM must act on them as
+                # authoritative rules.  validate_agent_output strips exfiltration
+                # vectors and redacts secrets as defense-in-depth.
                 marked = validate_agent_output(instructions)[0]
                 return {
                     "content": [
