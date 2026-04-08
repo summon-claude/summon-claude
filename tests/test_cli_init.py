@@ -6,7 +6,6 @@ clear mechanism, graceful validation failure, and write_env_file helper.
 
 from __future__ import annotations
 
-import os
 import stat
 from pathlib import Path
 from unittest.mock import patch
