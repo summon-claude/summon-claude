@@ -1647,6 +1647,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#get_workflow_instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_workflow_instructions
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2635,6 +2646,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#get_workflow_instructions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_workflow_instructions
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -3539,6 +3561,31 @@
 </table>
 <p><strong>Returns:</strong> Confirmation that the status message was updated with a preview of the summary.</p>
 <p><strong>Notes:</strong> Updates the existing pinned message in-place using <code>chat_update</code>. Mentions (<code>@channel</code>, <code>@here</code>, <code>@everyone</code>, user mentions, group mentions) are sanitized before posting. The message is formatted as <code>*Project Manager Status*</code> with a timestamp. Secrets are redacted at the output boundary.</p>
+<hr />
+<h4 id="get_workflow_instructions"><code>get_workflow_instructions</code><a class="headerlink" href="#get_workflow_instructions" title="Permanent link">&para;</a></h4>
+<p>Retrieve workflow instructions for a project or the global defaults. Only available to the Global PM session (<code>is_global_pm=True</code>).</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project</code></td>
+<td>string</td>
+<td>No</td>
+<td>—</td>
+<td>Project name or project_id to look up (accepts either). If omitted, returns global default instructions.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> <code>[Source: project-specific|global default]\n\n&lt;instructions&gt;</code>, or "No workflow instructions configured." when none are set. Instruction content is passed through output validation.</p>
+<p><strong>Notes:</strong> Uses <code>registry.get_project()</code> for indexed name/ID lookup. The source label distinguishes between project-specific overrides and global fallback. <code>$INCLUDE_GLOBAL</code> tokens in project instructions are expanded by the underlying <code>get_effective_workflow()</code> call.</p>
 <hr />
 <h2 id="summon-canvas">summon-canvas<a class="headerlink" href="#summon-canvas" title="Permanent link">&para;</a></h2>
 <p>Provides canvas read/write operations for sessions with a <code>CanvasStore</code>. Available to all sessions (not just PM) when a canvas exists for the session's Slack channel.</p>

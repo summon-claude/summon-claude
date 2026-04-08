@@ -1781,6 +1781,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1796,7 +1813,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -1979,7 +1996,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2018,7 +2035,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2046,7 +2063,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2268,6 +2285,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Unreleased">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#added" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Added
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2283,7 +2317,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added" class="md-nav__link">
+  <a href="#added_1" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2466,7 +2500,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_1" class="md-nav__link">
+  <a href="#added_2" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2505,7 +2539,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_2" class="md-nav__link">
+  <a href="#added_3" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2533,7 +2567,7 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#added_3" class="md-nav__link">
+  <a href="#added_4" class="md-nav__link">
     <span class="md-ellipsis">
       
         Added
@@ -2581,8 +2615,12 @@
 <p>The format is based on <a href="https://keepachangelog.com/en/1.1.0/">Keep a Changelog</a>,
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a href="https://github.com/summon-claude/summon-claude/compare/v1.0.0...HEAD">Unreleased</a><a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
-<h2 id="100-2026-04-02"><a href="https://github.com/summon-claude/summon-claude/compare/v0.2.1...v1.0.0">1.0.0</a> - 2026-04-02<a class="headerlink" href="#100-2026-04-02" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Workflow compliance auditing</strong> — Global PM can query workflow instructions on demand via <code>get_workflow_instructions</code> MCP tool during scans, compare PM behavior against project rules, and send corrective messages for violations (#TBD)</li>
+</ul>
+<h2 id="100-2026-04-02"><a href="https://github.com/summon-claude/summon-claude/compare/v0.2.1...v1.0.0">1.0.0</a> - 2026-04-02<a class="headerlink" href="#100-2026-04-02" title="Permanent link">&para;</a></h2>
+<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <h4 id="project-management">Project Management<a class="headerlink" href="#project-management" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Project management</strong> — <code>summon project add/up/down/list/remove</code> CLI for registering projects with name, working directory, and Slack channel prefix. <code>SessionRegistry</code> gains project CRUD, session-to-project linking, and <code>count_active_children</code> queries. PM agent profile with <code>--pm-profile</code> flag, PM-specific system prompt, and PM-only MCP tools (#51)</li>
@@ -2694,7 +2732,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>CLI module extraction</strong> — Business logic moved from <code>cli/__init__.py</code> into focused modules: <code>cli/start.py</code>, <code>cli/stop.py</code>, <code>cli/session.py</code>, <code>cli/db.py</code>, <code>cli/formatting.py</code>, <code>cli/helpers.py</code>, <code>cli/interactive.py</code> (#30)</li>
 </ul>
 <h2 id="020-2026-03-09"><a href="https://github.com/summon-claude/summon-claude/compare/v0.1.1...v0.2.0">0.2.0</a> - 2026-03-09<a class="headerlink" href="#020-2026-03-09" title="Permanent link">&para;</a></h2>
-<h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
+<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Single-bolt daemon architecture (#23)</li>
 <li>Declarative command dispatch with mid-message detection (#26)</li>
@@ -2708,7 +2746,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>Duplicate messages and ephemeral cleanup (#24)</li>
 </ul>
 <h2 id="011-2026-02-27"><a href="https://github.com/summon-claude/summon-claude/compare/v0.1.0...v0.1.1">0.1.1</a> - 2026-02-27<a class="headerlink" href="#011-2026-02-27" title="Permanent link">&para;</a></h2>
-<h3 id="added_2">Added<a class="headerlink" href="#added_2" title="Permanent link">&para;</a></h3>
+<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
 <ul>
 <li>AskUserQuestion routed to Slack interactive UI (#13)</li>
 <li>Three-layer socket resilience defense (#14)</li>
@@ -2716,7 +2754,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li>Ephemeral permissions and turn cancellation (#16)</li>
 </ul>
 <h2 id="010-2026-02-25"><a href="https://github.com/summon-claude/summon-claude/commits/v0.1.0">0.1.0</a> - 2026-02-25<a class="headerlink" href="#010-2026-02-25" title="Permanent link">&para;</a></h2>
-<h3 id="added_3">Added<a class="headerlink" href="#added_3" title="Permanent link">&para;</a></h3>
+<h3 id="added_4">Added<a class="headerlink" href="#added_4" title="Permanent link">&para;</a></h3>
 <ul>
 <li>Initial implementation of summon-claude</li>
 <li>PyPI publishing with trusted publishers and CI</li>

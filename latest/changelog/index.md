@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased](https://github.com/summon-claude/summon-claude/compare/v1.0.0...HEAD)
 
+### Added
+
+- **Workflow compliance auditing** — Global PM can query workflow instructions on demand via `get_workflow_instructions` MCP tool during scans, compare PM behavior against project rules, and send corrective messages for violations (#TBD)
+
 ## [1.0.0](https://github.com/summon-claude/summon-claude/compare/v0.2.1...v1.0.0) - 2026-04-02
 
 ### Added
