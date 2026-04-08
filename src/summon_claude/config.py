@@ -1119,24 +1119,32 @@ _FALLBACK_MODEL_CHOICES: tuple[str, ...] = (
 )
 
 
+def _default_sentinel(default_model: str | None) -> str:
+    """Build the 'default (...)' sentinel label for the model picker."""
+    if default_model:
+        return f"default (currently: {default_model})"
+    return "default (auto)"
+
+
 def get_model_choices() -> list[str]:
     """Return model choices for the init wizard and config set.
 
     Tries the TTL cache first; falls back to _FALLBACK_MODEL_CHOICES.
-    Always prepends "default (auto)" and appends "other" sentinels.
+    Always prepends a "default (...)" sentinel and appends "other".
     Wraps entirely in try/except — ImportError from model_cache is non-fatal.
     """
     try:
         from summon_claude.cli.model_cache import load_cached_models  # noqa: PLC0415
 
-        cached = load_cached_models()
-        if cached is not None:
-            values = [v for m in cached if (v := m.get("value"))]
+        result = load_cached_models()
+        if result is not None:
+            models, default_model = result
+            values = [v for m in models if (v := m.get("value"))]
             if values:
-                return ["default (auto)", *values, "other"]
+                return [_default_sentinel(default_model), *values, "other"]
     except Exception:
         logger.debug("Failed to load cached models", exc_info=True)
-    return ["default (auto)", *_FALLBACK_MODEL_CHOICES, "other"]
+    return [_default_sentinel(None), *_FALLBACK_MODEL_CHOICES, "other"]
 
 
 def _warn_unrecognized_model(value: str) -> str | None:

@@ -21,7 +21,11 @@ _CACHE_TTL = timedelta(days=7)
 _CACHE_FILENAME = "model-cache.json"
 
 
-def cache_sdk_models(models: list[dict[str, str]], cli_version: str | None) -> None:
+def cache_sdk_models(
+    models: list[dict[str, str]],
+    cli_version: str | None,
+    default_model: str | None = None,
+) -> None:
     """Write the model list to the local cache file.
 
     Early-returns for empty lists to prevent creating a 7-day dead zone
@@ -43,6 +47,7 @@ def cache_sdk_models(models: list[dict[str, str]], cli_version: str | None) -> N
                     "models": models,
                     "cached_at": datetime.now(UTC).isoformat(),
                     "cli_version": cli_version,
+                    "default_model": default_model,
                 }
             )
         )
@@ -50,11 +55,13 @@ def cache_sdk_models(models: list[dict[str, str]], cli_version: str | None) -> N
         logger.debug("Failed to write model cache", exc_info=True)
 
 
-def load_cached_models(current_cli_version: str | None = None) -> list[dict[str, str]] | None:
+def load_cached_models(
+    current_cli_version: str | None = None,
+) -> tuple[list[dict[str, str]], str | None] | None:
     """Read the cached model list if it is fresh and version-compatible.
 
     Returns None if: file missing, symlink, TTL expired, CLI version mismatch,
-    or parse error. Returns data["models"] on success.
+    or parse error. Returns (data["models"], default_model) on success.
 
     Version check is skipped if either current_cli_version is None OR the
     cached cli_version is None. Mismatch is only flagged when both are non-None
@@ -78,7 +85,7 @@ def load_cached_models(current_cli_version: str | None = None) -> list[dict[str,
             and current_cli_version != cached_version
         ):
             return None
-        return data["models"]
+        return (data["models"], data.get("default_model"))
     except Exception:
         logger.debug("Failed to read model cache", exc_info=True)
         return None
@@ -86,7 +93,7 @@ def load_cached_models(current_cli_version: str | None = None) -> list[dict[str,
 
 async def query_sdk_models(
     cli_version: str | None = None,
-) -> tuple[list[dict[str, str]], str | None] | None:
+) -> tuple[list[dict[str, str]], str | None, str | None] | None:
     """Spawn a throwaway SDK session to extract server_info.models.
 
     CLI-only: must be called via asyncio.run() in a single-threaded context.
@@ -98,7 +105,7 @@ async def query_sdk_models(
             Passed through to the return tuple — avoids re-running
             check_claude_cli() when the caller already has it.
 
-    Returns (models_list, cli_version) on success, None on any failure.
+    Returns (models_list, cli_version, default_model) on success, None on any failure.
     """
     try:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient  # noqa: PLC0415
@@ -107,7 +114,7 @@ async def query_sdk_models(
         try:
             # Inner coroutine gives wait_for a single awaitable covering both
             # client startup (__aenter__ spawns subprocess) and the query.
-            async def _do_query() -> tuple[list[dict[str, str]], str | None] | None:
+            async def _do_query() -> tuple[list[dict[str, str]], str | None, str | None] | None:
                 async with ClaudeSDKClient(
                     ClaudeAgentOptions(
                         cwd=str(Path.cwd()),
@@ -119,7 +126,8 @@ async def query_sdk_models(
                     if server_info is None:
                         return None
                     models = server_info.get("models", [])
-                    return (models, cli_version)
+                    default_model = server_info.get("model")
+                    return (models, cli_version, default_model)
 
             return await asyncio.wait_for(_do_query(), timeout=10)
         finally:

@@ -2253,7 +2253,8 @@ class SummonSession:
                                     cache_sdk_models,
                                 )
 
-                                cache_sdk_models(models, None)
+                                init_model = server_info.get("model")
+                                cache_sdk_models(models, None, init_model)
                                 reconcile_context_window_sizes(models)
                             # Best-effort: resolve initial model from init data
                             init_model = server_info.get("model")

@@ -465,13 +465,24 @@ class TestCwdValidators:
 
 
 class TestModelChoices:
-    def test_get_model_choices_with_cache(self):
-        """Mock cached models → choices include cached values with sentinels."""
+    def test_get_model_choices_with_cache_and_default(self):
+        """Mock cached models with default → sentinel shows 'currently: ...'."""
         from summon_claude.config import get_model_choices
 
         with patch(
             "summon_claude.cli.model_cache.load_cached_models",
-            return_value=[{"value": "model-a"}, {"value": "model-b"}],
+            return_value=([{"value": "model-a"}, {"value": "model-b"}], "model-a"),
+        ):
+            choices = get_model_choices()
+        assert choices == ["default (currently: model-a)", "model-a", "model-b", "other"]
+
+    def test_get_model_choices_with_cache_no_default(self):
+        """Mock cached models without default → sentinel shows 'auto'."""
+        from summon_claude.config import get_model_choices
+
+        with patch(
+            "summon_claude.cli.model_cache.load_cached_models",
+            return_value=([{"value": "model-a"}, {"value": "model-b"}], None),
         ):
             choices = get_model_choices()
         assert choices == ["default (auto)", "model-a", "model-b", "other"]
@@ -493,7 +504,7 @@ class TestModelChoices:
 
         with patch(
             "summon_claude.cli.model_cache.load_cached_models",
-            return_value=[{"value": "model-a"}, {"displayName": "no-value"}],
+            return_value=([{"value": "model-a"}, {"displayName": "no-value"}], None),
         ):
             choices = get_model_choices()
         assert choices == ["default (auto)", "model-a", "other"]
@@ -504,7 +515,7 @@ class TestModelChoices:
 
         with patch(
             "summon_claude.cli.model_cache.load_cached_models",
-            return_value=[{"displayName": "A"}, {"displayName": "B"}],
+            return_value=([{"displayName": "A"}, {"displayName": "B"}], None),
         ):
             choices = get_model_choices()
         assert choices == ["default (auto)", *list(_FALLBACK_MODEL_CHOICES), "other"]

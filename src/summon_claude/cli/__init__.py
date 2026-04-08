@@ -631,8 +631,8 @@ def cmd_init(ctx: click.Context) -> None:
             click.echo("  Discovering available models...", nl=False)
             sdk_result = asyncio.run(query_sdk_models(cli_version=cli_status.version))
             if sdk_result is not None:
-                sdk_models, sdk_cli_version = sdk_result
-                cache_sdk_models(sdk_models, sdk_cli_version)
+                sdk_models, sdk_cli_version, sdk_default = sdk_result
+                cache_sdk_models(sdk_models, sdk_cli_version, sdk_default)
                 if sdk_models:
                     click.echo(" done")
                 else:
@@ -739,9 +739,10 @@ def cmd_init(ctx: click.Context) -> None:
             prompt_default = current_value or (str(default) if default is not None else "")
             # Sentinel-aware default handling for model fields.
             if not prompt_default:
-                # Fresh install with no current value: map None → "default (auto)"
-                if "default (auto)" in choices:
-                    prompt_default = "default (auto)"
+                # Fresh install with no current value: select the "default (...)" sentinel
+                default_choice = next((c for c in choices if c.startswith("default (")), None)
+                if default_choice:
+                    prompt_default = default_choice
                 elif choices:
                     prompt_default = choices[0]
             elif choices and prompt_default not in choices:
@@ -755,7 +756,7 @@ def cmd_init(ctx: click.Context) -> None:
                 show_default=True,
             )
             # Sentinel post-processing
-            if value == "default (auto)":
+            if value.startswith("default ("):
                 value = ""
             elif value == "other":
                 raw_custom = click.prompt(f"    {opt.label} (custom)", default="")

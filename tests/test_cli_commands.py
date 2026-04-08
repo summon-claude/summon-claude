@@ -658,7 +658,7 @@ class TestCmdInit:
             ),
             patch(
                 "summon_claude.cli.model_cache.query_sdk_models",
-                return_value=(sdk_models, "1.0.0"),
+                return_value=(sdk_models, "1.0.0", "claude-sonnet-4-6"),
             ),
             patch("summon_claude.cli.model_cache.cache_sdk_models") as mock_cache,
         ):
@@ -666,7 +666,7 @@ class TestCmdInit:
             result = runner.invoke(cli, ["init"], input=inputs)
 
         assert result.exit_code == 0, f"Init failed: {result.output}"
-        mock_cache.assert_called_once_with(sdk_models, "1.0.0")
+        mock_cache.assert_called_once_with(sdk_models, "1.0.0", "claude-sonnet-4-6")
         assert "done" in result.output
 
     def test_init_model_discovery_empty_models(self, tmp_path):
@@ -703,7 +703,7 @@ class TestCmdInit:
             ),
             patch(
                 "summon_claude.cli.model_cache.query_sdk_models",
-                return_value=([], "1.0.0"),
+                return_value=([], "1.0.0", None),
             ),
         ):
             runner = CliRunner()

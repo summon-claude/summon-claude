@@ -45,7 +45,19 @@ class TestCacheSdkModels:
         """Write models, load immediately → returns same data."""
         cache_sdk_models(_SAMPLE_MODELS, "1.0.0")
         result = load_cached_models("1.0.0")
-        assert result == _SAMPLE_MODELS
+        assert result is not None
+        models, default_model = result
+        assert models == _SAMPLE_MODELS
+        assert default_model is None
+
+    def test_cache_round_trip_with_default_model(self, tmp_path):
+        """Write models with default_model, load → returns both."""
+        cache_sdk_models(_SAMPLE_MODELS, "1.0.0", "claude-sonnet-4-6")
+        result = load_cached_models("1.0.0")
+        assert result is not None
+        models, default_model = result
+        assert models == _SAMPLE_MODELS
+        assert default_model == "claude-sonnet-4-6"
 
     def test_cache_empty_models_rejected(self, tmp_path):
         """call cache_sdk_models([], "1.0.0") → no cache file written."""
@@ -105,7 +117,9 @@ class TestLoadCachedModels:
         """
         cache_sdk_models(_SAMPLE_MODELS, None)
         result = load_cached_models("2.0.0")
-        assert result == _SAMPLE_MODELS
+        assert result is not None
+        models, _ = result
+        assert models == _SAMPLE_MODELS
 
     def test_cache_version_none_skip_on_load(self, tmp_path):
         """Write with cli_version='1.0.0', load with current_cli_version=None → returns data.
@@ -114,7 +128,9 @@ class TestLoadCachedModels:
         """
         cache_sdk_models(_SAMPLE_MODELS, "1.0.0")
         result = load_cached_models(None)
-        assert result == _SAMPLE_MODELS
+        assert result is not None
+        models, _ = result
+        assert models == _SAMPLE_MODELS
 
     def test_cache_symlink_rejected_on_read(self, tmp_path):
         """Symlink at cache path → returns None on load."""
@@ -137,8 +153,8 @@ class TestLoadCachedModels:
 
 class TestQuerySdkModels:
     def test_query_sdk_models_success(self, tmp_path):
-        """Mock ClaudeSDKClient → verify returns (models, cli_version)."""
-        mock_server_info = {"models": _SAMPLE_MODELS}
+        """Mock ClaudeSDKClient → verify returns (models, cli_version, default_model)."""
+        mock_server_info = {"models": _SAMPLE_MODELS, "model": "claude-sonnet-4-6"}
         mock_client = AsyncMock()
         mock_client.get_server_info = AsyncMock(return_value=mock_server_info)
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -151,9 +167,10 @@ class TestQuerySdkModels:
             result = asyncio.run(query_sdk_models(cli_version="1.2.3"))
 
         assert result is not None
-        models, version = result
+        models, version, default_model = result
         assert models == _SAMPLE_MODELS
         assert version == "1.2.3"
+        assert default_model == "claude-sonnet-4-6"
 
     def test_query_sdk_models_failure(self, tmp_path):
         """Mock exception from ClaudeSDKClient → returns None."""
@@ -184,7 +201,7 @@ class TestQuerySdkModels:
         assert result is None
 
     def test_query_sdk_models_empty_models_key_missing(self, tmp_path):
-        """server_info without 'models' key → returns ([], cli_version)."""
+        """server_info without 'models' key → returns ([], cli_version, None)."""
         mock_client = AsyncMock()
         mock_client.get_server_info = AsyncMock(return_value={})
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -193,10 +210,10 @@ class TestQuerySdkModels:
         with patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client):
             result = asyncio.run(query_sdk_models(cli_version="1.2.3"))
 
-        assert result == ([], "1.2.3")
+        assert result == ([], "1.2.3", None)
 
     def test_query_sdk_models_empty_models_list(self, tmp_path):
-        """server_info with empty models list → returns ([], cli_version)."""
+        """server_info with empty models list → returns ([], cli_version, None)."""
         mock_client = AsyncMock()
         mock_client.get_server_info = AsyncMock(return_value={"models": []})
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
@@ -205,7 +222,7 @@ class TestQuerySdkModels:
         with patch("claude_agent_sdk.ClaudeSDKClient", return_value=mock_client):
             result = asyncio.run(query_sdk_models(cli_version="1.2.3"))
 
-        assert result == ([], "1.2.3")
+        assert result == ([], "1.2.3", None)
 
     def test_query_sdk_models_server_info_none(self, tmp_path):
         """get_server_info() returns None → returns None (not a timeout, not an exception)."""

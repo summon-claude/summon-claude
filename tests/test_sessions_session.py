@@ -4913,5 +4913,5 @@ class TestServerInfoModelCacheWiring:
         ):
             await session._run_session_tasks(rt, AsyncMock())
 
-        mock_cache.assert_called_once_with(models, None)
+        mock_cache.assert_called_once_with(models, None, None)
         mock_reconcile.assert_called_once_with(models)

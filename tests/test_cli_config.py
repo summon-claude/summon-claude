@@ -19,7 +19,7 @@ class TestConfigSetModelValidation:
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[{"value": "claude-opus-4-6"}],
+                return_value=([{"value": "claude-opus-4-6"}], None),
             ),
         ):
             # Should not raise SystemExit
@@ -37,7 +37,7 @@ class TestConfigSetModelValidation:
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[{"value": "claude-opus-4-6"}],
+                return_value=([{"value": "claude-opus-4-6"}], None),
             ),
         ):
             config_set("SUMMON_DEFAULT_MODEL", "my-custom-model")
@@ -57,7 +57,7 @@ class TestConfigSetModelValidation:
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[{"value": "claude-opus-4-6"}],
+                return_value=([{"value": "claude-opus-4-6"}], None),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -74,7 +74,7 @@ class TestConfigSetModelValidation:
             patch("summon_claude.cli.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.model_cache.load_cached_models",
-                return_value=[{"value": "claude-opus-4-6"}],
+                return_value=([{"value": "claude-opus-4-6"}], None),
             ),
             pytest.raises(SystemExit) as exc_info,
         ):
