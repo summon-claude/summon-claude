@@ -50,8 +50,21 @@ _BRIDGE_TIMEOUT_S = 660.0  # _PERMISSION_TIMEOUT_S (600) + 60s buffer
 
 # Built-in tools that bypass can_use_tool — the SDK never fires the callback
 # for these, so a bridge Future would never resolve (660s hang). Skip the
-# bridge entirely for these tools. Spike-confirmed 2026-03-20.
+# bridge entirely for these tools. Spike-confirmed 2026-03-20 on SDK 0.1.48.
+# If SDK is upgraded, re-run the spike (hack/spikes/spike_enter_worktree.py)
+# to verify no new built-ins bypass can_use_tool; add them here if found.
 _BRIDGE_SKIP_TOOLS = frozenset(["EnterWorktree", "ExitWorktree"])
+
+
+def _sanitize_approval_reason(text: str) -> str:
+    """Sanitize an approval reason for Slack mrkdwn display.
+
+    Applies sanitize_for_mrkdwn (strips mrkdwn chars, truncates to 60),
+    then removes underscores (prevent italic injection) and angle brackets
+    (prevent Slack link/mention injection).
+    """
+    return sanitize_for_mrkdwn(text, 60).replace("_", " ").replace("<", "").replace(">", "")
+
 
 # Maps tool names to the keys where their primary argument lives (tried in order).
 _TOOL_PATH_KEYS: dict[str, tuple[str, ...]] = {
@@ -659,12 +672,7 @@ class ResponseStreamer:
         label_suffix = ""
         if approval is not None:
             if approval.reason:
-                safe_reason = (
-                    sanitize_for_mrkdwn(approval.reason, 60)
-                    .replace("_", " ")
-                    .replace("<", "")
-                    .replace(">", "")
-                )
+                safe_reason = _sanitize_approval_reason(approval.reason)
                 approval_text = f"{approval.label}: {safe_reason}"
             else:
                 approval_text = approval.label

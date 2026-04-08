@@ -1565,6 +1565,20 @@ class TestApprovalVisibility:
 
         bridge.create_future.assert_not_called()
 
+    async def test_exit_worktree_skips_bridge(self):
+        """ExitWorktree bypasses can_use_tool — must skip bridge to prevent 660s hang."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        bridge.create_future = MagicMock()
+        streamer, router, client = make_streamer()
+        streamer._bridge = bridge
+        block = ToolUseBlock(id="tu_exit_wt", name="ExitWorktree", input={})
+
+        await streamer._handle_tool_use_block(block, None)
+
+        bridge.create_future.assert_not_called()
+
     async def test_denied_tool_result_suppressed(self):
         """Denied tool results (is_error=True) are suppressed — no :x: Tool error."""
         from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
@@ -1611,6 +1625,30 @@ class TestApprovalVisibility:
         # post SHOULD have been called for the approved result
         client.post.assert_called()
 
+    async def test_denied_tool_success_result_not_suppressed(self):
+        """Denied tool with is_error=False result is NOT suppressed — posts normally."""
+        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
+
+        bridge = ApprovalBridge()
+        bridge.resolve("Write", ApprovalInfo(label="denied", is_denial=True))
+        streamer, router, client = make_streamer()
+        streamer._bridge = bridge
+        tool_block = ToolUseBlock(id="tu_deny_ok", name="Write", input={"file_path": "/f"})
+
+        await streamer._handle_tool_use_block(tool_block, None)
+        client.post.reset_mock()
+
+        # Denied tool but result is NOT an error (is_error=False)
+        result_block = ToolResultBlock(
+            tool_use_id="tu_deny_ok",
+            content="Completed successfully",
+            is_error=False,
+        )
+        await streamer._handle_tool_result_block(result_block, None)
+
+        # Suppression only fires for denied+is_error=True; success posts normally
+        client.post.assert_called()
+
 
 class TestBridgeTimeoutGuard:
     """Guard test: bridge timeout must exceed permission timeout."""
@@ -1630,3 +1668,57 @@ class TestBridgeTimeoutGuard:
 
         assert "EnterWorktree" in _BRIDGE_SKIP_TOOLS
         assert "ExitWorktree" in _BRIDGE_SKIP_TOOLS
+
+
+class TestBridgeClearOnNewTurn:
+    """Tests for bridge.clear() cancelling stale Futures on stream_with_flush."""
+
+    async def test_stale_future_cancelled_on_second_stream_with_flush(self):
+        """Futures pending from a prior turn are cancelled when stream_with_flush starts."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        streamer, router, client = make_streamer()
+        streamer._bridge = bridge
+
+        # Create a pending Future that will never be resolved (simulates an aborted turn)
+        stale_fut = bridge.create_future("Write")
+        assert not stale_fut.done()
+
+        # Starting a new stream_with_flush must call bridge.clear(), cancelling stale_fut
+        messages = [
+            make_assistant_message([make_text_block("hello")]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # The stale Future must now be cancelled
+        assert stale_fut.cancelled()
+
+
+class TestSanitizeApprovalReason:
+    """Tests for the _sanitize_approval_reason helper."""
+
+    def test_empty_string(self):
+        from summon_claude.sessions.response import _sanitize_approval_reason
+
+        assert _sanitize_approval_reason("") == ""
+
+    def test_underscores_replaced_with_spaces(self):
+        from summon_claude.sessions.response import _sanitize_approval_reason
+
+        assert "_" not in _sanitize_approval_reason("safe_file_edit")
+
+    def test_angle_brackets_stripped(self):
+        from summon_claude.sessions.response import _sanitize_approval_reason
+
+        result = _sanitize_approval_reason("injected <@U123> mention")
+        assert "<" not in result
+        assert ">" not in result
+
+    def test_truncated_to_60_chars(self):
+        from summon_claude.sessions.response import _sanitize_approval_reason
+
+        long_reason = "a" * 100
+        result = _sanitize_approval_reason(long_reason)
+        assert len(result) <= 60

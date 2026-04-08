@@ -218,6 +218,33 @@ class TestHandleAction:
         assert batch_id not in handler._batch.decisions
         assert not event.is_set()
 
+    async def test_user_id_sanitization_fallback_in_handle_action(self):
+        """user_id that fails [A-Z0-9]+ regex is replaced with 'unknown' in bridge label."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        # authenticated_user_id must match user_id to pass the identity check
+        handler, _, _ = make_handler(authenticated_user_id="u_test_lower", bridge=bridge)
+        batch_id = "test-batch-sanitize"
+        event = asyncio.Event()
+        handler._batch.events[batch_id] = event
+        handler._batch.tool_names[batch_id] = ["CustomTool"]
+        handler._batch.tool_inputs[batch_id] = [{"key": "val"}]
+        handler._batch.message_ts[batch_id] = "1234.5678"
+
+        await handler.handle_action(
+            value=f"deny:{batch_id}",
+            user_id="u_test_lower",
+        )
+
+        fut = bridge.create_future("CustomTool")
+        assert fut.done()
+        info = fut.result()
+        # user_id "u_test_lower" fails [A-Z0-9]+ so it's replaced with "unknown"
+        assert "<@unknown>" in info.label
+        assert "<@u_test_lower>" not in info.label
+        assert info.is_denial is True
+
 
 class TestAutoApproveList:
     def test_list_files_approved(self):
@@ -1794,3 +1821,108 @@ class TestApprovalBridgeResolution:
         info = fut.result()
         assert "approved by" in info.label
         assert info.is_denial is False
+
+    async def test_request_approval_timeout_resolves_bridge(self):
+        """_request_approval TimeoutError path resolves bridge with denial."""
+        from unittest.mock import patch
+
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        class _ImmediateTimeout:
+            async def __aenter__(self):
+                raise TimeoutError
+
+            async def __aexit__(self, *args):
+                return False
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+
+        with patch(
+            "summon_claude.sessions.permissions.asyncio.timeout",
+            return_value=_ImmediateTimeout(),
+        ):
+            result = await handler.handle("CustomTool", {"key": "val"}, None)
+
+        assert isinstance(result, PermissionResultDeny)
+        fut = bridge.create_future("CustomTool")
+        assert fut.done()
+        info = fut.result()
+        assert info.is_denial is True
+        assert info.reason == "timed out"
+
+    async def test_post_approval_message_exception_resolves_bridge(self):
+        """When post_interactive raises, bridge resolves with denial."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, provider, _ = make_handler(bridge=bridge)
+        provider.post_interactive = AsyncMock(side_effect=RuntimeError("slack down"))
+
+        result = await handler.handle("CustomTool", {"key": "val"}, None)
+
+        assert isinstance(result, PermissionResultDeny)
+        fut = bridge.create_future("CustomTool")
+        assert fut.done()
+        info = fut.result()
+        assert info.is_denial is True
+        assert info.reason == "internal error"
+
+    async def test_sdk_allowed_resolves_bridge(self):
+        """Step 3 SDK allow resolves bridge with 'sdk-allowed' label."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        mock_ctx = MagicMock()
+        mock_ctx.suggestions = [mock_suggestion]
+
+        result = await handler.handle("CustomTool", {"key": "val"}, mock_ctx)
+
+        assert isinstance(result, PermissionResultAllow)
+        fut = bridge.create_future("CustomTool")
+        assert fut.done()
+        info = fut.result()
+        assert info.label == "sdk-allowed"
+        assert info.is_denial is False
+
+    async def test_ask_user_question_resolves_bridge_with_answered(self):
+        """AskUserQuestion success resolves bridge with 'answered' label."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        # Mock _handle_ask_user_question to return allow without Slack interaction
+        handler._handle_ask_user_question = AsyncMock(return_value=PermissionResultAllow())
+
+        result = await handler.handle("AskUserQuestion", {"questions": []}, None)
+
+        assert isinstance(result, PermissionResultAllow)
+        fut = bridge.create_future("AskUserQuestion")
+        assert fut.done()
+        info = fut.result()
+        assert info.label == "answered"
+        assert info.is_denial is False
+
+    async def test_ask_user_question_deny_resolves_bridge_with_denied(self):
+        """AskUserQuestion failure resolves bridge with denial — prevents 660s hang."""
+        from summon_claude.sessions.permissions import ApprovalBridge
+
+        bridge = ApprovalBridge()
+        handler, _, _ = make_handler(bridge=bridge)
+        handler._handle_ask_user_question = AsyncMock(
+            return_value=PermissionResultDeny(message="question timed out")
+        )
+
+        result = await handler.handle("AskUserQuestion", {"questions": []}, None)
+
+        assert isinstance(result, PermissionResultDeny)
+        fut = bridge.create_future("AskUserQuestion")
+        assert fut.done()
+        info = fut.result()
+        assert info.label == "denied"
+        assert info.reason == "question failed"
+        assert info.is_denial is True

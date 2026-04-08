@@ -207,6 +207,7 @@ _LABEL_BLOCKED_AUTO_MODE = "blocked"
 _LABEL_SDK_ALLOWED = "sdk-allowed"
 _LABEL_SDK_DENIED = "denied by policy"
 _LABEL_DENIED = "denied"
+_LABEL_USER_ANSWERED = "answered"
 
 
 class ApprovalBridge:
@@ -495,7 +496,7 @@ class PermissionHandler:
         if tool_name == "AskUserQuestion":
             result = await self._handle_ask_user_question(input_data)
             if isinstance(result, PermissionResultAllow):
-                self._resolve_approval(tool_name, _LABEL_AUTO_ALLOWED)
+                self._resolve_approval(tool_name, _LABEL_USER_ANSWERED)
             else:
                 self._resolve_approval(
                     tool_name,
@@ -824,23 +825,17 @@ class PermissionHandler:
         # 3. No containment active: hard deny
         if not self._in_containment:
             logger.info("Write gate: denying %s (no active containment)", tool_name)
-            if self._is_git_repo:
-                self._resolve_approval(
-                    tool_name,
-                    _LABEL_DENIED,
-                    reason="write gate",
-                    is_denial=True,
-                )
-                return PermissionResultDeny(
-                    message="Write access requires a worktree. "
-                    "Use EnterWorktree to create an isolated copy first."
-                )
             self._resolve_approval(
                 tool_name,
                 _LABEL_DENIED,
                 reason="write gate",
                 is_denial=True,
             )
+            if self._is_git_repo:
+                return PermissionResultDeny(
+                    message="Write access requires a worktree. "
+                    "Use EnterWorktree to create an isolated copy first."
+                )
             return PermissionResultDeny(
                 message="Write access requires a supported working directory. "
                 "Start a session in a project directory."
