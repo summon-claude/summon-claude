@@ -1230,7 +1230,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 # with mark_untrusted() because the GPM must act on them as
                 # authoritative rules.  validate_agent_output strips exfiltration
                 # vectors and redacts secrets as defense-in-depth.
-                marked = validate_agent_output(instructions)[0]
+                marked, sec_warnings = validate_agent_output(instructions)
+                for w in sec_warnings:
+                    logger.warning("get_workflow_instructions output validation: %s", w)
                 return {
                     "content": [
                         {
@@ -1245,7 +1247,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                     "content": [
                         {
                             "type": "text",
-                            "text": "Error retrieving workflow instructions.",
+                            "text": f"Error retrieving workflow instructions: {e}",
                         }
                     ],
                     "is_error": True,
@@ -1253,7 +1255,6 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
 
         _wf_tool = get_workflow_instructions
 
-    # Common tools: session info (2) + cron (3) + task (3) = 8
     tools: list[SdkMcpTool] = [
         session_list,
         session_info,
@@ -1277,6 +1278,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
+        # _wf_tool is set iff is_global_pm (is_global_pm → is_pm, so append here)
         if _wf_tool is not None:
             tools.append(_wf_tool)
     return tools
