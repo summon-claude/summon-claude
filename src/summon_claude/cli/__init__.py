@@ -33,6 +33,8 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
+    parse_env_file,
+    write_env_file,
 )
 from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
 from summon_claude.cli.doctor import async_doctor
@@ -583,6 +585,18 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
             click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
 
 
+def _ensure_gitignore() -> None:
+    """Write .gitignore in local-install .summon/ to prevent accidental commits."""
+    if not is_local_install():
+        return
+    summon_dir = get_data_dir()
+    summon_dir.mkdir(parents=True, exist_ok=True)
+    gitignore = summon_dir / ".gitignore"
+    if not gitignore.exists():
+        with contextlib.suppress(OSError):
+            gitignore.write_text("*\n")
+
+
 # ---------------------------------------------------------------------------
 # Top-level commands: init, config
 # ---------------------------------------------------------------------------
@@ -592,6 +606,8 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
 @click.pass_context
 def cmd_init(ctx: click.Context) -> None:
     """Interactive setup wizard for summon-claude configuration."""
+    from pydantic_core import PydanticUndefined  # noqa: PLC0415
+
     from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
     from summon_claude.config import CONFIG_OPTIONS, _is_truthy, get_config_default  # noqa: PLC0415
 
@@ -611,12 +627,14 @@ def cmd_init(ctx: click.Context) -> None:
     config_file = pathlib.Path(config_path_override) if config_path_override else get_config_file()
 
     # Load existing config values for pre-filling
-    from summon_claude.cli.config import parse_env_file  # noqa: PLC0415
-
     existing = parse_env_file(config_file)
     if existing:
         click.echo(f"  Existing config found at {config_file}")
         click.echo("  Press Enter to keep current values.\n")
+
+    # Build lookup structures for merge/filter/strip pass
+    valid_keys = {opt.env_key for opt in CONFIG_OPTIONS}
+    option_by_key = {opt.env_key: opt for opt in CONFIG_OPTIONS}
 
     # Opportunistically refresh model cache via throwaway SDK session
     if cli_status.found:
@@ -845,32 +863,33 @@ def cmd_init(ctx: click.Context) -> None:
         click.echo("Config file NOT written. Fix the errors and re-run `summon init`.", err=True)
         raise SystemExit(1) from e
 
-    # Write config file — merge existing values for hidden options to prevent data loss,
-    # then strip newlines to prevent injection into .env format
-    config_file.parent.mkdir(parents=True, exist_ok=True)
+    # Merge existing + collected, filter to known keys, strip defaults
     merged = {**existing, **collected}
-    sanitized = {k: v.replace("\n", "").replace("\r", "") for k, v in merged.items()}
-    output_lines = [f"{k}={v}" for k, v in sanitized.items()]
-    config_file.write_text("\n".join(output_lines) + "\n")
-    with contextlib.suppress(OSError):
-        config_file.chmod(0o600)
+    merged_values = {k: v for k, v in merged.items() if k in valid_keys}
+    for key in list(merged_values):
+        opt = option_by_key.get(key)
+        if opt and not opt.required:
+            field_default = get_config_default(opt)
+            if field_default is PydanticUndefined or field_default is None:
+                continue
+            if isinstance(field_default, bool):
+                default_str = str(field_default).lower()
+            else:
+                default_str = str(field_default)
+            if merged_values[key] == default_str:
+                del merged_values[key]
+
+    # Write config file
+    write_env_file(config_file, merged_values, atomic=True)
+    _ensure_gitignore()
 
     click.echo()
     click.echo(f"Configuration saved to {config_file}")
     if is_local_install():
-        # Defense-in-depth: write .gitignore inside .summon/ to prevent accidental commits
-        summon_dir = get_data_dir()
-        summon_dir.mkdir(parents=True, exist_ok=True)
-        gitignore = summon_dir / ".gitignore"
-        if not gitignore.exists():
-            with contextlib.suppress(OSError):
-                gitignore.write_text("*\n")
         click.echo("Note: Add .summon/ to your project's .gitignore to avoid committing secrets.")
     click.echo()
 
     # Auto-run config check — validates connectivity and shows feature inventory
-    from summon_claude.cli.config import config_check  # noqa: PLC0415
-
     config_check(config_path=config_path_override)
 
 
