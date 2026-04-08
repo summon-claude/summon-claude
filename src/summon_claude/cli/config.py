@@ -85,7 +85,11 @@ def write_env_file(path: Path, values: dict[str, str], *, atomic: bool = False) 
 
     write_path = path.parent / (path.name + ".tmp") if atomic else path
     try:
-        fd = os.open(str(write_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        old_umask = os.umask(0o177)
+        try:
+            fd = os.open(str(write_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        finally:
+            os.umask(old_umask)
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:
             f.write(content)

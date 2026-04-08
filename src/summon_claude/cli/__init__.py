@@ -841,7 +841,7 @@ def cmd_init(ctx: click.Context) -> None:
                                 for k, v in {**existing, **collected}.items()
                                 if k in valid_keys
                             }
-                            write_env_file(draft_path, dv)
+                            write_env_file(draft_path, dv, atomic=True)
                         except OSError:
                             pass
                         click.echo("    Cleared.")
@@ -878,7 +878,7 @@ def cmd_init(ctx: click.Context) -> None:
                     existing.pop(opt.env_key, None)
                     try:
                         dv = {k: v for k, v in {**existing, **collected}.items() if k in valid_keys}
-                        write_env_file(draft_path, dv)
+                        write_env_file(draft_path, dv, atomic=True)
                     except OSError:
                         pass
                     click.echo("    Cleared.")
@@ -911,7 +911,7 @@ def cmd_init(ctx: click.Context) -> None:
                 draft_values = {
                     k: v for k, v in {**existing, **collected}.items() if k in valid_keys
                 }
-                write_env_file(draft_path, draft_values)
+                write_env_file(draft_path, draft_values, atomic=True)
             except OSError:
                 pass
 
@@ -919,7 +919,7 @@ def cmd_init(ctx: click.Context) -> None:
         # Ctrl-C: save draft (fallback) and exit cleanly
         try:
             draft_values = {k: v for k, v in {**existing, **collected}.items() if k in valid_keys}
-            write_env_file(draft_path, draft_values)
+            write_env_file(draft_path, draft_values, atomic=True)
         except OSError:
             click.echo("\n  Could not save progress.", err=True)
         click.echo(f"\n  Partial progress saved to {draft_path}. Re-run summon init to resume.")
