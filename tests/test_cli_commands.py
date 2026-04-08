@@ -1642,8 +1642,9 @@ class TestInitPydanticValidationError:
             result = runner.invoke(cli, ["init"], input=inputs)
 
         assert result.exit_code != 0
-        assert "Validation error" in result.output
-        assert "Config file NOT written" in result.output
+        # Validation failure now writes config and reports issues
+        combined = result.output + (result.stderr or "")
+        assert "potential issues" in combined or "Fix with" in combined
 
 
 class TestInitTextValidateFnRetry:
