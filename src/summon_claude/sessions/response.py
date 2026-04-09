@@ -45,7 +45,7 @@ _MAX_MESSAGE_CHARS = 3000
 _FLUSH_HEADROOM_CHARS = 100
 _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
 # Built-in tools that bypass can_use_tool — the SDK never fires the callback
-# for these, so a bridge Future would never resolve (660s hang). Skip the
+# for these, so a bridge Future would never resolve (bridge_timeout_s hang). Skip the
 # bridge entirely for these tools. Spike-confirmed 2026-03-20 on SDK 0.1.48.
 # If SDK is upgraded, re-run the spike (hack/spikes/spike_enter_worktree.py)
 # to verify no new built-ins bypass can_use_tool; add them here if found.
@@ -409,7 +409,7 @@ class ResponseStreamer:
         # Await approval before posting — skip bridge for subagent tool calls.
         # The SDK may not invoke can_use_tool for tools in Task subagent messages
         # (parent_id != None). If the callback is never called, the Future would
-        # never resolve, causing a 660s hang.
+        # never resolve, causing a bridge_timeout_s hang.
         approval: ApprovalInfo | None = None
         if self._bridge is not None and parent_id is None and block.name not in _BRIDGE_SKIP_TOOLS:
             try:

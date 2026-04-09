@@ -20,6 +20,8 @@ from summon_claude.sessions.permissions import (
     _JIRA_MCP_PREFIX,
     _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
     _WRITE_GATED_TOOLS,
+    ApprovalBridge,
+    ApprovalInfo,
     PendingRequest,
     PermissionHandler,
     _format_request_summary,
@@ -220,8 +222,6 @@ class TestHandleAction:
 
     async def test_hitl_labels_do_not_embed_user_id(self):
         """HITL labels use constants — no <@user_id> mention to avoid Slack pings."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-batch-label"
@@ -239,7 +239,7 @@ class TestHandleAction:
         fut = bridge.create_future("CustomTool")
         assert fut.done()
         info = fut.result()
-        assert info.label == "denied"
+        assert info.label == "user-denied"
         assert "<@" not in info.label
         assert info.is_denial is True
 
@@ -697,8 +697,6 @@ class TestSessionApprovalCaching:
 
     async def test_approve_session_resolves_bridge_with_session_label(self):
         """approve_session should resolve bridge with 'approved for session' label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-batch"
@@ -856,8 +854,6 @@ class TestArgBasedCaching:
 
     async def test_approve_session_resolves_bridge_for_write_tools(self):
         """approve_session for write tools should resolve bridge with session label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-batch"
@@ -878,8 +874,6 @@ class TestArgBasedCaching:
 
     async def test_regular_approve_resolves_bridge_without_session(self):
         """Regular approve should resolve bridge with 'approved' label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-batch"
@@ -1558,13 +1552,21 @@ class TestJiraMCPGuardTests:
             assert prefix.startswith(_JIRA_MCP_PREFIX)
 
 
+class TestLabelConstants:
+    """Guard: approval label constants must remain distinct."""
+
+    def test_denied_labels_are_distinct(self):
+        """_LABEL_DENIED and _LABEL_USER_DENIED must differ to distinguish system vs user denial."""
+        from summon_claude.sessions.permissions import _LABEL_DENIED, _LABEL_USER_DENIED
+
+        assert _LABEL_DENIED != _LABEL_USER_DENIED
+
+
 class TestApprovalBridge:
     """Tests for the ApprovalBridge two-sided rendezvous."""
 
     async def test_streamer_first_ordering(self):
         """create_future then resolve — Future resolves with expected info."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         fut = bridge.create_future("Read")
         info = ApprovalInfo(label="auto-allowed")
@@ -1575,8 +1577,6 @@ class TestApprovalBridge:
 
     async def test_handler_first_ordering(self):
         """resolve before create_future — returned Future is already resolved."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         info = ApprovalInfo(label="sdk-allowed")
         bridge.resolve("Read", info)
@@ -1586,8 +1586,6 @@ class TestApprovalBridge:
 
     async def test_fifo_ordering(self):
         """Two create_future, two resolve — first goes to first, second to second."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         fut1 = bridge.create_future("Read")
         fut2 = bridge.create_future("Read")
@@ -1598,8 +1596,6 @@ class TestApprovalBridge:
 
     async def test_cleanup_on_empty(self):
         """After all Futures resolved, no leftover keys in internal dicts."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         fut = bridge.create_future("Read")
         bridge.resolve("Read", ApprovalInfo(label="done"))
@@ -1609,8 +1605,6 @@ class TestApprovalBridge:
 
     async def test_different_tool_names(self):
         """Futures for different tool names don't interfere."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         fut_r = bridge.create_future("Read")
         fut_w = bridge.create_future("Write")
@@ -1621,8 +1615,6 @@ class TestApprovalBridge:
 
     async def test_clear_cancels_pending_futures(self):
         """clear() cancels all pending Futures and empties dicts."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         fut = bridge.create_future("Read")
         bridge.clear()
@@ -1632,8 +1624,6 @@ class TestApprovalBridge:
 
     async def test_clear_resets_resolved(self):
         """clear() removes pre-resolved entries; new create_future creates a pending Future."""
-        from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
-
         bridge = ApprovalBridge()
         bridge.resolve("Read", ApprovalInfo(label="stale"))
         bridge.clear()
@@ -1647,8 +1637,6 @@ class TestApprovalBridgeResolution:
 
     async def test_auto_allow_resolves_bridge(self):
         """Static allowlist (Read) resolves bridge with 'auto-allowed'."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         result = await handler.handle("Read", {}, None)
@@ -1659,8 +1647,6 @@ class TestApprovalBridgeResolution:
 
     async def test_session_cache_resolves_bridge(self):
         """Session-cached tool resolves bridge with 'session-cached'."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         handler._session_approved_tools.add("Agent")
@@ -1672,8 +1658,6 @@ class TestApprovalBridgeResolution:
 
     async def test_sdk_deny_resolves_bridge(self):
         """SDK deny resolves bridge with denial label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         mock_ctx = MagicMock()
@@ -1688,8 +1672,6 @@ class TestApprovalBridgeResolution:
 
     async def test_hitl_deny_resolves_bridge(self):
         """HITL deny via handle_action resolves bridge with denial label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-deny"
@@ -1703,7 +1685,7 @@ class TestApprovalBridgeResolution:
         assert fut.done()
         info = fut.result()
         assert info.is_denial is True
-        assert info.label == "denied"
+        assert info.label == "user-denied"
 
     async def test_no_bridge_does_not_error(self):
         """Handler without bridge (bridge=None) works without errors."""
@@ -1713,8 +1695,6 @@ class TestApprovalBridgeResolution:
 
     async def test_classifier_allow_resolves_bridge(self):
         """Classifier allow resolves bridge with 'auto-mode' and reason."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         handler._classifier_enabled = True
@@ -1735,8 +1715,6 @@ class TestApprovalBridgeResolution:
 
     async def test_classifier_block_resolves_bridge(self):
         """Classifier block resolves bridge with 'blocked' and denial flag."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         handler._classifier_enabled = True
@@ -1757,8 +1735,6 @@ class TestApprovalBridgeResolution:
 
     async def test_write_gate_containment_resolves_bridge(self, tmp_path):
         """Write within containment resolves bridge with 'within project'."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         project = tmp_path / "project"
         project.mkdir()
         (project / "src").mkdir()
@@ -1781,8 +1757,6 @@ class TestApprovalBridgeResolution:
 
     async def test_write_gate_safe_dir_resolves_bridge(self, tmp_path):
         """Write to safe dir resolves bridge with 'auto-allowed'."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         project = tmp_path / "project"
         project.mkdir()
         hack_dir = project / "hack"
@@ -1804,8 +1778,6 @@ class TestApprovalBridgeResolution:
 
     async def test_hitl_approve_resolves_bridge(self):
         """HITL approval resolves bridge with 'approved' label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         batch_id = "test-approve"
@@ -1823,8 +1795,6 @@ class TestApprovalBridgeResolution:
     async def test_request_approval_timeout_resolves_bridge(self):
         """_request_approval TimeoutError path resolves bridge with denial."""
         from unittest.mock import patch
-
-        from summon_claude.sessions.permissions import ApprovalBridge
 
         class _ImmediateTimeout:
             async def __aenter__(self):
@@ -1851,8 +1821,6 @@ class TestApprovalBridgeResolution:
 
     async def test_post_approval_message_exception_resolves_bridge(self):
         """When post_interactive raises, bridge resolves with denial."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, provider, _ = make_handler(bridge=bridge)
         provider.post_interactive = AsyncMock(side_effect=RuntimeError("slack down"))
@@ -1868,8 +1836,6 @@ class TestApprovalBridgeResolution:
 
     async def test_sdk_allowed_resolves_bridge(self):
         """Step 3 SDK allow resolves bridge with 'sdk-allowed' label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
 
@@ -1889,8 +1855,6 @@ class TestApprovalBridgeResolution:
 
     async def test_ask_user_question_resolves_bridge_with_answered(self):
         """AskUserQuestion success resolves bridge with 'answered' label."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         # Mock _handle_ask_user_question to return allow without Slack interaction
@@ -1906,9 +1870,7 @@ class TestApprovalBridgeResolution:
         assert info.is_denial is False
 
     async def test_ask_user_question_deny_resolves_bridge_with_denied(self):
-        """AskUserQuestion failure resolves bridge with denial — prevents 660s hang."""
-        from summon_claude.sessions.permissions import ApprovalBridge
-
+        """AskUserQuestion failure resolves bridge with denial — prevents timeout hang."""
         bridge = ApprovalBridge()
         handler, _, _ = make_handler(bridge=bridge)
         handler._handle_ask_user_question = AsyncMock(
@@ -1923,4 +1885,58 @@ class TestApprovalBridgeResolution:
         info = fut.result()
         assert info.label == "denied"
         assert info.reason == "question failed"
+        assert info.is_denial is True
+
+    async def test_request_and_batch_timeout_both_resolve_bridge(self):
+        """Both per-request and batch timeouts deposit bridge resolve entries."""
+        bridge = ApprovalBridge()
+        handler, provider, _ = make_handler(bridge=bridge)
+        provider.post_interactive = AsyncMock(return_value=MagicMock(ts="mock_ts"))
+        handler._timeout_s = 1  # Short timeout
+
+        result = await handler.handle("CustomTool", {"key": "val"}, None)
+        assert isinstance(result, PermissionResultDeny)
+
+        # Per-request timeout (_request_approval:906) fires first → resolve #1
+        fut1 = bridge.create_future("CustomTool")
+        assert fut1.done()
+        assert fut1.result().is_denial is True
+        assert fut1.result().reason == "timed out"
+
+        # Yield to let batch timeout (_debounce_and_post:944) fire → resolve #2
+        await asyncio.sleep(0.05)
+        fut2 = bridge.create_future("CustomTool")
+        assert fut2.done()
+        info2 = fut2.result()
+        assert info2.is_denial is True
+        assert info2.reason == "timed out"
+
+    async def test_write_gated_fallthrough_skips_sdk_allowed(self):
+        """SDK-allow for write-gated tool with containment goes to HITL, not sdk-allowed."""
+        bridge = ApprovalBridge()
+        handler, provider, _ = make_handler(bridge=bridge)
+        provider.post_interactive = AsyncMock(return_value=MagicMock(ts="mock_ts"))
+        handler._timeout_s = 1  # Short timeout to avoid hanging
+
+        # Enable containment so write gate passes but _write_gated_fallthrough is True
+        handler._check_write_gate = PermissionHandler._check_write_gate.__get__(
+            handler, PermissionHandler
+        )
+        handler._in_containment = True
+        handler._write_access_granted = True
+
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        mock_ctx = MagicMock()
+        mock_ctx.suggestions = [mock_suggestion]
+
+        result = await handler.handle("Bash", {"command": "git status"}, mock_ctx)
+
+        # Should NOT be auto-allowed — should go to HITL and timeout
+        assert isinstance(result, PermissionResultDeny)
+        fut = bridge.create_future("Bash")
+        assert fut.done()
+        info = fut.result()
+        # Should NOT be "sdk-allowed" — the fallthrough prevents SDK allow
+        assert info.label != "sdk-allowed"
         assert info.is_denial is True

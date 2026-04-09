@@ -207,7 +207,7 @@ _LABEL_DENIED = "denied"
 _LABEL_USER_ANSWERED = "answered"
 _LABEL_USER_APPROVED = "approved"
 _LABEL_USER_APPROVED_SESSION = "approved for session"
-_LABEL_USER_DENIED = "denied"
+_LABEL_USER_DENIED = "user-denied"
 
 
 class ApprovalBridge:
