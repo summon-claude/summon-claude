@@ -15,7 +15,7 @@ import pytest
 from click.testing import CliRunner
 
 from summon_claude.cli import cli
-from summon_claude.cli.config import parse_env_file, write_env_file
+from summon_claude.cli.config import get_draft_path, parse_env_file, write_env_file
 from summon_claude.cli.preflight import CliStatus
 
 # ---------------------------------------------------------------------------
@@ -45,8 +45,9 @@ def _make_inputs(*middle: str) -> str:
 def _run_init(config_file: Path, inputs: str):
     """Run `summon init` via CliRunner and return the result."""
     runner = CliRunner()
-    # Pre-built model list so choice prompts have a stable default sentinel.
-    fake_models = ["default (claude-opus-4-5)", "claude-sonnet-4-5", "other"]
+    # 2-tuple matching load_cached_models return type:
+    # (list[dict[str, str]], str | None)
+    fake_models = [{"value": "claude-opus-4-5"}, {"value": "claude-sonnet-4-5"}]
     with (
         patch("summon_claude.cli.get_config_file", return_value=config_file),
         patch("summon_claude.config.get_config_file", return_value=config_file),
@@ -58,7 +59,7 @@ def _run_init(config_file: Path, inputs: str):
         patch("summon_claude.cli.config_check"),
         patch(
             "summon_claude.cli.model_cache.load_cached_models",
-            return_value=(fake_models, "1.0.0", "claude-opus-4-5"),
+            return_value=(fake_models, "claude-opus-4-5"),
         ),
     ):
         return runner.invoke(cli, ["init"], input=inputs)
@@ -159,7 +160,7 @@ class TestCtrlCAndDraftResume:
     def test_ctrlc_saves_draft(self, tmp_path):
         """Ctrl-C (simulated via EOFError -> click.Abort) saves a draft file."""
         config_file = tmp_path / "config.env"
-        draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+        draft_path = get_draft_path(config_file)
 
         # Provide only 2 of 3 required inputs — 3rd prompt triggers EOFError -> Abort
         partial_input = "xoxb-tok\nxapp-tok\n"
@@ -167,12 +168,12 @@ class TestCtrlCAndDraftResume:
 
         assert result.exit_code == 0, result.output
         # Draft should exist with the 2 collected values
-        assert draft_path.exists() or "Partial progress saved" in result.output
+        assert draft_path.exists(), result.output
 
     def test_draft_resume_prefills_values(self, tmp_path):
         """Resuming from a draft pre-fills values collected before Ctrl-C."""
         config_file = tmp_path / "config.env"
-        draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+        draft_path = get_draft_path(config_file)
 
         # Write a draft with saved progress
         write_env_file(
@@ -217,7 +218,7 @@ class TestDraftDeletedOnSuccess:
     def test_draft_deleted_after_successful_completion(self, tmp_path):
         """Draft file is deleted after wizard completes successfully."""
         config_file = tmp_path / "config.env"
-        draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+        draft_path = get_draft_path(config_file)
 
         # Pre-create a draft to simulate a prior interrupted run
         write_env_file(draft_path, {"SUMMON_SLACK_BOT_TOKEN": "xoxb-draft"})
@@ -380,7 +381,7 @@ class TestGracefulValidationFailure:
     def test_validation_failure_writes_config_and_exits_1(self, tmp_path):
         """When SummonConfig raises ValidationError, config IS written and exit code is 1."""
         config_file = tmp_path / "config.env"
-        draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+        draft_path = get_draft_path(config_file)
 
         # Build a real ValidationError
         try:
@@ -401,12 +402,17 @@ class TestGracefulValidationFailure:
 
         inputs = _make_inputs()
         runner = CliRunner()
+        fake_models = [{"value": "claude-opus-4-5"}, {"value": "claude-sonnet-4-5"}]
         with (
             patch("summon_claude.cli.get_config_file", return_value=config_file),
             patch("summon_claude.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.preflight.check_claude_cli",
                 return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch(
+                "summon_claude.cli.model_cache.load_cached_models",
+                return_value=(fake_models, "claude-opus-4-5"),
             ),
             patch("summon_claude.cli.SummonConfig", side_effect=real_error),
         ):
@@ -417,8 +423,8 @@ class TestGracefulValidationFailure:
         assert config_file.exists(), "Config should be written even on validation failure"
         # Warning message appears
         combined = result.output + (result.stderr or "")
-        assert "potential issues" in combined or "Fix with" in combined
-        # Draft is deleted
+        assert "potential issues" in combined and "Fix with" in combined
+        # Draft was created during collection then cleaned up on validation failure
         assert not draft_path.exists(), "Draft should be deleted after config write"
 
 
@@ -434,6 +440,7 @@ class TestUnexpectedErrorPreservesDraft:
 
         inputs = _make_inputs()
         runner = CliRunner()
+        fake_models = [{"value": "claude-opus-4-5"}, {"value": "claude-sonnet-4-5"}]
         with (
             patch("summon_claude.cli.get_config_file", return_value=config_file),
             patch("summon_claude.config.get_config_file", return_value=config_file),
@@ -441,13 +448,17 @@ class TestUnexpectedErrorPreservesDraft:
                 "summon_claude.cli.preflight.check_claude_cli",
                 return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
             ),
+            patch(
+                "summon_claude.cli.model_cache.load_cached_models",
+                return_value=(fake_models, "claude-opus-4-5"),
+            ),
             patch("summon_claude.cli.SummonConfig", side_effect=RuntimeError("boom")),
         ):
             result = runner.invoke(cli, ["init"], input=inputs)
 
         assert result.exit_code == 1
         # Draft file was written during collection, then NOT deleted on unexpected error
-        draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+        draft_path = get_draft_path(config_file)
         # Draft should exist (written during collection, not deleted on unexpected error)
         assert draft_path.exists(), "Draft should be preserved on unexpected error"
 
@@ -486,8 +497,8 @@ class TestWriteEnvFile:
         """atomic=True leaves no .tmp file after successful write."""
         path = tmp_path / "test.env"
         write_env_file(path, {"A": "1"}, atomic=True)
-        tmp = tmp_path / "test.env.tmp"
-        assert not tmp.exists()
+        leftover = [f for f in tmp_path.iterdir() if f.suffix == ".tmp"]
+        assert leftover == [], f"Temp file(s) leaked: {leftover}"
         assert path.exists()
         assert "A=1" in path.read_text()
 
@@ -506,6 +517,13 @@ class TestWriteEnvFile:
         content = path.read_text()
         assert "A=1" not in content
         assert "B=2" in content
+
+    def test_empty_dict_round_trip(self, tmp_path):
+        """write_env_file with {} writes an empty file; parse_env_file reads it back as {}."""
+        path = tmp_path / "test.env"
+        write_env_file(path, {})
+        assert path.exists()
+        assert parse_env_file(path) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -548,17 +566,23 @@ class TestCtrlCOSErrorFallback:
     def test_ctrlc_oserror_in_fallback_save_exits_0(self, tmp_path):
         """If draft save in Ctrl-C handler raises OSError, still exit 0 with warning."""
         config_file = tmp_path / "config.env"
+        draft_path = get_draft_path(config_file)
 
         # Only 1 input — next prompt triggers EOFError -> Abort
         partial_input = "xoxb-tok\n"
 
         runner = CliRunner()
+        fake_models = [{"value": "claude-opus-4-5"}, {"value": "claude-sonnet-4-5"}]
         with (
             patch("summon_claude.cli.get_config_file", return_value=config_file),
             patch("summon_claude.config.get_config_file", return_value=config_file),
             patch(
                 "summon_claude.cli.preflight.check_claude_cli",
                 return_value=CliStatus(True, "1.0.0", "/usr/bin/claude"),
+            ),
+            patch(
+                "summon_claude.cli.model_cache.load_cached_models",
+                return_value=(fake_models, "claude-opus-4-5"),
             ),
             patch("summon_claude.cli.config.config_check"),
             patch("summon_claude.cli.config_check"),
@@ -568,7 +592,8 @@ class TestCtrlCOSErrorFallback:
 
         assert result.exit_code == 0
         combined = result.output + (result.stderr or "")
-        assert "Could not save progress" in combined or "Partial progress" in combined
+        assert "Could not save progress" in combined
+        assert not draft_path.exists()
 
 
 # ---------------------------------------------------------------------------

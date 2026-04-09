@@ -34,6 +34,7 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
+    get_draft_path,
     parse_env_file,
     write_env_file,
 )
@@ -638,7 +639,7 @@ def cmd_init(ctx: click.Context) -> None:
     option_by_key = {opt.env_key: opt for opt in CONFIG_OPTIONS}
 
     # Draft file for crash/Ctrl-C recovery
-    draft_path = config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
+    draft_path = get_draft_path(config_file)
 
     # Offer to resume from draft if one exists
     if draft_path.exists():
