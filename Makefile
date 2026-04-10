@@ -158,5 +158,5 @@ release: ## Tag and publish a new release (interactive, main branch only)
 		exit 1; \
 	fi; \
 	git tag -a "v$$VERSION" -m "Release v$$VERSION"; \
-	git push origin "v$$VERSION"; \
-	gh release create "v$$VERSION" --generate-notes --title "v$$VERSION"
+	SKIP=no-commit-to-branch git push upstream "v$$VERSION"; \
+	gh release create "v$$VERSION" --repo summon-claude/summon-claude --generate-notes --title "v$$VERSION"
