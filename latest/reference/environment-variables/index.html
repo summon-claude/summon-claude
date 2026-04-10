@@ -2603,6 +2603,12 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <td>Milliseconds to wait before posting a permission request to Slack. Batches rapid tool approvals into a single message.</td>
 </tr>
 <tr>
+<td><code>SUMMON_PERMISSION_TIMEOUT_S</code></td>
+<td>integer</td>
+<td><code>900</code></td>
+<td>Seconds to wait for user approval before auto-denying a permission request. Default is 15 minutes. Set to <code>0</code> to disable the timeout (wait indefinitely).</td>
+</tr>
+<tr>
 <td><code>SUMMON_NO_UPDATE_CHECK</code></td>
 <td>boolean</td>
 <td><code>false</code></td>

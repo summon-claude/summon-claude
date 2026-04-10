@@ -2439,8 +2439,8 @@ If the session persists, stop it explicitly:
 <summary>Permission request times out</summary>
 <p><strong>Symptom:</strong> A pending permission request disappears after a while without being acted on, and Claude proceeds or aborts.</p>
 <p><strong>Cause:</strong> Permission requests have a timeout. After the timeout, summon defaults to denying the request (fail-safe).</p>
-<p><strong>Fix:</strong> Respond to permission requests promptly. The debounce interval can be adjusted via <code>SUMMON_PERMISSION_DEBOUNCE_MS</code> (default: 500ms):
-<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_PERMISSION_DEBOUNCE_MS<span class="w"> </span><span class="m">1000</span>
+<p><strong>Fix:</strong> Respond to permission requests promptly. The timeout can be increased via <code>SUMMON_PERMISSION_TIMEOUT_S</code> (default: 900 = 15 minutes):
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>config<span class="w"> </span><span class="nb">set</span><span class="w"> </span>SUMMON_PERMISSION_TIMEOUT_S<span class="w"> </span><span class="m">1800</span><span class="w">  </span><span class="c1"># 30 minutes</span>
 </code></pre></div></p>
 </details>
 <details class="tip" open="open">

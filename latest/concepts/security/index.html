@@ -2655,7 +2655,7 @@
 <li>Requests within the same 2-second debounce window are batched into a single Slack message (<code>SUMMON_PERMISSION_DEBOUNCE_MS</code>, default 2000).</li>
 <li>The message posts as a normal message with <strong>Approve</strong>, <strong>Approve for session</strong>, and <strong>Deny</strong> buttons.</li>
 <li>After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.</li>
-<li>If no response arrives within 10 minutes (<code>_PERMISSION_TIMEOUT_S = 600</code>), the request is automatically denied and the message is deleted.</li>
+<li>If no response arrives within the permission timeout (<code>SUMMON_PERMISSION_TIMEOUT_S</code>, default 15 minutes), the request is automatically denied and the message is deleted. Set to <code>0</code> to disable the timeout (wait indefinitely).</li>
 </ol>
 <p>"Approve for session" caches the approval for the session lifetime. Two tiers apply: write-gated tools (Edit, Write, Bash, etc.) cache the specific argument — the file path for file tools, or the exact command string for Bash — so blanket approval is not possible. All other tools cache the tool name, auto-approving all subsequent uses. GitHub require-approval tools are never session-cached regardless of tier (defense-in-depth).</p>
 <p>Only the authenticated session owner (<code>authenticated_user_id</code>) can approve or deny — clicks from other users are logged and ignored.</p>

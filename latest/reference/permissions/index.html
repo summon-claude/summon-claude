@@ -2557,13 +2557,14 @@
 </div>
 <hr />
 <h2 id="timeout">Timeout<a class="headerlink" href="#timeout" title="Permanent link">&para;</a></h2>
-<p>Permission requests expire after <strong>10 minutes</strong>. If you do not respond:</p>
+<p>Permission requests expire after <strong>15 minutes</strong> (configurable via <code>SUMMON_PERMISSION_TIMEOUT_S</code>). If you do not respond:</p>
 <ul>
 <li>The request is automatically denied.</li>
 <li>The interactive message is deleted.</li>
 <li>A timeout message is posted in the turn thread.</li>
 <li>Claude is told the permission timed out and adapts (typically by reporting it could not complete the action).</li>
 </ul>
+<p>Set <code>SUMMON_PERMISSION_TIMEOUT_S=0</code> to disable the timeout entirely — permission requests will wait indefinitely until you respond.</p>
 <hr />
 <h2 id="github-mcp-permissions">GitHub MCP permissions<a class="headerlink" href="#github-mcp-permissions" title="Permanent link">&para;</a></h2>
 <p>When GitHub is authenticated (via <code>summon auth github login</code>), Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:</p>
