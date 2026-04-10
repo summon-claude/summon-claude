@@ -398,7 +398,8 @@ class PermissionHandler:
         self._authenticated_user_id = authenticated_user_id
         self._bridge = bridge
         self._debounce_ms = config.permission_debounce_ms
-        self._timeout_s = config.permission_timeout_s
+        # 0 = no timeout → asyncio.timeout(None) disables the deadline
+        self._timeout_s: float | None = config.permission_timeout_s or None
 
         # Write gate state
         self._project_root: Path | None = Path(project_root) if project_root else None
@@ -905,7 +906,7 @@ class PermissionHandler:
             logger.warning("Permission request timed out for tool %s", tool_name)
             self._resolve_approval(tool_name, _LABEL_DENIED, reason="timed out", is_denial=True)
             await self._post_timeout_message()
-            timeout_min = self._timeout_s // 60
+            timeout_min = int(self._timeout_s) // 60 if self._timeout_s else 0
             return PermissionResultDeny(
                 message=f"Permission request timed out ({timeout_min} minutes)",
             )
@@ -1126,9 +1127,9 @@ class PermissionHandler:
     async def _post_timeout_message(self) -> None:
         """Post a message indicating permission timed out."""
         try:
+            timeout_min = int(self._timeout_s) // 60 if self._timeout_s else 0
             await self._router.post_to_active_thread(
-                f":hourglass: Permission request timed out after"
-                f" {self._timeout_s // 60} minutes. Denied.",
+                f":hourglass: Permission request timed out after {timeout_min} minutes. Denied.",
             )
         except Exception as e:
             logger.warning("Failed to post timeout message: %s", e)
@@ -1175,7 +1176,7 @@ class PermissionHandler:
             if msg_ts:
                 await self._router.client.delete_message(msg_ts)
             self._cleanup_ask_user(request_id)
-            timeout_min = self._timeout_s // 60
+            timeout_min = int(self._timeout_s) // 60 if self._timeout_s else 0
             return PermissionResultDeny(
                 message=f"Question timed out ({timeout_min} minutes)",
             )

@@ -1734,3 +1734,33 @@ class TestBridgeTimeoutRelationship:
                     os.environ.pop(k, None)
                 else:
                     os.environ[k] = v
+
+    def test_permission_timeout_zero_means_indefinite(self):
+        """permission_timeout_s=0 produces None timeout (indefinite)."""
+        from conftest import make_test_config
+
+        from summon_claude.sessions.permissions import PermissionHandler
+        from summon_claude.slack.router import ThreadRouter
+
+        config = make_test_config(permission_timeout_s=0)
+        from helpers import make_mock_slack_client
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        handler = PermissionHandler(router, config, authenticated_user_id="U_TEST")
+        assert handler._timeout_s is None
+
+    def test_permission_timeout_negative_rejected(self):
+        """Negative permission_timeout_s is rejected by validator."""
+        import pytest
+
+        from summon_claude.config import SummonConfig
+
+        with pytest.raises(Exception, match="must be >= 0"):
+            SummonConfig(
+                slack_bot_token="xoxb-t",
+                slack_app_token="xapp-t",
+                slack_signing_secret="abc123",
+                permission_timeout_s=-1,
+                _env_file=None,
+            )

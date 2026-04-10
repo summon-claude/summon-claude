@@ -123,6 +123,8 @@ Permission requests expire after **15 minutes** (configurable via `SUMMON_PERMIS
 - A timeout message is posted in the turn thread.
 - Claude is told the permission timed out and adapts (typically by reporting it could not complete the action).
 
+Set `SUMMON_PERMISSION_TIMEOUT_S=0` to disable the timeout entirely — permission requests will wait indefinitely until you respond.
+
 ---
 
 ## GitHub MCP permissions

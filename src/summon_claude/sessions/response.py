@@ -414,7 +414,7 @@ class ResponseStreamer:
         if self._bridge is not None and parent_id is None and block.name not in _BRIDGE_SKIP_TOOLS:
             try:
                 fut = self._bridge.create_future(block.name)
-                approval = await asyncio.wait_for(fut, timeout=self._bridge_timeout_s)
+                approval = await asyncio.wait_for(fut, timeout=self._bridge_timeout_s or None)
             except (TimeoutError, asyncio.CancelledError):
                 logger.warning(
                     "Approval bridge timeout for %s — posting without label",
