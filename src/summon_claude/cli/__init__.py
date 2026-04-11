@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import json
 import logging
 import os
@@ -33,6 +34,9 @@ from summon_claude.cli.config import (
     config_path,
     config_set,
     config_show,
+    get_draft_path,
+    parse_env_file,
+    write_env_file,
 )
 from summon_claude.cli.db import async_db_purge, async_db_status, async_db_vacuum
 from summon_claude.cli.doctor import async_doctor
@@ -583,6 +587,18 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
             click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
 
 
+def _ensure_gitignore() -> None:
+    """Write .gitignore in local-install .summon/ to prevent accidental commits."""
+    if not is_local_install():
+        return
+    summon_dir = get_data_dir()
+    summon_dir.mkdir(parents=True, exist_ok=True)
+    gitignore = summon_dir / ".gitignore"
+    if not gitignore.exists():
+        with contextlib.suppress(OSError):
+            gitignore.write_text("*\n")
+
+
 # ---------------------------------------------------------------------------
 # Top-level commands: init, config
 # ---------------------------------------------------------------------------
@@ -592,6 +608,8 @@ def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None
 @click.pass_context
 def cmd_init(ctx: click.Context) -> None:
     """Interactive setup wizard for summon-claude configuration."""
+    from pydantic_core import PydanticUndefined  # noqa: PLC0415
+
     from summon_claude.cli.preflight import check_claude_cli  # noqa: PLC0415
     from summon_claude.config import CONFIG_OPTIONS, _is_truthy, get_config_default  # noqa: PLC0415
 
@@ -611,12 +629,36 @@ def cmd_init(ctx: click.Context) -> None:
     config_file = pathlib.Path(config_path_override) if config_path_override else get_config_file()
 
     # Load existing config values for pre-filling
-    from summon_claude.cli.config import parse_env_file  # noqa: PLC0415
-
     existing = parse_env_file(config_file)
     if existing:
         click.echo(f"  Existing config found at {config_file}")
         click.echo("  Press Enter to keep current values.\n")
+
+    # Build lookup structures for merge/filter/strip pass
+    valid_keys = {opt.env_key for opt in CONFIG_OPTIONS}
+    option_by_key = {opt.env_key: opt for opt in CONFIG_OPTIONS}
+
+    # Draft file for crash/Ctrl-C recovery
+    draft_path = get_draft_path(config_file)
+
+    # Offer to resume from draft if one exists
+    if draft_path.exists():
+        try:
+            mtime = draft_path.stat().st_mtime
+            formatted_time = (
+                datetime.datetime.fromtimestamp(mtime, tz=datetime.UTC)
+                .astimezone()
+                .strftime("%Y-%m-%d %H:%M")
+            )
+            click.echo(f"  Found saved progress from {formatted_time}.")
+            if click.confirm("  Resume from saved progress?", default=True):
+                draft_values = parse_env_file(draft_path)
+                existing = {**existing, **draft_values}
+            else:
+                draft_path.unlink(missing_ok=True)
+        except (KeyboardInterrupt, click.Abort):
+            click.echo("\n  Draft preserved. Re-run summon init to resume.")
+            raise SystemExit(0) from None
 
     # Opportunistically refresh model cache via throwaway SDK session
     if cli_status.found:
@@ -645,232 +687,301 @@ def cmd_init(ctx: click.Context) -> None:
     current_group = ""
     show_advanced: bool | None = None  # None = not yet asked
 
-    for opt in CONFIG_OPTIONS:
-        # Build the in-progress config dict for visibility predicates
-        in_progress = {**existing, **collected}
+    try:
+        for opt in CONFIG_OPTIONS:
+            # Build the in-progress config dict for visibility predicates
+            in_progress = {**existing, **collected}
 
-        # Check visibility
-        if opt.visible is not None and not opt.visible(in_progress):
-            continue
+            # Check visibility
+            if opt.visible is not None and not opt.visible(in_progress):
+                continue
 
-        # Gate advanced options behind a single prompt
-        if opt.advanced and show_advanced is None:
-            click.echo()
-            show_advanced = click.confirm("  Configure advanced settings?", default=False)
-            if not show_advanced:
-                break
+            # Gate advanced options behind a single prompt
+            if opt.advanced and show_advanced is None:
+                click.echo()
+                show_advanced = click.confirm("  Configure advanced settings?", default=False)
+                if not show_advanced:
+                    break
 
-        # Print group header on group change
-        if opt.group != current_group:
-            current_group = opt.group
-            click.echo(click.style(f"  {opt.group}", bold=True))
+            # Print group header on group change
+            if opt.group != current_group:
+                current_group = opt.group
+                click.echo(click.style(f"  {opt.group}", bold=True))
 
-        current_value = existing.get(opt.env_key)
-        default = get_config_default(opt)
+            current_value = existing.get(opt.env_key)
+            default = get_config_default(opt)
 
-        # Show contextual guidance — help_hint preferred, help_text as fallback
-        hint = opt.help_hint or opt.help_text
-        if hint:
-            click.echo(click.style(f"    {hint}", dim=True))
-        # Show env var name for cross-reference with docs
-        click.echo(click.style(f"    ({opt.env_key})", dim=True))
+            # Show contextual guidance — help_hint preferred, help_text as fallback
+            hint = opt.help_hint or opt.help_text
+            if hint:
+                click.echo(click.style(f"    {hint}", dim=True))
+            # Show env var name for cross-reference with docs
+            click.echo(click.style(f"    ({opt.env_key})", dim=True))
 
-        if opt.input_type == "secret":
-            # Build prompt label with format hint if available
-            fmt_suffix = ""
-            if opt.format_hint:
-                fmt_suffix = click.style(f" [format: {opt.format_hint}]", dim=True)
+            value = ""
+            if opt.input_type == "secret":
+                # Build prompt label with format hint if available
+                fmt_suffix = ""
+                if opt.format_hint:
+                    fmt_suffix = click.style(f" [format: {opt.format_hint}]", dim=True)
 
-            if current_value:
-                raw = click.prompt(
-                    f"    {opt.label} [configured — Enter to keep]{fmt_suffix}",
-                    default="",
-                    show_default=False,
-                    hide_input=True,
-                )
-                if raw:
-                    value = raw
+                if current_value:
+                    raw = click.prompt(
+                        f"    {opt.label} [configured — Enter to keep]{fmt_suffix}",
+                        default="",
+                        show_default=False,
+                        hide_input=True,
+                    )
+                    if raw:
+                        value = raw
+                        click.echo(
+                            click.style(f"    Value received: {_mask_secret(value)}", dim=True)
+                        )
+                    else:
+                        value = current_value
+                        click.echo(click.style("    Kept existing value", dim=True))
+                elif opt.required:
+                    value = click.prompt(f"    {opt.label}{fmt_suffix}", hide_input=True)
+                    if opt.validate_fn:
+                        err = opt.validate_fn(value)
+                        while err:
+                            click.echo(f"    Error: {err}")
+                            value = click.prompt(f"    {opt.label}{fmt_suffix}", hide_input=True)
+                            err = opt.validate_fn(value)
                     click.echo(click.style(f"    Value received: {_mask_secret(value)}", dim=True))
                 else:
-                    value = current_value
-                    click.echo(click.style("    Kept existing value", dim=True))
-            elif opt.required:
-                value = click.prompt(f"    {opt.label}{fmt_suffix}", hide_input=True)
-                if opt.validate_fn:
-                    err = opt.validate_fn(value)
-                    while err:
-                        click.echo(f"    Error: {err}")
-                        value = click.prompt(f"    {opt.label}{fmt_suffix}", hide_input=True)
+                    # Optional secret — empty input accepted (skip)
+                    value = click.prompt(
+                        f"    {opt.label} (optional, Enter to skip){fmt_suffix}",
+                        default="",
+                        show_default=False,
+                        hide_input=True,
+                    )
+                    if value and opt.validate_fn:
                         err = opt.validate_fn(value)
-                click.echo(click.style(f"    Value received: {_mask_secret(value)}", dim=True))
-            else:
-                # Optional secret — empty input accepted (skip)
+                        while err:
+                            click.echo(f"    Error: {err}")
+                            value = click.prompt(
+                                f"    {opt.label}{fmt_suffix}",
+                                default="",
+                                show_default=False,
+                                hide_input=True,
+                            )
+                            if not value:
+                                break
+                            err = opt.validate_fn(value)
+                    if value:
+                        click.echo(
+                            click.style(f"    Value received: {_mask_secret(value)}", dim=True)
+                        )
+                    else:
+                        click.echo(click.style("    Skipped", dim=True))
+
+            elif opt.input_type == "choice":
+                if opt.choices_fn:
+                    choices = opt.choices_fn()
+                elif opt.choices:
+                    choices = list(opt.choices)
+                else:
+                    choices = []
+                prompt_default = current_value or (str(default) if default is not None else "")
+                # Sentinel-aware default handling for model fields.
+                if not prompt_default:
+                    # Fresh install with no current value: select the "default (...)" sentinel
+                    default_choice = next((c for c in choices if c.startswith("default (")), None)
+                    if default_choice:
+                        prompt_default = default_choice
+                    elif choices:
+                        prompt_default = choices[0]
+                elif choices and prompt_default not in choices:
+                    # Existing custom model not in choices: insert it before "other"
+                    insert_idx = choices.index("other") if "other" in choices else len(choices)
+                    choices = [*choices[:insert_idx], prompt_default, *choices[insert_idx:]]
                 value = click.prompt(
-                    f"    {opt.label} (optional, Enter to skip){fmt_suffix}",
-                    default="",
-                    show_default=False,
-                    hide_input=True,
+                    f"    {opt.label}",
+                    type=click.Choice(choices, case_sensitive=False) if choices else None,
+                    default=prompt_default or None,
+                    show_default=True,
                 )
+                # Sentinel post-processing
+                if value.startswith("default ("):
+                    value = ""
+                elif value == "other":
+                    raw_custom = click.prompt(f"    {opt.label} (custom)", default="")
+                    value = raw_custom if raw_custom else (current_value or "")
+                # Soft-validate if validate_fn present (warn-only; return value always None)
+                if value and opt.validate_fn:
+                    opt.validate_fn(value)
+
+            elif opt.input_type == "flag":
+                current_bool = False
+                if current_value:
+                    current_bool = _is_truthy(current_value)
+                elif default is not None:
+                    current_bool = bool(default)
+                value = (
+                    "true" if click.confirm(f"    {opt.label}?", default=current_bool) else "false"
+                )
+
+            elif opt.input_type == "int":
+                prompt_default = current_value or (str(default) if default is not None else None)
+                if current_value and not opt.required:
+                    click.echo(click.style('    (enter "clear" to remove)', dim=True))
+                cleared = False
+                while True:
+                    raw_input = click.prompt(
+                        f"    {opt.label}",
+                        default=prompt_default,
+                        show_default=prompt_default is not None,
+                    )
+                    raw_str = str(raw_input)
+                    if raw_str.strip().lower() == "clear" and not opt.required:
+                        collected.pop(opt.env_key, None)
+                        existing.pop(opt.env_key, None)
+                        try:
+                            dv = {
+                                k: v
+                                for k, v in {**existing, **collected}.items()
+                                if k in valid_keys
+                            }
+                            write_env_file(draft_path, dv, atomic=True)
+                        except OSError:
+                            pass
+                        click.echo("    Cleared.")
+                        cleared = True
+                        break
+                    try:
+                        int_value = int(raw_str)
+                    except ValueError:
+                        click.echo("    Error: Please enter a number.")
+                        continue
+                    value = str(int_value)
+                    if opt.validate_fn:
+                        err = opt.validate_fn(value)
+                        if err:
+                            click.echo(f"    Error: {err}")
+                            if hint:
+                                click.echo(click.style(f"    {hint}", dim=True))
+                            continue
+                    break
+                if cleared:
+                    continue
+
+            else:  # text
+                prompt_default = (
+                    current_value or (str(default) if default is not None else "") or ""
+                )
+                if current_value and not opt.required:
+                    click.echo(click.style('    (enter "clear" to remove)', dim=True))
+                value = click.prompt(
+                    f"    {opt.label}", default=prompt_default, show_default=bool(prompt_default)
+                )
+                if value.strip().lower() == "clear" and not opt.required:
+                    collected.pop(opt.env_key, None)
+                    existing.pop(opt.env_key, None)
+                    try:
+                        dv = {k: v for k, v in {**existing, **collected}.items() if k in valid_keys}
+                        write_env_file(draft_path, dv, atomic=True)
+                    except OSError:
+                        pass
+                    click.echo("    Cleared.")
+                    continue
                 if value and opt.validate_fn:
                     err = opt.validate_fn(value)
                     while err:
                         click.echo(f"    Error: {err}")
+                        if hint:
+                            click.echo(click.style(f"    {hint}", dim=True))
                         value = click.prompt(
-                            f"    {opt.label}{fmt_suffix}",
-                            default="",
-                            show_default=False,
-                            hide_input=True,
+                            f"    {opt.label}",
+                            default=prompt_default,
+                            show_default=bool(prompt_default),
                         )
                         if not value:
                             break
                         err = opt.validate_fn(value)
-                if value:
-                    click.echo(click.style(f"    Value received: {_mask_secret(value)}", dim=True))
-                else:
-                    click.echo(click.style("    Skipped", dim=True))
 
-        elif opt.input_type == "choice":
-            if opt.choices_fn:
-                choices = opt.choices_fn()
-            elif opt.choices:
-                choices = list(opt.choices)
+            # Only store non-default values (keep config file clean)
+            if isinstance(default, bool):
+                default_str = str(default).lower()
             else:
-                choices = []
-            prompt_default = current_value or (str(default) if default is not None else "")
-            # Sentinel-aware default handling for model fields.
-            if not prompt_default:
-                # Fresh install with no current value: select the "default (...)" sentinel
-                default_choice = next((c for c in choices if c.startswith("default (")), None)
-                if default_choice:
-                    prompt_default = default_choice
-                elif choices:
-                    prompt_default = choices[0]
-            elif choices and prompt_default not in choices:
-                # Existing custom model not in choices: insert it before "other"
-                insert_idx = choices.index("other") if "other" in choices else len(choices)
-                choices = [*choices[:insert_idx], prompt_default, *choices[insert_idx:]]
-            value = click.prompt(
-                f"    {opt.label}",
-                type=click.Choice(choices, case_sensitive=False) if choices else None,
-                default=prompt_default or None,
-                show_default=True,
-            )
-            # Sentinel post-processing
-            if value.startswith("default ("):
-                value = ""
-            elif value == "other":
-                raw_custom = click.prompt(f"    {opt.label} (custom)", default="")
-                value = raw_custom if raw_custom else (current_value or "")
-            # Soft-validate if validate_fn present (warn-only; return value always None)
-            if value and opt.validate_fn:
-                opt.validate_fn(value)
+                default_str = str(default) if default is not None else ""
+            if opt.required or value != default_str:
+                collected[opt.env_key] = value
 
-        elif opt.input_type == "flag":
-            current_bool = False
-            if current_value:
-                current_bool = _is_truthy(current_value)
-            elif default is not None:
-                current_bool = bool(default)
-            value = "true" if click.confirm(f"    {opt.label}?", default=current_bool) else "false"
+            # Save draft progress after each answer (best-effort)
+            try:
+                draft_values = {
+                    k: v for k, v in {**existing, **collected}.items() if k in valid_keys
+                }
+                write_env_file(draft_path, draft_values, atomic=True)
+            except OSError:
+                pass
 
-        elif opt.input_type == "int":
-            prompt_default = current_value or (str(default) if default is not None else None)
-            raw = click.prompt(
-                f"    {opt.label}", default=prompt_default, show_default=True, type=int
-            )
-            value = str(raw)
-            if value and opt.validate_fn:
-                err = opt.validate_fn(value)
-                while err:
-                    click.echo(f"    Error: {err}")
-                    if hint:
-                        click.echo(click.style(f"    {hint}", dim=True))
-                    raw = click.prompt(
-                        f"    {opt.label}",
-                        default=prompt_default,
-                        show_default=True,
-                        type=int,
-                    )
-                    value = str(raw)
-                    if not value:
-                        break
-                    err = opt.validate_fn(value)
+    except (KeyboardInterrupt, click.Abort):
+        # Ctrl-C: save draft (fallback) and exit cleanly
+        try:
+            draft_values = {k: v for k, v in {**existing, **collected}.items() if k in valid_keys}
+            write_env_file(draft_path, draft_values, atomic=True)
+        except OSError:
+            click.echo("\n  Could not save progress.", err=True)
+        click.echo(f"\n  Partial progress saved to {draft_path}. Re-run summon init to resume.")
+        raise SystemExit(0) from None
 
-        else:  # text
-            prompt_default = current_value or (str(default) if default is not None else "") or ""
-            value = click.prompt(
-                f"    {opt.label}", default=prompt_default, show_default=bool(prompt_default)
-            )
-            if value and opt.validate_fn:
-                err = opt.validate_fn(value)
-                while err:
-                    click.echo(f"    Error: {err}")
-                    if hint:
-                        click.echo(click.style(f"    {hint}", dim=True))
-                    value = click.prompt(
-                        f"    {opt.label}",
-                        default=prompt_default,
-                        show_default=bool(prompt_default),
-                    )
-                    if not value:
-                        break
-                    err = opt.validate_fn(value)
+    # Merge existing + collected, filter to known keys, strip defaults
+    merged = {**existing, **collected}
+    merged_values = {k: v for k, v in merged.items() if k in valid_keys}
+    for key in list(merged_values):
+        opt = option_by_key.get(key)
+        if opt and not opt.required:
+            field_default = get_config_default(opt)
+            if field_default is PydanticUndefined or field_default is None:
+                continue
+            if isinstance(field_default, bool):
+                default_str = str(field_default).lower()
+            else:
+                default_str = str(field_default)
+            if merged_values[key] == default_str:
+                del merged_values[key]
 
-        # Only store non-default values (keep config file clean)
-        if isinstance(default, bool):
-            default_str = str(default).lower()
-        else:
-            default_str = str(default) if default is not None else ""
-        if opt.required or value != default_str:
-            collected[opt.env_key] = value
-
-    # Validate before writing — construct SummonConfig to catch bad combinations
+    # Validate before writing — use merged_values (not collected-only)
     try:
         SummonConfig(
             **{
-                opt.field_name: collected[opt.env_key]
+                opt.field_name: merged_values[opt.env_key]
                 for opt in CONFIG_OPTIONS
-                if opt.env_key in collected
+                if opt.env_key in merged_values
             }
         )
     except pydantic.ValidationError as e:
-        click.echo("\nValidation error:", err=True)
+        # Write config even on validation failure (better than losing all input)
+        write_env_file(config_file, merged_values, atomic=True)
+        _ensure_gitignore()
+        draft_path.unlink(missing_ok=True)
+        click.echo(f"\n  Config written to {config_file} with potential issues:", err=True)
         for err in e.errors():
             field = ".".join(str(loc) for loc in err["loc"])
-            click.echo(f"  {field}: {err['msg']}", err=True)
-        click.echo("Config file NOT written. Fix the errors and re-run `summon init`.", err=True)
+            click.echo(f"    {field}: {err['msg']}", err=True)
+        click.echo("  Fix with: summon config set KEY VALUE, or re-run summon init", err=True)
         raise SystemExit(1) from e
     except Exception as e:
+        # Do NOT write config — state may be corrupt. Do NOT delete draft.
         click.echo(f"\nUnexpected error: {e}", err=True)
         click.echo("Config file NOT written. Fix the errors and re-run `summon init`.", err=True)
         raise SystemExit(1) from e
 
-    # Write config file — merge existing values for hidden options to prevent data loss,
-    # then strip newlines to prevent injection into .env format
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    merged = {**existing, **collected}
-    sanitized = {k: v.replace("\n", "").replace("\r", "") for k, v in merged.items()}
-    output_lines = [f"{k}={v}" for k, v in sanitized.items()]
-    config_file.write_text("\n".join(output_lines) + "\n")
-    with contextlib.suppress(OSError):
-        config_file.chmod(0o600)
+    # Write config file (success path)
+    write_env_file(config_file, merged_values, atomic=True)
+    draft_path.unlink(missing_ok=True)
+    _ensure_gitignore()
 
     click.echo()
     click.echo(f"Configuration saved to {config_file}")
     if is_local_install():
-        # Defense-in-depth: write .gitignore inside .summon/ to prevent accidental commits
-        summon_dir = get_data_dir()
-        summon_dir.mkdir(parents=True, exist_ok=True)
-        gitignore = summon_dir / ".gitignore"
-        if not gitignore.exists():
-            with contextlib.suppress(OSError):
-                gitignore.write_text("*\n")
         click.echo("Note: Add .summon/ to your project's .gitignore to avoid committing secrets.")
     click.echo()
 
     # Auto-run config check — validates connectivity and shows feature inventory
-    from summon_claude.cli.config import config_check  # noqa: PLC0415
-
     config_check(config_path=config_path_override)
 
 

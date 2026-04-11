@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import click
@@ -66,6 +67,72 @@ def parse_env_file(path: Path) -> dict[str, str]:
             k, _, v = stripped.partition("=")
             values[k.strip()] = v.strip()
     return values
+
+
+def write_env_file(path: Path, values: dict[str, str], *, atomic: bool = False) -> None:
+    """Write a dict as KEY=VALUE lines to a .env file with 0o600 permissions.
+
+    Sanitizes newlines from all values to prevent .env injection.
+    When atomic=True, writes to a temp file first then uses os.replace() for
+    atomic rename (prevents partial-write corruption on power loss).
+    """
+    content = "\n".join(
+        f"{k}={v.replace(chr(10), '').replace(chr(13), '')}" for k, v in values.items()
+    )
+    if content:
+        content += "\n"
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    if atomic:
+        old_umask = os.umask(0o177)
+        try:
+            tmp_fd, tmp_name = tempfile.mkstemp(
+                dir=str(path.parent), suffix=".tmp", prefix=path.name + "."
+            )
+        finally:
+            os.umask(old_umask)
+        write_path = Path(tmp_name)
+    else:
+        tmp_fd = None
+        write_path = path
+    try:
+        if atomic and tmp_fd is not None:
+            os.fchmod(tmp_fd, 0o600)
+            with os.fdopen(tmp_fd, "w") as f:
+                f.write(content)
+            tmp_fd = None  # fdopen owns the fd now
+        else:
+            old_umask = os.umask(0o177)
+            try:
+                fd = os.open(str(write_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            finally:
+                os.umask(old_umask)
+            try:
+                os.fchmod(fd, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    fd = -1  # fdopen owns the fd now
+                    f.write(content)
+            except BaseException:
+                if fd >= 0:
+                    with contextlib.suppress(OSError):
+                        os.close(fd)
+                raise
+        if atomic:
+            write_path.replace(path)
+    except BaseException:
+        if atomic:
+            if tmp_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.close(tmp_fd)
+            with contextlib.suppress(OSError):
+                write_path.unlink()
+        raise
+
+
+def get_draft_path(config_file: Path) -> Path:
+    """Return the draft path for a given config file (used for crash/Ctrl-C recovery)."""
+    return config_file.parent / (config_file.stem + ".draft" + config_file.suffix)
 
 
 def _require_config_file(override: str | None = None):
@@ -249,27 +316,11 @@ def config_set(key: str, value: str, override: str | None = None) -> None:
     value = value.replace("\n", "").replace("\r", "")
 
     config_file = get_config_file(override)
-    config_file.parent.mkdir(parents=True, exist_ok=True)
 
-    # Read existing lines
-    lines = config_file.read_text().splitlines() if config_file.exists() else []
-
-    updated = False
-    new_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith(f"{key}=") or stripped == key:
-            new_lines.append(f"{key}={value}")
-            updated = True
-        else:
-            new_lines.append(line)
-
-    if not updated:
-        new_lines.append(f"{key}={value}")
-
-    config_file.write_text("\n".join(new_lines) + "\n")
-    with contextlib.suppress(OSError):
-        config_file.chmod(0o600)
+    # Read existing values, update target key, write atomically at 0o600
+    existing = parse_env_file(config_file)
+    existing[key] = value
+    write_env_file(config_file, existing, atomic=True)
     click.echo(f"Set {key} in {config_file}")
 
 
