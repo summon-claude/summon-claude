@@ -4636,8 +4636,8 @@ class TestHandleDiffFileNonGit:
 
             await session._handle_diff_file(rt, "some_file.py", "thread_1")
 
-            # Should have called git diff
-            mock_exec.assert_called_once()
+            # Should have called git diff at least once (may also call ls-files for untracked check)
+            mock_exec.assert_called()
 
     async def test_git_repo_uploads_nonempty_diff(self, tmp_path):
         """In a git repo with actual changes, should upload the diff."""
