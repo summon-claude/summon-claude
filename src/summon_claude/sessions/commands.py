@@ -261,6 +261,12 @@ async def _handle_diff(args: list[str], _ctx: CommandContext) -> CommandResult:
     return CommandResult(text=None, metadata={"diff_file": args[0]})
 
 
+async def _handle_show(args: list[str], _ctx: CommandContext) -> CommandResult:
+    if not args:
+        return CommandResult(text="Usage: `!show <file>`")
+    return CommandResult(text=None, metadata={"show_file": args[0]})
+
+
 async def _handle_changes(_args: list[str], _ctx: CommandContext) -> CommandResult:
     return CommandResult(text=None, metadata={"show_changes": True})
 
@@ -427,6 +433,12 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         handler=_handle_diff,
         max_args=1,
         argument_hint="[file_path]",
+    ),
+    "show": CommandDef(
+        description="Show current file contents",
+        handler=_handle_show,
+        max_args=1,
+        argument_hint="<file>",
     ),
     "changes": CommandDef(
         description="Show all files changed in this session",

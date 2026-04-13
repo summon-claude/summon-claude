@@ -4795,7 +4795,7 @@ class TestHandleDiffAll:
         assert any("could not run git diff" in p.lower() for p in posted)
 
     async def test_large_diff_truncated_and_warning_posted(self, tmp_path):
-        """Diff exceeding _MAX_DIFF_UPLOAD_CHARS should be truncated with a warning."""
+        """Diff exceeding _MAX_UPLOAD_CHARS should be truncated with a warning."""
         from summon_claude.sessions import session as session_mod
 
         session = make_session(cwd=str(tmp_path))
@@ -4805,7 +4805,7 @@ class TestHandleDiffAll:
 
         big_diff = "x" * 200
         with (
-            patch.object(session_mod, "_MAX_DIFF_UPLOAD_CHARS", 100),
+            patch.object(session_mod, "_MAX_UPLOAD_CHARS", 100),
             patch("asyncio.create_subprocess_exec") as mock_exec,
         ):
             mock_proc = AsyncMock()

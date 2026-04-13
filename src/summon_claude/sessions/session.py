@@ -111,6 +111,7 @@ from summon_claude.slack.client import (
     redact_secrets,
     sanitize_for_slack,
 )
+from summon_claude.slack.formatting import snippet_type_for_extension
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
@@ -200,7 +201,19 @@ _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
-_MAX_DIFF_UPLOAD_CHARS = 5_000_000  # ~5 MB for ASCII (Slack API limit is 10 MB)
+_MAX_UPLOAD_CHARS = 5_000_000  # ~5 MB for ASCII (Slack API limit is 10 MB)
+
+
+def _read_bounded(path: str, limit: int) -> tuple[str, bool]:
+    """Read up to *limit* characters from *path*; return (content, truncated)."""
+    with open(path) as f:  # noqa: PTH123
+        content = f.read(limit + 1)
+    truncated = len(content) > limit
+    if truncated:
+        content = content[:limit]
+    return content, truncated
+
+
 _CLEANUP_TIMEOUT_S = 10.0
 _CONTEXT_AGENT_THRESHOLD = 70.0  # Inject context note into agent messages
 _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
@@ -3055,12 +3068,12 @@ class SummonSession:
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
                 diff_output = stdout.decode(errors="replace")
-                if len(diff_output) > _MAX_DIFF_UPLOAD_CHARS:
-                    diff_output = diff_output[:_MAX_DIFF_UPLOAD_CHARS] + "\n... (truncated)"
+                if len(diff_output) > _MAX_UPLOAD_CHARS:
+                    diff_output = diff_output[:_MAX_UPLOAD_CHARS] + "\n... (truncated)"
                     try:
                         await rt.client.post(
                             f":warning: Diff for `{user_path}` truncated at "
-                            f"{_MAX_DIFF_UPLOAD_CHARS:,} chars.",
+                            f"{_MAX_UPLOAD_CHARS:,} chars.",
                             thread_ts=thread_ts,
                         )
                     except Exception:
@@ -3116,10 +3129,10 @@ class SummonSession:
             stdout = stdout_bytes.decode(errors="replace")
 
             if stdout:
-                if len(stdout) > _MAX_DIFF_UPLOAD_CHARS:
-                    stdout = stdout[:_MAX_DIFF_UPLOAD_CHARS]
+                if len(stdout) > _MAX_UPLOAD_CHARS:
+                    stdout = stdout[:_MAX_UPLOAD_CHARS]
                     await rt.client.post(
-                        f":warning: Diff truncated to {_MAX_DIFF_UPLOAD_CHARS:,} chars.",
+                        f":warning: Diff truncated to {_MAX_UPLOAD_CHARS:,} chars.",
                         thread_ts=thread_ts,
                     )
                 await rt.client.upload(
@@ -3144,6 +3157,76 @@ class SummonSession:
             logger.debug("git diff (all) failed", exc_info=True)
             await rt.client.post(
                 ":warning: Could not run git diff.",
+                thread_ts=thread_ts,
+            )
+
+    async def _handle_show_file(
+        self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
+    ) -> None:
+        """Handle !show <file> — display file contents."""
+        cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
+        try:
+            resolved = os.path.realpath(Path(self._cwd) / user_path)  # noqa: ASYNC240
+            if not resolved.startswith(cwd + os.sep) and resolved != cwd:
+                await rt.client.post(
+                    f":warning: `{user_path}` is outside the session directory.",
+                    thread_ts=thread_ts,
+                )
+                return
+        except Exception:
+            await rt.client.post(f":warning: Invalid path: `{user_path}`.", thread_ts=thread_ts)
+            return
+
+        try:
+            try:
+                content, truncated = await asyncio.to_thread(
+                    _read_bounded, resolved, _MAX_UPLOAD_CHARS
+                )
+            except PermissionError:
+                await rt.client.post(
+                    f":warning: Permission denied: `{user_path}`.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except IsADirectoryError:
+                await rt.client.post(
+                    f":warning: `{user_path}` is a directory.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except UnicodeDecodeError:
+                await rt.client.post(
+                    f":warning: `{user_path}` appears to be a binary file.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except OSError as e:
+                await rt.client.post(
+                    f":warning: Could not read `{user_path}`: {e.strerror}.",
+                    thread_ts=thread_ts,
+                )
+                return
+
+            if truncated:
+                await rt.client.post(
+                    f":warning: File truncated at {_MAX_UPLOAD_CHARS:,} chars.",
+                    thread_ts=thread_ts,
+                )
+
+            resolved_path = Path(resolved)
+            basename = resolved_path.name
+            ext = resolved_path.suffix
+            await rt.client.upload(
+                content,
+                basename,
+                title=basename,
+                thread_ts=thread_ts,
+                snippet_type=snippet_type_for_extension(ext),
+            )
+        except Exception:
+            logger.debug("show file failed for %s", user_path, exc_info=True)
+            await rt.client.post(
+                f":warning: Could not display `{user_path}`.",
                 thread_ts=thread_ts,
             )
 
@@ -3506,6 +3589,12 @@ class SummonSession:
         diff_path = result.metadata.get("diff_file")
         if diff_path:
             await self._handle_diff_file(rt, diff_path, thread_ts)
+            return
+
+        # Handle !show <file> — display file contents
+        show_file = result.metadata.get("show_file")
+        if show_file:
+            await self._handle_show_file(rt, show_file, thread_ts)
             return
 
         # Handle !summon resume — resume a child session from within active session
@@ -4007,6 +4096,7 @@ class SummonSession:
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
                         or result.metadata.get("diff_all")
+                        or result.metadata.get("show_file")
                         or result.metadata.get("standalone")
                     )
                     if standalone_only:
