@@ -719,10 +719,12 @@ def _google_scopes_for_services(services: list[str]) -> list[str]:
         tier = "rw" if mode == "rw" else "ro"
         entry = GOOGLE_SERVICE_SCOPES.get(name)
         if entry:
-            for s in entry[tier]:
-                full = s if s.startswith("https://") else f"{GOOGLE_SCOPE_PREFIX}{s}"
-                if full not in scopes:
-                    scopes.append(full)
+            tiers_to_include = ["ro", "rw"] if tier == "rw" else [tier]
+            for t in tiers_to_include:
+                for s in entry[t]:
+                    full = s if s.startswith("https://") else f"{GOOGLE_SCOPE_PREFIX}{s}"
+                    if full not in scopes:
+                        scopes.append(full)
     return scopes
 
 
