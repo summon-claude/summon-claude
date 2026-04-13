@@ -56,7 +56,6 @@ def test_auto_approve_tools_match(docs_dir: Path) -> None:
 
     # Extract backtick-wrapped tool names from first column of table rows.
     # Rows look like: | `Read` / `Cat` | Read file contents |
-    # Split on " / " to handle multi-name cells.
     doc_tools: set[str] = set()
     row_re = re.compile(r"^\|([^|]+)\|", re.MULTILINE)
     for row_match in row_re.finditer(section):
