@@ -199,7 +199,7 @@ def auth_status(ctx: click.Context, as_json: bool) -> None:  # noqa: PLR0912, PL
         click.echo("No authentication configured. Available providers:")
         click.echo("  summon auth github login    Authenticate with GitHub")
         click.echo("  summon auth google setup    Set up Google OAuth credentials")
-        click.echo("  summon auth google login    Authenticate with Google Workspace")
+        click.echo("  summon auth google login    Authenticate with Google")
         click.echo("  summon auth jira login      Authenticate with Jira")
         click.echo("  summon auth slack login     Authenticate with external Slack")
 
