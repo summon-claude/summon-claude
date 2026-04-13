@@ -45,6 +45,7 @@ These commands are handled locally by summon without forwarding to Claude.
 | `!summon start` | | Spawn a new child session in the current channel |
 | `!summon resume [SESSION_ID]` | | Resume a previous Claude Code session |
 | `!diff FILE` | | Show a git diff for a file changed this session |
+| `!show FILE` | | Show current contents of a file |
 | `!changes` | | Show all files changed in this session |
 
 ### !help
@@ -143,6 +144,15 @@ Spawns or resumes sessions from within a running session. Child sessions appear 
 ```
 
 Shows a unified diff for the named file, covering changes made during this session. Rendered as a Slack snippet with syntax highlighting.
+
+### !show
+
+```
+!show src/auth/login.py
+!show config.yaml
+```
+
+Displays the contents of a file as a Slack snippet with syntax highlighting. Useful for reviewing file contents without switching context. Files are truncated if they exceed the upload size limit.
 
 ### !changes
 
