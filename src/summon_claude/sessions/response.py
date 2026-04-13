@@ -184,7 +184,7 @@ class _TurnState:
     tool_names: dict[str, str] = field(default_factory=dict)
     # tool_use_id → (tool_name, filepath, old_str, new_str); consumed by _handle_tool_result_block
     pending_file_changes: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
-    # Populated by external callers (e.g. approval bridge) to gate file change tracking
+    # Denied by approval bridge — suppresses :x: error posts and blocks file change tracking
     denied_tool_use_ids: set[str] = field(default_factory=set)
 
 
@@ -431,14 +431,14 @@ class ResponseStreamer:
         # so this persists during actual tool execution until the result arrives.
         await self._set_status(f"Running {block.name}...")
 
-    async def _handle_tool_result_block(
+    async def _handle_tool_result_block(  # noqa: PLR0912
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
         wt_name = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
         if wt_name is not None and not block.is_error and self._on_worktree_entered is not None:
             self._on_worktree_entered(wt_name)
-        # Consume pending file change data — pop unconditionally to keep dict clean
+        # Pop before early-return so denied/errored results don't leave stale entries
         pending_fc = self._turn.pending_file_changes.pop(block.tool_use_id, None)
         if self._mcp_health is not None:
             tool_name = self._turn.tool_names.get(block.tool_use_id)
@@ -454,7 +454,22 @@ class ResponseStreamer:
             return
         if pending_fc is not None and not block.is_error and not denied:
             fc_tool_name, filepath, old_str, new_str = pending_fc
-            self._schedule_file_change(filepath, old_str, new_str)
+            # For Edit tools, compute unified_diff once and share it with both
+            # _schedule_file_change (additions/deletions count) and _upload_diff (Slack content).
+            if fc_tool_name in ("Edit", "str_replace_editor") and old_str:
+                edit_diff_lines = list(
+                    difflib.unified_diff(
+                        old_str.splitlines(keepends=True),
+                        new_str.splitlines(keepends=True),
+                        fromfile=f"a/{filepath}",
+                        tofile=f"b/{filepath}",
+                    )
+                )
+            else:
+                edit_diff_lines = []
+            self._schedule_file_change(
+                filepath, old_str, new_str, precomputed_diff=edit_diff_lines or None
+            )
             # Fire deferred diff/content upload
             try:
                 thread_ts = self._resolve_upload_thread(parent_id)
@@ -462,7 +477,15 @@ class ResponseStreamer:
                 pass
             else:
                 if fc_tool_name in ("Edit", "str_replace_editor"):
-                    self._spawn_background(self._upload_diff(old_str, new_str, filepath, thread_ts))
+                    self._spawn_background(
+                        self._upload_diff(
+                            old_str,
+                            new_str,
+                            filepath,
+                            thread_ts,
+                            precomputed_diff=edit_diff_lines,
+                        )
+                    )
                 elif fc_tool_name == "Write" and filepath and new_str:
                     if filepath.endswith(".md"):
                         rendered = self._turn.md_rendered_paths
@@ -729,16 +752,22 @@ class ResponseStreamer:
         new_string: str,
         filename: str,
         thread_ts: str,
+        *,
+        precomputed_diff: list[str] | None = None,
     ) -> None:
         """Upload a unified diff as a snippet_type=diff file (fire-and-forget)."""
         diff_lines: list[str] = []
         try:
-            diff_lines = list(
-                difflib.unified_diff(
-                    old_string.splitlines(keepends=True),
-                    new_string.splitlines(keepends=True),
-                    fromfile=f"a/{filename}",
-                    tofile=f"b/{filename}",
+            diff_lines = (
+                precomputed_diff
+                if precomputed_diff is not None
+                else list(
+                    difflib.unified_diff(
+                        old_string.splitlines(keepends=True),
+                        new_string.splitlines(keepends=True),
+                        fromfile=f"a/{filename}",
+                        tofile=f"b/{filename}",
+                    )
                 )
             )
             if not diff_lines:
@@ -846,19 +875,25 @@ class ResponseStreamer:
         filepath: str,
         old_content: str,
         new_content: str,
+        *,
+        precomputed_diff: list[str] | None = None,
     ) -> None:
         """Schedule on_file_change callback as a fire-and-forget task."""
         if not self._on_file_change or not filepath:
             return
-        old_lines = old_content.splitlines() if old_content else []
         new_lines = new_content.splitlines() if new_content else []
         change_type: ChangeType = "modified" if old_content else "created"
         if old_content:
-            # Count actual changed lines via unified diff
-            diff = difflib.unified_diff(old_lines, new_lines)
+            # Count actual changed lines via unified diff.
+            # Use precomputed_diff when available to avoid a second unified_diff call.
+            diff_iter = (
+                iter(precomputed_diff)
+                if precomputed_diff is not None
+                else difflib.unified_diff(old_content.splitlines(), new_content.splitlines())
+            )
             additions = 0
             deletions = 0
-            for line in diff:
+            for line in diff_iter:
                 if line.startswith("+") and not line.startswith("+++"):
                     additions += 1
                 elif line.startswith("-") and not line.startswith("---"):

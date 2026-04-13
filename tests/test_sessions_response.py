@@ -1824,6 +1824,7 @@ class TestPendingFileChangeLifecycle:
         assert len(changes) == 0
 
     async def test_denied_tool_error_no_file_change_or_upload(self):
+        """Denial (is_error=True + denied_tool_use_ids) hits the early-return."""
         changes = []
 
         async def on_change(change):
@@ -1841,7 +1842,9 @@ class TestPendingFileChangeLifecycle:
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
 
-        # Denial is represented as is_error=True from the SDK
+        # Mark the tool use as denied before processing the result
+        streamer._turn.denied_tool_use_ids.add("tu_1")
+
         denied_result = ToolResultBlock(tool_use_id="tu_1", content="Denied", is_error=True)
         result_msg = make_assistant_message([denied_result])
         with patch.object(streamer, "_upload_write", new_callable=AsyncMock) as mock_upload:
@@ -1882,10 +1885,15 @@ class TestPendingFileChangeLifecycle:
         assert len(changes) == 0
 
     async def test_successful_edit_fires_deferred_upload(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         router.active_thread_ts = "thread_1"
-        streamer = ResponseStreamer(router)
+        streamer = ResponseStreamer(router, on_file_change=on_change)
 
         edit_block = make_tool_use_block(
             "Edit",
@@ -1900,6 +1908,63 @@ class TestPendingFileChangeLifecycle:
             await streamer._handle_assistant_message(result_msg)
             await asyncio.sleep(0.05)
             mock_upload_diff.assert_called_once()
+
+        assert len(changes) == 1
+
+    async def test_no_active_thread_skips_upload_but_fires_callback(self):
+        """RuntimeError from _resolve_upload_thread silently skips upload; callback still fires."""
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_not_called()
+
+        assert len(changes) == 1
+
+    async def test_str_replace_editor_fires_deferred_upload(self):
+        """str_replace_editor tool (grouped with Edit) triggers diff upload."""
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        edit_block = make_tool_use_block(
+            "str_replace_editor",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_called_once()
+
+        assert len(changes) == 1
 
     async def test_subagent_edit_deferred_upload_targets_subagent_thread(self):
         client = make_mock_slack_client()
