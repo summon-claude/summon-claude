@@ -275,3 +275,26 @@ def test_secret_fields_input_type_repr_agree() -> None:
     if repr_only:
         errors.append(f"repr=False but input_type!='secret': {sorted(repr_only)}")
     assert not errors, "\n".join(errors)
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — FUZZY_DEFAULTS and _DEFAULT_OVERRIDES must cover the same set
+# ---------------------------------------------------------------------------
+
+
+def test_fuzzy_defaults_match_default_overrides() -> None:
+    """FUZZY_DEFAULTS keys must match _DEFAULT_OVERRIDES keys exactly."""
+    from scripts.generate_env_docs import _DEFAULT_OVERRIDES
+
+    fuzzy_keys = set(FUZZY_DEFAULTS.keys())
+    override_keys = set(_DEFAULT_OVERRIDES.keys())
+
+    only_in_fuzzy = fuzzy_keys - override_keys
+    only_in_overrides = override_keys - fuzzy_keys
+
+    errors = []
+    if only_in_fuzzy:
+        errors.append(f"In FUZZY_DEFAULTS but not _DEFAULT_OVERRIDES: {sorted(only_in_fuzzy)}")
+    if only_in_overrides:
+        errors.append(f"In _DEFAULT_OVERRIDES but not FUZZY_DEFAULTS: {sorted(only_in_overrides)}")
+    assert not errors, "\n".join(errors)

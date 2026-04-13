@@ -405,3 +405,50 @@ def test_permission_flow_table_constants(docs_dir: Path) -> None:
     assert not missing, (
         f"Permission flow table references constants not in permissions module: {sorted(missing)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 10: All collection constants in permissions.py are tested
+# ---------------------------------------------------------------------------
+
+# Constants that are tested indirectly or are implementation details
+_INTENTIONALLY_UNTESTED: frozenset[str] = frozenset(
+    {
+        "_JIRA_MCP_PREFIX",  # used internally, not a standalone permission list
+        "_WRITE_TOOL_PATH_KEYS",  # implementation detail, not a permission list
+    }
+)
+
+
+def test_all_permission_constants_are_covered() -> None:
+    """Every frozenset/tuple collection constant in permissions.py must be tested."""
+    import summon_claude.sessions.permissions as permissions_module
+
+    # Find all module-level collection constants (frozenset or tuple, name starts with _)
+    source_constants: set[str] = set()
+    for name in dir(permissions_module):
+        if not name.startswith("_") or name.startswith("__"):
+            continue
+        val = getattr(permissions_module, name)
+        if isinstance(val, (frozenset, tuple)) and name.isupper():
+            source_constants.add(name)
+
+    # Constants tested by the tests above (imported at module level)
+    tested = {
+        "_AUTO_APPROVE_TOOLS",
+        "_WRITE_GATED_TOOLS",
+        "_GITHUB_MCP_REQUIRE_APPROVAL",
+        "_GITHUB_MCP_AUTO_APPROVE",
+        "_GITHUB_MCP_AUTO_APPROVE_PREFIXES",
+        "_JIRA_MCP_HARD_DENY",
+        "_JIRA_MCP_AUTO_APPROVE_PREFIXES",
+        "_JIRA_MCP_AUTO_APPROVE_EXACT",
+        "_GOOGLE_READ_TOOL_PREFIXES",
+        "_SUMMON_MCP_AUTO_APPROVE_PREFIXES",
+    }
+
+    untested = source_constants - tested - _INTENTIONALLY_UNTESTED
+    assert not untested, (
+        f"Permission constants in permissions.py not covered by guard tests: {sorted(untested)}. "
+        f"Add a test or add to _INTENTIONALLY_UNTESTED with justification."
+    )
