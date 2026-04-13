@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from conftest import make_test_config
@@ -462,6 +462,294 @@ class TestCwdValidators:
     def test_scribe_cwd_accepts_none(self):
         cfg = _make_config(scribe_cwd=None)
         assert cfg.scribe_cwd is None
+
+
+# ------------------------------------------------------------------
+# Worktree detection tests
+# ------------------------------------------------------------------
+
+
+class TestGetGitMainRepoRoot:
+    """Unit tests for _get_git_main_repo_root().
+
+    Note: macOS pytest tmp_path resolves to /private/var/... which is outside
+    Path.home(). We patch summon_claude.config.Path.home to return tmp_path so
+    the home-directory restriction in _get_git_main_repo_root passes.
+    """
+
+    def test_normal_repo_returns_cwd(self, tmp_path):
+        """Normal repo: --git-common-dir returns '.git' (relative) → parent of resolved .git."""
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        git_dir = tmp_path / ".git"
+        git_dir.mkdir()
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = b".git\n"
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("summon_claude.config.Path.home", return_value=tmp_path),
+        ):
+            result = _get_git_main_repo_root(tmp_path)
+
+        assert result == tmp_path
+
+    def test_worktree_returns_main_repo_root(self, tmp_path):
+        """Worktree: --git-common-dir returns absolute path to main repo's .git directory."""
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        # Simulate main repo at tmp_path/main, worktree at tmp_path/wt
+        main_git = tmp_path / "main" / ".git"
+        main_git.mkdir(parents=True)
+        worktree_dir = tmp_path / "wt"
+        worktree_dir.mkdir()
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = str(main_git).encode() + b"\n"
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("summon_claude.config.Path.home", return_value=tmp_path),
+        ):
+            result = _get_git_main_repo_root(worktree_dir)
+
+        assert result == tmp_path / "main"
+
+    def test_git_failure_returns_none(self, tmp_path):
+        """Non-zero exit code (not a git repo) returns None."""
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        fake_result = MagicMock()
+        fake_result.returncode = 128
+        fake_result.stdout = b""
+
+        with patch("subprocess.run", return_value=fake_result):
+            result = _get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
+    def test_timeout_returns_none(self, tmp_path):
+        """TimeoutExpired is caught and returns None."""
+        import subprocess
+
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)):
+            result = _get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
+    def test_git_not_installed_returns_none(self, tmp_path):
+        """FileNotFoundError (git not installed) returns None."""
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            result = _get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
+    def test_empty_stdout_returns_none(self, tmp_path):
+        """Empty stdout (edge case) returns None."""
+        from summon_claude.config import _get_git_main_repo_root
+
+        _get_git_main_repo_root.cache_clear()
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = b""
+
+        with patch("subprocess.run", return_value=fake_result):
+            result = _get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
+
+class TestDetectInstallModeWorktree:
+    """Tests for worktree-aware install mode detection.
+
+    All tests patch summon_claude.config.Path.home so that tmp_path directories
+    satisfy the home-directory restriction in _detect_install_mode() and
+    _get_git_main_repo_root(). On macOS, pytest tmp_path resolves to
+    /private/var/... which is outside Path.home().
+    """
+
+    def _clear_caches(self):
+        from summon_claude.config import (
+            _detect_install_mode,
+            _find_project_root,
+            _get_git_main_repo_root,
+        )
+
+        _detect_install_mode.cache_clear()
+        _find_project_root.cache_clear()
+        _get_git_main_repo_root.cache_clear()
+
+    def test_normal_repo_venv_under_root_is_local(self, tmp_path, monkeypatch):
+        """(a) Regression: normal repo with venv under project root → local mode."""
+        from summon_claude.config import _detect_install_mode
+
+        self._clear_caches()
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'")
+        venv = tmp_path / ".venv"
+        venv.mkdir()
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = b".git\n"
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
+        ):
+            mode, root = _detect_install_mode()
+
+        assert mode == "local"
+        assert root == tmp_path
+
+    def test_worktree_venv_under_main_repo_is_local(self, tmp_path, monkeypatch):
+        """(b) NEW: worktree with venv under main repo root → local mode."""
+        from summon_claude.config import _detect_install_mode
+
+        self._clear_caches()
+
+        # Main repo at tmp_path/main, worktree at tmp_path/wt
+        main_root = tmp_path / "main"
+        main_root.mkdir()
+        main_git = main_root / ".git"
+        main_git.mkdir()
+        venv = main_root / ".venv"
+        venv.mkdir()
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / "pyproject.toml").write_text("[project]\nname = 'test'")
+
+        monkeypatch.chdir(worktree)
+        monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = str(main_git).encode() + b"\n"
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
+        ):
+            mode, root = _detect_install_mode()
+
+        assert mode == "local"
+        # project_root stays as the worktree root, not main repo root
+        assert root == worktree
+
+    def test_worktree_no_virtual_env_is_global(self, tmp_path, monkeypatch):
+        """(c) Worktree with no VIRTUAL_ENV → global mode."""
+        from summon_claude.config import _detect_install_mode
+
+        self._clear_caches()
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / "pyproject.toml").write_text("[project]\nname = 'test'")
+
+        monkeypatch.chdir(worktree)
+        monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+
+        with patch("summon_claude.config.Path.home", return_value=tmp_path.parent):
+            mode, root = _detect_install_mode()
+
+        assert mode == "global"
+        assert root is None
+
+    def test_non_git_directory_is_global(self, tmp_path, monkeypatch):
+        """(d) Non-git directory → global mode even with VIRTUAL_ENV set."""
+        from summon_claude.config import _detect_install_mode
+
+        self._clear_caches()
+
+        # No pyproject.toml → no project root found → global mode
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("VIRTUAL_ENV", str(tmp_path / ".venv"))
+
+        mode, root = _detect_install_mode()
+
+        assert mode == "global"
+        assert root is None
+
+    def test_git_rev_parse_failure_falls_through_to_global(self, tmp_path, monkeypatch):
+        """(e) git rev-parse failure → fallback to global (no false-positive local detection)."""
+        import subprocess
+
+        from summon_claude.config import _detect_install_mode
+
+        self._clear_caches()
+
+        # Worktree with pyproject.toml, venv under main root (NOT under worktree root)
+        main_root = tmp_path / "main"
+        main_root.mkdir()
+        venv = main_root / ".venv"
+        venv.mkdir()
+
+        worktree = tmp_path / "wt"
+        worktree.mkdir()
+        (worktree / "pyproject.toml").write_text("[project]\nname = 'test'")
+
+        monkeypatch.chdir(worktree)
+        monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+
+        # git fails → _get_git_main_repo_root returns None → no local detection
+        with (
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)),
+            patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
+        ):
+            mode, root = _detect_install_mode()
+
+        assert mode == "global"
+        assert root is None
+
+    def test_get_config_dir_returns_summon_under_project_root_in_local_mode(
+        self, tmp_path, monkeypatch
+    ):
+        """(f) Integration: get_config_dir() → project_root/.summon/ in local mode."""
+        from summon_claude.config import _detect_install_mode, get_config_dir
+
+        self._clear_caches()
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'test'")
+        venv = tmp_path / ".venv"
+        venv.mkdir()
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = b".git\n"
+
+        with (
+            patch("subprocess.run", return_value=fake_result),
+            patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
+        ):
+            mode, root = _detect_install_mode()
+            assert mode == "local"
+            config_dir = get_config_dir()
+
+        assert config_dir == tmp_path / ".summon"
 
 
 class TestModelChoices:
