@@ -1004,6 +1004,27 @@ class TestGoogleScopeHelpers:
         assert "gmail (read-only)" in desc
         assert "calendar (read-write)" in desc
 
+    def test_describe_granted_scopes_combined_ro_rw(self) -> None:
+        """When both ro and rw scopes are granted, report as read-write."""
+        from summon_claude.cli.google_auth import (
+            GOOGLE_SCOPE_PREFIX,
+            _describe_granted_scopes,
+        )
+
+        # Simulate what _google_scopes_for_services produces for gmail:rw
+        granted = {
+            f"{GOOGLE_SCOPE_PREFIX}gmail.readonly",
+            f"{GOOGLE_SCOPE_PREFIX}gmail.send",
+            f"{GOOGLE_SCOPE_PREFIX}gmail.compose",
+            f"{GOOGLE_SCOPE_PREFIX}gmail.labels",
+            f"{GOOGLE_SCOPE_PREFIX}gmail.settings.basic",
+            f"{GOOGLE_SCOPE_PREFIX}calendar.readonly",
+            f"{GOOGLE_SCOPE_PREFIX}calendar.events",
+        }
+        desc = _describe_granted_scopes(granted)
+        assert "gmail (read-write)" in desc
+        assert "calendar (read-write)" in desc
+
     def test_load_google_client_credentials_from_env(self):
         """_load_google_client_credentials reads from environment variables."""
         from pathlib import Path
