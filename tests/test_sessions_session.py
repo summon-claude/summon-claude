@@ -5239,7 +5239,7 @@ class TestDiffAllUntracked:
             rt.client.upload.call_args.kwargs.get("content", "") if rt.client.upload.called else ""
         )
         combined = " ".join(posted) + " " + uploaded
-        assert "5" in combined  # "5 more untracked files" or similar
+        assert "5 more untracked files" in combined
 
     async def test_diff_all_early_exit_on_size(self, tmp_path):
         from summon_claude.sessions import session as session_mod

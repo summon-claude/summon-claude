@@ -3054,6 +3054,7 @@ class SummonSession:
             return
 
         basename = resolved.rsplit("/", 1)[-1]
+        env = _git_safe_env(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
@@ -3063,7 +3064,7 @@ class SummonSession:
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=_git_safe_env(cwd),
+                env=env,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
@@ -3101,7 +3102,7 @@ class SummonSession:
                     cwd=cwd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=_git_safe_env(cwd),
+                    env=env,
                 )
                 ls_stdout, _ = await asyncio.wait_for(ls_proc.communicate(), timeout=10)
                 if ls_stdout.strip():
@@ -3124,15 +3125,17 @@ class SummonSession:
                     "git",
                     "diff",
                     "--no-index",
+                    "--",
                     "/dev/null",
                     rel_path,
                     cwd=cwd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=_git_safe_env(cwd),
+                    env=env,
                 )
                 nidx_stdout, _ = await asyncio.wait_for(nidx_proc.communicate(), timeout=10)
-                nidx_rc = nidx_proc.returncode or 0
+                assert nidx_proc.returncode is not None  # set after communicate()
+                nidx_rc = nidx_proc.returncode
                 if nidx_stdout:
                     diff_output = nidx_stdout.decode(errors="replace")
                     if len(diff_output) > _MAX_UPLOAD_CHARS:
@@ -3191,6 +3194,7 @@ class SummonSession:
             return
 
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
+        env = _git_safe_env(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
@@ -3198,7 +3202,7 @@ class SummonSession:
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=_git_safe_env(cwd),
+                env=env,
             )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             stdout = stdout_bytes.decode(errors="replace")
@@ -3224,7 +3228,7 @@ class SummonSession:
                     cwd=cwd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=_git_safe_env(cwd),
+                    env=env,
                 )
                 ls_stdout, _ = await asyncio.wait_for(ls_proc.communicate(), timeout=10)
                 untracked_files = [
@@ -3236,27 +3240,33 @@ class SummonSession:
 
             overflow_count = max(0, len(untracked_files) - 50)
             parts: list[str] = []
-            for uf in untracked_files[:50]:
-                combined_len = len(tracked_diff) + sum(len(p) for p in parts)
+            parts_len = 0
+            for idx, uf in enumerate(untracked_files[:50]):
+                combined_len = len(tracked_diff) + parts_len
                 if combined_len > _MAX_UPLOAD_CHARS:
+                    overflow_count += 50 - idx  # remaining capped files
                     break
-                rel_path = str((Path(cwd) / uf).relative_to(cwd))
+                rel_path = uf
                 try:
                     nidx_proc = await asyncio.create_subprocess_exec(
                         "git",
                         "diff",
                         "--no-index",
+                        "--",
                         "/dev/null",
                         rel_path,
                         cwd=cwd,
                         stdout=asyncio.subprocess.PIPE,
                         stderr=asyncio.subprocess.PIPE,
-                        env=_git_safe_env(cwd),
+                        env=env,
                     )
                     nidx_out, _ = await asyncio.wait_for(nidx_proc.communicate(), timeout=10)
-                    nidx_rc = nidx_proc.returncode or 0
+                    assert nidx_proc.returncode is not None  # set after communicate()
+                    nidx_rc = nidx_proc.returncode
                     if nidx_out and nidx_rc < 2:
-                        parts.append(nidx_out.decode(errors="replace"))
+                        decoded = nidx_out.decode(errors="replace")
+                        parts.append(decoded)
+                        parts_len += len(decoded)
                 except Exception:
                     logger.debug("--no-index failed for untracked file %s", uf)
                     continue
