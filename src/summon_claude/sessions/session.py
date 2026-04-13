@@ -3073,6 +3073,12 @@ class SummonSession:
                     snippet_type="diff",
                 )
             else:
+                if proc.returncode != 0:
+                    await rt.client.post(
+                        f":warning: git diff failed for `{user_path}`.",
+                        thread_ts=thread_ts,
+                    )
+                    return
                 await rt.client.post(
                     f"_No uncommitted changes for `{user_path}`._",
                     thread_ts=thread_ts,
@@ -3124,6 +3130,12 @@ class SummonSession:
                     thread_ts=thread_ts,
                 )
             else:
+                if proc.returncode != 0:
+                    await rt.client.post(
+                        ":warning: Could not run git diff.",
+                        thread_ts=thread_ts,
+                    )
+                    return
                 msg = "_No uncommitted changes._"
                 if self._changed_files:
                     msg += " Use `!changes` to see session-tracked file changes."
