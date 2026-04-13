@@ -4,17 +4,17 @@
 Consolidates all authentication commands under `summon auth`:
   - summon auth status          (unified status of all providers)
   - summon auth github login    (GitHub OAuth device flow)
-  - summon auth github logout   (remove GitHub token)
+  - summon auth github logout   (remove GitHub credentials)
   - summon auth github status   (check GitHub auth status)
   - summon auth google setup    (guided Google OAuth setup)
-  - summon auth google login    (Google Workspace OAuth)
+  - summon auth google login    (Google OAuth)
   - summon auth google logout   (remove Google credentials)
   - summon auth google status   (check Google creds)
   - summon auth jira login      (Jira OAuth 2.1 with PKCE + DCR)
   - summon auth jira logout     (remove Jira credentials)
   - summon auth jira status     (check Jira auth status)
   - summon auth slack login     (external Slack browser auth)
-  - summon auth slack logout    (remove Slack auth state)
+  - summon auth slack logout    (remove Slack credentials)
   - summon auth slack status    (show Slack auth status)
   - summon auth slack channels  (update monitored channels)
 """
@@ -258,7 +258,7 @@ def auth_google_setup(account: str | None) -> None:
 @auth_google.command("login")
 @click.option("--account", default=None, help="Account label (e.g., personal, work)")
 def auth_google_login(account: str | None) -> None:
-    """Authenticate with Google Workspace."""
+    """Authenticate with Google."""
     try:
         google_auth(account=account)
     except KeyboardInterrupt:
@@ -268,7 +268,7 @@ def auth_google_login(account: str | None) -> None:
 @auth_google.command("status")
 @click.option("--account", default=None, help="Account label (e.g., personal, work)")
 def auth_google_status(account: str | None) -> None:
-    """Check Google Workspace authentication status."""
+    """Check Google authentication status."""
     google_status(account=account)
 
 

@@ -1113,11 +1113,8 @@ def _check_google_status_data(account: str | None = None) -> dict:  # noqa: PLR0
                 all_ok = False
                 continue
 
-            if cred.valid:
+            if cred.valid or (cred.expired and cred.refresh_token):
                 acct_status = "authenticated"
-            elif cred.expired and cred.refresh_token:
-                acct_status = "expired_refreshable"
-                all_ok = False
             else:
                 acct_status = "invalid"
                 all_ok = False
@@ -1171,9 +1168,12 @@ def google_logout(account: str | None = None) -> None:
         if not cred_files:
             click.echo(f"No Google credentials found for account '{acct.label}'.")
             continue
+        removed = 0
         for f in cred_files:
             try:
                 f.unlink(missing_ok=True)
+                removed += 1
             except OSError as e:
                 click.echo(f"Could not remove {f.name}: {e}", err=True)
-        click.echo(f"Google credentials removed ({acct.label}).")
+        if removed:
+            click.echo(f"Google credentials removed ({acct.label}).")
