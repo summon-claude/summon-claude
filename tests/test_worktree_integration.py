@@ -597,3 +597,53 @@ class TestShellHookProjectRootWithSpaces:
 
         assert exit_code == 0
         assert sentinel.exists()
+
+
+# ---------------------------------------------------------------------------
+# S-01: Home-directory containment for _get_worktree_project_root
+# ---------------------------------------------------------------------------
+
+
+class TestGetWorktreeProjectRootHomeDirGuard:
+    def test_path_outside_home_returns_none(self, tmp_path, monkeypatch):
+        from summon_claude.sessions.hooks import _get_worktree_project_root
+
+        mock_result = type(
+            "R",
+            (),
+            {
+                "returncode": 0,
+                "stdout": "worktree /opt/adversarial/repo\n",
+            },
+        )()
+        _mod = "summon_claude.sessions.hooks"
+        monkeypatch.setattr(f"{_mod}.subprocess.run", lambda *a, **kw: mock_result)
+        monkeypatch.setattr(
+            f"{_mod}.Path.home",
+            staticmethod(lambda: tmp_path / "home"),
+        )
+        (tmp_path / "home").mkdir()
+
+        assert _get_worktree_project_root(tmp_path) is None
+
+    def test_path_inside_home_returns_resolved(self, tmp_path, monkeypatch):
+        from summon_claude.sessions.hooks import _get_worktree_project_root
+
+        home = tmp_path / "home"
+        home.mkdir()
+        repo = home / "projects" / "myrepo"
+        repo.mkdir(parents=True)
+
+        mock_result = type(
+            "R",
+            (),
+            {
+                "returncode": 0,
+                "stdout": f"worktree {repo}\n",
+            },
+        )()
+        _mod = "summon_claude.sessions.hooks"
+        monkeypatch.setattr(f"{_mod}.subprocess.run", lambda *a, **kw: mock_result)
+        monkeypatch.setattr(f"{_mod}.Path.home", staticmethod(lambda: home))
+
+        assert _get_worktree_project_root(tmp_path) == repo.resolve()
