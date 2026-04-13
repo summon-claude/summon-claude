@@ -108,12 +108,13 @@ class TestRedactor:
         assert "12345678..." in result
 
     def test_redact_data_dir(self) -> None:
-        from summon_claude.diagnostics import _DATA_DIR
+        from summon_claude.diagnostics import _data_dir_str
 
-        if str(Path.home()) != _DATA_DIR:
-            text = f"opened {_DATA_DIR}/registry.db"
+        data_dir = _data_dir_str()
+        if str(Path.home()) != data_dir:
+            text = f"opened {data_dir}/registry.db"
             result = redactor.redact(text)
-            assert _DATA_DIR not in result
+            assert data_dir not in result
             assert "[data_dir]" in result
 
     def test_redact_no_sensitive_data(self) -> None:
