@@ -4977,7 +4977,6 @@ class TestDiffFileReturncode:
 
     async def test_diff_file_outside_cwd_posts_warning(self, tmp_path):
         session = make_session(cwd=str(tmp_path))
-        session._is_git_repo = True
         session._changed_files = {}
         rt = make_rt(AsyncMock())
 
@@ -4989,7 +4988,6 @@ class TestDiffFileReturncode:
 
     async def test_diff_file_outside_cwd_no_subprocess(self, tmp_path):
         session = make_session(cwd=str(tmp_path))
-        session._is_git_repo = True
         session._changed_files = {}
         rt = make_rt(AsyncMock())
 

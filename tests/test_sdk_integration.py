@@ -40,7 +40,12 @@ pytestmark = [
 
 @pytest.fixture(autouse=True, scope="session")
 def _strip_claudecode():
-    """Remove CLAUDECODE env var so SDK subprocesses don't detect nesting."""
+    """Remove CLAUDECODE env var so SDK subprocesses don't detect nesting.
+
+    NOTE: This is file-scoped (non-conftest). Do NOT move to conftest.py —
+    other test files (test_slack_mcp, test_sessions_classifier, test_model_cache)
+    set CLAUDECODE directly and assert its presence.
+    """
     old = os.environ.pop("CLAUDECODE", None)
     yield
     if old is not None:
@@ -257,7 +262,8 @@ class TestThinkingConfigIntegration:
         )
 
     @pytest.mark.xfail(
-        reason="Claude 4.x always returns ThinkingBlocks regardless of ThinkingConfigDisabled",
+        reason="Claude 4.x always returns ThinkingBlocks regardless of ThinkingConfigDisabled "
+        "(SDK does not expose a way to suppress thinking for always-on-thinking models)",
         strict=False,
     )
     async def test_disabled_thinking_produces_no_thinking_blocks(self):

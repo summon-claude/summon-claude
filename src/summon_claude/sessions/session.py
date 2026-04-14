@@ -3038,8 +3038,9 @@ class SummonSession:
         thread_ts: str | None,
     ) -> None:
         """Truncate diff_output if needed, warn, and upload as a diff snippet."""
+        suffix = "\n... (truncated)"
         if len(diff_output) > _MAX_UPLOAD_CHARS:
-            diff_output = diff_output[:_MAX_UPLOAD_CHARS] + "\n... (truncated)"
+            diff_output = diff_output[: _MAX_UPLOAD_CHARS - len(suffix)] + suffix
             try:
                 await rt.client.post(
                     f":warning: Diff for `{user_path}` truncated at {_MAX_UPLOAD_CHARS:,} chars.",
@@ -3249,28 +3250,32 @@ class SummonSession:
             if len(tracked_diff) > _MAX_UPLOAD_CHARS:
                 overflow_count += len(capped)
             else:
+                _sem = asyncio.Semaphore(10)
 
                 async def _nidx_diff(rel_path: str) -> str:
-                    try:
-                        nidx_proc = await asyncio.create_subprocess_exec(
-                            "git",
-                            "diff",
-                            "--no-index",
-                            "--",
-                            "/dev/null",
-                            rel_path,
-                            cwd=cwd,
-                            stdout=asyncio.subprocess.PIPE,
-                            stderr=asyncio.subprocess.PIPE,
-                            env=env,
-                        )
-                        nidx_out, _ = await asyncio.wait_for(nidx_proc.communicate(), timeout=10)
-                        assert nidx_proc.returncode is not None  # set after communicate()
-                        if nidx_out and nidx_proc.returncode < 2:
-                            return nidx_out.decode(errors="replace")
-                    except Exception:
-                        logger.debug("--no-index failed for untracked file %s", rel_path)
-                    return ""
+                    async with _sem:
+                        try:
+                            nidx_proc = await asyncio.create_subprocess_exec(
+                                "git",
+                                "diff",
+                                "--no-index",
+                                "--",
+                                "/dev/null",
+                                rel_path,
+                                cwd=cwd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                                env=env,
+                            )
+                            nidx_out, _ = await asyncio.wait_for(
+                                nidx_proc.communicate(), timeout=10
+                            )
+                            assert nidx_proc.returncode is not None  # set after communicate()
+                            if nidx_out and nidx_proc.returncode < 2:
+                                return nidx_out.decode(errors="replace")
+                        except Exception:
+                            logger.debug("--no-index failed for untracked file %s", rel_path)
+                        return ""
 
                 raw_parts = await asyncio.gather(*(_nidx_diff(uf) for uf in capped))
 
