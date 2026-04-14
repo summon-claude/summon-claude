@@ -3301,7 +3301,8 @@ class SummonSession:
 
             if combined:
                 if len(combined) > _MAX_UPLOAD_CHARS:
-                    combined = combined[:_MAX_UPLOAD_CHARS]
+                    _suffix = "\n... (truncated)"
+                    combined = combined[: _MAX_UPLOAD_CHARS - len(_suffix)] + _suffix
                     await rt.client.post(
                         f":warning: Diff truncated to {_MAX_UPLOAD_CHARS:,} chars.",
                         thread_ts=thread_ts,
@@ -3378,6 +3379,7 @@ class SummonSession:
                 return
 
             if truncated:
+                content += "\n... (truncated)"
                 await rt.client.post(
                     f":warning: File truncated at {_MAX_UPLOAD_CHARS:,} chars.",
                     thread_ts=thread_ts,
