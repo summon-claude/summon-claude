@@ -213,7 +213,7 @@ Doc tests run automatically as part of the main test suite (`make py-test` or `m
 To run only doc tests:
 
 ```{ .bash .notest }
-uv run pytest tests/docs/ -v -m docs
+make docs-test
 ```
 
 ### Test categories
