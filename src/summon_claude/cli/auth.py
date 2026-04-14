@@ -22,6 +22,7 @@ Consolidates all authentication commands under `summon auth`:
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 
 import click
@@ -56,6 +57,69 @@ from summon_claude.config import get_workspace_config_path
 
 
 def _check_jira_status_data() -> dict:
+    """Return Jira auth status as a dict for --json output.
+
+    Reads the token file once to extract both status and site name,
+    avoiding the double-read of calling check_jira_status() + get_jira_site_name().
+    """
+    import time  # noqa: PLC0415
+
+    from summon_claude.jira_auth import get_jira_token_path, jira_credentials_exist  # noqa: PLC0415
+
+    if not jira_credentials_exist():
+        return {"provider": "jira", "status": "not_configured"}
+
+    # Single read — mirrors check_jira_status() validation + get_jira_site_name() extraction
+    token_path = get_jira_token_path()
+    try:
+        token_data = json.loads(token_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {"provider": "jira", "status": "error", "error": "corrupt or unreadable"}
+
+    if not token_data.get("access_token"):
+        return {"provider": "jira", "status": "error", "error": "missing access_token"}
+
+    if not token_data.get("cloud_id"):
+        return {"provider": "jira", "status": "error", "error": "missing cloud_id"}
+
+    expires_at = token_data.get("expires_at", 0)
+    if time.time() >= expires_at and not token_data.get("refresh_token"):
+        return {"provider": "jira", "status": "error", "error": "expired without refresh_token"}
+
+    result: dict = {"provider": "jira", "status": "authenticated"}
+    name = token_data.get("cloud_name")
+    if name:
+        site = re.sub(r"[^\x20-\x7e]", "", name)[:80]
+        if site:
+            result["site"] = site
+    return result
+
+
+def _check_slack_status_data() -> dict:
+    wcp = get_workspace_config_path()
+    if not wcp.exists():
+        return {"provider": "slack", "status": "not_configured"}
+    try:
+        workspace = json.loads(wcp.read_text())
+        url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))[:200]
+    except (json.JSONDecodeError, OSError, AttributeError):
+        return {"provider": "slack", "status": "error", "error": "corrupted config"}
+    existing = _check_existing_slack_auth()
+    if existing:
+        return {
+            "provider": "slack",
+            "status": "authenticated",
+            "workspace_url": url,
+            "saved_at": existing["saved_iso"],
+        }
+    return {"provider": "slack", "status": "error", "error": "expired", "workspace_url": url}
+
+
+def _check_jira_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
+    """Check Jira authentication status.
+
+    Returns True if valid, False if broken, None if not configured.
+    """
     from summon_claude.jira_auth import (  # noqa: PLC0415
         check_jira_status,
         get_jira_site_name,
@@ -63,47 +127,23 @@ def _check_jira_status_data() -> dict:
     )
 
     if not jira_credentials_exist():
-        return {"provider": "jira", "status": "not_configured"}
-    err = check_jira_status()
-    if err:
-        return {"provider": "jira", "status": "error", "error": err}
-    site = get_jira_site_name()
-    result: dict = {"provider": "jira", "status": "authenticated"}
-    if site:
-        result["site"] = site
-    return result
-
-
-def _check_slack_status_data() -> dict:
-    import json as _json  # noqa: PLC0415
-
-    wcp = get_workspace_config_path()
-    if not wcp.exists():
-        return {"provider": "slack", "status": "not_configured"}
-    try:
-        workspace = _json.loads(wcp.read_text())
-        url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))[:200]
-    except (_json.JSONDecodeError, OSError, AttributeError):
-        return {"provider": "slack", "status": "error", "error": "corrupted config"}
-    existing = _check_existing_slack_auth()
-    if existing:
-        import datetime as _dt  # noqa: PLC0415
-
-        try:
-            saved_dt = _dt.datetime.strptime(  # noqa: DTZ007
-                existing["saved"],
-                "%Y-%m-%d %H:%M UTC",
+        if not quiet:
+            click.echo(
+                f"{prefix}{format_tag('INFO')} Jira: not configured (run `summon auth jira login`)"
             )
-            saved_iso = saved_dt.replace(tzinfo=_dt.UTC).isoformat()
-        except ValueError:
-            saved_iso = existing["saved"]
-        return {
-            "provider": "slack",
-            "status": "authenticated",
-            "workspace_url": url,
-            "saved_at": saved_iso,
-        }
-    return {"provider": "slack", "status": "expired", "workspace_url": url}
+        return None
+
+    err = check_jira_status()
+    if err is not None:
+        if not quiet:
+            click.echo(f"{prefix}{format_tag('FAIL')} Jira: {err}")
+        return False
+
+    if not quiet:
+        site = get_jira_site_name()
+        site_suffix = f" (site: {site})" if site else ""
+        click.echo(f"{prefix}{format_tag('PASS')} Jira: authenticated{site_suffix}")
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -119,18 +159,16 @@ def cmd_auth() -> None:
 @cmd_auth.command("status")
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 @click.pass_context
-def auth_status(ctx: click.Context, as_json: bool) -> None:  # noqa: PLR0912, PLR0915
+def auth_status(ctx: click.Context, as_json: bool) -> None:
     """Show authentication status for all configured providers."""
     if as_json:
-        import json as _json  # noqa: PLC0415
-
         providers = [
             _check_github_status_data(),
             _check_google_status_data(),
             _check_jira_status_data(),
             _check_slack_status_data(),
         ]
-        click.echo(_json.dumps({"providers": providers}, indent=2))
+        click.echo(json.dumps({"providers": providers}, indent=2))
         return
 
     quiet = ctx.obj.get("quiet", False) if ctx.obj else False
@@ -148,48 +186,33 @@ def auth_status(ctx: click.Context, as_json: bool) -> None:  # noqa: PLR0912, PL
         any_configured = True
 
     # Jira
-    from summon_claude.jira_auth import (  # noqa: PLC0415
-        check_jira_status,
-        get_jira_site_name,
-        jira_credentials_exist,
-    )
-
-    if jira_credentials_exist():
+    jira_result = _check_jira_status(prefix="  ", quiet=quiet)
+    if jira_result is not None:
         any_configured = True
-        jira_err = check_jira_status()
-        if jira_err is None:
-            if not quiet:
-                site = get_jira_site_name()
-                site_suffix = f" (site: {site})" if site else ""
-                click.echo(f"  {format_tag('PASS')} Jira: authenticated{site_suffix}")
-        elif not quiet:
-            click.echo(f"  {format_tag('FAIL')} Jira: {jira_err}")
-    elif not quiet:
-        click.echo(f"  {format_tag('INFO')} Jira: not configured (run `summon auth jira login`)")
 
     # External Slack
     workspace_config_path = get_workspace_config_path()
     if workspace_config_path.exists():
         any_configured = True
         if not quiet:
-            import json  # noqa: PLC0415
-
-            try:
-                workspace = json.loads(workspace_config_path.read_text())
-                url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))
-            except (json.JSONDecodeError, OSError, AttributeError):
-                click.echo(
-                    f"  {format_tag('FAIL')} Slack: workspace config is corrupted"
-                    " (re-run `summon auth slack login`)"
-                )
-                url = None
-            if url is not None:
-                existing = _check_existing_slack_auth()
-                if existing:
-                    age = existing["age"]
-                    tag = format_tag("PASS")
-                    click.echo(f"  {tag} Slack: authenticated (workspace: {url}, saved {age})")
-                else:
+            existing = _check_existing_slack_auth()
+            if existing:
+                url = re.sub(r"[^\x20-\x7e]", "", existing.get("url", "unknown"))[:200]
+                age = existing["age"]
+                tag = format_tag("PASS")
+                click.echo(f"  {tag} Slack: authenticated (workspace: {url}, saved {age})")
+            else:
+                # Config exists but auth is expired/missing — read URL for display
+                try:
+                    workspace = json.loads(workspace_config_path.read_text())
+                    url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))[:200]
+                except (json.JSONDecodeError, OSError, AttributeError):
+                    click.echo(
+                        f"  {format_tag('FAIL')} Slack: workspace config is corrupted"
+                        " (re-run `summon auth slack login`)"
+                    )
+                    url = None
+                if url is not None:
                     click.echo(f"  {format_tag('FAIL')} Slack: auth expired or missing ({url})")
     elif not quiet:
         click.echo(f"  {format_tag('INFO')} Slack: not configured (run `summon auth slack login`)")
@@ -487,12 +510,4 @@ def auth_jira_logout() -> None:
 @auth_jira.command("status")
 def auth_jira_status() -> None:
     """Check Jira authentication status."""
-    from summon_claude.jira_auth import check_jira_status, get_jira_site_name  # noqa: PLC0415
-
-    err = check_jira_status()
-    if err is None:
-        site = get_jira_site_name()
-        site_suffix = f" (site: {site})" if site else ""
-        click.echo(f"{format_tag('PASS')} Jira: authenticated{site_suffix}")
-    else:
-        click.echo(f"{format_tag('FAIL')} Jira: {err}")
+    _check_jira_status()

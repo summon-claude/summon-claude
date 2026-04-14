@@ -134,20 +134,12 @@ def _save_monitored_channels(monitored_channels: str) -> None:
     if not monitored_channels:
         return
 
+    from summon_claude.cli.config import parse_env_file, write_env_file  # noqa: PLC0415
+
     config_file = get_config_file()
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    lines = config_file.read_text().splitlines() if config_file.exists() else []
-    key = "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS"
-    new_line = f"{key}={monitored_channels}"
-    updated = False
-    for i, line in enumerate(lines):
-        if line.startswith(f"{key}="):
-            lines[i] = new_line
-            updated = True
-            break
-    if not updated:
-        lines.append(new_line)
-    config_file.write_text("\n".join(lines) + "\n")
+    existing = parse_env_file(config_file)
+    existing["SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS"] = monitored_channels
+    write_env_file(config_file, existing, atomic=True)
     click.echo(f"Monitored channels saved to {config_file}")
 
 
@@ -234,6 +226,7 @@ def _check_existing_slack_auth() -> dict[str, str] | None:
 
     return {
         "saved": saved_dt.strftime("%Y-%m-%d %H:%M UTC"),
+        "saved_iso": saved_dt.isoformat(),
         "age": age_str,
         "user_id": workspace.get("user_id", ""),
         "url": workspace.get("url", ""),
@@ -513,6 +506,12 @@ def _fetch_channels_via_playwright(
     if not state_path.is_file():
         click.echo("Auth state expired or missing.")
         click.echo(f"Re-run: summon auth slack login {workspace_url}")
+        return None
+
+    # [SEC] Validate path is within expected directory (mirrors _check_existing_slack_auth)
+    expected_dir = get_browser_auth_dir()
+    if not state_path.resolve().is_relative_to(expected_dir.resolve()):
+        click.echo("Auth state path is outside expected directory.", err=True)
         return None
 
     try:
