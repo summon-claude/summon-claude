@@ -111,7 +111,7 @@ def _list_worktree_paths(cwd: Path) -> list[Path]:
         for line in result.stdout.splitlines():
             if line.startswith("worktree "):
                 resolved = Path(line[len("worktree ") :].strip()).resolve()
-                if not resolved.is_relative_to(Path.home()):
+                if not resolved.is_relative_to(Path.home().resolve()):
                     logger.warning("git worktree path outside home directory: %s", resolved)
                     continue
                 paths.append(resolved)
