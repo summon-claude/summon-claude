@@ -539,7 +539,7 @@ class TestCmdInit:
                     "",  # slack_bot_token (keep existing)
                     "",  # slack_app_token (keep existing)
                     "",  # signing_secret (keep existing)
-                    "7",  # default_model: select "other" (7th in fallback list)
+                    "8",  # default_model: select "other" (8th — custom model inserted before it)
                     "",  # default_model (custom): empty → fall back to current_value
                     "3",  # default_effort (choice: 3=high)
                     "",  # channel_prefix
