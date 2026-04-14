@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 import time
-import unittest.mock
 from http.client import HTTPMessage
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
@@ -138,18 +138,18 @@ class TestFetchRetry:
     def test_retry_succeeds_after_transient_failure(self) -> None:
         """_fetch succeeds when urlopen raises 5xx twice then returns normally."""
         err_502 = HTTPError("http://example.com", 502, "Bad Gateway", HTTPMessage(), None)
-        mock_resp = unittest.mock.MagicMock()
+        mock_resp = MagicMock()
         mock_resp.__enter__ = lambda s: s
-        mock_resp.__exit__ = unittest.mock.MagicMock(return_value=False)
+        mock_resp.__exit__ = MagicMock(return_value=False)
         mock_resp.status = 200
         mock_resp.url = "http://example.com"
 
         with (
-            unittest.mock.patch(
+            patch(
                 "tests.docs.test_links.urlopen",
                 side_effect=[err_502, err_502, mock_resp],
             ),
-            unittest.mock.patch("time.sleep"),
+            patch("time.sleep"),
         ):
             status, final_url = _fetch("http://example.com")
 
@@ -161,11 +161,11 @@ class TestFetchRetry:
         err_404 = HTTPError("http://example.com", 404, "Not Found", HTTPMessage(), None)
 
         with (
-            unittest.mock.patch(
+            patch(
                 "tests.docs.test_links.urlopen",
                 side_effect=err_404,
             ),
-            unittest.mock.patch("time.sleep") as mock_sleep,
+            patch("time.sleep") as mock_sleep,
             pytest.raises(HTTPError) as exc_info,
         ):
             _fetch("http://example.com")
@@ -176,11 +176,11 @@ class TestFetchRetry:
     def test_connection_error_wrapping(self) -> None:
         """_fetch wraps ConnectionError in URLError after exhausting retries."""
         with (
-            unittest.mock.patch(
+            patch(
                 "tests.docs.test_links.urlopen",
                 side_effect=ConnectionError("connection refused"),
             ),
-            unittest.mock.patch("time.sleep"),
+            patch("time.sleep"),
             pytest.raises(URLError),
         ):
             _fetch("http://example.com")
@@ -188,11 +188,11 @@ class TestFetchRetry:
     def test_timeout_error_wrapping(self) -> None:
         """_fetch wraps TimeoutError in URLError after exhausting retries."""
         with (
-            unittest.mock.patch(
+            patch(
                 "tests.docs.test_links.urlopen",
                 side_effect=TimeoutError("timed out"),
             ),
-            unittest.mock.patch("time.sleep"),
+            patch("time.sleep"),
             pytest.raises(URLError),
         ):
             _fetch("http://example.com")
@@ -202,11 +202,11 @@ class TestFetchRetry:
         err_502 = HTTPError("http://example.com", 502, "Bad Gateway", HTTPMessage(), None)
 
         with (
-            unittest.mock.patch(
+            patch(
                 "tests.docs.test_links.urlopen",
                 side_effect=err_502,  # fails all 4 attempts
             ),
-            unittest.mock.patch("time.sleep") as mock_sleep,
+            patch("time.sleep") as mock_sleep,
             pytest.raises(HTTPError),
         ):
             _fetch("http://example.com")

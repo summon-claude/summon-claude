@@ -27,7 +27,7 @@ uv run pytest tests/ -v
 ```{ .bash .notest }
 make py-test-quick
 # or
-uv run pytest --maxfail=1 -q -m "not slack and not llm"
+uv run pytest --maxfail=1 -q -m "not slack and not llm and not link_check"
 ```
 
 ### Single module
@@ -199,7 +199,7 @@ async def test_classifier_blocks_dangerous_command():
     ...
 ```
 
-Excluded from pre-commit runs: `make py-test-quick` passes `-m "not slack and not llm"`.
+Excluded from pre-commit runs: `make py-test-quick` passes `-m "not slack and not llm and not link_check"`.
 
 ---
 
@@ -264,7 +264,7 @@ The `ci.yaml` workflow runs parallel jobs on every PR to `main`:
 4. **`docs`** — `mkdocs build --strict` (docs build check, PRs only)
 5. **`link-check`** — `make docs-test-links` (external URL validation, advisory — does not block merge)
 
-Jobs 1–4 are required status checks. Job 5 is advisory (visible red X on failure, but does not block merge). Slack integration tests run only on pushes to `main`.
+All five jobs run independently in parallel. Job 5 (`link-check`) is advisory — it shows a red X on failure but is not intended to block merge. Slack integration tests run only on pushes to `main`.
 
 **Debugging CI failures:**
 
