@@ -3379,7 +3379,9 @@ class SummonSession:
                 return
 
             if truncated:
-                content += "\n... (truncated)"
+                # Trim content to make room for the suffix within the upload cap
+                _show_suffix = "\n... (truncated)"
+                content = content[: _MAX_UPLOAD_CHARS - len(_show_suffix)] + _show_suffix
                 await rt.client.post(
                     f":warning: File truncated at {_MAX_UPLOAD_CHARS:,} chars.",
                     thread_ts=thread_ts,
