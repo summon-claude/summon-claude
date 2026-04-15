@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "INCLUDE_GLOBAL_TOKEN",
     "VALID_HOOK_TYPES",
+    "_list_worktree_paths",
     "run_lifecycle_hooks",
     "run_post_worktree_hooks",
 ]
