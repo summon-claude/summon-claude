@@ -752,6 +752,10 @@ class PermissionHandler:
         subdirectory of the project root, so the effective write boundary shrinks.
         Defense-in-depth: logs a warning if the candidate would widen containment.
 
+        The caller (response.py) ensures at most one of *worktree_name* and
+        *worktree_path* is non-empty.  If both are provided, *worktree_path*
+        takes priority and *worktree_name* is ignored.
+
         Args:
             worktree_name: Name from the EnterWorktree input (e.g. "feature-x").
                 Used to compute the worktree root for CWD containment checks.
