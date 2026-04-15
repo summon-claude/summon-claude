@@ -103,7 +103,7 @@ docs-test: ## Run doc validation tests (guard tests, code blocks, markdown code 
 	uv run pytest --markdown-docs docs/ tests/docs/ -v -m "docs and not link_check" -n0
 
 docs-test-links: ## Run external link validation tests (network-dependent)
-	uv run pytest tests/docs/test_links.py -v -m link_check -n0
+	uv run pytest tests/docs/test_links.py -v -m link_check
 
 # ============================================================================
 # REPO HOOKS

@@ -91,6 +91,7 @@ jobs:
     name: Link check
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    continue-on-error: true
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -99,7 +100,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --locked --extra all
+        run: uv sync --locked
 
       - name: Check external links
         run: make docs-test-links

@@ -101,6 +101,7 @@ markers = [
     "llm: marks tests that make real LLM API calls",
     "xdist_group: groups tests to run on the same worker (pytest-xdist)",
     "docs: documentation validation tests",
+    "link_check: External URL link validation tests (network-dependent)",
 ]
 ```
 
@@ -224,7 +225,7 @@ make docs-test
 | `test_env_vars.py` | `SUMMON_*` env vars in docs match `SummonConfig` fields |
 | `test_mcp_tools.py` | MCP tool docs match source tool schemas and counts |
 | `test_bash_codeblocks.py` | `summon` commands in bash blocks execute successfully |
-| `test_links.py` | External URLs in docs return 2xx/3xx (rejects redirects). Network tests use `link_check` marker; run separately via `make docs-test-links` |
+| `test_links.py` | External URLs in docs return 2xx with no redirect. Network tests use `link_check` marker; run separately via `make docs-test-links` |
 
 ### `notest` markers
 
@@ -250,7 +251,6 @@ The `notest` attribute is invisible to documentation readers — markdown render
 
 - **`test` job:** `make py-test` runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks. `make docs-test` runs markdown code block validation separately
 - **`link-check` job:** `make docs-test-links` runs external URL link validation (advisory — visible red X on failure, does not block merge)
-- **`slack-integration` job:** Runs bash CLI tests with real credentials (Tier 2 commands like `summon config show`)
 
 ---
 
@@ -264,7 +264,7 @@ The `ci.yaml` workflow runs parallel jobs on every PR to `main`:
 4. **`docs`** — `mkdocs build --strict` (docs build check, PRs only)
 5. **`link-check`** — `make docs-test-links` (external URL validation, advisory — does not block merge)
 
-All five jobs run independently in parallel. Job 5 (`link-check`) is advisory — it shows a red X on failure but is not intended to block merge. Slack integration tests run only on pushes to `main`.
+All five jobs run independently in parallel. Job 5 (`link-check`) is advisory — it shows a red X on failure but is not intended to block merge.
 
 **Debugging CI failures:**
 
