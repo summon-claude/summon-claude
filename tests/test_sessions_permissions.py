@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1499,13 +1500,18 @@ class TestClassifierIntegration:
         handler.set_classifier_enabled(True)
         mock_classifier.reset_counters.assert_called_once()
 
-    async def test_notify_entered_worktree_enables_classifier(self):
+    async def test_notify_entered_worktree_enables_classifier(self, tmp_path: Path):
         """notify_entered_worktree enables classifier when configured."""
         mock_classifier = MagicMock()
         mock_classifier.reset_counters = MagicMock()
         handler, _, _ = _make_classifier_handler(
             mock_classifier, classifier_configured=True, in_worktree=False
         )
+        # Set project_root so containment root can be computed (classifier
+        # only activates after a valid containment root is established).
+        handler._project_root = tmp_path
+        wt_dir = tmp_path / ".claude" / "worktrees" / "test-wt"
+        wt_dir.mkdir(parents=True)
         assert handler.classifier_enabled is False
 
         handler.notify_entered_worktree("test-wt")

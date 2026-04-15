@@ -37,6 +37,7 @@ from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPe
 
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.classifier import extract_classifier_context
+from summon_claude.sessions.hooks import _list_worktree_paths
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.slack.client import sanitize_for_mrkdwn
 from summon_claude.slack.markdown_split import MARKDOWN_BLOCK_LIMIT
@@ -122,6 +123,19 @@ _GOOGLE_READ_TOOL_PREFIXES = (
     "debug_",
     "inspect_",
 )
+
+
+def _is_registered_worktree(path: str, cwd: Path) -> Path | None:
+    """Check whether *path* appears in ``git worktree list`` output.
+
+    Returns the resolved Path if registered, None otherwise (fail-closed).
+    Using Path | None (SDR-4) avoids double-resolution at the call site.
+    """
+    resolved = Path(path).expanduser().resolve()
+    for wt_path in _list_worktree_paths(cwd):
+        if wt_path == resolved:
+            return resolved
+    return None
 
 
 def _is_google_read_tool(tool_name: str) -> bool:
@@ -727,7 +741,11 @@ class PermissionHandler:
         else:
             logger.info("Directory containment active (non-git) — root=%s", self._containment_root)
 
-    def notify_entered_worktree(self, worktree_name: str = "") -> None:
+    def notify_entered_worktree(  # noqa: PLR0912
+        self,
+        worktree_name: str = "",
+        worktree_path: str = "",
+    ) -> None:
         """Called by response consumer when EnterWorktree tool use is detected.
 
         Worktree entry always narrows containment — the worktree directory is a
@@ -737,7 +755,80 @@ class PermissionHandler:
         Args:
             worktree_name: Name from the EnterWorktree input (e.g. "feature-x").
                 Used to compute the worktree root for CWD containment checks.
+            worktree_path: Absolute path from the EnterWorktree input (CLI 2.1.105+).
+                Used for path-based re-entry into an existing worktree.
+                Validated against ``git worktree list`` before use as containment root.
         """
+        if worktree_path:
+            self._in_containment = True
+            self._in_worktree = True
+            # Guard: require project_root for git worktree validation
+            if not self._project_root:
+                logger.warning(
+                    "Worktree path %r ignored — no project root available for validation",
+                    worktree_path,
+                )
+            else:
+                # SDR-4: _is_registered_worktree returns resolved Path | None,
+                # eliminating the double-resolution that a bool return would require.
+                candidate = _is_registered_worktree(worktree_path, self._project_root)
+                if candidate is None:
+                    logger.warning(
+                        "Worktree path %r not found in git worktree list — "
+                        "containment root unchanged (all writes require HITL)",
+                        worktree_path,
+                    )
+                    # Intentional: _in_containment and _in_worktree are set above even
+                    # when validation fails. This means writes go to HITL (containment
+                    # active) but no CWD auto-approve (root is None). Fail-closed.
+                elif not candidate.is_relative_to(self._project_root.resolve()):
+                    # SEC: reject worktrees outside the project root. A worktree at
+                    # /tmp/evil would pass _is_registered_worktree (it IS in git
+                    # worktree list) but must not set containment root outside the
+                    # project boundary.
+                    logger.warning(
+                        "Worktree path %s is outside project root %s — "
+                        "containment root unchanged (all writes require HITL)",
+                        candidate,
+                        self._project_root,
+                    )
+                # Anti-widening guard: candidate must be narrower than (or equal
+                # to) the current root. For path-based re-entry after a prior
+                # name-based entry, the candidate is typically a sibling worktree
+                # (not a child), so the anti-widening guard rejects it. This is
+                # intentional: once containment is narrowed, it cannot be widened
+                # — the session must stick to its first worktree.
+                elif self._containment_root is not None:
+                    if candidate.is_relative_to(self._containment_root):
+                        self._containment_root = candidate
+                    else:
+                        logger.warning(
+                            "notify_entered_worktree: path %s would widen "
+                            "containment root %s — keeping current root",
+                            candidate,
+                            self._containment_root,
+                        )
+                else:
+                    self._containment_root = candidate
+            # Activate auto-classifier only when containment root is validated.
+            # Guarded by _containment_root is not None to prevent activating the
+            # classifier without a valid containment boundary (e.g. when project_root
+            # is absent or path validation fails).
+            if (
+                self._containment_root is not None
+                and self._classifier_configured
+                and self._classifier is not None
+            ):
+                self._classifier_enabled = True
+                self._classifier.reset_counters()
+                logger.info("Auto-mode classifier activated on worktree entry (path)")
+            logger.info(
+                "Worktree entry detected (path=%r) — write gate can be unlocked (root=%s)",
+                worktree_path,
+                self._containment_root,
+            )
+            return  # path handled, skip name-based logic below
+
         self._in_containment = True
         self._in_worktree = True
         if worktree_name and self._project_root:
@@ -774,8 +865,12 @@ class PermissionHandler:
                         "Worktree path escaped expected parent: %s — containment root unchanged",
                         candidate,
                     )
-        # Activate auto-classifier if configured
-        if self._classifier_configured and self._classifier is not None:
+        # Activate auto-classifier only when containment root is validated.
+        if (
+            self._containment_root is not None
+            and self._classifier_configured
+            and self._classifier is not None
+        ):
             self._classifier_enabled = True
             self._classifier.reset_counters()
             logger.info("Auto-mode classifier activated on worktree entry")

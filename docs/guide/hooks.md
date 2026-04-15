@@ -11,7 +11,7 @@ Lifecycle hooks let you run shell commands automatically at key points in the su
 
 | Hook | When it fires | Example use |
 |------|--------------|-------------|
-| `worktree_create` | After a session creates a git worktree | `make setup`, `uv sync` |
+| `worktree_create` | After a session creates a new git worktree (not on re-entry) | `make setup`, `uv sync` |
 | `project_up` | After `summon project up` starts a project | Notify a channel, warm caches |
 | `project_down` | After `summon project down` stops a project | Archive logs, post summary |
 

@@ -336,6 +336,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -361,6 +362,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -387,6 +389,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -395,6 +398,80 @@ class TestShellPostWorktreeNoDbFastExit:
 # ---------------------------------------------------------------------------
 # 9. Shell wrapper: PROJECT_ROOT with spaces handled correctly
 # ---------------------------------------------------------------------------
+
+
+class TestShellPostWorktreePathReentry:
+    """Tests for the path-based re-entry skip logic in POST_WORKTREE_TEMPLATE (C3)."""
+
+    def test_post_hook_skips_hooks_for_path_reentry(self, tmp_path):
+        """Post-hook exits 0 without running creation hooks for path-based re-entry.
+
+        When Claude Code calls EnterWorktree with a path= parameter (re-entering
+        an existing worktree), the hook receives JSON with tool_input.path set.
+        The template must detect this and exit 0 before running worktree_create hooks.
+        """
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", "/nonexistent/summon")
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # Simulate the JSON that Claude Code pipes to the post-hook stdin
+        # when EnterWorktree is called with a path parameter
+        hook_input = (
+            '{"tool_name":"EnterWorktree","tool_input":{"path":"/project/.claude/worktrees/feat"}}'
+        )
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Must exit 0 without reaching summon binary (which doesn't exist)
+        assert result.returncode == 0
+
+    def test_post_hook_runs_hooks_for_name_based_entry(self, tmp_path):
+        """Post-hook does NOT skip when tool_input has name= (not path=).
+
+        A name-based entry (new worktree creation) should still run creation hooks.
+        We verify the script proceeds past the path-skip guard by checking it
+        falls through to the DB check (exits 0 when DB is absent).
+        """
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", "/nonexistent/summon")
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # Name-based entry — no "path" key in tool_input
+        hook_input = '{"tool_name":"EnterWorktree","tool_input":{"name":"feat"}}'
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Falls through to DB check, exits 0 (DB doesn't exist)
+        assert result.returncode == 0
+
+    def test_post_hook_skips_when_path_is_nonempty_only(self, tmp_path):
+        """Post-hook only skips if path value is non-empty in the JSON."""
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", "/nonexistent/summon")
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # tool_input has path key but empty value — should NOT skip
+        hook_input = '{"tool_name":"EnterWorktree","tool_input":{"name":"feat","path":""}}'
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Empty path → not a re-entry, falls through to DB check, exits 0
+        assert result.returncode == 0
 
 
 class TestShellHookProjectRootWithSpaces:

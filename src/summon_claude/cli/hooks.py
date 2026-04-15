@@ -54,18 +54,40 @@ exit 0
 # sqlite3 is soft-gated: if missing, falls through to the Python runner which handles it.
 # No exec: exec replaces the shell, making any fallback exit unreachable for non-zero returns.
 # Unconditional `; exit 0` after subprocess call ensures clean exit regardless of summon's status.
+# stdin is consumed early (INPUT=$(cat)) because Claude Code pipes hook JSON to stdin.
+# Path-based re-entries skip worktree_create hooks — the worktree already exists.
 POST_WORKTREE_TEMPLATE = """\
 #!/bin/bash
 # summon PostToolUse:EnterWorktree hook — runs worktree_create lifecycle hooks
+# Skips hooks for path-based re-entries (worktree already exists).
+SUMMON_BIN='@@SUMMON_PATH@@'
+[ -x "$SUMMON_BIN" ] || SUMMON_BIN=$(command -v summon 2>/dev/null)
+[ -x "$SUMMON_BIN" ] || exit 0
+INPUT=$(cat)
+# Quick string check: skip Python parse if "path": is absent from stdin JSON.
+# Avoids ~50ms Python cold-start cost on the common case (name-based entries).
+# Security: this is a performance optimization only — Python JSON parser is authoritative.
+case "$INPUT" in *'"path":'*)
+    PYTHON=$(head -1 "$SUMMON_BIN" | sed 's/^#! *//')
+    if [ -z "$PYTHON" ] || [ ! -x "$PYTHON" ]; then
+        PYTHON=$(command -v python3 2>/dev/null)
+    fi
+    if [ -n "$PYTHON" ] && [ -x "$PYTHON" ]; then
+        WT_PATH=$("$PYTHON" -c "import sys,json
+d=json.loads(sys.stdin.read())
+print(d.get('tool_input',{}).get('path',''))" 2>/dev/null <<< "$INPUT")
+        if [ -n "$WT_PATH" ]; then
+            exit 0
+        fi
+    fi
+    ;;
+esac
 DB="${XDG_DATA_HOME:-$HOME/.local/share}/summon/registry.db"
 [ -f "$DB" ] || exit 0
 if command -v sqlite3 >/dev/null 2>&1; then
     RESULT=$(sqlite3 "$DB" "SELECT COUNT(*) FROM projects" 2>/dev/null)
     [ "${RESULT:-0}" -gt 0 ] || exit 0
 fi
-SUMMON_BIN='@@SUMMON_PATH@@'
-[ -x "$SUMMON_BIN" ] || SUMMON_BIN=$(command -v summon 2>/dev/null)
-[ -x "$SUMMON_BIN" ] || exit 0
 "$SUMMON_BIN" hooks run post-worktree; exit 0
 """
 

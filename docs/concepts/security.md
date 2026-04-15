@@ -45,7 +45,7 @@ Every tool call from Claude goes through `PermissionHandler.handle()` before exe
 
 Write-capable tools (`Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash`) are **denied by default** until containment is active (worktree or CWD). This prevents accidental writes to the main working directory.
 
-- **Git repositories:** the agent enters a worktree via `EnterWorktree`; the containment root is the worktree directory.
+- **Git repositories:** the agent enters a worktree via `EnterWorktree`; the containment root is the worktree directory. Two entry modes are supported: `EnterWorktree(name="...")` creates a new worktree under `.claude/worktrees/{name}/`; `EnterWorktree(path="...")` re-enters an existing worktree using its absolute path, validated against `git worktree list --porcelain` and confirmed to be within the project root before being accepted as the containment root.
 - **Non-git directories:** containment is activated automatically at session start using the session CWD as the containment root.
 
 Before the first write-gated tool is approved, if the session is not in a git repository, a warning is shown that changes cannot be automatically rolled back.
@@ -235,6 +235,8 @@ _WORKTREE_DISALLOWED_TOOLS = frozenset({
 ```
 
 This forces agents to use Claude's built-in `EnterWorktree` tool instead of raw `git worktree add` or `git worktree move`. The built-in tool provides better isolation and tracking — it creates worktrees under `.claude/worktrees/{name}/`, automatically names the branch `worktree-{name}`, and fires `PreToolUse`/`PostToolUse` hooks that summon can observe for lifecycle management.
+
+Agents can also re-enter an existing worktree using `EnterWorktree(path="<absolute-path>")`. This is used when a new child session takes over work that was started in a previous session's worktree. The path must appear in `git worktree list` output and be within the project root — paths from user messages or untrusted sources must never be used directly.
 
 ## Prompt Injection Defenses
 

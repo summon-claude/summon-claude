@@ -1221,7 +1221,7 @@ class TestWorktreeDetectionCallback:
         result_msg = make_assistant_message([result_block])
         await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
-        callback.assert_called_once_with("test-wt")
+        callback.assert_called_once_with("test-wt", "")
 
     async def test_enter_worktree_does_not_trigger_on_error(self):
         """Callback must NOT fire when EnterWorktree fails."""
@@ -1275,7 +1275,7 @@ class TestWorktreeDetectionCallback:
         result_msg = make_assistant_message([result_block])
         await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
-        callback.assert_called_once_with("")
+        callback.assert_called_once_with("", "")
 
     async def test_no_callback_no_error(self):
         """EnterWorktree without callback configured should not raise."""
@@ -1292,6 +1292,66 @@ class TestWorktreeDetectionCallback:
         await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         # No error = pass
+
+    async def test_enter_worktree_path_triggers_callback_on_success(self):
+        """Path-only EnterWorktree passes ('', path) to callback on success."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        wt_path = "/project/.claude/worktrees/feat"
+        use_block = make_tool_use_block("EnterWorktree", {"path": wt_path})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
+        await asyncio.sleep(0.05)
+        callback.assert_not_called()
+
+        result_block = ToolResultBlock(tool_use_id=use_block.id, content="Worktree entered")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
+        callback.assert_called_once_with("", wt_path)
+
+    async def test_enter_worktree_both_name_and_path_uses_name(self):
+        """When both name and path are present, name wins and path is cleared."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        use_block = make_tool_use_block(
+            "EnterWorktree", {"name": "feat", "path": "/project/.claude/worktrees/feat"}
+        )
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
+
+        result_block = ToolResultBlock(tool_use_id=use_block.id, content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
+        # Name wins — path is cleared to ""
+        callback.assert_called_once_with("feat", "")
+
+    async def test_enter_worktree_path_error_does_not_trigger_callback(self):
+        """Path-only EnterWorktree failure must NOT fire the callback."""
+        callback = MagicMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_worktree_entered=callback)
+
+        wt_path = "/project/.claude/worktrees/feat"
+        use_block = make_tool_use_block("EnterWorktree", {"path": wt_path})
+        use_msg = make_assistant_message([use_block])
+        await streamer._handle_assistant_message(use_msg)
+
+        result_block = ToolResultBlock(
+            tool_use_id=use_block.id, content="No worktree at path", is_error=True
+        )
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
+        await asyncio.sleep(0.05)
+        callback.assert_not_called()
 
 
 class TestFormatToolResult:
