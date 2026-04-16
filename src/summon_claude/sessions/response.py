@@ -446,7 +446,8 @@ class ResponseStreamer:
         """Route a ToolResultBlock to the correct thread."""
         wt_entry = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
         if wt_entry is not None and not block.is_error and self._on_worktree_entered is not None:
-            self._on_worktree_entered(wt_entry[0], wt_entry[1])
+            wt_name, wt_path = wt_entry
+            self._on_worktree_entered(wt_name, wt_path)
         # Pop before early-return so denied/errored results don't leave stale entries
         pending_fc = self._turn.pending_file_changes.pop(block.tool_use_id, None)
         if self._mcp_health is not None:

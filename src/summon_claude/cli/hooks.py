@@ -75,7 +75,8 @@ case "$INPUT" in *'"path":'*)
     if [ -n "$PYTHON" ] && [ -x "$PYTHON" ]; then
         WT_PATH=$("$PYTHON" -c "import sys,json
 d=json.loads(sys.stdin.read())
-print(d.get('tool_input',{}).get('path',''))" 2>/dev/null <<< "$INPUT")
+ti=d.get('tool_input',{})
+print('' if ti.get('name') else ti.get('path',''))" 2>/dev/null <<< "$INPUT")
         if [ -n "$WT_PATH" ]; then
             exit 0
         fi

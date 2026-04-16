@@ -125,14 +125,15 @@ _GOOGLE_READ_TOOL_PREFIXES = (
 )
 
 
-def _is_registered_worktree(path: str, cwd: Path) -> Path | None:
+def _is_registered_worktree(path: str, repo_root: Path) -> Path | None:
     """Check whether *path* appears in ``git worktree list`` output.
 
     Returns the resolved Path if registered, None otherwise (fail-closed).
-    Using Path | None (SDR-4) avoids double-resolution at the call site.
+    Returning Path | None (instead of bool) avoids double-resolution at the call site:
+    the caller can use the returned Path directly as the validated containment root.
     """
     resolved = Path(path).expanduser().resolve()
-    for wt_path in _list_worktree_paths(cwd):
+    for wt_path in _list_worktree_paths(repo_root):
         if wt_path == resolved:
             return resolved
     return None
@@ -418,7 +419,7 @@ class PermissionHandler:
         self._timeout_s: float | None = config.permission_timeout_s or None
 
         # Write gate state
-        self._project_root: Path | None = Path(project_root) if project_root else None
+        self._project_root: Path | None = Path(project_root).resolve() if project_root else None
         self._safe_dirs: list[str] = [
             str(Path(d.strip()).expanduser())
             for d in config.safe_write_dirs.split(",")
@@ -752,9 +753,9 @@ class PermissionHandler:
         subdirectory of the project root, so the effective write boundary shrinks.
         Defense-in-depth: logs a warning if the candidate would widen containment.
 
-        The caller (response.py) ensures at most one of *worktree_name* and
-        *worktree_path* is non-empty.  If both are provided, *worktree_path*
-        takes priority and *worktree_name* is ignored.
+        The caller (response.py) normalizes inputs so at most one of *worktree_name* and
+        *worktree_path* is non-empty.  If both are provided, *worktree_name* takes
+        priority: *worktree_path* is cleared and a warning is logged (response.py:409-415).
 
         Args:
             worktree_name: Name from the EnterWorktree input (e.g. "feature-x").
@@ -773,8 +774,8 @@ class PermissionHandler:
                     worktree_path,
                 )
             else:
-                # SDR-4: _is_registered_worktree returns resolved Path | None,
-                # eliminating the double-resolution that a bool return would require.
+                # _is_registered_worktree returns resolved Path | None rather than bool,
+                # so the resolved path can be used directly without re-resolving.
                 candidate = _is_registered_worktree(worktree_path, self._project_root)
                 if candidate is None:
                     logger.warning(
@@ -785,7 +786,7 @@ class PermissionHandler:
                     # Intentional: _in_containment and _in_worktree are set above even
                     # when validation fails. This means writes go to HITL (containment
                     # active) but no CWD auto-approve (root is None). Fail-closed.
-                elif not candidate.is_relative_to(self._project_root.resolve()):
+                elif not candidate.is_relative_to(self._project_root):
                     # SEC: reject worktrees outside the project root. A worktree at
                     # /tmp/evil would pass _is_registered_worktree (it IS in git
                     # worktree list) but must not set containment root outside the

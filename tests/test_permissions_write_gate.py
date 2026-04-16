@@ -1115,8 +1115,6 @@ class TestWorktreePath:
 
     def test_path_no_project_root_is_fail_closed(self):
         """Path-based entry without project_root configured fails closed."""
-        from unittest.mock import patch
-
         client = make_mock_slack_client()
         from summon_claude.slack.router import ThreadRouter
 
@@ -1129,11 +1127,11 @@ class TestWorktreePath:
             authenticated_user_id="U_TEST",
         )
 
-        with patch(
-            "summon_claude.sessions.permissions._is_registered_worktree",
-            return_value=None,
-        ):
-            handler.notify_entered_worktree(worktree_path="/some/worktree")
+        # Note: _is_registered_worktree is never reached here.
+        # permissions.py guards with `if not self._project_root:` at line 768
+        # and returns before calling _is_registered_worktree when project_root
+        # is absent — no patch needed.
+        handler.notify_entered_worktree(worktree_path="/some/worktree")
 
         # Without project_root, no project-root containment check is possible
         # Fail-closed: containment_root stays None, but in_containment is set
