@@ -1204,7 +1204,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_triggers_callback_on_success(self):
         """Callback fires on successful ToolResultBlock, not on ToolUseBlock."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1225,7 +1225,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_does_not_trigger_on_error(self):
         """Callback must NOT fire when EnterWorktree fails."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1245,7 +1245,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_other_tools_do_not_trigger_callback(self):
         """Non-EnterWorktree tools should NOT fire the callback."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1262,7 +1262,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_empty_name_passes_empty_string(self):
         """EnterWorktree with missing name key should pass empty string to callback."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1295,7 +1295,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_path_triggers_callback_on_success(self):
         """Path-only EnterWorktree passes ('', path) to callback on success."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1315,7 +1315,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_both_name_and_path_uses_name(self):
         """When both name and path are present, name wins and path is cleared."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)
@@ -1335,7 +1335,7 @@ class TestWorktreeDetectionCallback:
 
     async def test_enter_worktree_path_error_does_not_trigger_callback(self):
         """Path-only EnterWorktree failure must NOT fire the callback."""
-        callback = MagicMock()
+        callback = AsyncMock()
         client = make_mock_slack_client()
         router = ThreadRouter(client)
         streamer = ResponseStreamer(router, on_worktree_entered=callback)

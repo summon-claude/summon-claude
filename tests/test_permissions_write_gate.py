@@ -197,19 +197,19 @@ class TestWriteGateBehavior:
     async def test_notify_worktree_sets_flag(self):
         handler, _ = _make_handler()
         assert not handler._in_containment
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         assert handler._in_containment
 
     async def test_notify_worktree_computes_root(self):
         handler, _ = _make_handler(project_root="/project")
-        handler.notify_entered_worktree("feature-x")
+        await handler.notify_entered_worktree("feature-x")
         assert handler._containment_root is not None
         assert str(handler._containment_root).endswith(".claude/worktrees/feature-x")
 
     async def test_notify_worktree_rejects_path_traversal(self):
         """Worktree name with ../ should fail-closed (no CWD auto-approve)."""
         handler, _ = _make_handler(project_root="/project")
-        handler.notify_entered_worktree("../../")
+        await handler.notify_entered_worktree("../../")
         # Fail-closed: _containment_root stays None, all writes require HITL
         assert handler._containment_root is None
         assert handler._in_containment is True  # gate can still be unlocked
@@ -217,18 +217,18 @@ class TestWriteGateBehavior:
     async def test_notify_worktree_rejects_slash_in_name(self):
         """Worktree name with / should fail-closed."""
         handler, _ = _make_handler(project_root="/project")
-        handler.notify_entered_worktree("foo/bar")
+        await handler.notify_entered_worktree("foo/bar")
         assert handler._containment_root is None
 
     async def test_notify_worktree_no_name_stays_none(self):
         """Empty worktree name should leave _containment_root None (fail-closed)."""
         handler, _ = _make_handler(project_root="/project")
-        handler.notify_entered_worktree("")
+        await handler.notify_entered_worktree("")
         assert handler._containment_root is None
 
     async def test_write_after_worktree_prompts_once(self):
         handler, client = _make_handler()
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -237,7 +237,7 @@ class TestWriteGateBehavior:
     async def test_gate_approval_does_not_blanket_cache_tools(self):
         """Gate approval should NOT add write tools to _session_approved_tools."""
         handler, _ = _make_handler()
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         client = handler._router.client
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         await handler.handle("Write", {"file_path": "/f"}, None)
@@ -289,7 +289,7 @@ class TestWriteGateFullFlow:
         assert "worktree" in result.message.lower()
 
         # 2. EnterWorktree detected
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         assert handler._in_containment
 
         # 3. First write after worktree → one-time gate approval
@@ -319,7 +319,7 @@ class TestWriteGateFullFlow:
     async def test_write_gate_denial_does_not_set_flag(self):
         """User denying after worktree entry should NOT set _write_access_granted."""
         handler, client = _make_handler()
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_deny(handler))
         result = await handler.handle("Write", {"file_path": "/f"}, None)
         assert isinstance(result, PermissionResultDeny)
@@ -342,7 +342,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         result = await handler.handle("Write", {"file_path": str(wt_dir / "main.py")}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -353,7 +353,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         result = await handler.handle("str_replace_editor", {"path": str(wt_dir / "main.py")}, None)
         assert isinstance(result, PermissionResultAllow)
@@ -364,7 +364,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         result = await handler.handle(
             "NotebookEdit", {"notebook_path": str(wt_dir / "nb.ipynb")}, None
@@ -377,7 +377,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Edit", {"file_path": "/etc/hosts"}, None)
@@ -389,7 +389,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         # This resolves outside the worktree
         escape_path = str(wt_dir / ".." / ".." / ".." / "etc" / "passwd")
@@ -403,7 +403,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Bash", {"command": "ls"}, None)
@@ -415,7 +415,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
 
         # SDK says "allow Edit" (user configured allowedTools)
@@ -461,7 +461,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         # Relative path within worktree
         result = await handler.handle("Write", {"file_path": "src/main.py"}, None)
@@ -473,7 +473,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": ""}, None)
@@ -486,7 +486,7 @@ class TestCWDContainment:
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
         handler, client = _make_handler(project_root=str(tmp_path))
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         handler._write_access_granted = True
         client.post_interactive = AsyncMock(side_effect=_interactive_auto_approve(handler))
         result = await handler.handle("Write", {"file_path": "  "}, None)
@@ -696,7 +696,7 @@ class TestNonGitContainment:
         original_root = handler._containment_root
         wt_dir = tmp_path / ".claude" / "worktrees" / "feat"
         wt_dir.mkdir(parents=True)
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         # worktree is a subdirectory of original_root — containment narrows as expected
         assert handler._containment_root == wt_dir.resolve()
         assert handler._in_containment is True
@@ -715,7 +715,7 @@ class TestNonGitContainment:
         # subdir of narrow_dir — would widen if allowed)
         sibling = tmp_path / ".claude" / "worktrees" / "other"
         sibling.mkdir(parents=True)
-        handler.notify_entered_worktree("other")
+        await handler.notify_entered_worktree("other")
 
         # Root must NOT have changed — sibling is not relative to narrow_dir
         assert handler._containment_root == narrow_dir.resolve()
@@ -729,7 +729,7 @@ class TestNonGitContainment:
         handler._containment_root = deep_dir.resolve()
 
         # Enter a worktree whose root is a parent of the current root
-        handler.notify_entered_worktree("feat")
+        await handler.notify_entered_worktree("feat")
         # Root must stay at the narrower deep_dir
         assert handler._containment_root == deep_dir.resolve()
 
@@ -976,7 +976,7 @@ class TestWorktreePath:
             project_root=str(project_root),
         )
 
-    def test_path_sets_containment_root(self, tmp_path: Path):
+    async def test_path_sets_containment_root(self, tmp_path: Path):
         """Path-based entry sets _containment_root to the validated worktree path."""
         from unittest.mock import patch
 
@@ -988,14 +988,14 @@ class TestWorktreePath:
             "summon_claude.sessions.permissions._is_registered_worktree",
             return_value=wt_dir.resolve(),
         ):
-            handler.notify_entered_worktree(worktree_path=str(wt_dir))
+            await handler.notify_entered_worktree(worktree_path=str(wt_dir))
 
         assert handler._in_containment is True
         assert handler._in_worktree is True
         assert handler._containment_root is not None
         assert handler._containment_root == wt_dir.resolve()
 
-    def test_path_fails_validation_is_fail_closed(self, tmp_path: Path):
+    async def test_path_fails_validation_is_fail_closed(self, tmp_path: Path):
         """Unregistered path sets _in_containment=True but leaves _containment_root=None."""
         from unittest.mock import patch
 
@@ -1007,7 +1007,7 @@ class TestWorktreePath:
             "summon_claude.sessions.permissions._is_registered_worktree",
             return_value=None,
         ):
-            handler.notify_entered_worktree(worktree_path=str(wt_dir))
+            await handler.notify_entered_worktree(worktree_path=str(wt_dir))
 
         # Fail-closed: in_containment prevents "no active containment" denial,
         # but containment_root=None means all writes go through HITL
@@ -1015,7 +1015,7 @@ class TestWorktreePath:
         assert handler._in_worktree is True
         assert handler._containment_root is None
 
-    def test_path_anti_widening_guard(self, tmp_path: Path):
+    async def test_path_anti_widening_guard(self, tmp_path: Path):
         """Path-based entry cannot widen an already-narrowed containment root."""
         from unittest.mock import patch
 
@@ -1035,11 +1035,11 @@ class TestWorktreePath:
             return_value=broad_dir.resolve(),
         ):
             # broad_dir is a parent of narrow_dir — would widen, must be rejected
-            handler.notify_entered_worktree(worktree_path=str(broad_dir))
+            await handler.notify_entered_worktree(worktree_path=str(broad_dir))
 
         assert handler._containment_root == narrow_dir.resolve()
 
-    def test_path_activates_classifier(self, tmp_path: Path):
+    async def test_path_activates_classifier(self, tmp_path: Path):
         """Path-based entry activates the auto-classifier when configured."""
         from unittest.mock import MagicMock, patch
 
@@ -1065,11 +1065,11 @@ class TestWorktreePath:
             "summon_claude.sessions.permissions._is_registered_worktree",
             return_value=wt_dir.resolve(),
         ):
-            handler.notify_entered_worktree(worktree_path=str(wt_dir))
+            await handler.notify_entered_worktree(worktree_path=str(wt_dir))
 
         assert handler._classifier_enabled is True
 
-    def test_path_rejects_outside_project_root(self, tmp_path: Path):
+    async def test_path_rejects_outside_project_root(self, tmp_path: Path):
         """Path outside the project root is rejected even if registered in git."""
         from unittest.mock import patch
 
@@ -1083,13 +1083,13 @@ class TestWorktreePath:
             "summon_claude.sessions.permissions._is_registered_worktree",
             return_value=outside_dir.resolve(),
         ):
-            handler.notify_entered_worktree(worktree_path=str(outside_dir))
+            await handler.notify_entered_worktree(worktree_path=str(outside_dir))
 
         # Fail-closed: outside project root → containment_root stays None
         assert handler._in_containment is True
         assert handler._containment_root is None
 
-    def test_sibling_path_rejected_after_name_entry(self, tmp_path: Path):
+    async def test_sibling_path_rejected_after_name_entry(self, tmp_path: Path):
         """Path-based entry of a sibling worktree after name-based entry must not widen."""
         from unittest.mock import patch
 
@@ -1100,7 +1100,7 @@ class TestWorktreePath:
 
         handler = self._make_handler_with_project(tmp_path)
         # First entry: name-based, sets containment to feat-a
-        handler.notify_entered_worktree("feat-a")
+        await handler.notify_entered_worktree("feat-a")
         assert handler._containment_root == wt_a.resolve()
 
         # Second entry: path-based to sibling feat-b — must NOT change containment
@@ -1108,12 +1108,12 @@ class TestWorktreePath:
             "summon_claude.sessions.permissions._is_registered_worktree",
             return_value=wt_b.resolve(),
         ):
-            handler.notify_entered_worktree(worktree_path=str(wt_b))
+            await handler.notify_entered_worktree(worktree_path=str(wt_b))
 
         # Anti-widening: feat-b is sibling (not relative to feat-a) — root unchanged
         assert handler._containment_root == wt_a.resolve()
 
-    def test_path_no_project_root_is_fail_closed(self):
+    async def test_path_no_project_root_is_fail_closed(self):
         """Path-based entry without project_root configured fails closed."""
         client = make_mock_slack_client()
         from summon_claude.slack.router import ThreadRouter
@@ -1131,7 +1131,7 @@ class TestWorktreePath:
         # permissions.py guards with `if not self._project_root:` at line 768
         # and returns before calling _is_registered_worktree when project_root
         # is absent — no patch needed.
-        handler.notify_entered_worktree(worktree_path="/some/worktree")
+        await handler.notify_entered_worktree(worktree_path="/some/worktree")
 
         # Without project_root, no project-root containment check is possible
         # Fail-closed: containment_root stays None, but in_containment is set

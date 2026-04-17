@@ -1514,7 +1514,7 @@ class TestClassifierIntegration:
         wt_dir.mkdir(parents=True)
         assert handler.classifier_enabled is False
 
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         assert handler.classifier_enabled is True
         mock_classifier.reset_counters.assert_called()
 
@@ -1533,7 +1533,7 @@ class TestClassifierIntegration:
         wt_dir = tmp_path / ".claude" / "worktrees" / "test-wt"
         wt_dir.mkdir(parents=True)
 
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         # Containment root is set (valid worktree), but classifier stays off
         # because classifier_configured=False.
         assert handler._containment_root is not None

@@ -742,7 +742,7 @@ class PermissionHandler:
         else:
             logger.info("Directory containment active (non-git) — root=%s", self._containment_root)
 
-    def notify_entered_worktree(  # noqa: PLR0912
+    async def notify_entered_worktree(  # noqa: PLR0912
         self,
         worktree_name: str = "",
         worktree_path: str = "",
@@ -776,7 +776,13 @@ class PermissionHandler:
             else:
                 # _is_registered_worktree returns resolved Path | None rather than bool,
                 # so the resolved path can be used directly without re-resolving.
-                candidate = _is_registered_worktree(worktree_path, self._project_root)
+                # Offloaded to executor: _is_registered_worktree calls _list_worktree_paths
+                # which runs subprocess.run (blocking, up to 5s timeout). All state mutations
+                # remain on the event loop thread after the await returns.
+                loop = asyncio.get_running_loop()
+                candidate = await loop.run_in_executor(
+                    None, _is_registered_worktree, worktree_path, self._project_root
+                )
                 if candidate is None:
                     logger.warning(
                         "Worktree path %r not found in git worktree list — "

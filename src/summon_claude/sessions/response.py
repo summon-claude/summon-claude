@@ -217,7 +217,7 @@ class ResponseStreamer:
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
-        on_worktree_entered: Callable[[str, str], None] | None = None,
+        on_worktree_entered: Callable[[str, str], Awaitable[None]] | None = None,
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
         bridge_timeout_s: float = 960.0,
@@ -447,7 +447,7 @@ class ResponseStreamer:
         wt_entry = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
         if wt_entry is not None and not block.is_error and self._on_worktree_entered is not None:
             wt_name, wt_path = wt_entry
-            self._on_worktree_entered(wt_name, wt_path)
+            await self._on_worktree_entered(wt_name, wt_path)
         # Pop before early-return so denied/errored results don't leave stale entries
         pending_fc = self._turn.pending_file_changes.pop(block.tool_use_id, None)
         if self._mcp_health is not None:
