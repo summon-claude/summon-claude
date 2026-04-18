@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-llm py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-prompts docs-commands docs-env docs-serve docs-build docs-check docs-screenshots docs-terminal docs-test docs-test-links
+.PHONY: docs-prompts docs-commands docs-env docs-permissions docs-mcp docs-serve docs-build docs-check docs-check-generated docs-screenshots docs-terminal docs-test docs-test-links
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -90,6 +90,12 @@ docs-commands: ## Regenerate docs/reference/commands.md from COMMAND_ACTIONS
 docs-env: ## Regenerate docs/reference/environment-variables.md from CONFIG_OPTIONS
 	uv run python scripts/generate_env_docs.py
 
+docs-permissions: ## Regenerate docs/reference/permissions.md from permission constants
+	uv run python scripts/generate_permissions_docs.py
+
+docs-mcp: ## Regenerate docs/reference/mcp-tools.md from MCP tool definitions
+	uv run python scripts/generate_mcp_docs.py
+
 docs-serve: ## Serve docs locally with live reload
 	uv run mkdocs serve
 
@@ -99,13 +105,20 @@ docs-build: ## Build docs site
 docs-check: ## Verify docs build (strict mode, catches broken links)
 	uv run mkdocs build --strict
 
+docs-check-generated: ## Verify generated doc sections are up to date
+	uv run python scripts/generate_prompt_docs.py --check
+	uv run python scripts/generate_commands_docs.py --check
+	uv run python scripts/generate_env_docs.py --check
+	uv run python scripts/generate_permissions_docs.py --check
+	uv run python scripts/generate_mcp_docs.py --check
+
 docs-screenshots: ## Generate documentation screenshots (all sections)
 	uv run python scripts/docs-screenshots.py --output docs/assets/screenshots/
 
 docs-terminal: ## Capture terminal output and inject into docs
 	uv run python scripts/docs-screenshots.py --section terminal
 
-docs-test: ## Run doc validation tests (guard tests, code blocks, markdown code blocks)
+docs-test: docs-check-generated ## Run doc validation tests (guard tests, code blocks, markdown code blocks)
 	uv run pytest --markdown-docs docs/ tests/docs/ -v -m "docs and not link_check" -n0
 
 docs-test-links: ## Run external link validation tests (network-dependent)

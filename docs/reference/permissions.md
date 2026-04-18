@@ -10,7 +10,9 @@ When Claude wants to run a tool that could modify files, execute commands, or ta
 
 Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until containment is active.
 
-**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` (and the SDK alias `str_replace_editor`)
+<!-- permissions:write-gated -->
+**Write-gated tools:** `Bash`, `Edit`, `MultiEdit`, `NotebookEdit`, `Write` (and the SDK alias `str_replace_editor`)
+<!-- /permissions:write-gated -->
 
 Containment is activated in two ways depending on whether the session directory is a git repository:
 
@@ -42,6 +44,7 @@ Files written to these directories bypass the containment requirement entirely. 
 
 The following tools are always approved without prompting. They are read-only and cannot modify your system:
 
+<!-- permissions:auto-approve -->
 | Tool | Description |
 |------|-------------|
 | `Read` / `Cat` | Read file contents |
@@ -54,6 +57,7 @@ The following tools are always approved without prompting. They are read-only an
 | `GetSymbolsOverview` | Read code symbols overview |
 | `FindSymbol` | Find a symbol definition |
 | `FindReferencingSymbols` | Find symbol references |
+<!-- /permissions:auto-approve -->
 
 Summon's own MCP tools (`summon-cli`, `summon-slack`, `summon-canvas`) are also auto-approved — they are internal tools already scoped to the session's permissions.
 
@@ -131,23 +135,27 @@ Set `SUMMON_PERMISSION_TIMEOUT_S=0` to disable the timeout entirely — permissi
 
 When GitHub is authenticated (via `summon auth github login`), Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:
 
-**Auto-approved (read-only):** Any tool with a `get_`, `list_`, or `search_` prefix, plus `pull_request_read` and `get_file_contents`.
+<!-- permissions:github-allow -->
+**Auto-approved (read-only):** Any tool with a `get_`, `list_`, `search_` prefix, plus `get_file_contents` and `pull_request_read`.
+<!-- /permissions:github-allow -->
 
 **Always require Slack approval** — checked before prefix rules, so no `allowedTools` pattern can bypass them:
 
+<!-- permissions:github-deny -->
 | Tool | Reason |
 |------|--------|
-| `merge_pull_request` | Irreversible |
-| `delete_branch` | Irreversible |
-| `close_pull_request` | Visible to others |
-| `close_issue` | Visible to others |
-| `push_files` | Writes to remote |
-| `create_or_update_file` | Writes to remote |
-| `update_pull_request_branch` | Modifies shared branch |
-| `pull_request_review_write` | Visible to others |
-| `create_pull_request` | Visible to others |
-| `create_issue` | Visible to others |
 | `add_issue_comment` | Visible to others |
+| `close_issue` | Visible to others |
+| `close_pull_request` | Visible to others |
+| `create_issue` | Visible to others |
+| `create_or_update_file` | Writes to remote |
+| `create_pull_request` | Visible to others |
+| `delete_branch` | Irreversible |
+| `merge_pull_request` | Irreversible |
+| `pull_request_review_write` | Visible to others |
+| `push_files` | Writes to remote |
+| `update_pull_request_branch` | Modifies shared branch |
+<!-- /permissions:github-deny -->
 
 Any GitHub MCP tool not on either list also requires Slack approval (fail-closed).
 
@@ -160,23 +168,27 @@ Any GitHub MCP tool not on either list also requires Slack approval (fail-closed
 
 When Jira is authenticated (via `summon auth jira login`), Claude has access to Jira tools via the Atlassian Rovo MCP server. Jira uses a **strictly read-only** permission model — all write operations are hard-denied, not routed to Slack for approval.
 
-**Auto-approved (read-only):** Tools matching `get*`, `search*`, or `lookup*` prefixes, plus the exact match `atlassianUserInfo`.
+<!-- permissions:jira-allow -->
+**Auto-approved (read-only):** Tools matching `get*`, `lookup*`, `search*` prefixes, plus the exact match `atlassianUserInfo`.
+<!-- /permissions:jira-allow -->
 
 **Hard-denied (always blocked)** — checked before auto-approve prefixes:
 
+<!-- permissions:jira-deny -->
 | Tool | Reason |
 |------|--------|
-| `createJiraIssue` | Write operation |
-| `editJiraIssue` | Write operation |
-| `transitionJiraIssue` | Write operation |
 | `addCommentToJiraIssue` | Write operation |
 | `addWorklogToJiraIssue` | Write operation |
-| `createIssueLink` | Write operation |
-| `createConfluencePage` | Write operation |
 | `createConfluenceFooterComment` | Write operation |
 | `createConfluenceInlineComment` | Write operation |
-| `updateConfluencePage` | Write operation |
+| `createConfluencePage` | Write operation |
+| `createIssueLink` | Write operation |
+| `createJiraIssue` | Write operation |
+| `editJiraIssue` | Write operation |
 | `fetchAtlassian` | Generic ARI accessor — bypasses per-tool gating |
+| `transitionJiraIssue` | Write operation |
+| `updateConfluencePage` | Write operation |
+<!-- /permissions:jira-deny -->
 
 !!! warning "`fetchAtlassian` is not a read-only tool"
     Despite its name, `fetchAtlassian` is a generic Atlassian Resource Identifier (ARI) accessor that can fetch arbitrary resources across projects and products. It bypasses the per-tool permission model and is always blocked.
@@ -265,6 +277,10 @@ The full permission evaluation order in `handle()`:
 | 10 | Auto-classifier (Sonnet, only active after worktree entry) | Allow, Block, or fall through on uncertain |
 | 11 | SDK allow suggestions | Allow (write-gated tools excluded — CWD containment cannot be overridden) |
 | 12 | Slack HITL (interactive message, deleted after) | User decides |
+
+<!-- permissions:google-read -->
+**Google read-only prefixes (step 6a):** `check_`, `debug_`, `get_`, `inspect_`, `list_`, `query_`, `read_`, `search_`
+<!-- /permissions:google-read -->
 
 ---
 

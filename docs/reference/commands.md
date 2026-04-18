@@ -31,22 +31,23 @@ Fix the login bug !stop
 
 These commands are handled locally by summon without forwarding to Claude.
 
+<!-- commands:session -->
 | Command | Aliases | Description |
 |---------|---------|-------------|
-| `!help [COMMAND]` | | List all commands, or show details for one command |
-| `!status` | | Show session status (model, effort, cost, uptime, turn count) |
-| `!end` | `!quit`, `!exit`, `!logout` | End the session gracefully |
-| `!stop` | | Cancel the current Claude turn (interrupt mid-response) |
-| `!clear` | `!new`, `!reset` | Clear conversation history (start fresh context) |
-| `!model [MODEL]` | | Show current model, or switch to a different model |
-| `!effort [LEVEL]` | | Show current effort, or switch effort level |
-| `!auto [on\|off\|rules]` | `!automode` | Toggle or inspect the auto-mode classifier |
-| `!compact [INSTRUCTIONS]` | | Compact conversation context (reduces token usage) |
-| `!summon start` | | Spawn a new child session in the current channel |
-| `!summon resume [SESSION_ID]` | | Resume a previous Claude Code session |
-| `!diff [FILE]` | | Show uncommitted changes (staged + unstaged) for all files or a specific file |
-| `!show FILE` | | Show current contents of a file |
-| `!changes` | | Show all files changed in this session |
+| `!auto [on\|off\|rules]` | `!automode` | Toggle or inspect auto-mode classifier |
+| `!changes` |  | Show all files changed in this session |
+| `!clear` | `!new`, `!reset` | Clear conversation history |
+| `!compact` |  | Compact conversation context |
+| `!diff [file_path]` |  | Show git diff (all changes, or specify a file) |
+| `!effort` |  | Switch or display the effort level |
+| `!end` | `!quit`, `!exit`, `!logout` | End this session |
+| `!help` |  | Show available commands |
+| `!model` |  | Switch or display the active model |
+| `!show` |  | Show current file contents |
+| `!status` |  | Show session status |
+| `!stop` |  | Cancel the current Claude turn |
+| `!summon` |  | Spawn or resume a session |
+<!-- /commands:session -->
 
 ### !help
 

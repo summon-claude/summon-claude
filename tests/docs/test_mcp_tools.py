@@ -248,3 +248,21 @@ def test_mcp_tool_counts_match(docs_dir: Path, mcp_tool_names: set[str]) -> None
         print(f"  Source counts: {source_counts}")
 
     assert not count_errors, "MCP tool counts don't match:\n" + "\n".join(count_errors)
+
+
+# ---------------------------------------------------------------------------
+# Test 5
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def test_generated_sections_match() -> None:
+    """mcp-tools.md generated sections must be up to date with source tools."""
+    from scripts.generate_mcp_docs import generate, get_generated_sections
+
+    doc_path = _REPO_ROOT / "docs" / "reference" / "mcp-tools.md"
+    content = doc_path.read_text(encoding="utf-8")
+    sections = get_generated_sections()
+    updated = generate(content, sections)
+    assert content == updated, "mcp-tools.md is stale — run `make docs-mcp` to regenerate"

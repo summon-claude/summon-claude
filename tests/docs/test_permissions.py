@@ -445,3 +445,21 @@ def test_all_permission_constants_are_covered() -> None:
         f"Permission constants in permissions.py not covered by guard tests: {sorted(untested)}. "
         f"Add a test or add to _INTENTIONALLY_UNTESTED with justification."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Generated sections match source
+# ---------------------------------------------------------------------------
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def test_generated_sections_match() -> None:
+    """permissions.md generated sections must be up to date with permission constants."""
+    from scripts.generate_permissions_docs import _get_sections, generate
+
+    doc_path = _REPO_ROOT / "docs" / "reference" / "permissions.md"
+    content = doc_path.read_text(encoding="utf-8")
+    sections = _get_sections()
+    updated = generate(content, sections)
+    assert content == updated, "permissions.md is stale — run `make docs-permissions` to regenerate"

@@ -2,11 +2,10 @@
 """Generate docs/reference/commands.md sections from COMMAND_ACTIONS.
 
 Replaces content between marker pairs:
+  <!-- commands:session -->       / <!-- /commands:session -->
   <!-- commands:passthrough -->   / <!-- /commands:passthrough -->
   <!-- commands:blocked-specific --> / <!-- /commands:blocked-specific -->
   <!-- commands:cli-only -->      / <!-- /commands:cli-only -->
-
-The session commands table is hand-maintained and not touched.
 
 Usage::
 
@@ -23,6 +22,10 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DOC_PATH = _REPO_ROOT / "docs" / "reference" / "commands.md"
 
+_SESSION_RE = re.compile(
+    r"(<!-- commands:session -->\n).*?(<!-- /commands:session -->)",
+    re.DOTALL,
+)
 _PASSTHROUGH_RE = re.compile(
     r"(<!-- commands:passthrough -->\n).*?(<!-- /commands:passthrough -->)",
     re.DOTALL,
@@ -35,6 +38,35 @@ _CLI_ONLY_RE = re.compile(
     r"(<!-- commands:cli-only -->\n).*?(<!-- /commands:cli-only -->)",
     re.DOTALL,
 )
+
+
+def _get_session_commands() -> list[tuple[str, str, list[str], str]]:
+    """Return sorted list of (name, argument_hint, aliases, description) for handler commands."""
+    from summon_claude.sessions.commands import COMMAND_ACTIONS
+
+    entries: list[tuple[str, str, list[str], str]] = []
+    for name, defn in COMMAND_ACTIONS.items():
+        if ":" in name:
+            continue
+        if defn.handler is None:
+            continue
+        entries.append((name, defn.argument_hint, list(defn.aliases), defn.description))
+
+    entries.sort(key=lambda x: x[0])
+    return entries
+
+
+def _build_session_table(entries: list[tuple[str, str, list[str], str]]) -> str:
+    lines = ["| Command | Aliases | Description |", "|---------|---------|-------------|"]
+    for name, hint, aliases, description in entries:
+        cmd = f"`!{name}"
+        if hint:
+            escaped_hint = hint.replace("|", "\\|")
+            cmd += f" {escaped_hint}"
+        cmd += "`"
+        alias_str = ", ".join(f"`!{a}`" for a in aliases) if aliases else ""
+        lines.append(f"| {cmd} | {alias_str} | {description} |")
+    return "\n".join(lines) + "\n"
 
 
 _ClassifyResult = tuple[list[tuple[str, str]], list[tuple[str, str]], list[tuple[str, list[str]]]]
@@ -107,11 +139,16 @@ def _build_cli_only_list(entries: list[tuple[str, list[str]]]) -> str:
 
 def generate(content: str) -> str:
     """Replace marker sections in *content* with generated text."""
+    session_entries = _get_session_commands()
     passthrough, blocked_specific, cli_only = _classify_commands()
 
+    session_table = _build_session_table(session_entries)
     passthrough_table = _build_passthrough_table(passthrough)
     blocked_table = _build_blocked_specific_table(blocked_specific)
     cli_only_list = _build_cli_only_list(cli_only)
+
+    def _replace_session(m: re.Match) -> str:  # type: ignore[type-arg]
+        return f"{m.group(1)}{session_table}{m.group(2)}"
 
     def _replace_passthrough(m: re.Match) -> str:  # type: ignore[type-arg]
         return f"{m.group(1)}{passthrough_table}{m.group(2)}"
@@ -122,13 +159,10 @@ def generate(content: str) -> str:
     def _replace_cli_only(m: re.Match) -> str:  # type: ignore[type-arg]
         return f"{m.group(1)}{cli_only_list}{m.group(2)}"
 
-    return _CLI_ONLY_RE.sub(
-        _replace_cli_only,
-        _BLOCKED_SPECIFIC_RE.sub(
-            _replace_blocked,
-            _PASSTHROUGH_RE.sub(_replace_passthrough, content),
-        ),
-    )
+    result = _SESSION_RE.sub(_replace_session, content)
+    result = _PASSTHROUGH_RE.sub(_replace_passthrough, result)
+    result = _BLOCKED_SPECIFIC_RE.sub(_replace_blocked, result)
+    return _CLI_ONLY_RE.sub(_replace_cli_only, result)
 
 
 def main() -> int:
