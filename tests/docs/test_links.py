@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import time
 from http.client import HTTPMessage
@@ -13,6 +14,9 @@ from urllib.request import Request, urlopen
 import pytest
 
 from tests.docs.conftest import DOCS_DIR  # public constant, not a fixture
+
+# GitHub token for authenticated requests (raises rate limit from 60 to 5000/hr)
+_GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 
 pytestmark = pytest.mark.docs
 
@@ -76,12 +80,20 @@ def _should_skip(url: str) -> bool:
 _MAX_RETRIES = 3  # retries after first attempt (4 total attempts)
 
 
+def _is_github_url(url: str) -> bool:
+    """Check if URL points to github.com."""
+    return urlparse(url).hostname == "github.com"
+
+
 def _fetch(url: str, method: str = "HEAD") -> tuple[int, str]:
     """Fetch URL and return (status, final_url) with retry on transient errors."""
+    headers: dict[str, str] = {"User-Agent": "summon-claude-docs-linkcheck/1.0"}
+    if _GITHUB_TOKEN and _is_github_url(url):
+        headers["Authorization"] = f"token {_GITHUB_TOKEN}"
     for attempt in range(_MAX_RETRIES + 1):
         try:
             req = Request(  # noqa: S310
-                url, headers={"User-Agent": "summon-claude-docs-linkcheck/1.0"}, method=method
+                url, headers=headers, method=method
             )
             with urlopen(req, timeout=_TIMEOUT) as resp:  # noqa: S310
                 return resp.status, resp.url
@@ -108,7 +120,10 @@ def _check_url(url: str) -> tuple[bool, str]:
     try:
         status, final_url = _fetch(url, "HEAD")
     except HTTPError as e:
-        if e.code == 405:
+        if e.code == 405 or (e.code >= 500 and _is_github_url(url)):
+            # 405: server doesn't support HEAD; retry with GET
+            # 5xx on github.com: shared runner IPs cause transient 504s on HEAD;
+            # GET often succeeds (different code path on GitHub's web frontend)
             try:
                 status, final_url = _fetch(url, "GET")
             except (HTTPError, URLError) as e2:
@@ -328,6 +343,30 @@ class TestCheckUrl:
             ok, detail = _check_url("http://example.com/page")
         assert ok is False
         assert "403" in detail
+
+    def test_github_head_504_fallback_get_200(self) -> None:
+        """HEAD 504 on github.com triggers GET fallback; GET 200 returns (True, ...)."""
+        err_504 = HTTPError(
+            "https://github.com/org/repo", 504, "Gateway Timeout", HTTPMessage(), None
+        )
+
+        def _fake_fetch(url: str, method: str = "HEAD") -> tuple[int, str]:
+            if method == "HEAD":
+                raise err_504
+            return 200, url
+
+        with patch("tests.docs.test_links._fetch", side_effect=_fake_fetch):
+            ok, detail = _check_url("https://github.com/org/repo")
+        assert ok is True
+        assert "200" in detail
+
+    def test_non_github_head_504_no_fallback(self) -> None:
+        """HEAD 504 on non-GitHub URLs does NOT trigger GET fallback."""
+        err_504 = HTTPError("http://example.com/page", 504, "Gateway Timeout", HTTPMessage(), None)
+        with patch("tests.docs.test_links._fetch", side_effect=err_504):
+            ok, detail = _check_url("http://example.com/page")
+        assert ok is False
+        assert "504" in detail
 
 
 @pytest.mark.link_check
