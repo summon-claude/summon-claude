@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import functools
 import importlib.metadata
 import os
 import platform
@@ -84,16 +83,6 @@ DIAGNOSTIC_REGISTRY: dict[str, DiagnosticCheck] = {}
 _HOME_DIR = str(Path.home())
 
 
-@functools.cache
-def _data_dir_str() -> str:
-    return str(get_data_dir())
-
-
-@functools.cache
-def _config_dir_str() -> str:
-    return str(get_config_dir())
-
-
 _SLACK_USER_ID_RE = re.compile(r"\bU[A-Z0-9]{8,11}\b")
 _SLACK_CHANNEL_ID_RE = re.compile(r"\bC[A-Z0-9]{8,11}\b")
 _SLACK_TEAM_ID_RE = re.compile(r"\bT[A-Z0-9]{8,11}\b")
@@ -111,8 +100,8 @@ class Redactor:
         # 1. Token secrets (xoxb-, xapp-, sk-ant-, ghp_, github_pat_, gho_, ghu_, ghs_, ghr_)
         text = redact_secrets(text)
         # 2. Path normalization — longer specific dirs first, home last
-        data_dir = _data_dir_str()
-        config_dir = _config_dir_str()
+        data_dir = str(get_data_dir())
+        config_dir = str(get_config_dir())
         if data_dir != _HOME_DIR:
             text = text.replace(data_dir, "[data_dir]")
         if config_dir != _HOME_DIR:

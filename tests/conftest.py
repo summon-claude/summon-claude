@@ -119,13 +119,10 @@ def _reset_install_mode(monkeypatch):
         _find_project_root,
         get_git_main_repo_root,
     )
-    from summon_claude.diagnostics import _config_dir_str, _data_dir_str
 
     _detect_install_mode.cache_clear()
     _find_project_root.cache_clear()
     get_git_main_repo_root.cache_clear()
-    _data_dir_str.cache_clear()
-    _config_dir_str.cache_clear()
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.delenv("SUMMON_LOCAL", raising=False)
     yield
@@ -133,15 +130,11 @@ def _reset_install_mode(monkeypatch):
     from summon_claude.config import _detect_install_mode as fresh
     from summon_claude.config import _find_project_root as fresh_root
     from summon_claude.config import get_git_main_repo_root as fresh_git
-    from summon_claude.diagnostics import _config_dir_str as fresh_config
-    from summon_claude.diagnostics import _data_dir_str as fresh_data
 
     fresh.cache_clear()
     if hasattr(fresh_root, "cache_clear"):
         fresh_root.cache_clear()
     fresh_git.cache_clear()
-    fresh_data.cache_clear()
-    fresh_config.cache_clear()
 
 
 @pytest.fixture

@@ -108,9 +108,9 @@ class TestRedactor:
         assert "12345678..." in result
 
     def test_redact_data_dir(self) -> None:
-        from summon_claude.diagnostics import _data_dir_str
+        import summon_claude.diagnostics
 
-        data_dir = _data_dir_str()
+        data_dir = str(summon_claude.diagnostics.get_data_dir())
         if str(Path.home()) != data_dir:
             text = f"opened {data_dir}/registry.db"
             result = redactor.redact(text)
@@ -148,16 +148,14 @@ class TestRedactor:
     def test_redactor_is_instance(self) -> None:
         assert isinstance(redactor, Redactor)
 
-    def test_lazy_data_dir_evaluation_picks_up_patched_value(self, monkeypatch) -> None:
-        """Patching get_data_dir after import is picked up by the lazy _data_dir_str cache."""
+    def test_patched_data_dir_picked_up_by_redactor(self, monkeypatch) -> None:
+        """Patching get_data_dir after import is picked up by redact()."""
         from pathlib import Path
 
         import summon_claude.diagnostics
-        from summon_claude.diagnostics import _data_dir_str
 
         sentinel = Path("/tmp/test-sentinel-data")
         monkeypatch.setattr(summon_claude.diagnostics, "get_data_dir", lambda: sentinel)
-        _data_dir_str.cache_clear()
 
         result = redactor.redact("/tmp/test-sentinel-data/registry.db")
 
