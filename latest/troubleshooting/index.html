@@ -2528,7 +2528,7 @@ Verbose logs include SDK events, Slack API calls, and permission flow details.</
 <details class="tip" open="open">
 <summary>Google scope error when using a tool</summary>
 <p><strong>Symptom:</strong> A Google tool fails with "this tool requires write access that was not granted."</p>
-<p><strong>Cause:</strong> The tool needs write scopes (e.g., <code>gmail.modify</code>) but only read-only scopes were granted during <code>summon auth google login</code>.</p>
+<p><strong>Cause:</strong> The tool needs write scopes (e.g., <code>gmail.send</code>) but only read-only scopes were granted during <code>summon auth google login</code>.</p>
 <p><strong>Fix:</strong> Re-run the auth flow and grant write access to the relevant service:
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>login
 </code></pre></div>
