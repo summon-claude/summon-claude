@@ -1487,6 +1487,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#changes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2286,6 +2297,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#show" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        !show
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#changes" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2529,9 +2551,14 @@ Fix the login bug !stop
 <td>Resume a previous Claude Code session</td>
 </tr>
 <tr>
-<td><code>!diff FILE</code></td>
+<td><code>!diff [FILE]</code></td>
 <td></td>
-<td>Show a git diff for a file changed this session</td>
+<td>Show uncommitted changes (staged + unstaged) for all files or a specific file</td>
+</tr>
+<tr>
+<td><code>!show FILE</code></td>
+<td></td>
+<td>Show current contents of a file</td>
 </tr>
 <tr>
 <td><code>!changes</code></td>
@@ -2600,10 +2627,16 @@ Fix the login bug !stop
 </code></pre></div>
 <p>Spawns or resumes sessions from within a running session. Child sessions appear as new Slack channels. Requires the PM agent feature — see <a href="../../guide/projects/">Projects</a>.</p>
 <h3 id="diff">!diff<a class="headerlink" href="#diff" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>!diff src/auth/login.py
+<div class="highlight"><pre><span></span><code>!diff
+!diff src/auth/login.py
 !diff package.json
 </code></pre></div>
-<p>Shows a unified diff for the named file, covering changes made during this session. Rendered as a Slack snippet with syntax highlighting.</p>
+<p>Without arguments, shows all uncommitted changes — both staged and unstaged — compared to HEAD, plus synthetic new-file diffs for untracked files. With a file argument, shows the same for that specific file. Rendered as a Slack snippet with syntax highlighting.</p>
+<h3 id="show">!show<a class="headerlink" href="#show" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>!show src/auth/login.py
+!show config.yaml
+</code></pre></div>
+<p>Displays the contents of a file as a Slack snippet with syntax highlighting. Useful for reviewing file contents without switching context. Files are truncated if they exceed the upload size limit.</p>
 <h3 id="changes">!changes<a class="headerlink" href="#changes" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>!changes
 </code></pre></div>

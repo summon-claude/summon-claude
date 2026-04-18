@@ -31,21 +31,22 @@ ______________________________________________________________________
 
 These commands are handled locally by summon without forwarding to Claude.
 
-| Command                       | Aliases                     | Description                                                   |
-| ----------------------------- | --------------------------- | ------------------------------------------------------------- |
-| `!help [COMMAND]`             |                             | List all commands, or show details for one command            |
-| `!status`                     |                             | Show session status (model, effort, cost, uptime, turn count) |
-| `!end`                        | `!quit`, `!exit`, `!logout` | End the session gracefully                                    |
-| `!stop`                       |                             | Cancel the current Claude turn (interrupt mid-response)       |
-| `!clear`                      | `!new`, `!reset`            | Clear conversation history (start fresh context)              |
-| `!model [MODEL]`              |                             | Show current model, or switch to a different model            |
-| `!effort [LEVEL]`             |                             | Show current effort, or switch effort level                   |
-| `!auto [on\|off\|rules]`      | `!automode`                 | Toggle or inspect the auto-mode classifier                    |
-| `!compact [INSTRUCTIONS]`     |                             | Compact conversation context (reduces token usage)            |
-| `!summon start`               |                             | Spawn a new child session in the current channel              |
-| `!summon resume [SESSION_ID]` |                             | Resume a previous Claude Code session                         |
-| `!diff FILE`                  |                             | Show a git diff for a file changed this session               |
-| `!changes`                    |                             | Show all files changed in this session                        |
+| Command                       | Aliases                     | Description                                                                   |
+| ----------------------------- | --------------------------- | ----------------------------------------------------------------------------- |
+| `!help [COMMAND]`             |                             | List all commands, or show details for one command                            |
+| `!status`                     |                             | Show session status (model, effort, cost, uptime, turn count)                 |
+| `!end`                        | `!quit`, `!exit`, `!logout` | End the session gracefully                                                    |
+| `!stop`                       |                             | Cancel the current Claude turn (interrupt mid-response)                       |
+| `!clear`                      | `!new`, `!reset`            | Clear conversation history (start fresh context)                              |
+| `!model [MODEL]`              |                             | Show current model, or switch to a different model                            |
+| `!effort [LEVEL]`             |                             | Show current effort, or switch effort level                                   |
+| `!auto [on\|off\|rules]`      | `!automode`                 | Toggle or inspect the auto-mode classifier                                    |
+| `!compact [INSTRUCTIONS]`     |                             | Compact conversation context (reduces token usage)                            |
+| `!summon start`               |                             | Spawn a new child session in the current channel                              |
+| `!summon resume [SESSION_ID]` |                             | Resume a previous Claude Code session                                         |
+| `!diff [FILE]`                |                             | Show uncommitted changes (staged + unstaged) for all files or a specific file |
+| `!show FILE`                  |                             | Show current contents of a file                                               |
+| `!changes`                    |                             | Show all files changed in this session                                        |
 
 ### !help
 
@@ -140,11 +141,21 @@ Spawns or resumes sessions from within a running session. Child sessions appear 
 ### !diff
 
 ```
+!diff
 !diff src/auth/login.py
 !diff package.json
 ```
 
-Shows a unified diff for the named file, covering changes made during this session. Rendered as a Slack snippet with syntax highlighting.
+Without arguments, shows all uncommitted changes — both staged and unstaged — compared to HEAD, plus synthetic new-file diffs for untracked files. With a file argument, shows the same for that specific file. Rendered as a Slack snippet with syntax highlighting.
+
+### !show
+
+```
+!show src/auth/login.py
+!show config.yaml
+```
+
+Displays the contents of a file as a Slack snippet with syntax highlighting. Useful for reviewing file contents without switching context. Files are truncated if they exceed the upload size limit.
 
 ### !changes
 
