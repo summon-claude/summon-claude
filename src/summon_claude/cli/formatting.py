@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import click
 
@@ -142,22 +143,23 @@ def _mask_secret(value: str, prefix_len: int = 5) -> str:
 # Auth output consistency — shared formatters for all providers
 # ---------------------------------------------------------------------------
 
-_AUTH_STATUS_TAGS: dict[str, str] = {
+AuthDisplayStatus = Literal["authenticated", "not_configured", "error", "warn"]
+# "warn" is intentionally absent from JSON — JSON output uses "authenticated" even
+# when validation was skipped (the token exists, we just can't verify it online).
+AuthJsonStatus = Literal["authenticated", "not_configured", "error"]
+
+_AUTH_STATUS_TAGS: dict[AuthDisplayStatus, str] = {
     "authenticated": "PASS",
     "not_configured": "INFO",
     "error": "FAIL",
     "warn": "WARN",
 }
 
-# "warn" is intentionally absent — JSON output uses "authenticated" even when
-# validation was skipped (the token exists, we just can't verify it online).
-_VALID_AUTH_JSON_STATUSES = frozenset({"authenticated", "not_configured", "error"})
-
 
 def auth_status_line(
     provider: str,
     *,
-    status: str,
+    status: AuthDisplayStatus,
     message: str,
     prefix: str = "",
 ) -> str:
@@ -166,12 +168,7 @@ def auth_status_line(
     *status* selects the colored tag: authenticated->PASS, not_configured->INFO,
     error->FAIL, warn->WARN.
     """
-    tag_name = _AUTH_STATUS_TAGS.get(status)
-    if tag_name is None:
-        raise ValueError(
-            f"Unknown auth status {status!r}; expected one of {sorted(_AUTH_STATUS_TAGS)}"
-        )
-    return f"{prefix}{format_tag(tag_name)} {provider}: {message}"
+    return f"{prefix}{format_tag(_AUTH_STATUS_TAGS[status])} {provider}: {message}"
 
 
 def auth_not_configured_msg(setup_cmd: str) -> str:
@@ -238,15 +235,10 @@ def auth_cancelled() -> str:
     return "\nAuthentication cancelled."
 
 
-def make_auth_status_data(provider: str, status: str, **extra: object) -> dict:
+def make_auth_status_data(provider: str, status: AuthJsonStatus, **extra: object) -> dict:
     """Build a provider status dict for ``--json`` output.
 
     Enforces ``{"provider": ..., "status": ...}`` base shape.
     Valid statuses: authenticated, not_configured, error.
     """
-    if status not in _VALID_AUTH_JSON_STATUSES:
-        raise ValueError(
-            f"Invalid auth JSON status {status!r};"
-            f" expected one of {sorted(_VALID_AUTH_JSON_STATUSES)}"
-        )
     return {"provider": provider, "status": status, **extra}

@@ -2398,11 +2398,15 @@ class TestAuthFormattingHelpers:
         line = auth_status_line("X", status="authenticated", message="ok", prefix="  ")
         assert line.startswith("  ")
 
-    def test_auth_status_line_invalid_status_raises(self):
-        from summon_claude.cli.formatting import auth_status_line
+    def test_auth_status_line_all_valid_statuses(self):
+        """Every AuthDisplayStatus value produces output without error."""
+        from typing import get_args
 
-        with pytest.raises(ValueError, match="Unknown auth status"):
-            auth_status_line("X", status="bogus", message="nope")
+        from summon_claude.cli.formatting import AuthDisplayStatus, auth_status_line
+
+        for status in get_args(AuthDisplayStatus):
+            line = auth_status_line("Test", status=status, message="ok")
+            assert "Test: ok" in line
 
     def test_auth_not_configured_msg(self):
         from summon_claude.cli.formatting import auth_not_configured_msg
@@ -2493,16 +2497,12 @@ class TestAuthFormattingHelpers:
         d = make_auth_status_data("github", "authenticated", login="bob")
         assert d == {"provider": "github", "status": "authenticated", "login": "bob"}
 
-    def test_make_auth_status_data_invalid_status_raises(self):
-        from summon_claude.cli.formatting import make_auth_status_data
-
-        with pytest.raises(ValueError, match="Invalid auth JSON status"):
-            make_auth_status_data("x", "bogus")
-
     def test_make_auth_status_data_all_valid_statuses(self):
-        from summon_claude.cli.formatting import _VALID_AUTH_JSON_STATUSES, make_auth_status_data
+        from typing import get_args
 
-        for status in _VALID_AUTH_JSON_STATUSES:
+        from summon_claude.cli.formatting import AuthJsonStatus, make_auth_status_data
+
+        for status in get_args(AuthJsonStatus):
             d = make_auth_status_data("test", status)
             assert d["provider"] == "test"
             assert d["status"] == status
