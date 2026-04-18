@@ -2722,10 +2722,11 @@ Which database should I use for the session store?
 <li><strong>Uncertain</strong> — when the classifier can't confidently decide, the tool falls through to Slack HITL</li>
 </ul>
 <p>The classifier only runs <strong>after worktree entry</strong>. Read-only sessions (before <code>EnterWorktree</code>) never use it — all tool decisions go through the standard permission flow.</p>
+<p><strong>Path-based worktree entries (CLI 2.1.105+):</strong> When an agent uses <code>EnterWorktree(path="...")</code> to re-enter an existing worktree, the containment root is set to the resolved worktree path validated against <code>git worktree list --porcelain</code>. The path must be registered in git and must be within the project root — unregistered paths or paths outside the project boundary are rejected (fail-closed: containment flags are set but the root stays <code>None</code>, so all writes still require HITL approval). The classifier activates on path-based entry the same as name-based entry.</p>
 <h3 id="activation">Activation<a class="headerlink" href="#activation" title="Permanent link">&para;</a></h3>
 <ol>
 <li>Session starts in read-only mode — classifier is dormant</li>
-<li>Agent enters worktree via <code>EnterWorktree</code></li>
+<li>Agent enters worktree via <code>EnterWorktree</code> (name-based creation or path-based re-entry)</li>
 <li>If <code>SUMMON_AUTO_CLASSIFIER_ENABLED=true</code> (default), the classifier activates</li>
 <li>Tool calls now go through: write gate → static lists → caches → <strong>classifier</strong> → SDK allow → Slack HITL</li>
 </ol>

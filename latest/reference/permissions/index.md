@@ -225,10 +225,12 @@ The classifier evaluates each pending tool call against configurable prose rules
 
 The classifier only runs **after worktree entry**. Read-only sessions (before `EnterWorktree`) never use it — all tool decisions go through the standard permission flow.
 
+**Path-based worktree entries (CLI 2.1.105+):** When an agent uses `EnterWorktree(path="...")` to re-enter an existing worktree, the containment root is set to the resolved worktree path validated against `git worktree list --porcelain`. The path must be registered in git and must be within the project root — unregistered paths or paths outside the project boundary are rejected (fail-closed: containment flags are set but the root stays `None`, so all writes still require HITL approval). The classifier activates on path-based entry the same as name-based entry.
+
 ### Activation
 
 1. Session starts in read-only mode — classifier is dormant
-1. Agent enters worktree via `EnterWorktree`
+1. Agent enters worktree via `EnterWorktree` (name-based creation or path-based re-entry)
 1. If `SUMMON_AUTO_CLASSIFIER_ENABLED=true` (default), the classifier activates
 1. Tool calls now go through: write gate → static lists → caches → **classifier** → SDK allow → Slack HITL
 

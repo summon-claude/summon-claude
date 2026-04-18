@@ -2372,7 +2372,7 @@
 <tbody>
 <tr>
 <td><code>worktree_create</code></td>
-<td>After a session creates a git worktree</td>
+<td>After a session creates a new git worktree (not on re-entry)</td>
 <td><code>make setup</code>, <code>uv sync</code></td>
 </tr>
 <tr>
@@ -2387,6 +2387,7 @@
 </tr>
 </tbody>
 </table>
+<p>When a session re-enters an existing worktree using <code>EnterWorktree(path="...")</code>, <code>worktree_create</code> hooks are skipped. The worktree already exists, so setup commands like <code>uv sync</code> or <code>make setup</code> are assumed to have already run. Because <code>worktree_create</code> hooks are not guaranteed to be idempotent, re-running them could cause unintended side effects.</p>
 <p>Each hook is a list of shell commands. Commands run sequentially; if one fails, the remaining commands are skipped.</p>
 <hr />
 <h2 id="setting-hooks">Setting hooks<a class="headerlink" href="#setting-hooks" title="Permanent link">&para;</a></h2>

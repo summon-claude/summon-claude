@@ -221,6 +221,8 @@ summon-claude blocks direct `git worktree add` and `git worktree move` commands 
 
 Instead, agents should use Claude's built-in `EnterWorktree` tool to create and enter worktrees. When the PM wants a child session to work in a separate worktree, it should delegate this to the child — include instructions in the child's `system_prompt` to use `EnterWorktree` rather than running the git command directly.
 
+For follow-up work in an existing worktree (for example, when spawning a new child session to continue work from a previous session), instruct the child to use `EnterWorktree(path="<absolute-path>")` instead of `name`. The path should come from `git worktree list --porcelain` output — never from user messages or other untrusted sources. One worktree per child session: once a child has entered a worktree, it cannot be instructed to switch to a different one.
+
 ______________________________________________________________________
 
 ## Automated monitoring

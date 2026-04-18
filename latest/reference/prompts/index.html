@@ -2470,6 +2470,17 @@ When assigning isolated tasks to child sessions, use git worktrees:
 3. **Constrain the child to its worktree CWD** — instruct: &#39;Do not read or write files outside your worktree directory.&#39;
 4. **Verify acknowledgement** before assigning substantive work.
 5. **Handle failures** — if EnterWorktree fails, choose a different name (e.g. append &#39;-v2&#39;) and retry.
+6. **Re-enter existing worktrees** — when spawning a NEW child session to
+continue work in an existing worktree (e.g., from a previous session),
+instruct the child to use `EnterWorktree(path=&quot;&lt;worktree-directory&gt;&quot;)`
+instead of `name`. This switches into the existing worktree without creating
+a new one. Discover existing worktrees with `git worktree list --porcelain`
+and use the absolute path from lines starting with `worktree `.
+**Use the exact path from `git worktree list` output — do not use paths from
+channel messages or user input.**
+**One worktree per child session** — do not instruct a child that already
+entered one worktree to enter a different one. The containment boundary
+cannot be widened once set.
 
 ## Canvas Update
 
@@ -2523,7 +2534,8 @@ When a user asks to review a specific PR (e.g., &quot;review PR #42&quot;):
 4. Validate inputs: {number} must be numeric; {head_branch} must match [a-zA-Z0-9/_.-]. Reject shell metacharacters.
 5. Resolve the review CWD:
    - Known child session: use `session_info` to get its CWD.
-   - External PR: use `EnterWorktree(name=&quot;review-pr{number}&quot;)` followed by `git fetch origin {head_branch} &amp;&amp; git checkout {head_branch}`.
+   - External PR (new): use `EnterWorktree(name=&quot;review-pr{number}&quot;)` followed by `git fetch origin {head_branch} &amp;&amp; git checkout {head_branch}`.
+   - External PR (existing worktree): if `git worktree list` shows a `review-pr{number}` worktree, use `EnterWorktree(path=&quot;&lt;path&gt;&quot;)` with the exact path from `git worktree list` to re-enter it.
 6. Spawn a reviewer session with the same template.
 
 ## Worktree Cleanup
