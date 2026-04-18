@@ -657,24 +657,44 @@ class TestCleanupInteractive:
 
 
 # ---------------------------------------------------------------------------
-# _init_select — init wizard interactive selector
+# interactive_select with init-wizard kwargs (catch_interrupt=False, back_label=False)
 # ---------------------------------------------------------------------------
+
+# The init wizard previously used a thin _init_select wrapper.  These tests
+# exercise interactive_select directly with the same kwargs the wizard passes.
+
+_INIT_HINT = "(↑/↓ to select, Enter to confirm)"
+
+
+def _init_select(
+    options: list[str],
+    title: str,
+    ctx: click.Context,
+    default_index: int = 0,
+) -> str:
+    """Test helper: call interactive_select with init-wizard kwargs and unwrap."""
+    result = interactive_select(
+        options,
+        title,
+        ctx,
+        default_index=default_index,
+        catch_interrupt=False,
+        back_label=False,
+        hint=_INIT_HINT,
+    )
+    return result[0] if result else ""
 
 
 class TestInitSelect:
-    """Tests for _init_select() (init wizard selector)."""
+    """Tests for interactive_select() with init-wizard kwargs."""
 
     def test_empty_options_returns_empty_string(self):
-        """Empty options list returns empty string immediately."""
-        from summon_claude.cli import _init_select
-
+        """Empty options list returns None (empty string after unwrap)."""
         ctx = _make_ctx()
         assert _init_select([], "Pick:", ctx) == ""
 
     def test_non_interactive_fallback_selects_option(self):
         """Non-interactive fallback returns selected option by number."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
         result_container = {}
@@ -693,8 +713,6 @@ class TestInitSelect:
 
     def test_non_interactive_default_accepted_on_enter(self):
         """Pressing Enter in non-interactive mode selects the default."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
         result_container = {}
@@ -713,8 +731,6 @@ class TestInitSelect:
 
     def test_non_interactive_abort_raises(self):
         """Ctrl+C / EOF during non-interactive prompt propagates click.Abort."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
 
@@ -730,8 +746,6 @@ class TestInitSelect:
 
     def test_interactive_calls_pick_with_default_index(self):
         """TTY mode calls pick.pick with the correct default_index."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         with (
             patch("summon_claude.cli.interactive.is_interactive", return_value=True),
@@ -741,7 +755,7 @@ class TestInitSelect:
         assert result == "beta"
         mock_pick.assert_called_once_with(
             ["alpha", "beta", "gamma"],
-            "Pick:  (↑/↓ to select, Enter to confirm)",
+            f"Pick:  {_INIT_HINT}",
             indicator=">",
             default_index=1,
         )
@@ -749,8 +763,6 @@ class TestInitSelect:
     def test_interactive_keyboard_interrupt_propagates(self):
         """KeyboardInterrupt during pick.pick propagates for draft-save."""
         import pytest
-
-        from summon_claude.cli import _init_select
 
         ctx = _make_ctx()
         with (
@@ -762,8 +774,6 @@ class TestInitSelect:
 
     def test_no_interactive_flag_uses_fallback_not_pick(self):
         """no_interactive=True forces numbered-list fallback even when stdin is a TTY."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx(no_interactive=True)
         runner = CliRunner()
         result_container = {}
@@ -785,8 +795,6 @@ class TestInitSelect:
 
     def test_non_interactive_marker_on_default(self):
         """Non-interactive fallback shows '*' marker on the default option."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
 
@@ -803,8 +811,6 @@ class TestInitSelect:
 
     def test_non_interactive_marker_on_non_first_default(self):
         """Non-interactive fallback shows '*' on the correct non-first option."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
 
@@ -821,8 +827,6 @@ class TestInitSelect:
 
     def test_default_index_clamped_to_valid_range(self):
         """Out-of-bounds default_index is clamped to last valid option."""
-        from summon_claude.cli import _init_select
-
         ctx = _make_ctx()
         runner = CliRunner()
         result_container = {}

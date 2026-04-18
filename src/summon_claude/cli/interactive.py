@@ -162,20 +162,6 @@ def interactive_select(
     return (options[choice - 1], choice - 1)
 
 
-def _init_select(options: list[str], title: str, ctx: click.Context, default_index: int = 0) -> str:
-    """Init wizard selector — wraps interactive_select with propagating interrupts."""
-    result = interactive_select(
-        options,
-        title,
-        ctx,
-        default_index=default_index,
-        catch_interrupt=False,
-        back_label=False,
-        hint="(↑/↓ to select, Enter to confirm)",
-    )
-    return result[0] if result else ""
-
-
 def interactive_multi_select(
     options: list[str], title: str, ctx: click.Context
 ) -> list[tuple[str, int]]:
