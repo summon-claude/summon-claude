@@ -30,6 +30,12 @@ The GitHub remote MCP server at `api.githubcopilot.com/mcp/` works with OAuth to
 
 Once authenticated, the GitHub MCP server is wired into **all** sessions automatically — no per-session configuration needed.
 
+To check authentication status:
+
+```
+summon auth github status
+```
+
 To remove stored credentials:
 
 ```

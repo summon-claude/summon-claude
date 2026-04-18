@@ -2439,6 +2439,9 @@
 <p>The GitHub remote MCP server at <code>api.githubcopilot.com/mcp/</code> works with OAuth tokens. A GitHub Copilot subscription is not required.</p>
 </div>
 <p>Once authenticated, the GitHub MCP server is wired into <strong>all</strong> sessions automatically — no per-session configuration needed.</p>
+<p>To check authentication status:</p>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>github<span class="w"> </span>status
+</code></pre></div>
 <p>To remove stored credentials:</p>
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>github<span class="w"> </span><span class="nb">logout</span>
 </code></pre></div>

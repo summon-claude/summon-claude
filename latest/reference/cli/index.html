@@ -1349,6 +1349,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#summon-auth-github-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1371,6 +1382,17 @@
     <span class="md-ellipsis">
       
         login
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon-auth-google-logout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        logout
       
     </span>
   </a>
@@ -2760,6 +2782,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#summon-auth-github-status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        status
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -2782,6 +2815,17 @@
     <span class="md-ellipsis">
       
         login
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#summon-auth-google-logout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        logout
       
     </span>
   </a>
@@ -3552,7 +3596,7 @@
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3576,7 +3620,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3600,7 +3644,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3624,7 +3668,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3648,7 +3692,31 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
+<td>boolean</td>
+<td>Show this message and exit.</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h6 id="summon-auth-github-status">summon auth github status<a class="headerlink" href="#summon-auth-github-status" title="Permanent link">&para;</a></h6>
+<p>Check GitHub authentication status.</p>
+<p><strong>Usage:</strong></p>
+<div class="highlight"><pre><span></span><code>summon auth github status [OPTIONS]
+</code></pre></div>
+<p><strong>Options:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3656,7 +3724,7 @@
 </tbody>
 </table>
 <h5 id="summon-auth-google">summon auth google<a class="headerlink" href="#summon-auth-google" title="Permanent link">&para;</a></h5>
-<p>Google Workspace authentication for scribe monitoring.</p>
+<p>Google authentication.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth google [OPTIONS] COMMAND [ARGS]...
 </code></pre></div>
@@ -3672,7 +3740,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3680,7 +3748,7 @@
 </tbody>
 </table>
 <h6 id="summon-auth-google-login">summon auth google login<a class="headerlink" href="#summon-auth-google-login" title="Permanent link">&para;</a></h6>
-<p>Authenticate with Google Workspace.</p>
+<p>Authenticate with Google.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth google login [OPTIONS]
 </code></pre></div>
@@ -3702,7 +3770,37 @@
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
+<td>boolean</td>
+<td>Show this message and exit.</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h6 id="summon-auth-google-logout">summon auth google logout<a class="headerlink" href="#summon-auth-google-logout" title="Permanent link">&para;</a></h6>
+<p>Remove stored Google credentials.</p>
+<p><strong>Usage:</strong></p>
+<div class="highlight"><pre><span></span><code>summon auth google logout [OPTIONS]
+</code></pre></div>
+<p><strong>Options:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Description</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--account</code></td>
+<td>text</td>
+<td>Account label (e.g., personal, work)</td>
+<td>None</td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3732,7 +3830,7 @@
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3740,7 +3838,7 @@
 </tbody>
 </table>
 <h6 id="summon-auth-google-status">summon auth google status<a class="headerlink" href="#summon-auth-google-status" title="Permanent link">&para;</a></h6>
-<p>Check Google Workspace authentication status.</p>
+<p>Check Google authentication status.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth google status [OPTIONS]
 </code></pre></div>
@@ -3762,7 +3860,7 @@
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3770,7 +3868,7 @@
 </tbody>
 </table>
 <h5 id="summon-auth-jira">summon auth jira<a class="headerlink" href="#summon-auth-jira" title="Permanent link">&para;</a></h5>
-<p>Jira authentication (OAuth 2.1 with PKCE + DCR).</p>
+<p>Jira authentication for MCP tools.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth jira [OPTIONS] COMMAND [ARGS]...
 </code></pre></div>
@@ -3786,7 +3884,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3816,7 +3914,7 @@
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3840,7 +3938,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3864,7 +3962,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3872,7 +3970,7 @@
 </tbody>
 </table>
 <h5 id="summon-auth-slack">summon auth slack<a class="headerlink" href="#summon-auth-slack" title="Permanent link">&para;</a></h5>
-<p>External Slack workspace authentication for scribe monitoring.</p>
+<p>External Slack workspace authentication.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth slack [OPTIONS] COMMAND [ARGS]...
 </code></pre></div>
@@ -3888,7 +3986,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3918,7 +4016,7 @@
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3944,7 +4042,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3952,7 +4050,7 @@ or full URL (https://myteam.slack.com).</p>
 </tbody>
 </table>
 <h6 id="summon-auth-slack-logout">summon auth slack logout<a class="headerlink" href="#summon-auth-slack-logout" title="Permanent link">&para;</a></h6>
-<p>Remove external Slack workspace auth state.</p>
+<p>Remove stored Slack credentials.</p>
 <p><strong>Usage:</strong></p>
 <div class="highlight"><pre><span></span><code>summon auth slack logout [OPTIONS]
 </code></pre></div>
@@ -3968,7 +4066,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -3992,7 +4090,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4016,7 +4114,13 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>--json</code></td>
+<td>boolean</td>
+<td>Output as JSON</td>
+<td><code>False</code></td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4040,7 +4144,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4064,7 +4168,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4088,7 +4192,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4112,7 +4216,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4136,7 +4240,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4160,7 +4264,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4184,7 +4288,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4220,7 +4324,7 @@ or full URL (https://myteam.slack.com).</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4244,7 +4348,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4268,7 +4372,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4304,7 +4408,7 @@ or full URL (https://myteam.slack.com).</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4328,7 +4432,7 @@ or full URL (https://myteam.slack.com).</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4358,7 +4462,7 @@ or full URL (https://myteam.slack.com).</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4385,7 +4489,7 @@ as PreToolUse/PostToolUse handlers for EnterWorktree. Idempotent.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4423,7 +4527,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4453,7 +4557,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4477,7 +4581,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4501,7 +4605,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4525,7 +4629,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4555,7 +4659,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4580,7 +4684,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4610,7 +4714,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 <td><code>table</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4634,7 +4738,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4658,7 +4762,7 @@ Use "$INCLUDE_GLOBAL" in per-project hooks to include global hooks.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4690,7 +4794,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4714,7 +4818,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4738,7 +4842,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4762,7 +4866,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4792,7 +4896,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4816,7 +4920,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4846,7 +4950,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4876,7 +4980,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4900,7 +5004,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4930,7 +5034,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -4960,7 +5064,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>table</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -5002,7 +5106,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>table</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -5032,7 +5136,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>50</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -5086,7 +5190,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td>None</td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -5116,7 +5220,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>False</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>
@@ -5146,7 +5250,7 @@ Pass --jql "" to clear the Jira JQL filter.</p>
 <td><code>table</code></td>
 </tr>
 <tr>
-<td><code>--help</code>, <code>-h</code></td>
+<td><code>-h</code>, <code>--help</code></td>
 <td>boolean</td>
 <td>Show this message and exit.</td>
 <td><code>False</code></td>

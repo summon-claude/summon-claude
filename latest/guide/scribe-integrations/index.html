@@ -2398,6 +2398,9 @@
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
 </code></pre></div>
 <p>This shows whether credentials exist, which scopes are granted (read-only vs read-write per service), and whether the token is still valid.</p>
+<p>To remove stored Google credentials (keeps app setup intact for re-login):</p>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span><span class="nb">logout</span>
+</code></pre></div>
 <h3 id="enabling-the-google-collector">Enabling the Google collector<a class="headerlink" href="#enabling-the-google-collector" title="Permanent link">&para;</a></h3>
 <p>The Google collector is <strong>auto-detected</strong>: when workspace-mcp is installed and Google credentials exist, the scribe automatically uses Google tools. No manual config flag is needed.</p>
 <p>To explicitly disable it: <code>summon config set SUMMON_SCRIBE_GOOGLE_ENABLED false</code></p>
