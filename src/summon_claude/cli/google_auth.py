@@ -13,7 +13,15 @@ from typing import Any
 
 import click
 
-from summon_claude.cli.formatting import format_tag
+from summon_claude.cli.formatting import (
+    auth_authenticated_msg,
+    auth_login_success,
+    auth_not_configured_msg,
+    auth_not_stored,
+    auth_removed,
+    auth_status_line,
+    make_auth_status_data,
+)
 from summon_claude.config import (
     ACCOUNT_LABEL_RE,
     GOOGLE_SCOPE_PREFIX,
@@ -933,8 +941,7 @@ def google_auth(account: str | None = None) -> None:
         store.store_credential(user_email, cred)
         _secure_credential_files(account_dir)
         click.echo()
-        click.echo(f"Google Workspace authenticated as {user_email}.")
-        click.echo(f"Credentials stored in {account_dir}")
+        auth_login_success("Google", identity=user_email, storage_path=account_dir)
 
     # Context-aware next-step guidance.
     from summon_claude.cli.config import parse_env_file  # noqa: PLC0415
@@ -974,15 +981,27 @@ def _check_google_status(
         from auth.credential_store import LocalDirectoryCredentialStore  # noqa: PLC0415
     except ImportError:
         if not quiet:
-            tag = format_tag("INFO")
-            click.echo(f"{prefix}{tag} Google: not installed (install summon-claude[google])")
+            click.echo(
+                auth_status_line(
+                    "Google",
+                    status="not_configured",
+                    message="not installed (install summon-claude[google])",
+                    prefix=prefix,
+                )
+            )
         return None
 
     base_dir = get_google_credentials_dir()
     if not base_dir.exists():
         if not quiet:
-            tag = format_tag("INFO")
-            click.echo(f"{prefix}{tag} Google: not configured (run `summon auth google setup`)")
+            click.echo(
+                auth_status_line(
+                    "Google",
+                    status="not_configured",
+                    message=auth_not_configured_msg("summon auth google setup"),
+                    prefix=prefix,
+                )
+            )
         return None
 
     if account is not None:
@@ -991,8 +1010,13 @@ def _check_google_status(
         if not account_dir.exists():
             if not quiet:
                 click.echo(
-                    f"{prefix}{format_tag('INFO')} Google: account {account!r} not found"
-                    f" (run `summon auth google setup --account {account}`)"
+                    auth_status_line(
+                        "Google",
+                        status="not_configured",
+                        message=f"account {account!r} not found"
+                        f" (run `summon auth google setup --account {account}`)",
+                        prefix=prefix,
+                    )
                 )
             return None
         dirs_to_check = [(account, account_dir)]
@@ -1011,13 +1035,23 @@ def _check_google_status(
                 )
                 if has_client_env:
                     click.echo(
-                        f"{prefix}{format_tag('INFO')} Google: setup complete, run"
-                        " `summon auth google login` to authenticate"
+                        auth_status_line(
+                            "Google",
+                            status="not_configured",
+                            message="setup complete, run"
+                            " `summon auth google login` to authenticate",
+                            prefix=prefix,
+                        )
                     )
                 else:
-                    tag = format_tag("INFO")
-                    msg = "Google: not configured (run `summon auth google setup`)"
-                    click.echo(f"{prefix}{tag} {msg}")
+                    click.echo(
+                        auth_status_line(
+                            "Google",
+                            status="not_configured",
+                            message=auth_not_configured_msg("summon auth google setup"),
+                            prefix=prefix,
+                        )
+                    )
             return None
         dirs_to_check = [(a.label, base_dir / a.label) for a in discovered]
 
@@ -1027,8 +1061,14 @@ def _check_google_status(
         users = store.list_users()
         if not users:
             if not quiet:
-                tag = format_tag("INFO")
-                click.echo(f"{prefix}{tag} Google [{acct_label}]: no credentials found")
+                click.echo(
+                    auth_status_line(
+                        f"Google [{acct_label}]",
+                        status="not_configured",
+                        message="no credentials found",
+                        prefix=prefix,
+                    )
+                )
             all_ok = False
             continue
 
@@ -1036,19 +1076,27 @@ def _check_google_status(
             cred = store.get_credential(user)
             if not cred:
                 if not quiet:
-                    tag = format_tag("FAIL")
-                    msg = f"Google [{acct_label}]: invalid credential file ({user})"
-                    click.echo(f"{prefix}{tag} {msg}")
+                    click.echo(
+                        auth_status_line(
+                            f"Google [{acct_label}]",
+                            status="error",
+                            message=f"invalid credential file ({user})",
+                            prefix=prefix,
+                        )
+                    )
                 all_ok = False
                 continue
 
-            if cred.valid or (cred.expired and cred.refresh_token):
-                status = "authenticated as"
-            else:
+            if not (cred.valid or (cred.expired and cred.refresh_token)):
                 if not quiet:
                     click.echo(
-                        f"{prefix}{format_tag('FAIL')} Google [{acct_label}]: invalid"
-                        f" — re-run `summon auth google login --account {acct_label}` ({user})"
+                        auth_status_line(
+                            f"Google [{acct_label}]",
+                            status="error",
+                            message="invalid"
+                            f" — re-run `summon auth google login --account {acct_label}` ({user})",
+                            prefix=prefix,
+                        )
                     )
                 all_ok = False
                 continue
@@ -1057,11 +1105,87 @@ def _check_google_status(
                 # Summarise granted access level per service.
                 granted = set(cred.scopes or [])
                 access = _describe_granted_scopes(granted)
-                click.echo(f"{prefix}{format_tag('PASS')} Google [{acct_label}]: {status} {user}")
+                click.echo(
+                    auth_status_line(
+                        f"Google [{acct_label}]",
+                        status="authenticated",
+                        message=auth_authenticated_msg(identity=user),
+                        prefix=prefix,
+                    )
+                )
                 if access:
                     click.echo(f"{prefix}  Access: {access}")
 
     return all_ok
+
+
+def _check_google_status_data(account: str | None = None) -> dict:  # noqa: PLR0911
+    """Return Google auth status as a dict for --json output.
+
+    Never includes credential file paths or secrets.
+    """
+    try:
+        from auth.credential_store import LocalDirectoryCredentialStore  # noqa: PLC0415
+    except ImportError:
+        return make_auth_status_data("google", "not_configured", reason="not_installed")
+
+    base_dir = get_google_credentials_dir()
+    if not base_dir.exists():
+        return make_auth_status_data("google", "not_configured")
+
+    if account is not None:
+        account_dir = base_dir / account
+        if not account_dir.exists():
+            return make_auth_status_data("google", "not_configured")
+        dirs_to_check = [(account, account_dir)]
+    else:
+        from summon_claude.config import discover_google_accounts  # noqa: PLC0415
+
+        discovered = discover_google_accounts()
+        if not discovered:
+            has_client_env = any(
+                (base_dir / d / "client_env").exists()
+                for d in base_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
+            )
+            if has_client_env:
+                return make_auth_status_data("google", "not_configured", reason="setup_only")
+            return make_auth_status_data("google", "not_configured")
+        dirs_to_check = [(a.label, base_dir / a.label) for a in discovered]
+
+    accounts_data: list[dict] = []
+    all_ok = True
+    for acct_label, creds_dir in dirs_to_check:
+        store = LocalDirectoryCredentialStore(str(creds_dir))
+        users = store.list_users()
+        if not users:
+            all_ok = False
+            continue
+
+        for user in users:
+            cred = store.get_credential(user)
+            if not cred:
+                all_ok = False
+                continue
+
+            if cred.valid or (cred.expired and cred.refresh_token):
+                acct_status = "authenticated"
+            else:
+                acct_status = "invalid"
+                all_ok = False
+
+            granted = set(cred.scopes or [])
+            access = _describe_granted_scopes(granted)
+            entry: dict = {"label": acct_label, "email": user, "status": acct_status}
+            if access:
+                entry["access"] = access
+            accounts_data.append(entry)
+
+    if not accounts_data:
+        return make_auth_status_data("google", "not_configured")
+
+    overall = "authenticated" if all_ok else "error"
+    return make_auth_status_data("google", overall, accounts=accounts_data)
 
 
 def google_status(account: str | None = None) -> None:
@@ -1069,3 +1193,42 @@ def google_status(account: str | None = None) -> None:
     if account is not None:
         account = _validate_account_label(account)
     _check_google_status(account=account)
+
+
+def google_logout(account: str | None = None) -> None:
+    """Remove stored Google credentials."""
+    from summon_claude.config import discover_google_accounts  # noqa: PLC0415
+
+    accounts = discover_google_accounts()
+    if account is not None:
+        account = _validate_account_label(account)
+        matches = [a for a in accounts if a.label == account]
+        if not matches:
+            click.echo(auth_not_stored("Google", account=account))
+            return
+        target_accounts = matches
+    else:
+        target_accounts = accounts
+
+    if not target_accounts:
+        click.echo(auth_not_stored("Google"))
+        return
+
+    labels = ", ".join(a.label for a in target_accounts)
+    if not click.confirm(f"Remove Google credentials for {labels}?"):
+        return
+
+    for acct in target_accounts:
+        cred_files = [f for f in acct.creds_dir.glob("*.json") if "@" in f.stem]
+        if not cred_files:
+            click.echo(auth_not_stored("Google", account=acct.label))
+            continue
+        removed_count = 0
+        for f in cred_files:
+            try:
+                f.unlink(missing_ok=True)
+                removed_count += 1
+            except OSError as e:
+                click.echo(f"Could not remove {f.name}: {e}", err=True)
+        if removed_count:
+            click.echo(auth_removed("Google", qualifier=acct.label))

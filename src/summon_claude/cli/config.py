@@ -15,7 +15,16 @@ from pathlib import Path
 
 import click
 
-from summon_claude.cli.formatting import format_tag
+from summon_claude.cli.formatting import (
+    auth_authenticated_msg,
+    auth_login_success,
+    auth_not_configured_msg,
+    auth_not_stored,
+    auth_removed,
+    auth_status_line,
+    format_tag,
+    make_auth_status_data,
+)
 from summon_claude.config import (
     _BOOL_FALSE,
     _BOOL_TRUE,
@@ -351,11 +360,12 @@ async def github_auth_cmd() -> None:
     try:
         result = await run_device_flow(on_code=_print_device_code)
         login = re.sub(r"[^a-zA-Z0-9-]", "", result.login) or "unknown"
-        cred_dir = result.token_path.parent
-        click.echo(f"GitHub authenticated as {login}.")
-        click.echo(f"Credentials stored in {cred_dir}")
-        click.echo()
-        click.echo("GitHub MCP tools will be available on next session start.")
+        auth_login_success(
+            "GitHub",
+            identity=login,
+            storage_path=result.token_path.parent,
+            next_step="GitHub MCP tools will be available on next session start.",
+        )
     except aiohttp.ClientError as e:
         click.echo(f"Network error during GitHub auth: {e}", err=True)
         sys.exit(1)
@@ -370,9 +380,9 @@ def github_logout() -> None:
 
     removed = remove_token()
     if removed:
-        click.echo("GitHub token removed.")
+        click.echo(auth_removed("GitHub"))
     else:
-        click.echo("No GitHub token stored.")
+        click.echo(auth_not_stored("GitHub"))
 
 
 def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
@@ -392,8 +402,12 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
     if not token:
         if not quiet:
             click.echo(
-                f"{prefix}{format_tag('INFO')} GitHub: not configured"
-                " (run `summon auth github login`)"
+                auth_status_line(
+                    "GitHub",
+                    status="not_configured",
+                    message=auth_not_configured_msg("summon auth github login"),
+                    prefix=prefix,
+                )
             )
         return None
 
@@ -402,16 +416,24 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
     except (OSError, aiohttp.ClientError, GitHubAuthError):
         if not quiet:
             click.echo(
-                f"{prefix}{format_tag('WARN')} GitHub: token found"
-                " (validation skipped — network error)"
+                auth_status_line(
+                    "GitHub",
+                    status="warn",
+                    message="token found (validation skipped — network error)",
+                    prefix=prefix,
+                )
             )
         return True
 
     if result is None:
         if not quiet:
             click.echo(
-                f"{prefix}{format_tag('FAIL')} GitHub: token invalid"
-                " — run `summon auth github login`"
+                auth_status_line(
+                    "GitHub",
+                    status="error",
+                    message="token invalid — run `summon auth github login`",
+                    prefix=prefix,
+                )
             )
         return False
 
@@ -419,9 +441,48 @@ def _check_github_status(*, prefix: str = "", quiet: bool = False) -> bool | Non
         login = re.sub(r"[^a-zA-Z0-9-]", "", result["login"]) or "unknown"
         scopes = re.sub(r"[^\x20-\x7e]", "", result["scopes"])
         click.echo(
-            f"{prefix}{format_tag('PASS')} GitHub: authenticated as {login} (scopes: {scopes})"
+            auth_status_line(
+                "GitHub",
+                status="authenticated",
+                message=auth_authenticated_msg(identity=login, detail=f"scopes: {scopes}"),
+                prefix=prefix,
+            )
         )
     return True
+
+
+def _check_github_status_data() -> dict:
+    """Return GitHub auth status as a dict for --json output.
+
+    Never includes token values.
+    """
+    import aiohttp  # noqa: PLC0415
+
+    from summon_claude.github_auth import (  # noqa: PLC0415
+        GitHubAuthError,
+        load_token,
+        validate_token,
+    )
+
+    token = load_token()
+    if not token:
+        return make_auth_status_data("github", "not_configured")
+
+    try:
+        result = asyncio.run(validate_token(token))
+    except (OSError, aiohttp.ClientError, GitHubAuthError):
+        return make_auth_status_data(
+            "github",
+            "authenticated",
+            note="validation skipped — network error",
+        )
+
+    if result is None:
+        return make_auth_status_data("github", "error", error="token invalid")
+
+    login = re.sub(r"[^a-zA-Z0-9-]", "", result["login"]) or "unknown"
+    scopes = re.sub(r"[^\x20-\x7e]", "", result["scopes"])
+    return make_auth_status_data("github", "authenticated", login=login, scopes=scopes)
 
 
 def get_upgrade_command() -> str:
@@ -661,6 +722,13 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
     if google_result is False:
         all_pass = False
 
+    # Jira (optional, only if credentials exist)
+    from summon_claude.cli.auth import _check_jira_status  # noqa: PLC0415
+
+    jira_result = _check_jira_status(prefix="  ", quiet=quiet)
+    if jira_result is False:
+        all_pass = False
+
     # Optional extras availability (informational)
     if not quiet:
         from summon_claude.config import (  # noqa: PLC0415
@@ -731,20 +799,6 @@ def config_check(quiet: bool = False, config_path: str | None = None) -> bool:
         click.echo()
         click.echo(click.style("Features:", bold=True))
         _print_feature_inventory(db_path, values)
-
-    # Jira (optional, only if credentials exist)
-    from summon_claude.jira_auth import check_jira_status, jira_credentials_exist  # noqa: PLC0415
-
-    if jira_credentials_exist():
-        jira_err = check_jira_status()
-        if jira_err is None:
-            if not quiet:
-                click.echo(f"  {format_tag('PASS')} Jira credentials valid")
-        else:
-            click.echo(f"  {format_tag('FAIL')} Jira: {jira_err}")
-            all_pass = False
-    elif not quiet:
-        click.echo(f"  {format_tag('INFO')} Jira: not configured (optional)")
 
     return all_pass
 

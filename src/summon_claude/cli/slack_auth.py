@@ -13,6 +13,14 @@ from urllib.parse import urlparse
 
 import click
 
+from summon_claude.cli.formatting import (
+    auth_authenticated_msg,
+    auth_login_success,
+    auth_not_configured_msg,
+    auth_not_stored,
+    auth_removed,
+    auth_status_line,
+)
 from summon_claude.config import (
     get_browser_auth_dir,
     get_config_file,
@@ -134,20 +142,12 @@ def _save_monitored_channels(monitored_channels: str) -> None:
     if not monitored_channels:
         return
 
+    from summon_claude.cli.config import parse_env_file, write_env_file  # noqa: PLC0415
+
     config_file = get_config_file()
-    config_file.parent.mkdir(parents=True, exist_ok=True)
-    lines = config_file.read_text().splitlines() if config_file.exists() else []
-    key = "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS"
-    new_line = f"{key}={monitored_channels}"
-    updated = False
-    for i, line in enumerate(lines):
-        if line.startswith(f"{key}="):
-            lines[i] = new_line
-            updated = True
-            break
-    if not updated:
-        lines.append(new_line)
-    config_file.write_text("\n".join(lines) + "\n")
+    existing = parse_env_file(config_file)
+    existing["SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS"] = monitored_channels
+    write_env_file(config_file, existing, atomic=True)
     click.echo(f"Monitored channels saved to {config_file}")
 
 
@@ -234,6 +234,7 @@ def _check_existing_slack_auth() -> dict[str, str] | None:
 
     return {
         "saved": saved_dt.strftime("%Y-%m-%d %H:%M UTC"),
+        "saved_iso": saved_dt.isoformat(),
         "age": age_str,
         "user_id": workspace.get("user_id", ""),
         "url": workspace.get("url", ""),
@@ -291,7 +292,7 @@ def slack_auth(workspace: str) -> None:
 
     browser_type = os.environ.get("SUMMON_SCRIBE_SLACK_BROWSER", "chrome")
 
-    click.echo(f"Opening {browser_type} browser for Slack login at {workspace_url}")
+    click.echo(f"Opening {browser_type} browser for Slack authentication at {workspace_url}")
     click.echo("Complete the login in the browser window.")
     click.echo("The browser will close automatically after detecting your session.")
     click.echo("WARNING: Auth state contains session cookies — treat stored files as secrets.")
@@ -305,14 +306,15 @@ def slack_auth(workspace: str) -> None:
     effective_url = result.resolved_url or workspace_url
 
     identity = result.user_id or "unknown"
-    click.echo(f"Slack authenticated as {identity}.")
-    click.echo(f"Credentials stored in {result.state_file.parent}")
+    auth_login_success("Slack", identity=identity, storage_path=result.state_file.parent)
     click.echo(f"  Team ID:  {result.team_id or 'not detected'}")
     click.echo(f"  Channels: {len(result.channels) if result.channels else 0} found")
     if result.resolved_url and result.resolved_url.rstrip("/") != workspace_url.rstrip("/"):
         click.echo(f"  Resolved: {result.resolved_url} (redirected from {workspace_url})")
 
     _save_workspace_config(result, effective_url, browser_type)
+    click.echo()
+    click.echo("Slack monitoring will be available on next project start.")
 
 
 def _save_workspace_config(
@@ -374,15 +376,48 @@ def slack_status() -> None:
     """Show external Slack workspace configuration and auth status."""
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon auth slack login <workspace-url>")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="not_configured",
+                message=auth_not_configured_msg("summon auth slack login <workspace>"),
+            )
+        )
         return
 
     try:
         workspace = json.loads(config_path.read_text())
     except (json.JSONDecodeError, OSError):
-        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message="workspace config is corrupted (re-run `summon auth slack login`)",
+            )
+        )
         return
+
+    url = workspace.get("url", "N/A")
+    existing = _check_existing_slack_auth()
+    if existing:
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="authenticated",
+                message=auth_authenticated_msg(
+                    detail=f"workspace: {url}, saved {existing['age']}",
+                ),
+            )
+        )
+    else:
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message=f"auth expired or missing ({url})",
+            )
+        )
+    click.echo()
     click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
     user_id = workspace.get("user_id", "")
     click.echo(f"User ID: {user_id or 'not set (re-run `summon auth slack login` to add)'}")
@@ -409,13 +444,15 @@ def slack_status() -> None:
 
 
 def slack_remove() -> None:
-    """Remove external Slack workspace auth state."""
+    """Remove stored Slack credentials."""
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No external Slack workspace configured.")
+        click.echo(auth_not_stored("Slack"))
         return
 
-    if not click.confirm("Remove Slack auth state? This cannot be undone."):
+    if not click.confirm(
+        "Remove Slack credentials? Reconfigure by running 'summon auth slack login' again.",
+    ):
         return
 
     try:
@@ -441,7 +478,7 @@ def slack_remove() -> None:
     with contextlib.suppress(FileNotFoundError):
         config_path.unlink()
 
-    click.echo("Slack auth state removed.")
+    click.echo(auth_removed("Slack"))
 
 
 def slack_channels(*, refresh: bool = False) -> None:
@@ -452,14 +489,25 @@ def slack_channels(*, refresh: bool = False) -> None:
     """
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon auth slack login <workspace>")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="not_configured",
+                message=auth_not_configured_msg("summon auth slack login <workspace>"),
+            )
+        )
         return
 
     try:
         workspace = json.loads(config_path.read_text())
     except (json.JSONDecodeError, OSError):
-        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message="workspace config is corrupted (re-run `summon auth slack login`)",
+            )
+        )
         return
     workspace_url = workspace.get("url", "")
     cached_channels = workspace.get("channels")
@@ -498,6 +546,12 @@ def _fetch_channels_via_playwright(
     if not state_path.is_file():
         click.echo("Auth state expired or missing.")
         click.echo(f"Re-run: summon auth slack login {workspace_url}")
+        return None
+
+    # [SEC] Validate path is within expected directory (mirrors _check_existing_slack_auth)
+    expected_dir = get_browser_auth_dir()
+    if not state_path.resolve().is_relative_to(expected_dir.resolve()):
+        click.echo("Auth state path is outside expected directory.", err=True)
         return None
 
     try:

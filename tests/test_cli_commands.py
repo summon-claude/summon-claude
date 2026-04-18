@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -1218,6 +1219,466 @@ class TestAuthStatus:
         assert "corrupted" in result.output
         assert "summon auth slack login" in result.output
 
+    def test_auth_status_jira_authenticated_with_site(self, tmp_path):
+        """auth status Jira PASS line includes site name when available."""
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=tmp_path / "x"),
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch(
+                "summon_claude.jira_auth.get_jira_site_name",
+                return_value="mycompany.atlassian.net",
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "Jira: authenticated (site: mycompany.atlassian.net)" in result.output
+
+    def test_auth_status_jira_authenticated_without_site(self, tmp_path):
+        """auth status Jira PASS line omits site suffix when site name unavailable."""
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=tmp_path / "x"),
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch("summon_claude.jira_auth.get_jira_site_name", return_value=None),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "Jira: authenticated" in result.output
+        assert "(site:" not in result.output
+
+    def test_auth_status_slack_authenticated_labels(self, tmp_path):
+        """auth status Slack PASS line uses 'workspace:' and 'saved' labels."""
+        import json
+
+        ws_file = tmp_path / "ws.json"
+        ws_file.write_text(json.dumps({"url": "myteam.slack.com"}))
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=ws_file),
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False),
+            patch(
+                "summon_claude.cli.auth._check_existing_slack_auth",
+                return_value={"age": "2 days ago", "url": "myteam.slack.com"},
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "workspace: myteam.slack.com" in result.output
+        assert "saved 2 days ago" in result.output
+
+    def test_auth_status_slack_expired(self, tmp_path):
+        """auth status shows FAIL when Slack config exists but auth is expired."""
+        import json
+
+        ws_file = tmp_path / "ws.json"
+        ws_file.write_text(json.dumps({"url": "myteam.slack.com"}))
+        with (
+            patch("summon_claude.cli.auth._check_github_status", return_value=None),
+            patch("summon_claude.cli.auth._check_google_status", return_value=None),
+            patch("summon_claude.cli.auth._check_jira_status", return_value=None),
+            patch("summon_claude.cli.auth.get_workspace_config_path", return_value=ws_file),
+            patch("summon_claude.cli.auth._check_existing_slack_auth", return_value=None),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status"])
+        assert result.exit_code == 0
+        assert "FAIL" in result.output
+        assert "expired or missing" in result.output
+        assert "myteam.slack.com" in result.output
+
+
+class TestAuthStatusJSON:
+    """Tests for summon auth status --json flag."""
+
+    def test_auth_status_json_no_providers(self, tmp_path):
+        """--json outputs all four providers as not_configured."""
+        import json
+
+        with (
+            patch(
+                "summon_claude.cli.auth._check_github_status_data",
+                return_value={"provider": "github", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_google_status_data",
+                return_value={"provider": "google", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_jira_status_data",
+                return_value={"provider": "jira", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_slack_status_data",
+                return_value={"provider": "slack", "status": "not_configured"},
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["providers"]) == 4
+        assert all(p["status"] == "not_configured" for p in data["providers"])
+
+    def test_auth_status_json_github_configured(self, tmp_path):
+        """--json includes GitHub login and scopes."""
+        import json
+
+        with (
+            patch(
+                "summon_claude.cli.auth._check_github_status_data",
+                return_value={
+                    "provider": "github",
+                    "status": "authenticated",
+                    "login": "testuser",
+                    "scopes": "repo",
+                },
+            ),
+            patch(
+                "summon_claude.cli.auth._check_google_status_data",
+                return_value={"provider": "google", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_jira_status_data",
+                return_value={"provider": "jira", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_slack_status_data",
+                return_value={"provider": "slack", "status": "not_configured"},
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        github = data["providers"][0]
+        assert github["login"] == "testuser"
+        assert github["scopes"] == "repo"
+
+    def test_auth_status_json_quiet(self):
+        """--json output is still produced when --quiet is passed."""
+        import json
+
+        with (
+            patch(
+                "summon_claude.cli.auth._check_github_status_data",
+                return_value={"provider": "github", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_google_status_data",
+                return_value={"provider": "google", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_jira_status_data",
+                return_value={"provider": "jira", "status": "not_configured"},
+            ),
+            patch(
+                "summon_claude.cli.auth._check_slack_status_data",
+                return_value={"provider": "slack", "status": "not_configured"},
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["--quiet", "auth", "status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["providers"]) == 4
+
+
+class TestCheckGithubStatusData:
+    """Unit tests for _check_github_status_data dict-returning helper."""
+
+    def test_not_configured(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            result = _check_github_status_data()
+        assert result == {"provider": "github", "status": "not_configured"}
+
+    def test_authenticated(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="fake-token"),
+            patch(
+                "summon_claude.cli.config.asyncio.run",
+                return_value={"login": "testuser", "scopes": "repo,gist"},
+            ),
+        ):
+            result = _check_github_status_data()
+        assert result["provider"] == "github"
+        assert result["status"] == "authenticated"
+        assert result["login"] == "testuser"
+        assert result["scopes"] == "repo,gist"
+
+    def test_sanitizes_login(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="fake-token"),
+            patch(
+                "summon_claude.cli.config.asyncio.run",
+                return_value={"login": "evil<script>", "scopes": "repo"},
+            ),
+        ):
+            result = _check_github_status_data()
+        assert result["login"] == "evilscript"
+
+    def test_login_empty_after_sanitize(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="fake-token"),
+            patch(
+                "summon_claude.cli.config.asyncio.run",
+                return_value={"login": "!!!", "scopes": ""},
+            ),
+        ):
+            result = _check_github_status_data()
+        assert result["login"] == "unknown"
+
+    def test_network_error(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="fake-token"),
+            patch("summon_claude.cli.config.asyncio.run", side_effect=OSError("timeout")),
+        ):
+            result = _check_github_status_data()
+        assert result["provider"] == "github"
+        assert result["status"] == "authenticated"
+        assert "validation skipped" in result["note"]
+
+    def test_token_invalid(self):
+        from summon_claude.cli.config import _check_github_status_data
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="fake-token"),
+            patch("summon_claude.cli.config.asyncio.run", return_value=None),
+        ):
+            result = _check_github_status_data()
+        assert result == {"provider": "github", "status": "error", "error": "token invalid"}
+
+
+class TestCheckJiraStatusData:
+    """Unit tests for _check_jira_status_data dict-returning helper."""
+
+    def test_not_configured(self):
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            result = _check_jira_status_data()
+        assert result == {"provider": "jira", "status": "not_configured"}
+
+    def test_corrupt_token(self, tmp_path):
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text("not valid json{{{")
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "error"
+        assert "corrupt" in result["error"]
+
+    def test_missing_access_token(self, tmp_path):
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text('{"cloud_id": "abc"}')
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "error"
+        assert "access_token" in result["error"]
+
+    def test_missing_cloud_id(self, tmp_path):
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text('{"access_token": "tok"}')
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "error"
+        assert "cloud_id" in result["error"]
+
+    def test_authenticated_with_site(self, tmp_path):
+        import json as _json
+        import time
+
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_data = {
+            "access_token": "tok",
+            "cloud_id": "abc-123",
+            "cloud_name": "myorg",
+            "expires_at": time.time() + 3600,
+        }
+        token_file.write_text(_json.dumps(token_data))
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["provider"] == "jira"
+        assert result["status"] == "authenticated"
+        assert result["site"] == "myorg"
+
+    def test_authenticated_no_cloud_name(self, tmp_path):
+        import json as _json
+        import time
+
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_data = {
+            "access_token": "tok",
+            "cloud_id": "abc-123",
+            "expires_at": time.time() + 3600,
+        }
+        token_file.write_text(_json.dumps(token_data))
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "authenticated"
+        assert "site" not in result
+
+    def test_expired_with_refresh_token(self, tmp_path):
+        """Expired token with refresh_token is still OK (daemon will refresh)."""
+        import json as _json
+
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_data = {
+            "access_token": "tok",
+            "cloud_id": "abc-123",
+            "expires_at": 0,
+            "refresh_token": "rt",
+        }
+        token_file.write_text(_json.dumps(token_data))
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "authenticated"
+
+    def test_expired_without_refresh_token(self, tmp_path):
+        import json as _json
+
+        from summon_claude.cli.auth import _check_jira_status_data
+
+        token_file = tmp_path / "token.json"
+        token_data = {
+            "access_token": "tok",
+            "cloud_id": "abc-123",
+            "expires_at": 0,
+        }
+        token_file.write_text(_json.dumps(token_data))
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file),
+        ):
+            result = _check_jira_status_data()
+        assert result["status"] == "error"
+        assert "expired" in result["error"]
+
+
+class TestCheckSlackStatusData:
+    """Unit tests for _check_slack_status_data dict-returning helper."""
+
+    def test_not_configured(self, tmp_path):
+        from summon_claude.cli.auth import _check_slack_status_data
+
+        with patch(
+            "summon_claude.cli.auth.get_workspace_config_path",
+            return_value=tmp_path / "nonexistent.json",
+        ):
+            result = _check_slack_status_data()
+        assert result == {"provider": "slack", "status": "not_configured"}
+
+    def test_corrupted_config(self, tmp_path):
+        from summon_claude.cli.auth import _check_slack_status_data
+
+        bad_config = tmp_path / "workspace.json"
+        bad_config.write_text("not valid json{{{")
+        with patch(
+            "summon_claude.cli.auth.get_workspace_config_path",
+            return_value=bad_config,
+        ):
+            result = _check_slack_status_data()
+        assert result["provider"] == "slack"
+        assert result["status"] == "error"
+        assert result["error"] == "corrupted config"
+
+    def test_authenticated(self, tmp_path):
+        import json as _json
+
+        from summon_claude.cli.auth import _check_slack_status_data
+
+        config_file = tmp_path / "workspace.json"
+        config_file.write_text(_json.dumps({"url": "https://myteam.slack.com"}))
+        with (
+            patch(
+                "summon_claude.cli.auth.get_workspace_config_path",
+                return_value=config_file,
+            ),
+            patch(
+                "summon_claude.cli.auth._check_existing_slack_auth",
+                return_value={
+                    "saved": "2026-01-01 12:00 UTC",
+                    "saved_iso": "2026-01-01T12:00:00+00:00",
+                    "age": "3d ago",
+                    "user_id": "U12345",
+                    "url": "https://myteam.slack.com",
+                },
+            ),
+        ):
+            result = _check_slack_status_data()
+        assert result["provider"] == "slack"
+        assert result["status"] == "authenticated"
+        assert result["saved_at"] == "2026-01-01T12:00:00+00:00"
+        assert result["workspace_url"] == "https://myteam.slack.com"
+
+    def test_expired(self, tmp_path):
+        """Auth exists but expired — returns error status."""
+        import json as _json
+
+        from summon_claude.cli.auth import _check_slack_status_data
+
+        config_file = tmp_path / "workspace.json"
+        config_file.write_text(_json.dumps({"url": "https://myteam.slack.com"}))
+        with (
+            patch(
+                "summon_claude.cli.auth.get_workspace_config_path",
+                return_value=config_file,
+            ),
+            patch("summon_claude.cli.auth._check_existing_slack_auth", return_value=None),
+        ):
+            result = _check_slack_status_data()
+        assert result["provider"] == "slack"
+        assert result["status"] == "error"
+        assert result["error"] == "expired"
+        assert result["workspace_url"] == "https://myteam.slack.com"
+
 
 class TestGitHubAuthCLI:
     """Tests for auth github login/logout Click commands."""
@@ -1328,7 +1789,7 @@ class TestGitHubAuthCLI:
             result = runner.invoke(cli, ["auth", "github", "logout"])
 
         assert result.exit_code == 0
-        assert "removed" in result.output
+        assert "GitHub credentials removed." in result.output
 
     def test_github_logout_no_token(self):
         with patch("summon_claude.github_auth.remove_token", return_value=False):
@@ -1336,7 +1797,36 @@ class TestGitHubAuthCLI:
             result = runner.invoke(cli, ["auth", "github", "logout"])
 
         assert result.exit_code == 0
-        assert "No GitHub token" in result.output
+        assert "No GitHub credentials stored." in result.output
+
+
+class TestLoginKeyboardInterrupt:
+    def test_google_login_keyboard_interrupt(self):
+        """Ctrl+C during google login prints cancellation."""
+        with patch("summon_claude.cli.auth.google_auth", side_effect=KeyboardInterrupt):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "google", "login"])
+        assert "cancelled" in result.output.lower()
+
+    def test_jira_login_keyboard_interrupt(self):
+        """Ctrl+C during jira login prints cancellation."""
+        from unittest.mock import AsyncMock
+
+        with patch(
+            "summon_claude.jira_auth.try_refresh_only",
+            new_callable=AsyncMock,
+            side_effect=KeyboardInterrupt,
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "jira", "login"])
+        assert "cancelled" in result.output.lower()
+
+    def test_slack_login_keyboard_interrupt(self):
+        """Ctrl+C during slack login prints cancellation."""
+        with patch("summon_claude.cli.auth.slack_auth", side_effect=KeyboardInterrupt):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "slack", "login", "test-workspace"])
+        assert "cancelled" in result.output.lower()
 
 
 class TestConfigSetChoiceValidation:
@@ -1563,6 +2053,77 @@ class TestGetUpgradeCommand:
             assert "pipx upgrade" in get_upgrade_command()
 
 
+class TestSaveMonitoredChannels:
+    """Tests for _save_monitored_channels atomic write."""
+
+    def test_creates_new_config(self, tmp_path):
+        from summon_claude.cli.slack_auth import _save_monitored_channels
+
+        config_file = tmp_path / "summon.env"
+        with patch("summon_claude.cli.slack_auth.get_config_file", return_value=config_file):
+            _save_monitored_channels("C01ABC,C02DEF")
+        content = config_file.read_text()
+        assert "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C01ABC,C02DEF" in content
+
+    def test_preserves_existing_keys(self, tmp_path):
+        from summon_claude.cli.slack_auth import _save_monitored_channels
+
+        config_file = tmp_path / "summon.env"
+        config_file.write_text("SUMMON_DEFAULT_MODEL=opus\nSUMMON_SCRIBE_ENABLED=true\n")
+        with patch("summon_claude.cli.slack_auth.get_config_file", return_value=config_file):
+            _save_monitored_channels("C01ABC")
+        content = config_file.read_text()
+        assert "SUMMON_DEFAULT_MODEL=opus" in content
+        assert "SUMMON_SCRIBE_ENABLED=true" in content
+        assert "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C01ABC" in content
+
+    def test_updates_existing_key(self, tmp_path):
+        from summon_claude.cli.slack_auth import _save_monitored_channels
+
+        config_file = tmp_path / "summon.env"
+        config_file.write_text("SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C_OLD\n")
+        with patch("summon_claude.cli.slack_auth.get_config_file", return_value=config_file):
+            _save_monitored_channels("C_NEW")
+        content = config_file.read_text()
+        assert "C_OLD" not in content
+        assert "SUMMON_SCRIBE_SLACK_MONITORED_CHANNELS=C_NEW" in content
+
+    def test_empty_string_skips(self, tmp_path):
+        from summon_claude.cli.slack_auth import _save_monitored_channels
+
+        config_file = tmp_path / "summon.env"
+        config_file.write_text("KEY=val\n")
+        with patch("summon_claude.cli.slack_auth.get_config_file", return_value=config_file):
+            _save_monitored_channels("")
+        # File unchanged
+        assert config_file.read_text() == "KEY=val\n"
+
+
+class TestFetchChannelsPathGuard:
+    """Path-traversal guard in _fetch_channels_via_playwright."""
+
+    def test_rejects_path_outside_browser_auth_dir(self, tmp_path):
+        from summon_claude.cli.slack_auth import _fetch_channels_via_playwright
+
+        # Create a state file outside the expected browser auth directory
+        outside_file = tmp_path / "outside" / "state.json"
+        outside_file.parent.mkdir()
+        outside_file.write_text("{}")
+
+        workspace = {
+            "url": "https://myteam.slack.com",
+            "auth_state_path": str(outside_file),
+            "browser_type": "chrome",
+        }
+        with patch(
+            "summon_claude.cli.slack_auth.get_browser_auth_dir",
+            return_value=tmp_path / "expected",
+        ):
+            result = _fetch_channels_via_playwright(workspace)
+
+        assert result is None
+
+
 class TestSlackAuthLoginCLI:
     """Tests for auth slack login exception-to-exit path."""
 
@@ -1645,6 +2206,69 @@ class TestInitPydanticValidationError:
         # Validation failure now writes config and reports issues
         combined = result.output + (result.stderr or "")
         assert "potential issues" in combined or "Fix with" in combined
+
+
+class TestGitHubStatusCmd:
+    def test_auth_github_status(self):
+        """auth github status calls _check_github_status with no args."""
+        with patch("summon_claude.cli.auth._check_github_status") as mock_check:
+            mock_check.return_value = True
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "github", "status"])
+        assert result.exit_code == 0
+        mock_check.assert_called_once_with()
+
+
+class TestGoogleLogoutCmd:
+    def test_auth_google_logout_removes_credentials(self, tmp_path):
+        """auth google logout removes {email}.json credential files."""
+        from summon_claude.config import GoogleAccount
+
+        account_dir = tmp_path / "default"
+        account_dir.mkdir()
+        cred_file = account_dir / "test@example.com.json"
+        cred_file.write_text("{}")
+        client_secret = account_dir / "client_secret.json"
+        client_secret.write_text("{}")
+
+        mock_account = GoogleAccount(
+            label="default",
+            creds_dir=account_dir,
+            email="test@example.com",
+        )
+        with patch("summon_claude.config.discover_google_accounts", return_value=[mock_account]):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "google", "logout"], input="y\n")
+
+        assert result.exit_code == 0
+        assert "Google credentials removed" in result.output
+        assert not cred_file.exists()  # credential deleted
+        assert client_secret.exists()  # client_secret preserved
+
+    def test_auth_google_logout_no_credentials(self):
+        """auth google logout with no accounts."""
+        with patch("summon_claude.config.discover_google_accounts", return_value=[]):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "google", "logout"])
+        assert result.exit_code == 0
+        assert "No Google credentials stored." in result.output
+
+    def test_auth_google_logout_account_not_found(self, tmp_path):
+        """auth google logout --account with non-matching label."""
+        from summon_claude.config import GoogleAccount
+
+        account_dir = tmp_path / "default"
+        account_dir.mkdir()
+        mock_account = GoogleAccount(
+            label="default",
+            creds_dir=account_dir,
+            email="test@example.com",
+        )
+        with patch("summon_claude.config.discover_google_accounts", return_value=[mock_account]):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "google", "logout", "--account", "work"])
+        assert result.exit_code == 0
+        assert "No Google credentials found for account 'work'" in result.output
 
 
 class TestInitTextValidateFnRetry:
@@ -1734,3 +2358,282 @@ class TestInitTextValidateFnRetry:
         assert "Error:" in result.output or "at least 1" in result.output
         content = config_file.read_text()
         assert "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES=10" in content
+
+
+# ---------------------------------------------------------------------------
+# Auth formatting helpers — unit tests + cross-provider consistency
+# ---------------------------------------------------------------------------
+
+
+class TestAuthFormattingHelpers:
+    """Unit tests for shared auth formatting functions in formatting.py."""
+
+    def test_auth_status_line_authenticated(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("GitHub", status="authenticated", message="authenticated as bob")
+        assert "GitHub: authenticated as bob" in line
+
+    def test_auth_status_line_not_configured(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("Jira", status="not_configured", message="not configured")
+        assert "Jira: not configured" in line
+
+    def test_auth_status_line_error(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("Slack", status="error", message="expired")
+        assert "Slack: expired" in line
+
+    def test_auth_status_line_warn(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("GitHub", status="warn", message="network error")
+        assert "GitHub: network error" in line
+
+    def test_auth_status_line_prefix(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("X", status="authenticated", message="ok", prefix="  ")
+        assert line.startswith("  ")
+
+    def test_auth_status_line_all_valid_statuses(self):
+        """Every AuthDisplayStatus value produces output without error."""
+        from typing import get_args
+
+        from summon_claude.cli.formatting import AuthDisplayStatus, auth_status_line
+
+        for status in get_args(AuthDisplayStatus):
+            line = auth_status_line("Test", status=status, message="ok")
+            assert "Test: ok" in line
+
+    def test_auth_not_configured_msg(self):
+        from summon_claude.cli.formatting import auth_not_configured_msg
+
+        msg = auth_not_configured_msg("summon auth github login")
+        assert msg == "not configured (run `summon auth github login`)"
+
+    def test_auth_authenticated_msg_identity_only(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(identity="bob")
+        assert msg == "authenticated as bob"
+
+    def test_auth_authenticated_msg_detail_only(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(detail="site: acme")
+        assert msg == "authenticated (site: acme)"
+
+    def test_auth_authenticated_msg_both(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(identity="bob", detail="scopes: repo")
+        assert msg == "authenticated as bob (scopes: repo)"
+
+    def test_auth_authenticated_msg_bare(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg()
+        assert msg == "authenticated"
+
+    def test_auth_login_success(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("TestProvider", identity="user@test.com", storage_path="/tmp/creds")
+        out = capsys.readouterr().out
+        assert "TestProvider authenticated as user@test.com." in out
+        assert "Credentials stored in /tmp/creds" in out
+
+    def test_auth_login_success_with_detail(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("Jira", detail="site: acme", storage_path="/tmp/j")
+        out = capsys.readouterr().out
+        assert "Jira authenticated (site: acme)." in out
+
+    def test_auth_login_success_identity_takes_precedence_over_detail(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("X", identity="user@t.co", detail="site: a", storage_path="/p")
+        out = capsys.readouterr().out
+        assert "X authenticated as user@t.co." in out
+        assert "(site: a)" not in out  # identity wins, detail is ignored
+
+    def test_auth_login_success_with_next_step(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("X", identity="u", storage_path="/p", next_step="Run Y.")
+        out = capsys.readouterr().out
+        assert "Run Y." in out
+
+    def test_auth_removed(self):
+        from summon_claude.cli.formatting import auth_removed
+
+        assert auth_removed("GitHub") == "GitHub credentials removed."
+        assert (
+            auth_removed("Google", qualifier="default") == "Google credentials removed (default)."
+        )
+
+    def test_auth_not_stored(self):
+        from summon_claude.cli.formatting import auth_not_stored
+
+        assert auth_not_stored("Jira") == "No Jira credentials stored."
+        assert (
+            auth_not_stored("Google", account="work")
+            == "No Google credentials found for account 'work'."
+        )
+
+    def test_auth_cancelled(self):
+        from summon_claude.cli.formatting import auth_cancelled
+
+        msg = auth_cancelled()
+        assert "Authentication cancelled." in msg
+
+    def test_make_auth_status_data_valid(self):
+        from summon_claude.cli.formatting import make_auth_status_data
+
+        d = make_auth_status_data("github", "authenticated", login="bob")
+        assert d == {"provider": "github", "status": "authenticated", "login": "bob"}
+
+    def test_make_auth_status_data_all_valid_statuses(self):
+        from typing import get_args
+
+        from summon_claude.cli.formatting import AuthJsonStatus, make_auth_status_data
+
+        for status in get_args(AuthJsonStatus):
+            d = make_auth_status_data("test", status)
+            assert d["provider"] == "test"
+            assert d["status"] == status
+
+
+class TestAuthOutputConsistency:
+    """Cross-provider consistency: all providers produce output matching shared patterns.
+
+    These tests exercise each provider's _check_*_status() function and assert the
+    output conforms to the standard pattern, regardless of implementation.
+    """
+
+    # Patterns that strip ANSI codes before matching
+    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+    def _strip_ansi(self, text: str) -> str:
+        return self._ANSI_RE.sub("", text)
+
+    # -- Status output patterns --
+
+    def test_github_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.config import _check_github_status
+
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            _check_github_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] GitHub: not configured \(run `.*`\)", out)
+
+    def test_github_authenticated_matches_pattern(self, capsys):
+        from summon_claude.cli.config import _check_github_status
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+            patch("summon_claude.github_auth.validate_token", new=MagicMock()),
+            patch(
+                "summon_claude.cli.config.asyncio.run",
+                return_value={"login": "testuser", "scopes": "repo"},
+            ),
+        ):
+            _check_github_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[PASS\] GitHub: authenticated as \w+", out)
+
+    def test_jira_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.auth import _check_jira_status
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            _check_jira_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Jira: not configured \(run `.*`\)", out)
+
+    def test_jira_authenticated_matches_pattern(self, capsys):
+        from summon_claude.cli.auth import _check_jira_status
+
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch("summon_claude.jira_auth.get_jira_site_name", return_value="acme"),
+        ):
+            _check_jira_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[PASS\] Jira: authenticated", out)
+
+    def test_google_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.google_auth import _check_google_status
+
+        with patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=Path("/nonexistent"),
+        ):
+            _check_google_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Google: not configured \(run `.*`\)", out)
+
+    def test_slack_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.slack_auth import slack_status
+
+        with patch(
+            "summon_claude.config.get_workspace_config_path",
+            return_value=Path("/nonexistent"),
+        ):
+            slack_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Slack: not configured", out)
+
+    def test_all_json_status_data_share_base_shape(self):
+        """All _check_*_status_data() functions return {provider, status} at minimum."""
+        from summon_claude.cli.auth import _check_jira_status_data, _check_slack_status_data
+        from summon_claude.cli.config import _check_github_status_data
+        from summon_claude.cli.google_auth import _check_google_status_data
+
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            github = _check_github_status_data()
+
+        with patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=Path("/nonexistent"),
+        ):
+            google = _check_google_status_data()
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            jira = _check_jira_status_data()
+
+        with patch(
+            "summon_claude.config.get_workspace_config_path",
+            return_value=Path("/nonexistent"),
+        ):
+            slack = _check_slack_status_data()
+
+        for name, data in [
+            ("github", github),
+            ("google", google),
+            ("jira", jira),
+            ("slack", slack),
+        ]:
+            assert "provider" in data, f"{name} missing 'provider' key"
+            assert "status" in data, f"{name} missing 'status' key"
+            assert data["status"] in {
+                "authenticated",
+                "not_configured",
+                "error",
+            }, f"{name} has unexpected status: {data['status']}"
+
+    def test_logout_messages_consistent(self):
+        """All logout commands use auth_removed/auth_not_stored patterns."""
+        from summon_claude.cli.formatting import auth_not_stored, auth_removed
+
+        # Verify the pattern is consistent across all providers
+        providers = ["GitHub", "Google", "Jira", "Slack"]
+        for p in providers:
+            removed = auth_removed(p)
+            not_stored = auth_not_stored(p)
+            assert removed.endswith("credentials removed.")
+            assert not_stored.startswith(f"No {p} credentials")

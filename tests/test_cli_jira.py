@@ -293,7 +293,8 @@ class TestJiraLogin:
 
         assert result.exit_code == 0
         mock_browser.assert_not_called()
-        assert "refreshed" in result.output.lower()
+        assert "jira authenticated" in result.output.lower()
+        assert "mcp tools will be available" in result.output.lower()
 
     def test_login_refresh_fails_falls_through(self):
         """When try_refresh_only returns False, browser flow is called."""
@@ -384,23 +385,51 @@ class TestJiraLogout:
 
 class TestJiraStatus:
     def test_jira_status_authenticated(self):
-        """When _check_jira_status returns None, output says 'authenticated'."""
-        with patch(
-            "summon_claude.jira_auth.check_jira_status",
-            return_value=None,
+        """When credentials exist and check passes, output says 'authenticated'."""
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch("summon_claude.jira_auth.get_jira_site_name", return_value=None),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["auth", "jira", "status"])
 
         assert result.exit_code == 0
         assert "authenticated" in result.output.lower()
+        assert "(site:" not in result.output
+
+    def test_jira_status_authenticated_with_site(self):
+        """When credentials exist and site is set, output includes site name."""
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch(
+                "summon_claude.jira_auth.get_jira_site_name",
+                return_value="myorg.atlassian.net",
+            ),
+        ):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "jira", "status"])
+
+        assert result.exit_code == 0
+        assert "(site: myorg.atlassian.net)" in result.output
+
+    def test_jira_status_not_configured(self):
+        """When no credentials exist, output uses INFO tag (not FAIL)."""
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            runner = CliRunner()
+            result = runner.invoke(cli, ["auth", "jira", "status"])
+
+        assert result.exit_code == 0
+        assert "not configured" in result.output
+        assert "FAIL" not in result.output
 
     def test_jira_status_error(self):
-        """When _check_jira_status returns an error string, it is displayed."""
-        error_msg = "No Jira credentials found. Run: summon auth jira login"
-        with patch(
-            "summon_claude.jira_auth.check_jira_status",
-            return_value=error_msg,
+        """When check_jira_status returns an error string, it is displayed."""
+        error_msg = "Token expired"
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=error_msg),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["auth", "jira", "status"])
@@ -411,9 +440,9 @@ class TestJiraStatus:
     def test_jira_status_missing_cloud_id_error(self):
         """Partial credentials (no cloud_id) produce an error message."""
         error_msg = "Jira credentials found but no cloud_id is configured."
-        with patch(
-            "summon_claude.jira_auth.check_jira_status",
-            return_value=error_msg,
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=error_msg),
         ):
             runner = CliRunner()
             result = runner.invoke(cli, ["auth", "jira", "status"])
@@ -423,19 +452,57 @@ class TestJiraStatus:
 
     def test_jira_status_direct_function_authenticated(self):
         """Direct call to jira_status() does not raise when authenticated."""
-        with patch(
-            "summon_claude.jira_auth.check_jira_status",
-            return_value=None,
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch("summon_claude.jira_auth.get_jira_site_name", return_value=None),
         ):
             auth_jira_status.callback()  # Should not raise
 
     def test_jira_status_direct_function_error(self):
         """Direct call to jira_status() does not raise on error status."""
-        with patch(
-            "summon_claude.jira_auth.check_jira_status",
-            return_value="some error",
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value="some error"),
         ):
             auth_jira_status.callback()  # Should not raise
+
+
+class TestCheckJiraStatusQuietMode:
+    """Tests for _check_jira_status quiet parameter."""
+
+    def test_quiet_not_configured_no_output(self, capsys):
+        """quiet=True suppresses output when not configured."""
+        from summon_claude.cli.auth import _check_jira_status
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            result = _check_jira_status(quiet=True)
+        assert result is None
+        assert capsys.readouterr().out == ""
+
+    def test_quiet_authenticated_no_output(self, capsys):
+        """quiet=True suppresses output when authenticated."""
+        from summon_claude.cli.auth import _check_jira_status
+
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+        ):
+            result = _check_jira_status(quiet=True)
+        assert result is True
+        assert capsys.readouterr().out == ""
+
+    def test_quiet_error_no_output(self, capsys):
+        """quiet=True suppresses output on error."""
+        from summon_claude.cli.auth import _check_jira_status
+
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value="broken"),
+        ):
+            result = _check_jira_status(quiet=True)
+        assert result is False
+        assert capsys.readouterr().out == ""
 
 
 # ---------------------------------------------------------------------------
@@ -764,3 +831,69 @@ class TestProjectListJQLDisplay:
 
         assert result.exit_code == 0
         assert "JQL" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# get_jira_site_name
+# ---------------------------------------------------------------------------
+
+
+class TestGetJiraSiteName:
+    def test_returns_cloud_name(self, tmp_path):
+        """get_jira_site_name returns cloud_name from token file."""
+        import json
+
+        from summon_claude.jira_auth import get_jira_site_name
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text(json.dumps({"cloud_name": "MyOrg"}))
+        with patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file):
+            result = get_jira_site_name()
+        assert result == "MyOrg"
+
+    def test_returns_none_for_missing_file(self, tmp_path):
+        """get_jira_site_name returns None when token file missing."""
+        from summon_claude.jira_auth import get_jira_site_name
+
+        with patch(
+            "summon_claude.jira_auth.get_jira_token_path",
+            return_value=tmp_path / "missing.json",
+        ):
+            result = get_jira_site_name()
+        assert result is None
+
+    def test_returns_none_for_corrupt_file(self, tmp_path):
+        """get_jira_site_name returns None for corrupt JSON."""
+        from summon_claude.jira_auth import get_jira_site_name
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text("not json{{{")
+        with patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file):
+            result = get_jira_site_name()
+        assert result is None
+
+    def test_returns_none_for_missing_cloud_name(self, tmp_path):
+        """get_jira_site_name returns None when cloud_name not in token."""
+        import json
+
+        from summon_claude.jira_auth import get_jira_site_name
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text(json.dumps({"access_token": "abc"}))
+        with patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file):
+            result = get_jira_site_name()
+        assert result is None
+
+    def test_sanitizes_non_printable_chars(self, tmp_path):
+        """get_jira_site_name strips non-printable characters."""
+        import json
+
+        from summon_claude.jira_auth import get_jira_site_name
+
+        token_file = tmp_path / "token.json"
+        token_file.write_text(json.dumps({"cloud_name": "My\x00Org\x1bName"}))
+        with patch("summon_claude.jira_auth.get_jira_token_path", return_value=token_file):
+            result = get_jira_site_name()
+        assert result == "MyOrgName"
+        assert "\x00" not in result
+        assert "\x1b" not in result
