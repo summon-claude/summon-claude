@@ -363,7 +363,9 @@ def test_derive_default_mappings() -> None:
         if field_info is None:
             continue
         result = _derive_default(opt, field_info)
-        # Result is either None (3-col table) or a non-empty string
-        assert result is None or isinstance(result, str), (
-            f"{opt.env_key}: _derive_default returned unexpected type: {type(result)}"
-        )
+        if opt.input_type == "secret":
+            assert result is None, f"{opt.env_key}: secret field must return None (3-col table)"
+        else:
+            assert isinstance(result, str) and result, (
+                f"{opt.env_key}: _derive_default must return a non-empty string, got {result!r}"
+            )

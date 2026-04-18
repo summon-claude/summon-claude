@@ -291,14 +291,15 @@ def test_jira_auto_approve_match(docs_dir: Path) -> None:
     # strip mcp__jira__ prefix → {"get", "search", "lookup"}
     # The doc uses backtick-and-asterisk form like `get*`, so match against backtick patterns
     expected_prefixes = {_strip_prefix(p, "mcp__jira__") for p in _JIRA_MCP_AUTO_APPROVE_PREFIXES}
-    missing_prefixes = [p for p in expected_prefixes if p not in line]
+    # Use backtick-bounded match to avoid false-passing on common English words
+    missing_prefixes = [p for p in expected_prefixes if f"`{p}" not in line]
     assert not missing_prefixes, (
         f"Jira auto-approve prefixes missing from doc prose: {sorted(missing_prefixes)}"
     )
 
-    # Verify all exact tool short names appear
+    # Verify all exact tool short names appear (backtick-bounded)
     expected_exact = {_strip_prefix(t, "mcp__jira__") for t in _JIRA_MCP_AUTO_APPROVE_EXACT}
-    missing_exact = [t for t in expected_exact if t not in line]
+    missing_exact = [t for t in expected_exact if f"`{t}`" not in line]
     assert not missing_exact, (
         f"Jira auto-approve exact tools missing from doc prose: {sorted(missing_exact)}"
     )
@@ -440,6 +441,13 @@ def test_all_permission_constants_are_covered() -> None:
         "_SUMMON_MCP_AUTO_APPROVE_PREFIXES",
     }
 
+    # Verify tested set doesn't contain phantom entries (renamed/removed constants)
+    phantom = tested - source_constants
+    assert not phantom, (
+        f"Names in `tested` set not found in permissions module: {sorted(phantom)}. "
+        f"Remove stale entries from the `tested` set."
+    )
+
     untested = source_constants - tested - _INTENTIONALLY_UNTESTED
     assert not untested, (
         f"Permission constants in permissions.py not covered by guard tests: {sorted(untested)}. "
@@ -460,6 +468,10 @@ def test_generated_sections_match() -> None:
 
     doc_path = _REPO_ROOT / "docs" / "reference" / "permissions.md"
     content = doc_path.read_text(encoding="utf-8")
-    sections = _get_sections()
+    try:
+        sections = _get_sections()
+    except RuntimeError as e:
+        pytest.fail(str(e))
+        raise  # unreachable — satisfies type checker
     updated = generate(content, sections)
     assert content == updated, "permissions.md is stale — run `make docs-permissions` to regenerate"

@@ -44,8 +44,8 @@ def _parse_session_commands_table(content: str) -> list[str]:
     table_row_re = re.compile(r"^\|\s*`!(\S+)", re.MULTILINE)
     for m in table_row_re.finditer(section):
         raw = m.group(1)
-        # Strip trailing backtick or other punctuation, take first word
-        name = raw.rstrip("`").split()[0].lower()
+        # Strip trailing backtick or other punctuation
+        name = raw.rstrip("`").lower()
         # Skip table separator rows
         if name.startswith("-"):
             continue
