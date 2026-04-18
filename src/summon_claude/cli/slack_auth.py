@@ -13,6 +13,13 @@ from urllib.parse import urlparse
 
 import click
 
+from summon_claude.cli.formatting import (
+    auth_authenticated_msg,
+    auth_login_success,
+    auth_not_stored,
+    auth_removed,
+    auth_status_line,
+)
 from summon_claude.config import (
     get_browser_auth_dir,
     get_config_file,
@@ -297,8 +304,6 @@ def slack_auth(workspace: str) -> None:
 
     effective_url = result.resolved_url or workspace_url
 
-    from summon_claude.cli.formatting import auth_login_success  # noqa: PLC0415
-
     identity = result.user_id or "unknown"
     auth_login_success("Slack", identity=identity, storage_path=result.state_file.parent)
     click.echo(f"  Team ID:  {result.team_id or 'not detected'}")
@@ -370,20 +375,26 @@ def slack_status() -> None:
     """Show external Slack workspace configuration and auth status."""
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon auth slack login <workspace-url>")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="not_configured",
+                message="not configured (run `summon auth slack login <workspace>`)",
+            )
+        )
         return
 
     try:
         workspace = json.loads(config_path.read_text())
     except (json.JSONDecodeError, OSError):
-        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message="workspace config is corrupted (re-run `summon auth slack login`)",
+            )
+        )
         return
-
-    from summon_claude.cli.formatting import (  # noqa: PLC0415
-        auth_authenticated_msg,
-        auth_status_line,
-    )
 
     url = workspace.get("url", "N/A")
     existing = _check_existing_slack_auth()
@@ -433,8 +444,6 @@ def slack_status() -> None:
 
 def slack_remove() -> None:
     """Remove stored Slack credentials."""
-    from summon_claude.cli.formatting import auth_not_stored, auth_removed  # noqa: PLC0415
-
     config_path = get_workspace_config_path()
     if not config_path.exists():
         click.echo(auth_not_stored("Slack"))
@@ -479,14 +488,25 @@ def slack_channels(*, refresh: bool = False) -> None:
     """
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No external Slack workspace configured.")
-        click.echo("Run: summon auth slack login <workspace>")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="not_configured",
+                message="not configured (run `summon auth slack login <workspace>`)",
+            )
+        )
         return
 
     try:
         workspace = json.loads(config_path.read_text())
     except (json.JSONDecodeError, OSError):
-        click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message="workspace config is corrupted (re-run `summon auth slack login`)",
+            )
+        )
         return
     workspace_url = workspace.get("url", "")
     cached_channels = workspace.get("channels")

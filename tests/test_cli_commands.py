@@ -2449,6 +2449,14 @@ class TestAuthFormattingHelpers:
         out = capsys.readouterr().out
         assert "Jira authenticated (site: acme)." in out
 
+    def test_auth_login_success_identity_takes_precedence_over_detail(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("X", identity="user@t.co", detail="site: a", storage_path="/p")
+        out = capsys.readouterr().out
+        assert "X authenticated as user@t.co." in out
+        assert "(site: a)" not in out  # identity wins, detail is ignored
+
     def test_auth_login_success_with_next_step(self, capsys):
         from summon_claude.cli.formatting import auth_login_success
 
@@ -2557,6 +2565,28 @@ class TestAuthOutputConsistency:
             _check_jira_status()
         out = self._strip_ansi(capsys.readouterr().out)
         assert re.search(r"\[PASS\] Jira: authenticated", out)
+
+    def test_google_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.google_auth import _check_google_status
+
+        with patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=Path("/nonexistent"),
+        ):
+            _check_google_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Google: not configured \(run `.*`\)", out)
+
+    def test_slack_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.slack_auth import slack_status
+
+        with patch(
+            "summon_claude.config.get_workspace_config_path",
+            return_value=Path("/nonexistent"),
+        ):
+            slack_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Slack: not configured", out)
 
     def test_all_json_status_data_share_base_shape(self):
         """All _check_*_status_data() functions return {provider, status} at minimum."""

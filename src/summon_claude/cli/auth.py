@@ -160,7 +160,7 @@ def _check_jira_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
             auth_status_line(
                 "Jira",
                 status="authenticated",
-                message=auth_authenticated_msg(detail=detail) if detail else "authenticated",
+                message=auth_authenticated_msg(detail=detail),
                 prefix=prefix,
             )
         )

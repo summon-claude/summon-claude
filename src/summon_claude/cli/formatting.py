@@ -149,6 +149,8 @@ _AUTH_STATUS_TAGS: dict[str, str] = {
     "warn": "WARN",
 }
 
+# "warn" is intentionally absent — JSON output uses "authenticated" even when
+# validation was skipped (the token exists, we just can't verify it online).
 _VALID_AUTH_JSON_STATUSES = frozenset({"authenticated", "not_configured", "error"})
 
 
