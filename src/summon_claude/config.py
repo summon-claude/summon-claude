@@ -68,7 +68,7 @@ def _find_project_root() -> Path | None:
 
 
 @functools.lru_cache(maxsize=1)
-def _get_git_main_repo_root(cwd: Path) -> Path | None:
+def get_git_main_repo_root(cwd: Path) -> Path | None:
     """Return the main repo root for the given directory (worktree-aware).
 
     For a normal git repo, returns the same directory (parent of .git/).
@@ -128,7 +128,7 @@ def _detect_install_mode() -> tuple[str, Path | None]:
         if venv_path.is_absolute():
             if venv_path.resolve().is_relative_to(project_root.resolve()):
                 return ("local", project_root)
-            main_root = _get_git_main_repo_root(project_root)
+            main_root = get_git_main_repo_root(project_root)
             if (
                 main_root is not None
                 and main_root.resolve() != project_root.resolve()

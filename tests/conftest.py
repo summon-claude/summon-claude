@@ -108,7 +108,7 @@ def _reset_install_mode(monkeypatch):
     Without this, ``uv run pytest`` sets VIRTUAL_ENV and the repo has
     pyproject.toml, so every test would detect local mode.
 
-    Invariant: _detect_install_mode only calls _get_git_main_repo_root when
+    Invariant: _detect_install_mode only calls get_git_main_repo_root when
     VIRTUAL_ENV is set (config.py line 126: ``if venv_str and ...``).
     Deleting VIRTUAL_ENV prevents the git subprocess from running.  If this
     condition ever changes, tests that don't mock subprocess.run will call
@@ -117,13 +117,13 @@ def _reset_install_mode(monkeypatch):
     from summon_claude.config import (
         _detect_install_mode,
         _find_project_root,
-        _get_git_main_repo_root,
+        get_git_main_repo_root,
     )
     from summon_claude.diagnostics import _config_dir_str, _data_dir_str
 
     _detect_install_mode.cache_clear()
     _find_project_root.cache_clear()
-    _get_git_main_repo_root.cache_clear()
+    get_git_main_repo_root.cache_clear()
     _data_dir_str.cache_clear()
     _config_dir_str.cache_clear()
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
@@ -132,7 +132,7 @@ def _reset_install_mode(monkeypatch):
     # Import fresh in case importlib.reload() created a new function object
     from summon_claude.config import _detect_install_mode as fresh
     from summon_claude.config import _find_project_root as fresh_root
-    from summon_claude.config import _get_git_main_repo_root as fresh_git
+    from summon_claude.config import get_git_main_repo_root as fresh_git
     from summon_claude.diagnostics import _config_dir_str as fresh_config
     from summon_claude.diagnostics import _data_dir_str as fresh_data
 

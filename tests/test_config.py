@@ -470,16 +470,16 @@ class TestCwdValidators:
 
 
 class TestGetGitMainRepoRoot:
-    """Unit tests for _get_git_main_repo_root().
+    """Unit tests for get_git_main_repo_root().
 
     Note: macOS pytest tmp_path resolves to /private/var/... which is outside
     Path.home(). We patch summon_claude.config.Path.home to return tmp_path so
-    the home-directory restriction in _get_git_main_repo_root passes.
+    the home-directory restriction in get_git_main_repo_root passes.
     """
 
     def test_normal_repo_returns_cwd(self, tmp_path):
         """Normal repo: --git-common-dir returns '.git' (relative) → parent of resolved .git."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         git_dir = tmp_path / ".git"
         git_dir.mkdir()
@@ -491,13 +491,13 @@ class TestGetGitMainRepoRoot:
             patch("subprocess.run", return_value=fake_result),
             patch("summon_claude.config.Path.home", return_value=tmp_path),
         ):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result == tmp_path.resolve()
 
     def test_worktree_returns_main_repo_root(self, tmp_path):
         """Worktree: --git-common-dir returns absolute path to main repo's .git directory."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         # Simulate main repo at tmp_path/main, worktree at tmp_path/wt
         main_git = tmp_path / "main" / ".git"
@@ -513,20 +513,20 @@ class TestGetGitMainRepoRoot:
             patch("subprocess.run", return_value=fake_result),
             patch("summon_claude.config.Path.home", return_value=tmp_path),
         ):
-            result = _get_git_main_repo_root(worktree_dir)
+            result = get_git_main_repo_root(worktree_dir)
 
         assert result == (tmp_path / "main").resolve()
 
     def test_git_failure_returns_none(self, tmp_path):
         """Non-zero exit code (not a git repo) returns None."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         fake_result = MagicMock()
         fake_result.returncode = 128
         fake_result.stdout = b""
 
         with patch("subprocess.run", return_value=fake_result):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
@@ -534,51 +534,51 @@ class TestGetGitMainRepoRoot:
         """TimeoutExpired is caught and returns None."""
         import subprocess
 
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
     def test_git_not_installed_returns_none(self, tmp_path):
         """FileNotFoundError (git not installed) returns None."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         with patch("subprocess.run", side_effect=FileNotFoundError):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
     def test_empty_stdout_returns_none(self, tmp_path):
         """Empty stdout (edge case) returns None."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         fake_result = MagicMock()
         fake_result.returncode = 0
         fake_result.stdout = b""
 
         with patch("subprocess.run", return_value=fake_result):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
     def test_path_too_long_returns_none(self, tmp_path):
         """Path >= 4096 chars (PATH_MAX) is rejected as a sanity check."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         fake_result = MagicMock()
         fake_result.returncode = 0
         fake_result.stdout = (b"x" * 4096) + b"\n"
 
         with patch("subprocess.run", return_value=fake_result):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
     def test_path_outside_home_returns_none(self, tmp_path):
         """Security gate: git returns a path that resolves outside Path.home() → None."""
-        from summon_claude.config import _get_git_main_repo_root
+        from summon_claude.config import get_git_main_repo_root
 
         # git reports a .git dir under /opt — outside the mocked home of /home/testuser
         fake_result = MagicMock()
@@ -589,7 +589,7 @@ class TestGetGitMainRepoRoot:
             patch("subprocess.run", return_value=fake_result),
             patch("summon_claude.config.Path.home", return_value=tmp_path / "home" / "testuser"),
         ):
-            result = _get_git_main_repo_root(tmp_path)
+            result = get_git_main_repo_root(tmp_path)
 
         assert result is None
 
@@ -599,7 +599,7 @@ class TestDetectInstallModeWorktree:
 
     All tests patch summon_claude.config.Path.home so that tmp_path directories
     satisfy the home-directory restriction in _detect_install_mode() and
-    _get_git_main_repo_root(). On macOS, pytest tmp_path resolves to
+    get_git_main_repo_root(). On macOS, pytest tmp_path resolves to
     /private/var/... which is outside Path.home().
     """
 
@@ -607,12 +607,12 @@ class TestDetectInstallModeWorktree:
         from summon_claude.config import (
             _detect_install_mode,
             _find_project_root,
-            _get_git_main_repo_root,
+            get_git_main_repo_root,
         )
 
         _detect_install_mode.cache_clear()
         _find_project_root.cache_clear()
-        _get_git_main_repo_root.cache_clear()
+        get_git_main_repo_root.cache_clear()
 
     def test_normal_repo_venv_under_root_is_local(self, tmp_path, monkeypatch):
         """(a) Regression: normal repo with venv under project root → local mode."""
@@ -730,7 +730,7 @@ class TestDetectInstallModeWorktree:
         monkeypatch.chdir(worktree)
         monkeypatch.setenv("VIRTUAL_ENV", str(venv))
 
-        # git fails → _get_git_main_repo_root returns None → no local detection
+        # git fails → get_git_main_repo_root returns None → no local detection
         with (
             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("git", 5)),
             patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
@@ -744,7 +744,7 @@ class TestDetectInstallModeWorktree:
         """Relative VIRTUAL_ENV path is not absolute → is_absolute() guard skips it → global.
 
         No subprocess.run mock needed: is_absolute() returns False before
-        _get_git_main_repo_root is ever called.
+        get_git_main_repo_root is ever called.
         """
         from summon_claude.config import _detect_install_mode
 

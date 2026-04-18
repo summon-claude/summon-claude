@@ -12,6 +12,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from summon_claude.config import get_git_main_repo_root
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN, VALID_HOOK_TYPES
 from summon_claude.sessions.registry import SessionRegistry
 
@@ -120,25 +121,13 @@ def _list_worktree_paths(cwd: Path) -> list[Path]:
         return []
 
 
-def _get_worktree_project_root(cwd: Path) -> Path | None:
-    """Return the main worktree path (first entry in git worktree list).
-
-    Returns None if git is unavailable or cwd is not inside a git worktree.
-    """
-    paths = _list_worktree_paths(cwd)
-    if not paths:
-        logger.debug("git worktree list returned no paths for cwd=%s", cwd)
-        return None
-    return paths[0]
-
-
 def run_post_worktree_hooks(cwd: Path) -> int:
     """CLI entry point for PostToolUse shell wrapper. Returns 0 always.
 
     Looks up worktree_create hooks for the project containing *cwd* and
     runs them.  Hook failures are logged as warnings but never fatal.
     """
-    project_root = _get_worktree_project_root(cwd)
+    project_root = get_git_main_repo_root(cwd)
     if project_root is None:
         logger.debug("run_post_worktree_hooks: could not determine project root for %s", cwd)
         return 0

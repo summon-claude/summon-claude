@@ -67,7 +67,7 @@ class TestWorktreeE2eHookBridge:
         def _run_in_thread() -> int:
             with (
                 patch(
-                    "summon_claude.sessions.hooks._get_worktree_project_root",
+                    "summon_claude.sessions.hooks.get_git_main_repo_root",
                     return_value=project_root,
                 ),
                 patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
@@ -94,7 +94,7 @@ class TestWorktreePostHookRunsCreateHooks:
         mock_reg_cls = _make_hooks_mock_registry([f"touch {sentinel}"])
 
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -109,7 +109,7 @@ class TestWorktreePostHookRunsCreateHooks:
         mock_reg_cls = _make_hooks_mock_registry([f"touch {file_a}", f"touch {file_b}"])
 
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -163,7 +163,7 @@ class TestWorktreePostHookFailureNonFatal:
         mock_reg_cls = _make_hooks_mock_registry(["exit 42"])
 
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -176,7 +176,7 @@ class TestWorktreePostHookFailureNonFatal:
         mock_reg_cls = _make_hooks_mock_registry(["exit 1", f"touch {sentinel}"])
 
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -216,7 +216,7 @@ class TestWorktreeProjectOverride:
         def _run() -> None:
             with (
                 patch(
-                    "summon_claude.sessions.hooks._get_worktree_project_root",
+                    "summon_claude.sessions.hooks.get_git_main_repo_root",
                     return_value=project_root,
                 ),
                 patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
@@ -260,7 +260,7 @@ class TestWorktreeProjectExplicitEmpty:
         def _run() -> None:
             with (
                 patch(
-                    "summon_claude.sessions.hooks._get_worktree_project_root",
+                    "summon_claude.sessions.hooks.get_git_main_repo_root",
                     return_value=project_root,
                 ),
                 patch("summon_claude.sessions.registry.default_db_path", return_value=db_path),
@@ -590,60 +590,10 @@ class TestShellHookProjectRootWithSpaces:
         mock_reg_cls = _make_hooks_mock_registry([f"touch '{sentinel}'"])
 
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=spaced_dir)
 
         assert exit_code == 0
         assert sentinel.exists()
-
-
-# ---------------------------------------------------------------------------
-# S-01: Home-directory containment for _get_worktree_project_root
-# ---------------------------------------------------------------------------
-
-
-class TestGetWorktreeProjectRootHomeDirGuard:
-    def test_path_outside_home_returns_none(self, tmp_path, monkeypatch):
-        from summon_claude.sessions.hooks import _get_worktree_project_root
-
-        mock_result = type(
-            "R",
-            (),
-            {
-                "returncode": 0,
-                "stdout": "worktree /opt/adversarial/repo\n",
-            },
-        )()
-        _mod = "summon_claude.sessions.hooks"
-        monkeypatch.setattr(f"{_mod}.subprocess.run", lambda *a, **kw: mock_result)
-        monkeypatch.setattr(
-            f"{_mod}.Path.home",
-            staticmethod(lambda: tmp_path / "home"),
-        )
-        (tmp_path / "home").mkdir()
-
-        assert _get_worktree_project_root(tmp_path) is None
-
-    def test_path_inside_home_returns_resolved(self, tmp_path, monkeypatch):
-        from summon_claude.sessions.hooks import _get_worktree_project_root
-
-        home = tmp_path / "home"
-        home.mkdir()
-        repo = home / "projects" / "myrepo"
-        repo.mkdir(parents=True)
-
-        mock_result = type(
-            "R",
-            (),
-            {
-                "returncode": 0,
-                "stdout": f"worktree {repo}\n",
-            },
-        )()
-        _mod = "summon_claude.sessions.hooks"
-        monkeypatch.setattr(f"{_mod}.subprocess.run", lambda *a, **kw: mock_result)
-        monkeypatch.setattr(f"{_mod}.Path.home", staticmethod(lambda: home))
-
-        assert _get_worktree_project_root(tmp_path) == repo.resolve()

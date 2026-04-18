@@ -488,7 +488,7 @@ class TestRunPostWorktreeHooksIntegration:
 
         mock_reg_cls = _make_hooks_mock_registry(["true"])
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -501,7 +501,7 @@ class TestRunPostWorktreeHooksIntegration:
 
         mock_reg_cls = _make_hooks_mock_registry(["exit 1"])
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -514,7 +514,7 @@ class TestRunPostWorktreeHooksIntegration:
 
         mock_reg_cls = _make_hooks_mock_registry([])
         with (
-            patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=tmp_path),
+            patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=tmp_path),
             patch("summon_claude.sessions.hooks.SessionRegistry", mock_reg_cls),
         ):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
@@ -522,10 +522,10 @@ class TestRunPostWorktreeHooksIntegration:
         assert exit_code == 0
 
     def test_run_post_worktree_hooks_returns_zero_when_not_in_git_worktree(self, tmp_path):
-        """run_post_worktree_hooks returns 0 when _get_worktree_project_root returns None."""
+        """run_post_worktree_hooks returns 0 when get_git_main_repo_root returns None."""
         from summon_claude.sessions.hooks import run_post_worktree_hooks
 
-        with patch("summon_claude.sessions.hooks._get_worktree_project_root", return_value=None):
+        with patch("summon_claude.sessions.hooks.get_git_main_repo_root", return_value=None):
             exit_code = run_post_worktree_hooks(cwd=tmp_path)
 
         assert exit_code == 0
