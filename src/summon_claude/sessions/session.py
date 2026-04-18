@@ -3059,7 +3059,7 @@ class SummonSession:
     async def _handle_diff_file(  # noqa: PLR0912
         self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
     ) -> None:
-        """Handle !diff <file> — show git diff for a specific file."""
+        """Handle !diff <file> — show uncommitted changes for a specific file."""
         result = await self._resolve_cwd_path(rt, user_path, thread_ts)
         if result is None:
             return
@@ -3092,6 +3092,7 @@ class SummonSession:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "diff",
+                "HEAD",
                 "--",
                 resolved,
                 cwd=cwd,
@@ -3186,7 +3187,7 @@ class SummonSession:
     async def _handle_diff_all(  # noqa: PLR0912, PLR0915
         self, rt: _SessionRuntime, thread_ts: str | None
     ) -> None:
-        """Handle bare !diff — show combined git diff for all changes."""
+        """Handle bare !diff — show all uncommitted changes (staged + unstaged)."""
         if not self._is_git_repo:
             if self._changed_files:
                 await self._post_change_summary(rt, thread_ts=thread_ts)
@@ -3203,6 +3204,7 @@ class SummonSession:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "diff",
+                "HEAD",
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,

@@ -44,7 +44,7 @@ These commands are handled locally by summon without forwarding to Claude.
 | `!compact [INSTRUCTIONS]` | | Compact conversation context (reduces token usage) |
 | `!summon start` | | Spawn a new child session in the current channel |
 | `!summon resume [SESSION_ID]` | | Resume a previous Claude Code session |
-| `!diff [FILE]` | | Show git diff — all uncommitted changes, or a specific file |
+| `!diff [FILE]` | | Show uncommitted changes (staged + unstaged) for all files or a specific file |
 | `!show FILE` | | Show current contents of a file |
 | `!changes` | | Show all files changed in this session |
 
@@ -144,7 +144,7 @@ Spawns or resumes sessions from within a running session. Child sessions appear 
 !diff package.json
 ```
 
-Without arguments, shows all uncommitted changes (tracked working-tree diff plus synthetic new-file diffs for untracked files). With a file argument, shows the working-tree diff for that file; for untracked files, shows a synthetic new-file diff. Rendered as a Slack snippet with syntax highlighting.
+Without arguments, shows all uncommitted changes — both staged and unstaged — compared to HEAD, plus synthetic new-file diffs for untracked files. With a file argument, shows the same for that specific file. Rendered as a Slack snippet with syntax highlighting.
 
 ### !show
 
