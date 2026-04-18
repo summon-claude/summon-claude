@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "INCLUDE_GLOBAL_TOKEN",
     "VALID_HOOK_TYPES",
+    "_list_worktree_paths",
     "run_lifecycle_hooks",
     "run_post_worktree_hooks",
 ]
@@ -90,10 +91,10 @@ async def run_lifecycle_hooks(
     return errors
 
 
-def _get_worktree_project_root(cwd: Path) -> Path | None:
-    """Return the project root (main worktree path) by parsing `git worktree list`.
+def _list_worktree_paths(cwd: Path) -> list[Path]:
+    """Return resolved absolute paths of all git worktrees for the repo at *cwd*.
 
-    Returns None if git is unavailable or cwd is not inside a git worktree.
+    Returns an empty list on any subprocess error (fail-closed).
     """
     try:
         result = subprocess.run(
@@ -105,14 +106,26 @@ def _get_worktree_project_root(cwd: Path) -> Path | None:
             check=False,
         )
         if result.returncode != 0:
-            return None
-        # The first "worktree " line in porcelain output is the main worktree.
+            return []
+        paths = []
         for line in result.stdout.splitlines():
             if line.startswith("worktree "):
-                return Path(line[len("worktree ") :].strip())
-    except Exception as exc:
-        logger.debug("git worktree list failed: %s", exc)
-    return None
+                paths.append(Path(line[len("worktree ") :].strip()).resolve())
+        return paths
+    except Exception:
+        return []
+
+
+def _get_worktree_project_root(cwd: Path) -> Path | None:
+    """Return the main worktree path (first entry in git worktree list).
+
+    Returns None if git is unavailable or cwd is not inside a git worktree.
+    """
+    paths = _list_worktree_paths(cwd)
+    if not paths:
+        logger.debug("git worktree list returned no paths for cwd=%s", cwd)
+        return None
+    return paths[0]
 
 
 def run_post_worktree_hooks(cwd: Path) -> int:

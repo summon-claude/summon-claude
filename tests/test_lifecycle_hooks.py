@@ -532,6 +532,72 @@ class TestRunPostWorktreeHooksIntegration:
 
 
 # ---------------------------------------------------------------------------
+# _list_worktree_paths unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestListWorktreePaths:
+    """Unit tests for _list_worktree_paths — the subprocess bridge for security validation."""
+
+    def test_returns_paths_from_valid_porcelain_output(self, tmp_path):
+        """Parses 'worktree <path>' lines from git porcelain output."""
+        import subprocess as _subprocess
+
+        from summon_claude.sessions.hooks import _list_worktree_paths
+
+        fake_output = (
+            "worktree /repo/main\n"
+            "HEAD abc123\n"
+            "branch refs/heads/main\n"
+            "\n"
+            "worktree /repo/.claude/worktrees/feat-a\n"
+            "HEAD def456\n"
+            "branch refs/heads/worktree-feat-a\n"
+        )
+        mock_result = _subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=0,
+            stdout=fake_output,
+            stderr="",
+        )
+        with patch("summon_claude.sessions.hooks.subprocess.run", return_value=mock_result):
+            paths = _list_worktree_paths(tmp_path)
+
+        assert len(paths) == 2
+        assert paths[0] == Path("/repo/main").resolve()
+        assert paths[1] == Path("/repo/.claude/worktrees/feat-a").resolve()
+
+    def test_returns_empty_list_on_nonzero_returncode(self, tmp_path):
+        """Returns [] (fail-closed) when git exits with non-zero status."""
+        import subprocess as _subprocess
+
+        from summon_claude.sessions.hooks import _list_worktree_paths
+
+        mock_result = _subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=128,
+            stdout="",
+            stderr="fatal: not a git repository",
+        )
+        with patch("summon_claude.sessions.hooks.subprocess.run", return_value=mock_result):
+            paths = _list_worktree_paths(tmp_path)
+
+        assert paths == []
+
+    def test_returns_empty_list_on_exception(self, tmp_path):
+        """Returns [] (fail-closed) when subprocess.run raises (e.g. FileNotFoundError)."""
+        from summon_claude.sessions.hooks import _list_worktree_paths
+
+        with patch(
+            "summon_claude.sessions.hooks.subprocess.run",
+            side_effect=FileNotFoundError("git not found"),
+        ):
+            paths = _list_worktree_paths(tmp_path)
+
+        assert paths == []
+
+
+# ---------------------------------------------------------------------------
 # Hooks CLI commands: show, set, clear
 # ---------------------------------------------------------------------------
 

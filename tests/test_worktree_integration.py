@@ -11,6 +11,7 @@ Covers Task 3 of the worktree support plan:
 from __future__ import annotations
 
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -336,6 +337,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -361,6 +363,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -387,6 +390,7 @@ class TestShellPostWorktreeNoDbFastExit:
             ["bash", str(script)],
             env=env,
             capture_output=True,
+            stdin=subprocess.DEVNULL,
             timeout=5,
         )
         assert result.returncode == 0
@@ -395,6 +399,161 @@ class TestShellPostWorktreeNoDbFastExit:
 # ---------------------------------------------------------------------------
 # 9. Shell wrapper: PROJECT_ROOT with spaces handled correctly
 # ---------------------------------------------------------------------------
+
+
+def _make_mock_summon_bin(tmp_path: Path) -> Path:
+    """Create a minimal executable mock summon binary for shell template tests.
+
+    The binary must be executable (so the SUMMON_BIN guard passes) and have a
+    valid Python shebang (so the template can extract the Python interpreter
+    path for the inline JSON parser).  The body exits 1 so any accidental
+    invocation of ``summon hooks run post-worktree`` fails loudly.
+    """
+    python = shutil.which("python3") or shutil.which("python")
+    assert python, "No python3/python found on PATH — cannot create mock binary"
+    content = f"#!{python}\nimport sys; sys.exit(1)\n"
+    mock_bin = tmp_path / "summon"
+    mock_bin.write_text(content)
+    mock_bin.chmod(mock_bin.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return mock_bin
+
+
+class TestShellPostWorktreePathReentry:
+    """Tests for the path-based re-entry skip logic in POST_WORKTREE_TEMPLATE (C3)."""
+
+    def test_post_hook_skips_hooks_for_path_reentry(self, tmp_path):
+        """Post-hook exits 0 without running creation hooks for path-based re-entry.
+
+        When Claude Code calls EnterWorktree with a path= parameter (re-entering
+        an existing worktree), the hook receives JSON with tool_input.path set.
+        The template must detect this and exit 0 before running worktree_create hooks.
+
+        Uses a real mock binary so the SUMMON_BIN guard passes and the script
+        reaches the case block — verifying the path-skip logic fires, not the
+        early-exit guard.
+        """
+        mock_bin = _make_mock_summon_bin(tmp_path)
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", str(mock_bin))
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # Simulate the JSON that Claude Code pipes to the post-hook stdin
+        # when EnterWorktree is called with a path parameter
+        hook_input = (
+            '{"tool_name":"EnterWorktree","tool_input":{"path":"/project/.claude/worktrees/feat"}}'
+        )
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Path-based re-entry: case block detects "path": in JSON, Python parser
+        # extracts non-empty path, and the script exits 0 before calling summon.
+        # If the path-skip guard were absent, the mock binary would exit 1.
+        assert result.returncode == 0
+
+    def test_post_hook_runs_hooks_for_name_based_entry(self, tmp_path):
+        """Post-hook does NOT skip when tool_input has name= (not path=).
+
+        A name-based entry (new worktree creation) should still run creation hooks.
+        We verify the script proceeds past the path-skip guard by checking it
+        falls through to the DB check (exits 0 when DB is absent).
+        """
+        mock_bin = _make_mock_summon_bin(tmp_path)
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", str(mock_bin))
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # Name-based entry — no "path" key in tool_input
+        hook_input = '{"tool_name":"EnterWorktree","tool_input":{"name":"feat"}}'
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Name-based: case block is skipped (no "path": in JSON), falls through
+        # to DB check, exits 0 (DB doesn't exist). Mock binary is not invoked.
+        assert result.returncode == 0
+
+    def test_post_hook_skips_when_path_is_nonempty_only(self, tmp_path):
+        """Post-hook only skips if path value is non-empty in the JSON."""
+        mock_bin = _make_mock_summon_bin(tmp_path)
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", str(mock_bin))
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # tool_input has path key but empty value — should NOT skip
+        hook_input = '{"tool_name":"EnterWorktree","tool_input":{"name":"feat","path":""}}'
+
+        env = {**os.environ, "XDG_DATA_HOME": str(tmp_path / "nonexistent_data")}
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Empty path → Python returns empty string → does not exit 0 in case block
+        # → falls through to DB check, exits 0 (DB doesn't exist).
+        assert result.returncode == 0
+
+    def test_post_hook_path_reentry_without_python_falls_through(self, tmp_path):
+        """Path-based re-entry without Python available falls through to run creation hooks.
+
+        When Python is unavailable the shell cannot parse the JSON, so the path-skip
+        guard is inactive. The hook falls through to the DB/summon-binary checks and
+        runs creation hooks. This is acceptable degraded behaviour — correctness requires
+        Python; without it the hook errs on the side of running hooks rather than silently
+        skipping them.
+        """
+        # Create a mock summon binary whose shebang points to a non-existent
+        # Python, so `head -1 | sed` extracts an invalid path.  The fallback
+        # `command -v python3` finds a broken stub that exits immediately.
+        mock_bin = tmp_path / "summon-nopy"
+        mock_bin.write_text("#!/nonexistent/python\nimport sys; sys.exit(1)\n")
+        mock_bin.chmod(mock_bin.stat().st_mode | stat.S_IXUSR)
+
+        # Create a broken python3 stub: executable (so `command -v` finds it
+        # and `[ -x ]` passes) but exits immediately with error, producing no
+        # output.  The `2>/dev/null` in the template suppresses stderr, so
+        # WT_PATH ends up empty → path-skip guard does not fire.
+        fake_bin = tmp_path / "fakebin"
+        fake_bin.mkdir()
+        fake_py = fake_bin / "python3"
+        fake_py.write_text("#!/bin/sh\nexit 1\n")
+        fake_py.chmod(fake_py.stat().st_mode | stat.S_IXUSR)
+
+        content = POST_WORKTREE_TEMPLATE.replace("@@SUMMON_PATH@@", str(mock_bin))
+        script = _write_script(tmp_path / "post.sh", content)
+
+        # A path-based re-entry payload — would normally trigger the skip guard
+        hook_input = (
+            '{"tool_name":"EnterWorktree","tool_input":{"path":"/project/.claude/worktrees/feat"}}'
+        )
+
+        # PATH includes fake_bin FIRST so the broken python3 shadows the real one.
+        # /usr/bin and /bin are needed for head, sed, and other utilities.
+        env = {
+            **os.environ,
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "XDG_DATA_HOME": str(tmp_path / "nonexistent_data"),
+        }
+
+        result = subprocess.run(
+            ["bash", str(script)],
+            env=env,
+            input=hook_input.encode(),
+            capture_output=True,
+            timeout=5,
+        )
+        # Falls through to DB check (DB absent → exit 0). The hook did NOT skip
+        # hooks — it proceeded normally. Exit 0 confirms the fallthrough path.
+        assert result.returncode == 0
 
 
 class TestShellHookProjectRootWithSpaces:

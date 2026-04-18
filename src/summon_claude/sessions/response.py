@@ -178,8 +178,8 @@ class _TurnState:
     turn_thread_ts: str | None = None
     thinking_buffer: str = ""
     md_rendered_paths: set[str] = field(default_factory=set)
-    # Track EnterWorktree tool_use_ids → worktree name for callback
-    pending_worktree_names: dict[str, str] = field(default_factory=dict)
+    # Track EnterWorktree tool_use_ids → (name, path) for callback
+    pending_worktree_names: dict[str, tuple[str, str]] = field(default_factory=dict)
     # Track tool_use_id → tool name for health tracker
     tool_names: dict[str, str] = field(default_factory=dict)
     # tool_use_id → (tool_name, filepath, old_str, new_str); consumed by _handle_tool_result_block
@@ -217,7 +217,7 @@ class ResponseStreamer:
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
-        on_worktree_entered: Callable[[str], None] | None = None,
+        on_worktree_entered: Callable[[str, str], Awaitable[None]] | None = None,
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
         bridge_timeout_s: float = 960.0,
@@ -405,8 +405,17 @@ class ResponseStreamer:
             await self._router.start_subagent_thread(block.id, description)
 
         if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
-            wt_name = (block.input or {}).get("name", "")
-            self._turn.pending_worktree_names[block.id] = wt_name
+            inp = block.input or {}
+            wt_name = inp.get("name") or ""
+            wt_path = inp.get("path") or ""
+            if wt_name and wt_path:
+                logger.warning(
+                    "EnterWorktree has both name=%r and path=%r; using name",
+                    wt_name,
+                    wt_path,
+                )
+                wt_path = ""
+            self._turn.pending_worktree_names[block.id] = (wt_name, wt_path)
 
         # Await approval before posting — skip bridge for subagent tool calls.
         # The SDK may not invoke can_use_tool for tools in Task subagent messages
@@ -435,9 +444,10 @@ class ResponseStreamer:
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
-        wt_name = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
-        if wt_name is not None and not block.is_error and self._on_worktree_entered is not None:
-            self._on_worktree_entered(wt_name)
+        wt_entry = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
+        if wt_entry is not None and not block.is_error and self._on_worktree_entered is not None:
+            wt_name, wt_path = wt_entry
+            await self._on_worktree_entered(wt_name, wt_path)
         # Pop before early-return so denied/errored results don't leave stale entries
         pending_fc = self._turn.pending_file_changes.pop(block.tool_use_id, None)
         if self._mcp_health is not None:

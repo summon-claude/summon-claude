@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1499,27 +1500,43 @@ class TestClassifierIntegration:
         handler.set_classifier_enabled(True)
         mock_classifier.reset_counters.assert_called_once()
 
-    async def test_notify_entered_worktree_enables_classifier(self):
+    async def test_notify_entered_worktree_enables_classifier(self, tmp_path: Path):
         """notify_entered_worktree enables classifier when configured."""
         mock_classifier = MagicMock()
         mock_classifier.reset_counters = MagicMock()
         handler, _, _ = _make_classifier_handler(
             mock_classifier, classifier_configured=True, in_worktree=False
         )
+        # Set project_root so containment root can be computed (classifier
+        # only activates after a valid containment root is established).
+        handler._project_root = tmp_path
+        wt_dir = tmp_path / ".claude" / "worktrees" / "test-wt"
+        wt_dir.mkdir(parents=True)
         assert handler.classifier_enabled is False
 
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
         assert handler.classifier_enabled is True
         mock_classifier.reset_counters.assert_called()
 
-    async def test_notify_entered_worktree_does_not_enable_when_not_configured(self):
+    async def test_notify_entered_worktree_does_not_enable_when_not_configured(
+        self, tmp_path: Path
+    ):
         """notify_entered_worktree does NOT enable classifier when not configured."""
         mock_classifier = MagicMock()
         handler, _, _ = _make_classifier_handler(
             mock_classifier, classifier_configured=False, in_worktree=False
         )
+        # Set project_root and create worktree dir so containment_root IS set —
+        # this isolates the classifier_configured=False guard as the reason
+        # the classifier stays disabled, not a missing containment root.
+        handler._project_root = tmp_path
+        wt_dir = tmp_path / ".claude" / "worktrees" / "test-wt"
+        wt_dir.mkdir(parents=True)
 
-        handler.notify_entered_worktree("test-wt")
+        await handler.notify_entered_worktree("test-wt")
+        # Containment root is set (valid worktree), but classifier stays off
+        # because classifier_configured=False.
+        assert handler._containment_root is not None
         assert handler.classifier_enabled is False
 
     async def test_auto_on_rejected_pre_worktree(self):
