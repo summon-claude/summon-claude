@@ -39,6 +39,7 @@ from summon_claude.config import SummonConfig
 from summon_claude.sessions.classifier import extract_classifier_context
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.slack.client import sanitize_for_mrkdwn
+from summon_claude.slack.markdown_split import MARKDOWN_BLOCK_LIMIT
 from summon_claude.slack.router import ThreadRouter
 
 if TYPE_CHECKING:
@@ -1551,11 +1552,6 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
     return blocks
 
 
-_DIFF_PREVIEW_MAX_CHARS = 8000  # Well under Slack's 12K markdown block limit
-_DIFF_PREVIEW_MAX_INPUT_LINES = 500  # Cap input before computing unified_diff
-_WRITE_PREVIEW_MAX_LINES = 30
-
-
 def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str, Any]]:
     """Build Slack markdown blocks with diff/content previews for a permission batch.
 
@@ -1563,6 +1559,9 @@ def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str,
     previews.  Non-file tools are silently skipped.  Uses ``type: markdown``
     blocks with fenced ``diff`` code blocks for syntax highlighting.  If the
     block type is unsupported, Slack silently drops it — no breakage.
+
+    Output is truncated at Slack's 12K markdown block char limit — no
+    per-field line caps, so users see as much of the change as Slack allows.
     """
     previews: list[str] = []
     for req in requests:
@@ -1570,12 +1569,10 @@ def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str,
             filepath = _extract_file_path(req.tool_name, req.input_data) or "file"
             old_str = req.input_data.get("old_string", "")
             new_str = req.input_data.get("new_string", "")
-            old_lines = old_str.splitlines(keepends=True)[:_DIFF_PREVIEW_MAX_INPUT_LINES]
-            new_lines = new_str.splitlines(keepends=True)[:_DIFF_PREVIEW_MAX_INPUT_LINES]
             diff_text = "".join(
                 difflib.unified_diff(
-                    old_lines,
-                    new_lines,
+                    old_str.splitlines(keepends=True),
+                    new_str.splitlines(keepends=True),
                     fromfile=f"a/{filepath}",
                     tofile=f"b/{filepath}",
                 )
@@ -1586,18 +1583,14 @@ def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str,
             filepath = _extract_file_path(req.tool_name, req.input_data)
             content = req.input_data.get("content", "")
             if filepath and content:
-                lines = content.splitlines()
-                preview = "\n".join(lines[:_WRITE_PREVIEW_MAX_LINES])
-                if len(lines) > _WRITE_PREVIEW_MAX_LINES:
-                    preview += f"\n... ({len(lines) - _WRITE_PREVIEW_MAX_LINES} more lines)"
-                previews.append(f"# New file: {filepath}\n{preview}")
+                previews.append(f"# New file: {filepath}\n{content}")
 
     if not previews:
         return []
 
     combined = "\n".join(previews)
-    if len(combined) > _DIFF_PREVIEW_MAX_CHARS:
-        combined = combined[:_DIFF_PREVIEW_MAX_CHARS] + "\n... (truncated)"
+    if len(combined) > MARKDOWN_BLOCK_LIMIT:
+        combined = combined[:MARKDOWN_BLOCK_LIMIT] + "\n... (truncated)"
     # Escape triple backticks to prevent code fence breakout
     combined = combined.replace("```", "\u2019\u2019\u2019")
 

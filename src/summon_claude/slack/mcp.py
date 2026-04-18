@@ -25,6 +25,7 @@ from claude_agent_sdk import (
 )
 
 from summon_claude.slack.client import SlackClient
+from summon_claude.slack.markdown_split import MARKDOWN_BLOCK_LIMIT
 
 if TYPE_CHECKING:
     from claude_agent_sdk import SdkMcpTool
@@ -32,7 +33,6 @@ if TYPE_CHECKING:
 
 _MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 _MAX_TEXT_CHARS = 3000  # Slack section block limit
-_MARKDOWN_BLOCK_LIMIT = 12000  # Slack type: markdown block cumulative limit
 
 _PARENT_TS_RE = re.compile(r"^\d+\.\d+$")
 _EMOJI_RE = re.compile(r"^[A-Za-z0-9_+]+$")
@@ -395,7 +395,7 @@ def create_summon_mcp_tools(  # noqa: PLR0915
         formatted = f"*{title}*\n```{lang}\n{code}\n```"
 
         # Content > 12K → file upload fallback
-        if len(formatted) > _MARKDOWN_BLOCK_LIMIT:
+        if len(formatted) > MARKDOWN_BLOCK_LIMIT:
             snippet_type = lang.lower() or None
             try:
                 await client.upload(

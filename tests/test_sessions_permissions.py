@@ -375,7 +375,7 @@ class TestDiffPreviewBlocks:
         assert "New file: /src/new.py" in blocks[0]["text"]
         assert "print('hello')" in blocks[0]["text"]
 
-    def test_write_truncates_at_30_lines(self):
+    def test_write_shows_full_content(self):
         content = "\n".join(f"line {i}" for i in range(50))
         req = PendingRequest(
             request_id="r1",
@@ -385,9 +385,8 @@ class TestDiffPreviewBlocks:
         blocks = _build_diff_preview_blocks([req])
         assert len(blocks) == 1
         text = blocks[0]["text"]
-        assert "line 29" in text
-        assert "line 30" not in text
-        assert "... (20 more lines)" in text
+        assert "line 0" in text
+        assert "line 49" in text
 
     def test_bash_produces_no_block(self):
         req = PendingRequest(
@@ -485,30 +484,14 @@ class TestDiffPreviewBlocks:
         assert len(blocks) == 1
         assert "```" not in blocks[0]["text"].split("```diff\n", 1)[1].rsplit("\n```", 1)[0]
 
-    def test_large_input_capped_before_diff(self):
-        req = PendingRequest(
-            request_id="r1",
-            tool_name="Edit",
-            input_data={
-                "path": "/src/big.py",
-                "old_string": "line\n" * 1000,
-                "new_string": "changed\n" * 1000,
-            },
-        )
-        blocks = _build_diff_preview_blocks([req])
-        assert len(blocks) == 1
-        # Input capped at 500 lines — diff should be present but not include all 1000 lines
-        diff_body = blocks[0]["text"]
-        assert "+changed" in diff_body
-
     def test_large_diff_truncated(self):
         req = PendingRequest(
             request_id="r1",
             tool_name="Edit",
             input_data={
                 "path": "/src/big.py",
-                "old_string": ("a" * 40 + "\n") * 500,
-                "new_string": ("b" * 40 + "\n") * 500,
+                "old_string": ("a" * 40 + "\n") * 200,
+                "new_string": ("b" * 40 + "\n") * 200,
             },
         )
         blocks = _build_diff_preview_blocks([req])
