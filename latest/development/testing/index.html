@@ -2603,7 +2603,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <h3 id="quick-skip-slack-llm-integration-fail-fast">Quick (skip Slack + LLM integration, fail-fast)<a class="headerlink" href="#quick-skip-slack-llm-integration-fail-fast" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>py-test-quick
 <span class="c1"># or</span>
-uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slack and not llm&quot;</span>
+uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slack and not llm and not link_check&quot;</span>
 </code></pre></div>
 <h3 id="single-module">Single module<a class="headerlink" href="#single-module" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_auth.py<span class="w"> </span>-v
@@ -2654,6 +2654,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <span class="w">    </span><span class="s2">&quot;llm: marks tests that make real LLM API calls&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="s2">&quot;xdist_group: groups tests to run on the same worker (pytest-xdist)&quot;</span><span class="p">,</span>
 <span class="w">    </span><span class="s2">&quot;docs: documentation validation tests&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">&quot;link_check: External URL link validation tests (network-dependent)&quot;</span><span class="p">,</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>Key settings:
@@ -2727,14 +2728,14 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
     <span class="c1"># spawns a real Claude subprocess</span>
     <span class="o">...</span>
 </code></pre></div>
-<p>Excluded from pre-commit runs: <code>make py-test-quick</code> passes <code>-m "not slack and not llm"</code>.</p>
+<p>Excluded from pre-commit runs: <code>make py-test-quick</code> passes <code>-m "not slack and not llm and not link_check"</code>.</p>
 <hr />
 <h2 id="documentation-validation-tests">Documentation Validation Tests<a class="headerlink" href="#documentation-validation-tests" title="Permanent link">&para;</a></h2>
 <p>Documentation tests (<code>pytest.mark.docs</code>) verify that docs stay in sync with the codebase and that code examples are valid.</p>
 <h3 id="running-doc-tests">Running doc tests<a class="headerlink" href="#running-doc-tests" title="Permanent link">&para;</a></h3>
 <p>Doc tests run automatically as part of the main test suite (<code>make py-test</code> or <code>make py-test-quick</code>).
 To run only doc tests:</p>
-<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/docs/<span class="w"> </span>-v<span class="w"> </span>-m<span class="w"> </span>docs
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>docs-test
 </code></pre></div>
 <h3 id="test-categories">Test categories<a class="headerlink" href="#test-categories" title="Permanent link">&para;</a></h3>
 <table>
@@ -2763,7 +2764,7 @@ To run only doc tests:</p>
 </tr>
 <tr>
 <td><code>test_links.py</code></td>
-<td>External URLs in docs return 2xx/3xx (rejects redirects)</td>
+<td>External URLs in docs return 2xx with no redirect. Network tests use <code>link_check</code> marker; run separately via <code>make docs-test-links</code></td>
 </tr>
 </tbody>
 </table>
@@ -2784,18 +2785,20 @@ summon start --model opus
 <p>The <code>notest</code> attribute is invisible to documentation readers — markdown renderers ignore unknown attributes after the language identifier.</p>
 <h3 id="ci-integration">CI integration<a class="headerlink" href="#ci-integration" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>test</code> job:</strong> <code>make py-test</code> runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks + link checks. <code>make docs-test</code> runs markdown code block validation separately</li>
-<li><strong><code>slack-integration</code> job:</strong> Runs bash CLI tests with real credentials (Tier 2 commands like <code>summon config show</code>)</li>
+<li><strong><code>test</code> job:</strong> <code>make py-test</code> runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks. <code>make docs-test</code> runs markdown code block validation separately</li>
+<li><strong><code>link-check</code> job:</strong> <code>make docs-test-links</code> runs external URL link validation (advisory — visible red X on failure, does not block merge)</li>
 </ul>
 <hr />
 <h2 id="ci-testing">CI Testing<a class="headerlink" href="#ci-testing" title="Permanent link">&para;</a></h2>
-<p>The <code>ci.yaml</code> workflow runs three parallel jobs on every PR to <code>main</code>:</p>
+<p>The <code>ci.yaml</code> workflow runs parallel jobs on every PR to <code>main</code>:</p>
 <ol>
 <li><strong><code>lint</code></strong> — <code>make py-lint</code> (ruff check + format)</li>
 <li><strong><code>typecheck</code></strong> — <code>make py-typecheck</code> (pyright)</li>
 <li><strong><code>test</code></strong> — <code>make py-test</code> + <code>make docs-test</code> (full pytest suite + markdown code block validation)</li>
+<li><strong><code>docs</code></strong> — <code>mkdocs build --strict</code> (docs build check, PRs only)</li>
+<li><strong><code>link-check</code></strong> — <code>make docs-test-links</code> (external URL validation, advisory — does not block merge)</li>
 </ol>
-<p>All three jobs run independently in parallel. Slack integration tests run only on pushes to <code>main</code>.</p>
+<p>All five jobs run independently in parallel. Job 5 (<code>link-check</code>) is advisory — it shows a red X on failure but is not intended to block merge.</p>
 <p><strong>Debugging CI failures:</strong></p>
 <ul>
 <li><strong>Flaky parallel test:</strong> Run locally with <code>-n0</code> to get clean output: <code>uv run pytest tests/test_&lt;module&gt;.py -v -n0</code></li>
