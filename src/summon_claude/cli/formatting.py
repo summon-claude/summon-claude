@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import click
 
@@ -135,3 +136,115 @@ def _mask_secret(value: str, prefix_len: int = 5) -> str:
     if len(value) > 2 * prefix_len:
         return f"{value[:prefix_len]}*** [{len(value)} chars]"
     return f"[{len(value)} chars]"
+
+
+# ---------------------------------------------------------------------------
+# Auth output consistency — shared formatters for all providers
+# ---------------------------------------------------------------------------
+
+_AUTH_STATUS_TAGS: dict[str, str] = {
+    "authenticated": "PASS",
+    "not_configured": "INFO",
+    "error": "FAIL",
+    "warn": "WARN",
+}
+
+_VALID_AUTH_JSON_STATUSES = frozenset({"authenticated", "not_configured", "error"})
+
+
+def auth_status_line(
+    provider: str,
+    *,
+    status: str,
+    message: str,
+    prefix: str = "",
+) -> str:
+    """Build a tagged auth status line: ``{prefix}[TAG] Provider: message``.
+
+    *status* selects the colored tag: authenticated->PASS, not_configured->INFO,
+    error->FAIL, warn->WARN.
+    """
+    tag_name = _AUTH_STATUS_TAGS.get(status)
+    if tag_name is None:
+        raise ValueError(
+            f"Unknown auth status {status!r}; expected one of {sorted(_AUTH_STATUS_TAGS)}"
+        )
+    return f"{prefix}{format_tag(tag_name)} {provider}: {message}"
+
+
+def auth_not_configured_msg(setup_cmd: str) -> str:
+    """Standard 'not configured' message with setup/login hint."""
+    return f"not configured (run `{setup_cmd}`)"
+
+
+def auth_authenticated_msg(*, identity: str = "", detail: str = "") -> str:
+    """Standard 'authenticated' message with optional identity and detail."""
+    parts = ["authenticated"]
+    if identity:
+        parts.append(f"as {identity}")
+    if detail:
+        parts.append(f"({detail})")
+    return " ".join(parts)
+
+
+def auth_login_success(
+    provider: str,
+    *,
+    identity: str = "",
+    detail: str = "",
+    storage_path: str | Path,
+    next_step: str = "",
+) -> None:
+    """Print standard post-login success output.
+
+    Produces 2+ lines::
+
+        {Provider} authenticated as {identity}.
+        Credentials stored in {path}
+        [blank line + next_step if provided]
+
+    Use *identity* for user-identifying info (email, username).
+    Use *detail* for non-identity info (site name, workspace).
+    """
+    if identity:
+        click.echo(f"{provider} authenticated as {identity}.")
+    elif detail:
+        click.echo(f"{provider} authenticated ({detail}).")
+    else:
+        click.echo(f"{provider} authenticated.")
+    click.echo(f"Credentials stored in {storage_path}")
+    if next_step:
+        click.echo()
+        click.echo(next_step)
+
+
+def auth_removed(provider: str, *, qualifier: str = "") -> str:
+    """Standard credential-removed message."""
+    suffix = f" ({qualifier})" if qualifier else ""
+    return f"{provider} credentials removed{suffix}."
+
+
+def auth_not_stored(provider: str, *, account: str = "") -> str:
+    """Standard no-credentials message."""
+    if account:
+        return f"No {provider} credentials found for account '{account}'."
+    return f"No {provider} credentials stored."
+
+
+def auth_cancelled() -> str:
+    """Standard authentication cancellation message (with leading newline)."""
+    return "\nAuthentication cancelled."
+
+
+def make_auth_status_data(provider: str, status: str, **extra: object) -> dict:
+    """Build a provider status dict for ``--json`` output.
+
+    Enforces ``{"provider": ..., "status": ...}`` base shape.
+    Valid statuses: authenticated, not_configured, error.
+    """
+    if status not in _VALID_AUTH_JSON_STATUSES:
+        raise ValueError(
+            f"Invalid auth JSON status {status!r};"
+            f" expected one of {sorted(_VALID_AUTH_JSON_STATUSES)}"
+        )
+    return {"provider": provider, "status": status, **extra}

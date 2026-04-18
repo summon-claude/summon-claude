@@ -33,7 +33,15 @@ from summon_claude.cli.config import (
     github_auth_cmd,
     github_logout,
 )
-from summon_claude.cli.formatting import format_tag
+from summon_claude.cli.formatting import (
+    auth_cancelled,
+    auth_login_success,
+    auth_not_configured_msg,
+    auth_not_stored,
+    auth_removed,
+    auth_status_line,
+    make_auth_status_data,
+)
 from summon_claude.cli.google_auth import (
     _check_google_status,
     _check_google_status_data,
@@ -67,26 +75,26 @@ def _check_jira_status_data() -> dict:
     from summon_claude.jira_auth import get_jira_token_path, jira_credentials_exist  # noqa: PLC0415
 
     if not jira_credentials_exist():
-        return {"provider": "jira", "status": "not_configured"}
+        return make_auth_status_data("jira", "not_configured")
 
     # Single read — mirrors check_jira_status() validation + get_jira_site_name() extraction
     token_path = get_jira_token_path()
     try:
         token_data = json.loads(token_path.read_text())
     except (json.JSONDecodeError, OSError):
-        return {"provider": "jira", "status": "error", "error": "corrupt or unreadable"}
+        return make_auth_status_data("jira", "error", error="corrupt or unreadable")
 
     if not token_data.get("access_token"):
-        return {"provider": "jira", "status": "error", "error": "missing access_token"}
+        return make_auth_status_data("jira", "error", error="missing access_token")
 
     if not token_data.get("cloud_id"):
-        return {"provider": "jira", "status": "error", "error": "missing cloud_id"}
+        return make_auth_status_data("jira", "error", error="missing cloud_id")
 
     expires_at = token_data.get("expires_at", 0)
     if time.time() >= expires_at and not token_data.get("refresh_token"):
-        return {"provider": "jira", "status": "error", "error": "expired without refresh_token"}
+        return make_auth_status_data("jira", "error", error="expired without refresh_token")
 
-    result: dict = {"provider": "jira", "status": "authenticated"}
+    result = make_auth_status_data("jira", "authenticated")
     name = token_data.get("cloud_name")
     if name:
         site = re.sub(r"[^\x20-\x7e]", "", name)[:80]
@@ -98,21 +106,21 @@ def _check_jira_status_data() -> dict:
 def _check_slack_status_data() -> dict:
     wcp = get_workspace_config_path()
     if not wcp.exists():
-        return {"provider": "slack", "status": "not_configured"}
+        return make_auth_status_data("slack", "not_configured")
     try:
         workspace = json.loads(wcp.read_text())
         url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))[:200]
     except (json.JSONDecodeError, OSError, AttributeError):
-        return {"provider": "slack", "status": "error", "error": "corrupted config"}
+        return make_auth_status_data("slack", "error", error="corrupted config")
     existing = _check_existing_slack_auth()
     if existing:
-        return {
-            "provider": "slack",
-            "status": "authenticated",
-            "workspace_url": url,
-            "saved_at": existing["saved_iso"],
-        }
-    return {"provider": "slack", "status": "error", "error": "expired", "workspace_url": url}
+        return make_auth_status_data(
+            "slack",
+            "authenticated",
+            workspace_url=url,
+            saved_at=existing["saved_iso"],
+        )
+    return make_auth_status_data("slack", "error", error="expired", workspace_url=url)
 
 
 def _check_jira_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
@@ -129,20 +137,32 @@ def _check_jira_status(*, prefix: str = "", quiet: bool = False) -> bool | None:
     if not jira_credentials_exist():
         if not quiet:
             click.echo(
-                f"{prefix}{format_tag('INFO')} Jira: not configured (run `summon auth jira login`)"
+                auth_status_line(
+                    "Jira",
+                    status="not_configured",
+                    message=auth_not_configured_msg("summon auth jira login"),
+                    prefix=prefix,
+                )
             )
         return None
 
     err = check_jira_status()
     if err is not None:
         if not quiet:
-            click.echo(f"{prefix}{format_tag('FAIL')} Jira: {err}")
+            click.echo(auth_status_line("Jira", status="error", message=err, prefix=prefix))
         return False
 
     if not quiet:
         site = get_jira_site_name()
-        site_suffix = f" (site: {site})" if site else ""
-        click.echo(f"{prefix}{format_tag('PASS')} Jira: authenticated{site_suffix}")
+        detail = f"site: {site}" if site else ""
+        click.echo(
+            auth_status_line(
+                "Jira",
+                status="authenticated",
+                message=f"authenticated ({detail})" if detail else "authenticated",
+                prefix=prefix,
+            )
+        )
     return True
 
 
@@ -199,8 +219,14 @@ def auth_status(ctx: click.Context, as_json: bool) -> None:
             if existing:
                 url = re.sub(r"[^\x20-\x7e]", "", existing.get("url", "unknown"))[:200]
                 age = existing["age"]
-                tag = format_tag("PASS")
-                click.echo(f"  {tag} Slack: authenticated (workspace: {url}, saved {age})")
+                click.echo(
+                    auth_status_line(
+                        "Slack",
+                        status="authenticated",
+                        message=f"authenticated (workspace: {url}, saved {age})",
+                        prefix="  ",
+                    )
+                )
             else:
                 # Config exists but auth is expired/missing — read URL for display
                 try:
@@ -208,14 +234,33 @@ def auth_status(ctx: click.Context, as_json: bool) -> None:
                     url = re.sub(r"[^\x20-\x7e]", "", workspace.get("url", "unknown"))[:200]
                 except (json.JSONDecodeError, OSError, AttributeError):
                     click.echo(
-                        f"  {format_tag('FAIL')} Slack: workspace config is corrupted"
-                        " (re-run `summon auth slack login`)"
+                        auth_status_line(
+                            "Slack",
+                            status="error",
+                            message="workspace config is corrupted"
+                            " (re-run `summon auth slack login`)",
+                            prefix="  ",
+                        )
                     )
                     url = None
                 if url is not None:
-                    click.echo(f"  {format_tag('FAIL')} Slack: auth expired or missing ({url})")
+                    click.echo(
+                        auth_status_line(
+                            "Slack",
+                            status="error",
+                            message=f"auth expired or missing ({url})",
+                            prefix="  ",
+                        )
+                    )
     elif not quiet:
-        click.echo(f"  {format_tag('INFO')} Slack: not configured (run `summon auth slack login`)")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="not_configured",
+                message=auth_not_configured_msg("summon auth slack login"),
+                prefix="  ",
+            )
+        )
 
     if not any_configured and not quiet:
         click.echo()
@@ -243,7 +288,7 @@ def auth_github_login() -> None:
     try:
         asyncio.run(github_auth_cmd())
     except KeyboardInterrupt:
-        click.echo("\nAuthentication cancelled.", err=True)
+        click.echo(auth_cancelled(), err=True)
 
 
 @auth_github.command("logout")
@@ -285,7 +330,7 @@ def auth_google_login(account: str | None) -> None:
     try:
         google_auth(account=account)
     except KeyboardInterrupt:
-        click.echo("\nAuthentication cancelled.", err=True)
+        click.echo(auth_cancelled(), err=True)
 
 
 @auth_google.command("status")
@@ -323,7 +368,7 @@ def auth_slack_login(workspace: str) -> None:
     try:
         slack_auth(workspace)
     except KeyboardInterrupt:
-        click.echo("\nAuthentication cancelled.", err=True)
+        click.echo(auth_cancelled(), err=True)
 
 
 @auth_slack.command("logout")
@@ -417,10 +462,12 @@ def auth_jira_login(site: str | None) -> None:  # noqa: PLR0912, PLR0915
             token = load_jira_token()
             if token:
                 site_name = token.get("cloud_name", "Unknown")
-                click.echo(f"Jira authenticated (site: {site_name}).")
-                click.echo(f"Credentials stored in {get_jira_token_path().parent}")
-                click.echo()
-                click.echo("Jira MCP tools will be available on next session start.")
+                auth_login_success(
+                    "Jira",
+                    detail=f"site: {site_name}",
+                    storage_path=get_jira_token_path().parent,
+                    next_step="Jira MCP tools will be available on next session start.",
+                )
                 return
 
         click.echo("Opening browser for Jira authentication...")
@@ -487,12 +534,14 @@ def auth_jira_login(site: str | None) -> None:  # noqa: PLR0912, PLR0915
 
         save_jira_token(token_data)
         site_label = token_data.get("cloud_name", token_data["cloud_id"])
-        click.echo(f"Jira authenticated (site: {site_label}).")
-        click.echo(f"Credentials stored in {get_jira_token_path().parent}")
-        click.echo()
-        click.echo("Jira MCP tools will be available on next session start.")
+        auth_login_success(
+            "Jira",
+            detail=f"site: {site_label}",
+            storage_path=get_jira_token_path().parent,
+            next_step="Jira MCP tools will be available on next session start.",
+        )
     except (KeyboardInterrupt, click.Abort):
-        click.echo("\nAuthentication cancelled.", err=True)
+        click.echo(auth_cancelled(), err=True)
 
 
 @auth_jira.command("logout")
@@ -501,10 +550,10 @@ def auth_jira_logout() -> None:
     from summon_claude.jira_auth import jira_credentials_exist, logout  # noqa: PLC0415
 
     if not jira_credentials_exist():
-        click.echo("No Jira credentials to remove.")
+        click.echo(auth_not_stored("Jira"))
         return
     logout()
-    click.echo("Jira credentials removed.")
+    click.echo(auth_removed("Jira"))
 
 
 @auth_jira.command("status")

@@ -297,9 +297,10 @@ def slack_auth(workspace: str) -> None:
 
     effective_url = result.resolved_url or workspace_url
 
+    from summon_claude.cli.formatting import auth_login_success  # noqa: PLC0415
+
     identity = result.user_id or "unknown"
-    click.echo(f"Slack authenticated as {identity}.")
-    click.echo(f"Credentials stored in {result.state_file.parent}")
+    auth_login_success("Slack", identity=identity, storage_path=result.state_file.parent)
     click.echo(f"  Team ID:  {result.team_id or 'not detected'}")
     click.echo(f"  Channels: {len(result.channels) if result.channels else 0} found")
     if result.resolved_url and result.resolved_url.rstrip("/") != workspace_url.rstrip("/"):
@@ -379,15 +380,26 @@ def slack_status() -> None:
         click.echo("Workspace config is corrupted. Re-run: summon auth slack login")
         return
 
-    from summon_claude.cli.formatting import format_tag  # noqa: PLC0415
+    from summon_claude.cli.formatting import auth_status_line  # noqa: PLC0415
 
     url = workspace.get("url", "N/A")
     existing = _check_existing_slack_auth()
     if existing:
-        tag = format_tag("PASS")
-        click.echo(f"{tag} Slack: authenticated (workspace: {url}, saved {existing['age']})")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="authenticated",
+                message=f"authenticated (workspace: {url}, saved {existing['age']})",
+            )
+        )
     else:
-        click.echo(f"{format_tag('FAIL')} Slack: auth expired or missing ({url})")
+        click.echo(
+            auth_status_line(
+                "Slack",
+                status="error",
+                message=f"auth expired or missing ({url})",
+            )
+        )
     click.echo()
     click.echo(f"Workspace URL: {workspace.get('url', 'N/A')}")
     user_id = workspace.get("user_id", "")
@@ -416,9 +428,11 @@ def slack_status() -> None:
 
 def slack_remove() -> None:
     """Remove stored Slack credentials."""
+    from summon_claude.cli.formatting import auth_not_stored, auth_removed  # noqa: PLC0415
+
     config_path = get_workspace_config_path()
     if not config_path.exists():
-        click.echo("No Slack credentials stored.")
+        click.echo(auth_not_stored("Slack"))
         return
 
     if not click.confirm(
@@ -449,7 +463,7 @@ def slack_remove() -> None:
     with contextlib.suppress(FileNotFoundError):
         config_path.unlink()
 
-    click.echo("Slack credentials removed.")
+    click.echo(auth_removed("Slack"))
 
 
 def slack_channels(*, refresh: bool = False) -> None:

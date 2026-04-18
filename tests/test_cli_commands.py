@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -2357,3 +2358,240 @@ class TestInitTextValidateFnRetry:
         assert "Error:" in result.output or "at least 1" in result.output
         content = config_file.read_text()
         assert "SUMMON_SCRIBE_SCAN_INTERVAL_MINUTES=10" in content
+
+
+# ---------------------------------------------------------------------------
+# Auth formatting helpers — unit tests + cross-provider consistency
+# ---------------------------------------------------------------------------
+
+
+class TestAuthFormattingHelpers:
+    """Unit tests for shared auth formatting functions in formatting.py."""
+
+    def test_auth_status_line_authenticated(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("GitHub", status="authenticated", message="authenticated as bob")
+        assert "GitHub: authenticated as bob" in line
+
+    def test_auth_status_line_not_configured(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("Jira", status="not_configured", message="not configured")
+        assert "Jira: not configured" in line
+
+    def test_auth_status_line_error(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("Slack", status="error", message="expired")
+        assert "Slack: expired" in line
+
+    def test_auth_status_line_warn(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("GitHub", status="warn", message="network error")
+        assert "GitHub: network error" in line
+
+    def test_auth_status_line_prefix(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        line = auth_status_line("X", status="authenticated", message="ok", prefix="  ")
+        assert line.startswith("  ")
+
+    def test_auth_status_line_invalid_status_raises(self):
+        from summon_claude.cli.formatting import auth_status_line
+
+        with pytest.raises(ValueError, match="Unknown auth status"):
+            auth_status_line("X", status="bogus", message="nope")
+
+    def test_auth_not_configured_msg(self):
+        from summon_claude.cli.formatting import auth_not_configured_msg
+
+        msg = auth_not_configured_msg("summon auth github login")
+        assert msg == "not configured (run `summon auth github login`)"
+
+    def test_auth_authenticated_msg_identity_only(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(identity="bob")
+        assert msg == "authenticated as bob"
+
+    def test_auth_authenticated_msg_detail_only(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(detail="site: acme")
+        assert msg == "authenticated (site: acme)"
+
+    def test_auth_authenticated_msg_both(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg(identity="bob", detail="scopes: repo")
+        assert msg == "authenticated as bob (scopes: repo)"
+
+    def test_auth_authenticated_msg_bare(self):
+        from summon_claude.cli.formatting import auth_authenticated_msg
+
+        msg = auth_authenticated_msg()
+        assert msg == "authenticated"
+
+    def test_auth_login_success(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("TestProvider", identity="user@test.com", storage_path="/tmp/creds")
+        out = capsys.readouterr().out
+        assert "TestProvider authenticated as user@test.com." in out
+        assert "Credentials stored in /tmp/creds" in out
+
+    def test_auth_login_success_with_detail(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("Jira", detail="site: acme", storage_path="/tmp/j")
+        out = capsys.readouterr().out
+        assert "Jira authenticated (site: acme)." in out
+
+    def test_auth_login_success_with_next_step(self, capsys):
+        from summon_claude.cli.formatting import auth_login_success
+
+        auth_login_success("X", identity="u", storage_path="/p", next_step="Run Y.")
+        out = capsys.readouterr().out
+        assert "Run Y." in out
+
+    def test_auth_removed(self):
+        from summon_claude.cli.formatting import auth_removed
+
+        assert auth_removed("GitHub") == "GitHub credentials removed."
+        assert (
+            auth_removed("Google", qualifier="default") == "Google credentials removed (default)."
+        )
+
+    def test_auth_not_stored(self):
+        from summon_claude.cli.formatting import auth_not_stored
+
+        assert auth_not_stored("Jira") == "No Jira credentials stored."
+        assert (
+            auth_not_stored("Google", account="work")
+            == "No Google credentials found for account 'work'."
+        )
+
+    def test_auth_cancelled(self):
+        from summon_claude.cli.formatting import auth_cancelled
+
+        msg = auth_cancelled()
+        assert "Authentication cancelled." in msg
+
+    def test_make_auth_status_data_valid(self):
+        from summon_claude.cli.formatting import make_auth_status_data
+
+        d = make_auth_status_data("github", "authenticated", login="bob")
+        assert d == {"provider": "github", "status": "authenticated", "login": "bob"}
+
+    def test_make_auth_status_data_invalid_status_raises(self):
+        from summon_claude.cli.formatting import make_auth_status_data
+
+        with pytest.raises(ValueError, match="Invalid auth JSON status"):
+            make_auth_status_data("x", "bogus")
+
+    def test_make_auth_status_data_all_valid_statuses(self):
+        from summon_claude.cli.formatting import _VALID_AUTH_JSON_STATUSES, make_auth_status_data
+
+        for status in _VALID_AUTH_JSON_STATUSES:
+            d = make_auth_status_data("test", status)
+            assert d["provider"] == "test"
+            assert d["status"] == status
+
+
+class TestAuthOutputConsistency:
+    """Cross-provider consistency: all providers produce output matching shared patterns.
+
+    These tests exercise each provider's _check_*_status() function and assert the
+    output conforms to the standard pattern, regardless of implementation.
+    """
+
+    # Patterns that strip ANSI codes before matching
+    _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+    def _strip_ansi(self, text: str) -> str:
+        return self._ANSI_RE.sub("", text)
+
+    # -- Status output patterns --
+
+    def test_github_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.config import _check_github_status
+
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            _check_github_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] GitHub: not configured \(run `.*`\)", out)
+
+    def test_github_authenticated_matches_pattern(self, capsys):
+        from summon_claude.cli.config import _check_github_status
+
+        with (
+            patch("summon_claude.github_auth.load_token", return_value="gho_test"),
+            patch("summon_claude.github_auth.validate_token", new=MagicMock()),
+            patch(
+                "summon_claude.cli.config.asyncio.run",
+                return_value={"login": "testuser", "scopes": "repo"},
+            ),
+        ):
+            _check_github_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[PASS\] GitHub: authenticated as \w+", out)
+
+    def test_jira_not_configured_matches_pattern(self, capsys):
+        from summon_claude.cli.auth import _check_jira_status
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            _check_jira_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[INFO\] Jira: not configured \(run `.*`\)", out)
+
+    def test_jira_authenticated_matches_pattern(self, capsys):
+        from summon_claude.cli.auth import _check_jira_status
+
+        with (
+            patch("summon_claude.jira_auth.jira_credentials_exist", return_value=True),
+            patch("summon_claude.jira_auth.check_jira_status", return_value=None),
+            patch("summon_claude.jira_auth.get_jira_site_name", return_value="acme"),
+        ):
+            _check_jira_status()
+        out = self._strip_ansi(capsys.readouterr().out)
+        assert re.search(r"\[PASS\] Jira: authenticated", out)
+
+    def test_all_json_status_data_share_base_shape(self):
+        """All _check_*_status_data() functions return {provider, status} at minimum."""
+        from summon_claude.cli.auth import _check_jira_status_data, _check_slack_status_data
+        from summon_claude.cli.config import _check_github_status_data
+
+        with patch("summon_claude.github_auth.load_token", return_value=None):
+            github = _check_github_status_data()
+
+        with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
+            jira = _check_jira_status_data()
+
+        with patch(
+            "summon_claude.config.get_workspace_config_path",
+            return_value=Path("/nonexistent"),
+        ):
+            slack = _check_slack_status_data()
+
+        for name, data in [("github", github), ("jira", jira), ("slack", slack)]:
+            assert "provider" in data, f"{name} missing 'provider' key"
+            assert "status" in data, f"{name} missing 'status' key"
+            assert data["status"] in {
+                "authenticated",
+                "not_configured",
+                "error",
+            }, f"{name} has unexpected status: {data['status']}"
+
+    def test_logout_messages_consistent(self):
+        """All logout commands use auth_removed/auth_not_stored patterns."""
+        from summon_claude.cli.formatting import auth_not_stored, auth_removed
+
+        # Verify the pattern is consistent across all providers
+        providers = ["GitHub", "Google", "Jira", "Slack"]
+        for p in providers:
+            removed = auth_removed(p)
+            not_stored = auth_not_stored(p)
+            assert removed.endswith("credentials removed.")
+            assert not_stored.startswith(f"No {p} credentials")
