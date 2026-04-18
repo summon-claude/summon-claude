@@ -181,15 +181,9 @@ def _reset_install_mode(monkeypatch):
     monkeypatch.delenv("VIRTUAL_ENV", raising=False)
     monkeypatch.delenv("SUMMON_LOCAL", raising=False)
     yield
-    # Import fresh in case importlib.reload() created a new function object
-    from summon_claude.config import _detect_install_mode as fresh
-    from summon_claude.config import _find_project_root as fresh_root
-    from summon_claude.config import get_git_main_repo_root as fresh_git
-
-    fresh.cache_clear()
-    if hasattr(fresh_root, "cache_clear"):
-        fresh_root.cache_clear()
-    fresh_git.cache_clear()
+    _detect_install_mode.cache_clear()
+    _find_project_root.cache_clear()
+    get_git_main_repo_root.cache_clear()
 
 
 @pytest.fixture

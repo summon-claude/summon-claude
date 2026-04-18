@@ -666,20 +666,18 @@ def find_workspace_mcp_bin() -> Path:
     return Path(sys.executable).parent / "workspace-mcp"
 
 
-# Sentinel for detecting whether dotenv_settings.env_file was explicitly set to None
-_SENTINEL = object()
-
-
 class SummonConfig(BaseSettings):
     """Main configuration loaded from environment variables (SUMMON_ prefix) or .env file."""
 
     model_config = SettingsConfigDict(
         env_prefix="SUMMON_",
-        # env_file is intentionally absent here — resolved lazily in
-        # settings_customise_sources() so that get_config_file() is not called
-        # at class-definition time (import time).  Calling it eagerly would
-        # populate _detect_install_mode()'s LRU cache with real paths before
-        # test fixtures can patch _xdg_dir / get_local_root.
+        # Placeholder — NOT the real config path.  The actual env_file is
+        # resolved lazily in settings_customise_sources() so get_config_file()
+        # is never called at class-definition time (import time).  A non-None
+        # placeholder is required so pydantic-settings populates
+        # dotenv_settings.env_file with a non-None value, making it
+        # distinguishable from the _env_file=None test override.
+        env_file=(".env",),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -703,10 +701,11 @@ class SummonConfig(BaseSettings):
         that override: a None env_file means "no dotenv loading" so we pass
         the original dotenv_settings through unchanged (it will load nothing).
         """
-        # Honour _env_file=None override: the passed dotenv_settings already has
-        # env_file=None, so use it directly (reads nothing — intended for tests).
-        effective_env_file = getattr(dotenv_settings, "env_file", _SENTINEL)
-        if effective_env_file is None:
+        # Honour _env_file=None override: pydantic-settings sets
+        # dotenv_settings.env_file=None when the caller passes _env_file=None.
+        # The model_config placeholder (".env",) is non-None, so this branch
+        # only fires for the explicit None override (i.e. tests).
+        if getattr(dotenv_settings, "env_file", None) is None:
             return (init_settings, env_settings, dotenv_settings, file_secret_settings)
         # Normal path: resolve the real config file path lazily at instantiation.
         lazy_dotenv = DotEnvSettingsSource(

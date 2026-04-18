@@ -4,7 +4,7 @@ These tests prove that the _isolate_data_dir fixture comprehensively intercepts
 ALL callers of get_data_dir() and get_config_dir(), regardless of import style,
 with zero per-module maintenance.
 
-The isolation mechanism (Approach A):
+The isolation mechanism:
   - Patches summon_claude.config._xdg_dir → all calls to get_data_dir/get_config_dir
     that delegate to _xdg_dir are redirected to temp dirs.
   - Patches summon_claude.config.get_local_root → returns None (global mode), so
@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import ast
 import importlib
-import importlib.util
 import sys
 from pathlib import Path
 
@@ -39,12 +38,12 @@ import summon_claude.sessions.session
 from summon_claude.config import get_config_dir, get_data_dir
 
 # ---------------------------------------------------------------------------
-# (b) Prove get_data_dir() / get_config_dir() return temp paths during tests
+# Prove get_data_dir() / get_config_dir() return temp paths during tests
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.xdist_group("data_dir_isolation")
-def test_data_dir_is_isolated(monkeypatch):
+def test_data_dir_is_isolated():
     """Prove that during test execution, get_data_dir() and get_config_dir()
     return isolated temp paths (not the real XDG/home directories).
 
@@ -53,11 +52,6 @@ def test_data_dir_is_isolated(monkeypatch):
     expected isolation is in effect by:
     1. Calling get_data_dir() and checking it differs from the real XDG path.
     2. Calling get_config_dir() and checking it differs from the real XDG path.
-
-    Note: tests that call importlib.reload() break session-scoped patches in
-    the same worker.  This test uses the _reset_install_mode monkeypatch to
-    ensure get_local_root returns None (global mode) via _detect_install_mode
-    cache clear, which is enough to verify isolation when patches are active.
 
     If this test fails, it typically means one of:
     - import-time evaluation was reintroduced into config.py
@@ -83,7 +77,7 @@ def test_data_dir_is_isolated(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# (c) ALL module-level bindings resolve to the same isolated path
+# ALL module-level bindings resolve to the same isolated path
 # ---------------------------------------------------------------------------
 
 
@@ -183,30 +177,20 @@ class TestModuleBindingsAreCovered:
 
 
 # ---------------------------------------------------------------------------
-# (d) Auto-discovery: find ALL import sites and verify coverage
+# Auto-discovery: find ALL module-level import sites and verify coverage
 # ---------------------------------------------------------------------------
-
-# Modules that ONLY have inline (inside-function-body) imports of get_data_dir/
-# get_config_dir (no module-level import).  Inline imports pick up the source-level
-# patch automatically (they re-execute the import statement each time).
-# summon_claude.diagnostics is excluded: it has a top-level import at line 21 that
-# IS verifiable, plus inline imports at lines 339/526 that resolve to None via
-# getattr and are skipped automatically.
-_INLINE_ONLY_MODULES = frozenset(
-    {
-        "summon_claude.slack.bolt",
-        "summon_claude.jira_auth",
-    }
-)
 
 _SRC_ROOT = Path(__file__).parent.parent / "src"
 _PACKAGE_ROOT = _SRC_ROOT / "summon_claude"
 
 
 def _find_import_sites() -> list[tuple[str, int, str]]:
-    """AST-scan all .py files and return (module_dotpath, lineno, name) tuples
-    for every static 'from summon_claude.config import ... get_data_dir/get_config_dir'
-    at module level (not inside a function body).
+    """AST-scan all .py files for module-level imports of get_data_dir/get_config_dir.
+
+    Returns (module_dotpath, lineno, name) tuples.  Only top-level statements
+    are checked (``ast.iter_child_nodes`` on the module body), so inline imports
+    inside function bodies are excluded — those are covered automatically by the
+    source-level ``_xdg_dir`` patch via LEGB resolution.
     """
     targets = {"get_data_dir", "get_config_dir"}
     sites: list[tuple[str, int, str]] = []
@@ -222,16 +206,15 @@ def _find_import_sites() -> list[tuple[str, int, str]]:
         except SyntaxError:
             continue
 
-        for node in ast.walk(tree):
+        # Only top-level statements — inline imports inside function bodies
+        # are excluded (they pick up the _xdg_dir source patch automatically).
+        for node in ast.iter_child_nodes(tree):
             if not isinstance(node, ast.ImportFrom):
                 continue
             if node.module != "summon_claude.config":
                 continue
-            # Check if this import is at module level (not inside a function)
-            # We approximate this by checking the node appears in the top-level body
             for name_alias in node.names:
-                imported = name_alias.asname or name_alias.name
-                if imported in targets or name_alias.name in targets:
+                if name_alias.name in targets:
                     sites.append((module_path, node.lineno, name_alias.name))
 
     return sites
@@ -242,24 +225,15 @@ def _find_import_sites() -> list[tuple[str, int, str]]:
 def test_import_site_is_isolated(info):
     """Auto-discovered import site: calling the function returns the isolated path.
 
-    This test parameterizes over ALL static import sites discovered by AST scan.
-    A new module that imports get_data_dir from summon_claude.config will
+    This test parameterizes over ALL module-level import sites discovered by AST
+    scan.  A new module that imports get_data_dir from summon_claude.config will
     automatically appear here and be verified — zero conftest changes needed.
     """
     module_dotpath, lineno, func_name = info
 
     canonical = get_data_dir() if func_name == "get_data_dir" else get_config_dir()
 
-    # Skip modules that only use inline imports: they have no module-level attribute
-    # to verify, but the _xdg_dir source patch covers them automatically.
-    if module_dotpath in _INLINE_ONLY_MODULES:
-        pytest.skip(f"Inline-only import in {module_dotpath} — auto-covered by _xdg_dir patch")
-
-    try:
-        mod = importlib.import_module(module_dotpath)
-    except ImportError as e:
-        pytest.skip(f"Could not import {module_dotpath}: {e}")
-
+    mod = importlib.import_module(module_dotpath)
     fn = getattr(mod, func_name, None)
     if fn is None:
         pytest.skip(f"{module_dotpath} does not expose {func_name} as a module attribute")

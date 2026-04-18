@@ -555,8 +555,9 @@ class TestFindProjectRootHardening:
 class TestDefaultDbPathMigrationGuard:
     """Tests for default_db_path() local-mode migration suppression.
 
-    The conftest patches ``default_db_path`` at session scope, so we reload
-    the module to get the real function and patch its dependencies directly.
+    Uses module-level captures of ``_registry_mod`` and ``_real_default_db_path``
+    (captured before session fixtures run) to access the real function without
+    ``importlib.reload()``, which would break session-scoped patches.
     """
 
     @staticmethod
