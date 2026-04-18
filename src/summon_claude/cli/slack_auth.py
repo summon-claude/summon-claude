@@ -16,6 +16,7 @@ import click
 from summon_claude.cli.formatting import (
     auth_authenticated_msg,
     auth_login_success,
+    auth_not_configured_msg,
     auth_not_stored,
     auth_removed,
     auth_status_line,
@@ -379,7 +380,7 @@ def slack_status() -> None:
             auth_status_line(
                 "Slack",
                 status="not_configured",
-                message="not configured (run `summon auth slack login <workspace>`)",
+                message=auth_not_configured_msg("summon auth slack login <workspace>"),
             )
         )
         return
@@ -492,7 +493,7 @@ def slack_channels(*, refresh: bool = False) -> None:
             auth_status_line(
                 "Slack",
                 status="not_configured",
-                message="not configured (run `summon auth slack login <workspace>`)",
+                message=auth_not_configured_msg("summon auth slack login <workspace>"),
             )
         )
         return

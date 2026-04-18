@@ -2592,9 +2592,16 @@ class TestAuthOutputConsistency:
         """All _check_*_status_data() functions return {provider, status} at minimum."""
         from summon_claude.cli.auth import _check_jira_status_data, _check_slack_status_data
         from summon_claude.cli.config import _check_github_status_data
+        from summon_claude.cli.google_auth import _check_google_status_data
 
         with patch("summon_claude.github_auth.load_token", return_value=None):
             github = _check_github_status_data()
+
+        with patch(
+            "summon_claude.cli.google_auth.get_google_credentials_dir",
+            return_value=Path("/nonexistent"),
+        ):
+            google = _check_google_status_data()
 
         with patch("summon_claude.jira_auth.jira_credentials_exist", return_value=False):
             jira = _check_jira_status_data()
@@ -2605,7 +2612,12 @@ class TestAuthOutputConsistency:
         ):
             slack = _check_slack_status_data()
 
-        for name, data in [("github", github), ("jira", jira), ("slack", slack)]:
+        for name, data in [
+            ("github", github),
+            ("google", google),
+            ("jira", jira),
+            ("slack", slack),
+        ]:
             assert "provider" in data, f"{name} missing 'provider' key"
             assert "status" in data, f"{name} missing 'status' key"
             assert data["status"] in {
