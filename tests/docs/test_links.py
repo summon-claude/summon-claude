@@ -87,13 +87,16 @@ def _is_github_url(url: str) -> bool:
 def _fetch(url: str, method: str = "HEAD") -> tuple[int, str]:
     """Fetch URL and return (status, final_url) with retry on transient errors."""
     headers: dict[str, str] = {"User-Agent": "summon-claude-docs-linkcheck/1.0"}
-    if _GITHUB_TOKEN and _is_github_url(url):
-        headers["Authorization"] = f"token {_GITHUB_TOKEN}"
+    github_auth = _GITHUB_TOKEN and _is_github_url(url)
     for attempt in range(_MAX_RETRIES + 1):
         try:
             req = Request(  # noqa: S310
                 url, headers=headers, method=method
             )
+            if github_auth:
+                # Use unredirected_header so the token is NOT forwarded on
+                # cross-domain redirects (urllib forwards regular headers).
+                req.add_unredirected_header("Authorization", f"token {_GITHUB_TOKEN}")
             with urlopen(req, timeout=_TIMEOUT) as resp:  # noqa: S310
                 return resp.status, resp.url
         except HTTPError as e:
