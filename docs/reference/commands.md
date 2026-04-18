@@ -43,7 +43,7 @@ These commands are handled locally by summon without forwarding to Claude.
 | `!end` | `!quit`, `!exit`, `!logout` | End this session |
 | `!help` |  | Show available commands |
 | `!model` |  | Switch or display the active model |
-| `!show` |  | Show current file contents |
+| `!show <file>` |  | Show current file contents |
 | `!status` |  | Show session status |
 | `!stop` |  | Cancel the current Claude turn |
 | `!summon` |  | Spawn or resume a session |
