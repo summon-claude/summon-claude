@@ -28,7 +28,7 @@ uv run pytest tests/ -v
 ```
 make py-test-quick
 # or
-uv run pytest --maxfail=1 -q -m "not slack and not llm"
+uv run pytest --maxfail=1 -q -m "not slack and not llm and not link_check"
 ```
 
 ### Single module
@@ -104,6 +104,7 @@ markers = [
     "llm: marks tests that make real LLM API calls",
     "xdist_group: groups tests to run on the same worker (pytest-xdist)",
     "docs: documentation validation tests",
+    "link_check: External URL link validation tests (network-dependent)",
 ]
 ```
 
@@ -203,7 +204,7 @@ async def test_classifier_blocks_dangerous_command():
     ...
 ```
 
-Excluded from pre-commit runs: `make py-test-quick` passes `-m "not slack and not llm"`.
+Excluded from pre-commit runs: `make py-test-quick` passes `-m "not slack and not llm and not link_check"`.
 
 ______________________________________________________________________
 
@@ -216,18 +217,18 @@ Documentation tests (`pytest.mark.docs`) verify that docs stay in sync with the 
 Doc tests run automatically as part of the main test suite (`make py-test` or `make py-test-quick`). To run only doc tests:
 
 ```
-uv run pytest tests/docs/ -v -m docs
+make docs-test
 ```
 
 ### Test categories
 
-| Test file                 | What it checks                                           |
-| ------------------------- | -------------------------------------------------------- |
-| `test_cli_commands.py`    | CLI commands in docs match Click definitions             |
-| `test_env_vars.py`        | `SUMMON_*` env vars in docs match `SummonConfig` fields  |
-| `test_mcp_tools.py`       | MCP tool docs match source tool schemas and counts       |
-| `test_bash_codeblocks.py` | `summon` commands in bash blocks execute successfully    |
-| `test_links.py`           | External URLs in docs return 2xx/3xx (rejects redirects) |
+| Test file                 | What it checks                                                                                                                      |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `test_cli_commands.py`    | CLI commands in docs match Click definitions                                                                                        |
+| `test_env_vars.py`        | `SUMMON_*` env vars in docs match `SummonConfig` fields                                                                             |
+| `test_mcp_tools.py`       | MCP tool docs match source tool schemas and counts                                                                                  |
+| `test_bash_codeblocks.py` | `summon` commands in bash blocks execute successfully                                                                               |
+| `test_links.py`           | External URLs in docs return 2xx with no redirect. Network tests use `link_check` marker; run separately via `make docs-test-links` |
 
 ### `notest` markers
 
@@ -252,20 +253,22 @@ The `notest` attribute is invisible to documentation readers — markdown render
 
 ### CI integration
 
-- **`test` job:** `make py-test` runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks + link checks. `make docs-test` runs markdown code block validation separately
-- **`slack-integration` job:** Runs bash CLI tests with real credentials (Tier 2 commands like `summon config show`)
+- **`test` job:** `make py-test` runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks. `make docs-test` runs markdown code block validation separately
+- **`link-check` job:** `make docs-test-links` runs external URL link validation (advisory — visible red X on failure, does not block merge)
 
 ---
 
 ## CI Testing
 
-The `ci.yaml` workflow runs three parallel jobs on every PR to `main`:
+The `ci.yaml` workflow runs parallel jobs on every PR to `main`:
 
 1. **`lint`** — `make py-lint` (ruff check + format)
 2. **`typecheck`** — `make py-typecheck` (pyright)
 3. **`test`** — `make py-test` + `make docs-test` (full pytest suite + markdown code block validation)
+4. **`docs`** — `mkdocs build --strict` (docs build check, PRs only)
+5. **`link-check`** — `make docs-test-links` (external URL validation, advisory — does not block merge)
 
-All three jobs run independently in parallel. Slack integration tests run only on pushes to `main`.
+All five jobs run independently in parallel. Job 5 (`link-check`) is advisory — it shows a red X on failure but is not intended to block merge.
 
 **Debugging CI failures:**
 
