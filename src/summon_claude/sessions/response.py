@@ -182,7 +182,9 @@ class _TurnState:
     pending_worktree_names: dict[str, str] = field(default_factory=dict)
     # Track tool_use_id → tool name for health tracker
     tool_names: dict[str, str] = field(default_factory=dict)
-    # Track denied tool_use_ids to suppress redundant :x: Tool error messages
+    # tool_use_id → (tool_name, filepath, old_str, new_str); consumed by _handle_tool_result_block
+    pending_file_changes: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
+    # Denied by approval bridge — suppresses :x: error posts and blocks file change tracking
     denied_tool_use_ids: set[str] = field(default_factory=set)
 
 
@@ -436,6 +438,8 @@ class ResponseStreamer:
         wt_name = self._turn.pending_worktree_names.pop(block.tool_use_id, None)
         if wt_name is not None and not block.is_error and self._on_worktree_entered is not None:
             self._on_worktree_entered(wt_name)
+        # Pop before early-return so denied/errored results don't leave stale entries
+        pending_fc = self._turn.pending_file_changes.pop(block.tool_use_id, None)
         if self._mcp_health is not None:
             tool_name = self._turn.tool_names.get(block.tool_use_id)
             if tool_name:
@@ -445,8 +449,53 @@ class ResponseStreamer:
                 )
         # Suppress redundant :x: Tool error for denied tools — the denial label
         # on the tool use block already communicates the outcome.
-        if block.tool_use_id in self._turn.denied_tool_use_ids and block.is_error:
+        denied = block.tool_use_id in self._turn.denied_tool_use_ids
+        if denied and block.is_error:
             return
+        if pending_fc is not None and not block.is_error and not denied:
+            fc_tool_name, filepath, old_str, new_str = pending_fc
+            # For Edit tools, compute unified_diff once and share it with both
+            # _schedule_file_change (additions/deletions count) and _upload_diff (Slack content).
+            edit_diff_lines = (
+                list(
+                    difflib.unified_diff(
+                        old_str.splitlines(keepends=True),
+                        new_str.splitlines(keepends=True),
+                        fromfile=f"a/{filepath}",
+                        tofile=f"b/{filepath}",
+                    )
+                )
+                if fc_tool_name in ("Edit", "str_replace_editor") and old_str
+                else []
+            )
+            self._schedule_file_change(
+                filepath, old_str, new_str, precomputed_diff=edit_diff_lines or None
+            )
+            # Fire deferred diff/content upload
+            try:
+                thread_ts = self._resolve_upload_thread(parent_id)
+            except RuntimeError:
+                pass
+            else:
+                if fc_tool_name in ("Edit", "str_replace_editor"):
+                    self._spawn_background(
+                        self._upload_diff(
+                            old_str,
+                            new_str,
+                            filepath,
+                            thread_ts,
+                            precomputed_diff=edit_diff_lines,
+                        )
+                    )
+                elif fc_tool_name == "Write" and filepath and new_str:
+                    if filepath.endswith(".md"):
+                        rendered = self._turn.md_rendered_paths
+                        self._spawn_background(
+                            self._render_md_write(filepath, new_str, thread_ts, rendered)
+                        )
+                    else:
+                        basename = PurePosixPath(filepath).name
+                        self._spawn_background(self._upload_write(new_str, basename, thread_ts))
         await self._post_tool_result(block, parent_id)
         # No _set_status — thread post auto-clears "Running {tool}...",
         # and the next block (tool use or text) arrives quickly.
@@ -590,38 +639,18 @@ class ResponseStreamer:
             await self._router.post_to_active_thread(f"Tool: {tool_name}", blocks=blocks)
             self._turn.thread_ts = None
 
-        # Fire-and-forget diff upload for Edit tools
+        # Defer diff/content upload for Edit tools until ToolResultBlock confirms success
         if tool_name in ("Edit", "str_replace_editor") and "old_string" in input_data:
             filename = input_data.get("path", input_data.get("file_path", "file"))
             old_str = input_data.get("old_string", "")
             new_str = input_data.get("new_string", "")
-            try:
-                thread_ts = self._resolve_upload_thread(parent_id)
-            except RuntimeError:
-                logger.debug("No active thread for diff upload of %s, skipping", filename)
-            else:
-                self._spawn_background(self._upload_diff(old_str, new_str, filename, thread_ts))
-            self._schedule_file_change(filename, old_str, new_str)
+            self._turn.pending_file_changes[block.id] = (tool_name, filename, old_str, new_str)
 
-        # Fire-and-forget content upload for Write
+        # Defer content upload for Write until ToolResultBlock confirms success
         elif tool_name == "Write":
             filepath = input_data.get("file_path", input_data.get("path", ""))
             content = input_data.get("content", "")
-            if filepath and content:
-                try:
-                    thread_ts = self._resolve_upload_thread(parent_id)
-                except RuntimeError:
-                    logger.debug("No active thread for write upload of %s, skipping", filepath)
-                else:
-                    if filepath.endswith(".md"):
-                        rendered = self._turn.md_rendered_paths
-                        self._spawn_background(
-                            self._render_md_write(filepath, content, thread_ts, rendered)
-                        )
-                    else:
-                        basename = PurePosixPath(filepath).name
-                        self._spawn_background(self._upload_write(content, basename, thread_ts))
-            self._schedule_file_change(filepath, "", content)
+            self._turn.pending_file_changes[block.id] = (tool_name, filepath, "", content)
 
     async def _post_tool_result(self, block: ToolResultBlock, parent_id: str | None = None) -> None:
         """Post a brief tool result summary to the appropriate thread."""
@@ -724,16 +753,22 @@ class ResponseStreamer:
         new_string: str,
         filename: str,
         thread_ts: str,
+        *,
+        precomputed_diff: list[str] | None = None,
     ) -> None:
         """Upload a unified diff as a snippet_type=diff file (fire-and-forget)."""
         diff_lines: list[str] = []
         try:
-            diff_lines = list(
-                difflib.unified_diff(
-                    old_string.splitlines(keepends=True),
-                    new_string.splitlines(keepends=True),
-                    fromfile=f"a/{filename}",
-                    tofile=f"b/{filename}",
+            diff_lines = (
+                precomputed_diff
+                if precomputed_diff is not None
+                else list(
+                    difflib.unified_diff(
+                        old_string.splitlines(keepends=True),
+                        new_string.splitlines(keepends=True),
+                        fromfile=f"a/{filename}",
+                        tofile=f"b/{filename}",
+                    )
                 )
             )
             if not diff_lines:
@@ -841,19 +876,25 @@ class ResponseStreamer:
         filepath: str,
         old_content: str,
         new_content: str,
+        *,
+        precomputed_diff: list[str] | None = None,
     ) -> None:
         """Schedule on_file_change callback as a fire-and-forget task."""
         if not self._on_file_change or not filepath:
             return
-        old_lines = old_content.splitlines() if old_content else []
         new_lines = new_content.splitlines() if new_content else []
         change_type: ChangeType = "modified" if old_content else "created"
         if old_content:
-            # Count actual changed lines via unified diff
-            diff = difflib.unified_diff(old_lines, new_lines)
+            # Count actual changed lines via unified diff.
+            # Use precomputed_diff when available to avoid a second unified_diff call.
+            diff_iter = (
+                iter(precomputed_diff)
+                if precomputed_diff is not None
+                else difflib.unified_diff(old_content.splitlines(), new_content.splitlines())
+            )
             additions = 0
             deletions = 0
-            for line in diff:
+            for line in diff_iter:
                 if line.startswith("+") and not line.startswith("+++"):
                     additions += 1
                 elif line.startswith("-") and not line.startswith("---"):

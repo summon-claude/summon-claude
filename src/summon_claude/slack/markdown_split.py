@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import re
 
+MARKDOWN_BLOCK_LIMIT = 12_000  # Slack ``type: markdown`` block cumulative char limit
+
 _HEADING_RE = re.compile(r"^#{1,6} ", re.MULTILINE)
 _FENCE_RE = re.compile(r"^```", re.MULTILINE)
 _TABLE_LINE_RE = re.compile(r"^\|", re.MULTILINE)
 
 
-def split_markdown(text: str, limit: int = 12000) -> list[str]:
+def split_markdown(text: str, limit: int = MARKDOWN_BLOCK_LIMIT) -> list[str]:
     """Split markdown text into chunks that each fit within *limit* chars.
 
     Respects markdown structure:

@@ -24,6 +24,7 @@ Permission check flow (handle() steps):
 from __future__ import annotations
 
 import asyncio
+import difflib
 import logging
 import os
 import uuid
@@ -38,6 +39,7 @@ from summon_claude.config import SummonConfig
 from summon_claude.sessions.classifier import extract_classifier_context
 from summon_claude.sessions.response import get_tool_primary_arg
 from summon_claude.slack.client import sanitize_for_mrkdwn
+from summon_claude.slack.markdown_split import MARKDOWN_BLOCK_LIMIT
 from summon_claude.slack.router import ThreadRouter
 
 if TYPE_CHECKING:
@@ -999,11 +1001,14 @@ class PermissionHandler:
         approve_session_value = f"approve_session:{batch_id}"
         deny_value = f"deny:{batch_id}"
 
+        diff_blocks = _build_diff_preview_blocks(requests)
+
         blocks = [
             {
                 "type": "section",
                 "text": {"type": "mrkdwn", "text": header_text},
             },
+            *diff_blocks,
             {
                 "type": "actions",
                 "block_id": f"permission_{batch_id}",
@@ -1545,6 +1550,51 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
         )
 
     return blocks
+
+
+def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str, Any]]:
+    """Build Slack markdown blocks with diff/content previews for a permission batch.
+
+    Scans *requests* for Edit/str_replace_editor/Write tools and generates
+    previews.  Non-file tools are silently skipped.  Uses ``type: markdown``
+    blocks with fenced ``diff`` code blocks for syntax highlighting.  If the
+    block type is unsupported, Slack silently drops it — no breakage.
+
+    Output is truncated at Slack's 12K markdown block char limit — no
+    per-field line caps, so users see as much of the change as Slack allows.
+    """
+    previews: list[str] = []
+    for req in requests:
+        if req.tool_name in ("Edit", "str_replace_editor") and "old_string" in req.input_data:
+            filepath = _extract_file_path(req.tool_name, req.input_data) or "file"
+            old_str = req.input_data.get("old_string", "")
+            new_str = req.input_data.get("new_string", "")
+            diff_text = "".join(
+                difflib.unified_diff(
+                    old_str.splitlines(keepends=True),
+                    new_str.splitlines(keepends=True),
+                    fromfile=f"a/{filepath}",
+                    tofile=f"b/{filepath}",
+                )
+            )
+            if diff_text:
+                previews.append(diff_text)
+        elif req.tool_name == "Write":
+            filepath = _extract_file_path(req.tool_name, req.input_data)
+            content = req.input_data.get("content", "")
+            if filepath and content:
+                previews.append(f"# New file: {filepath}\n{content}")
+
+    if not previews:
+        return []
+
+    combined = "\n".join(previews)
+    if len(combined) > MARKDOWN_BLOCK_LIMIT:
+        combined = combined[:MARKDOWN_BLOCK_LIMIT] + "\n... (truncated)"
+    # Escape triple backticks to prevent code fence breakout
+    combined = combined.replace("```", "\u2019\u2019\u2019")
+
+    return [{"type": "markdown", "text": f"```diff\n{combined}\n```"}]
 
 
 def _format_request_summary(req: PendingRequest) -> str:

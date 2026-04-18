@@ -24,6 +24,7 @@ from summon_claude.sessions.permissions import (
     ApprovalInfo,
     PendingRequest,
     PermissionHandler,
+    _build_diff_preview_blocks,
     _format_request_summary,
 )
 from summon_claude.slack.router import ThreadRouter
@@ -326,6 +327,176 @@ class TestFormatRequestSummary:
         summary = _format_request_summary(req)
         assert isinstance(summary, str)
         assert "CustomTool" in summary
+
+
+class TestDiffPreviewBlocks:
+    """Tests for diff preview blocks in approval messages."""
+
+    def test_edit_produces_diff_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/main.py",
+                "old_string": "old line\n",
+                "new_string": "new line\n",
+            },
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "markdown"
+        assert "```diff" in blocks[0]["text"]
+        assert "-old line" in blocks[0]["text"]
+        assert "+new line" in blocks[0]["text"]
+
+    def test_str_replace_editor_produces_diff_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="str_replace_editor",
+            input_data={
+                "path": "/src/main.py",
+                "old_string": "before\n",
+                "new_string": "after\n",
+            },
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        assert "-before" in blocks[0]["text"]
+        assert "+after" in blocks[0]["text"]
+
+    def test_write_produces_preview_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Write",
+            input_data={"file_path": "/src/new.py", "content": "print('hello')\n"},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        assert "New file: /src/new.py" in blocks[0]["text"]
+        assert "print('hello')" in blocks[0]["text"]
+
+    def test_write_shows_full_content(self):
+        content = "\n".join(f"line {i}" for i in range(50))
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Write",
+            input_data={"file_path": "/src/big.py", "content": content},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        text = blocks[0]["text"]
+        assert "line 0" in text
+        assert "line 49" in text
+
+    def test_bash_produces_no_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Bash",
+            input_data={"command": "git status"},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert blocks == []
+
+    def test_empty_edit_produces_no_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={"path": "/src/main.py", "old_string": "same\n", "new_string": "same\n"},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert blocks == []
+
+    def test_write_empty_content_produces_no_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Write",
+            input_data={"file_path": "/src/new.py", "content": ""},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert blocks == []
+
+    def test_write_empty_path_produces_no_block(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Write",
+            input_data={"file_path": "", "content": "hello"},
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert blocks == []
+
+    def test_mixed_batch_combines_previews(self):
+        edit_req = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/a.py",
+                "old_string": "old\n",
+                "new_string": "new\n",
+            },
+        )
+        bash_req = PendingRequest(
+            request_id="r2",
+            tool_name="Bash",
+            input_data={"command": "ls"},
+        )
+        blocks = _build_diff_preview_blocks([edit_req, bash_req])
+        assert len(blocks) == 1
+        assert "-old" in blocks[0]["text"]
+
+    def test_multiple_edits_combined(self):
+        req1 = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/a.py",
+                "old_string": "aaa\n",
+                "new_string": "bbb\n",
+            },
+        )
+        req2 = PendingRequest(
+            request_id="r2",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/b.py",
+                "old_string": "ccc\n",
+                "new_string": "ddd\n",
+            },
+        )
+        blocks = _build_diff_preview_blocks([req1, req2])
+        assert len(blocks) == 1
+        text = blocks[0]["text"]
+        assert "src/a.py" in text
+        assert "src/b.py" in text
+        assert "-aaa" in text
+        assert "-ccc" in text
+
+    def test_backtick_fence_escaped(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/main.py",
+                "old_string": "before ```code``` after\n",
+                "new_string": "replaced\n",
+            },
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        assert "```" not in blocks[0]["text"].split("```diff\n", 1)[1].rsplit("\n```", 1)[0]
+
+    def test_large_diff_truncated(self):
+        req = PendingRequest(
+            request_id="r1",
+            tool_name="Edit",
+            input_data={
+                "path": "/src/big.py",
+                "old_string": ("a" * 40 + "\n") * 200,
+                "new_string": ("b" * 40 + "\n") * 200,
+            },
+        )
+        blocks = _build_diff_preview_blocks([req])
+        assert len(blocks) == 1
+        assert "truncated" in blocks[0]["text"]
 
 
 class TestPermissionInteractive:

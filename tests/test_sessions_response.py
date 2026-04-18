@@ -45,8 +45,8 @@ def make_text_block(text: str) -> TextBlock:
     return TextBlock(text=text)
 
 
-def make_tool_use_block(name: str, input_data: dict) -> ToolUseBlock:
-    return ToolUseBlock(id="tu_1", name=name, input=input_data)
+def make_tool_use_block(name: str, input_data: dict, tool_use_id: str = "tu_1") -> ToolUseBlock:
+    return ToolUseBlock(id=tool_use_id, name=name, input=input_data)
 
 
 def make_assistant_message(content: list) -> AssistantMessage:
@@ -681,6 +681,9 @@ class TestUploadDiff:
         )
         msg = make_assistant_message([edit_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         # Give fire-and-forget task a moment
         await asyncio.sleep(0.05)
         client.upload.assert_called_once()
@@ -696,6 +699,9 @@ class TestUploadDiff:
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         client.upload.assert_called_once()
         assert "output.py" in client.upload.call_args.args[1]
@@ -711,6 +717,9 @@ class TestUploadDiff:
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         # .md files should NOT trigger upload — they use markdown blocks
         client.upload.assert_not_called()
@@ -737,9 +746,13 @@ class TestUploadDiff:
         write_block = make_tool_use_block(
             "Write",
             {"file_path": "/src/README.md", "content": "# V1"},
+            tool_use_id="tu_1",
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
         client.post.reset_mock()
 
@@ -747,9 +760,13 @@ class TestUploadDiff:
         write_block2 = make_tool_use_block(
             "Write",
             {"file_path": "/src/README.md", "content": "# V2"},
+            tool_use_id="tu_2",
         )
         msg2 = make_assistant_message([write_block2])
         await streamer._handle_assistant_message(msg2)
+        result_block2 = ToolResultBlock(tool_use_id="tu_2", content="OK")
+        result_msg2 = make_assistant_message([result_block2])
+        await streamer._handle_assistant_message(result_msg2)
         await asyncio.sleep(0.05)
 
         # Should show "Updated" header, not full re-render.
@@ -785,6 +802,9 @@ class TestUploadDiff:
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
 
         # Should have attempted markdown block and fallen back to mrkdwn-converted text.
@@ -1120,6 +1140,9 @@ class TestFileChangeCallback:
         )
         msg = make_assistant_message([edit_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
 
         assert len(changes) == 1
@@ -1147,6 +1170,9 @@ class TestFileChangeCallback:
         )
         msg = make_assistant_message([write_block])
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
 
         assert len(changes) == 1
@@ -1167,6 +1193,9 @@ class TestFileChangeCallback:
         msg = make_assistant_message([edit_block])
         # Should not raise
         await streamer._handle_assistant_message(msg)
+        result_block = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([result_block])
+        await streamer._handle_assistant_message(result_msg)
         await asyncio.sleep(0.05)
 
 
@@ -1764,3 +1793,207 @@ class TestBridgeTimeoutRelationship:
                 permission_timeout_s=-1,
                 _env_file=None,
             )
+
+
+class TestPendingFileChangeLifecycle:
+    async def test_failed_tool_no_file_change_or_upload(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/out.py", "content": "print('hi')"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+
+        failed_result = ToolResultBlock(tool_use_id="tu_1", content="Error", is_error=True)
+        result_msg = make_assistant_message([failed_result])
+        with patch.object(streamer, "_upload_write", new_callable=AsyncMock) as mock_upload:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload.assert_not_called()
+
+        assert len(changes) == 0
+
+    async def test_denied_tool_error_no_file_change_or_upload(self):
+        """Denial (is_error=True + denied_tool_use_ids) hits the early-return."""
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/out.py", "content": "print('hi')"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+
+        # Mark the tool use as denied before processing the result
+        streamer._turn.denied_tool_use_ids.add("tu_1")
+
+        denied_result = ToolResultBlock(tool_use_id="tu_1", content="Denied", is_error=True)
+        result_msg = make_assistant_message([denied_result])
+        with patch.object(streamer, "_upload_write", new_callable=AsyncMock) as mock_upload:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload.assert_not_called()
+
+        assert len(changes) == 0
+
+    async def test_denied_tool_success_result_not_triggered(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        write_block = make_tool_use_block(
+            "Write",
+            {"file_path": "/src/out.py", "content": "print('hi')"},
+        )
+        msg = make_assistant_message([write_block])
+        await streamer._handle_assistant_message(msg)
+
+        # Manually mark as denied even though result is is_error=False
+        streamer._turn.denied_tool_use_ids.add("tu_1")
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK", is_error=False)
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_write", new_callable=AsyncMock) as mock_upload:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload.assert_not_called()
+
+        assert len(changes) == 0
+
+    async def test_successful_edit_fires_deferred_upload(self):
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_called_once()
+
+        assert len(changes) == 1
+
+    async def test_no_active_thread_skips_upload_but_fires_callback(self):
+        """RuntimeError from _resolve_upload_thread silently skips upload; callback still fires."""
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_not_called()
+
+        assert len(changes) == 1
+
+    async def test_str_replace_editor_fires_deferred_upload(self):
+        """str_replace_editor tool (grouped with Edit) triggers diff upload."""
+        changes = []
+
+        async def on_change(change):
+            changes.append(change)
+
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "thread_1"
+        streamer = ResponseStreamer(router, on_file_change=on_change)
+
+        edit_block = make_tool_use_block(
+            "str_replace_editor",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        msg = make_assistant_message([edit_block])
+        await streamer._handle_assistant_message(msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = make_assistant_message([success_result])
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_called_once()
+
+        assert len(changes) == 1
+
+    async def test_subagent_edit_deferred_upload_targets_subagent_thread(self):
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        router.active_thread_ts = "active_ts"
+        subagent_ts = await router.start_subagent_thread("task_123", "desc")
+        streamer = ResponseStreamer(router)
+
+        edit_block = make_tool_use_block(
+            "Edit",
+            {"path": "/src/main.py", "old_string": "old\n", "new_string": "new\n"},
+        )
+        tool_msg = AssistantMessage(
+            content=[edit_block],
+            model="claude-opus-4-6",
+            parent_tool_use_id="task_123",
+        )
+        await streamer._handle_assistant_message(tool_msg)
+
+        success_result = ToolResultBlock(tool_use_id="tu_1", content="OK")
+        result_msg = AssistantMessage(
+            content=[success_result],
+            model="claude-opus-4-6",
+            parent_tool_use_id="task_123",
+        )
+        with patch.object(streamer, "_upload_diff", new_callable=AsyncMock) as mock_upload_diff:
+            await streamer._handle_assistant_message(result_msg)
+            await asyncio.sleep(0.05)
+            mock_upload_diff.assert_called_once()
+            _, _, _, thread_ts_arg = mock_upload_diff.call_args.args
+            assert thread_ts_arg == subagent_ts
+            assert thread_ts_arg != "active_ts"
