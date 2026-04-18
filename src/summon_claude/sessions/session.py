@@ -111,6 +111,7 @@ from summon_claude.slack.client import (
     redact_secrets,
     sanitize_for_slack,
 )
+from summon_claude.slack.formatting import snippet_type_for_extension
 from summon_claude.slack.mcp import create_summon_mcp_server
 from summon_claude.slack.router import ThreadRouter
 from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
@@ -200,7 +201,9 @@ _AUTH_TIMEOUT_S = 300  # 5 minutes to authenticate
 _AUTH_COUNTDOWN_INTERVAL_S = 15.0  # log countdown every 15 seconds
 _QUEUE_POLL_INTERVAL_S = 1.0
 _MAX_USER_MESSAGE_CHARS = 10_000
-_MAX_DIFF_UPLOAD_CHARS = 5_000_000  # ~5 MB for ASCII (Slack API limit is 10 MB)
+_MAX_UPLOAD_CHARS = 5_000_000  # ~5 MB for ASCII (Slack API limit is 10 MB)
+
+
 _CLEANUP_TIMEOUT_S = 10.0
 _CONTEXT_AGENT_THRESHOLD = 70.0  # Inject context note into agent messages
 _CONTEXT_WARNING_THRESHOLD = 75.0  # Warn user in Slack
@@ -346,6 +349,14 @@ def _make_channel_name(prefix: str, session_name: str) -> str:
     return name[:_MAX_CHANNEL_NAME_LEN].lower()
 
 
+def _read_bounded(path: str, limit: int) -> tuple[str, bool]:
+    """Read up to *limit* characters from *path*; return (content, truncated)."""
+    with open(path) as f:  # noqa: PTH123
+        content = f.read(limit)
+        truncated = bool(f.read(1))
+    return content, truncated
+
+
 def _git_safe_env(resolved_cwd: str) -> dict[str, str]:
     """Return an env dict safe for git subprocesses (SC-03).
 
@@ -353,9 +364,7 @@ def _git_safe_env(resolved_cwd: str) -> dict[str, str]:
     repositories outside the intended working directory, and sets
     GIT_CEILING_DIRECTORIES to stop traversal above cwd.
     """
-    env = dict(os.environ)
-    env.pop("GIT_DIR", None)
-    env.pop("GIT_WORK_TREE", None)
+    env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE")}
     existing_ceiling = env.get("GIT_CEILING_DIRECTORIES", "")
     env["GIT_CEILING_DIRECTORIES"] = (
         f"{existing_ceiling}:{resolved_cwd}" if existing_ceiling else resolved_cwd
@@ -3002,10 +3011,10 @@ class SummonSession:
             )
         return "\n".join(lines)
 
-    async def _handle_diff_file(
+    async def _resolve_cwd_path(
         self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
-    ) -> None:
-        """Handle !diff <file> — show git diff for a specific file."""
+    ) -> tuple[str, str] | None:
+        """Resolve user_path relative to cwd; return (cwd, resolved) or None on error."""
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
         try:
             resolved = os.path.realpath(Path(self._cwd) / user_path)  # noqa: ASYNC240
@@ -3014,10 +3023,47 @@ class SummonSession:
                     f":warning: `{user_path}` is outside the session directory.",
                     thread_ts=thread_ts,
                 )
-                return
+                return None
         except Exception:
             await rt.client.post(f":warning: Invalid path: `{user_path}`.", thread_ts=thread_ts)
+            return None
+        return cwd, resolved
+
+    @staticmethod
+    async def _upload_diff(
+        rt: _SessionRuntime,
+        diff_output: str,
+        user_path: str,
+        basename: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Truncate diff_output if needed, warn, and upload as a diff snippet."""
+        suffix = "\n... (truncated)"
+        if len(diff_output) > _MAX_UPLOAD_CHARS:
+            diff_output = diff_output[: _MAX_UPLOAD_CHARS - len(suffix)] + suffix
+            try:
+                await rt.client.post(
+                    f":warning: Diff for `{user_path}` truncated at {_MAX_UPLOAD_CHARS:,} chars.",
+                    thread_ts=thread_ts,
+                )
+            except Exception:
+                logger.debug("Failed to post truncation warning for %s", user_path)
+        await rt.client.upload(
+            diff_output,
+            f"{basename}.diff",
+            title=f"git diff: {basename}",
+            thread_ts=thread_ts,
+            snippet_type="diff",
+        )
+
+    async def _handle_diff_file(  # noqa: PLR0912
+        self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
+    ) -> None:
+        """Handle !diff <file> — show uncommitted changes for a specific file."""
+        result = await self._resolve_cwd_path(rt, user_path, thread_ts)
+        if result is None:
             return
+        cwd, resolved = result
 
         # Show tracked info if available
         change = self._changed_files.get(user_path) or self._changed_files.get(resolved)
@@ -3040,43 +3086,97 @@ class SummonSession:
                 )
             return
 
-        basename = resolved.rsplit("/", 1)[-1]
+        basename = Path(resolved).name
+        env = _git_safe_env(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "diff",
+                "HEAD",
                 "--",
                 resolved,
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=_git_safe_env(cwd),
+                env=env,
             )
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             if stdout:
-                diff_output = stdout.decode(errors="replace")
-                if len(diff_output) > _MAX_DIFF_UPLOAD_CHARS:
-                    diff_output = diff_output[:_MAX_DIFF_UPLOAD_CHARS] + "\n... (truncated)"
-                    try:
-                        await rt.client.post(
-                            f":warning: Diff for `{user_path}` truncated at "
-                            f"{_MAX_DIFF_UPLOAD_CHARS:,} chars.",
-                            thread_ts=thread_ts,
-                        )
-                    except Exception:
-                        logger.debug("Failed to post truncation warning for %s", user_path)
-                await rt.client.upload(
-                    diff_output,
-                    f"{basename}.diff",
-                    title=f"git diff: {basename}",
-                    thread_ts=thread_ts,
-                    snippet_type="diff",
+                await self._upload_diff(
+                    rt, stdout.decode(errors="replace"), user_path, basename, thread_ts
                 )
             else:
-                await rt.client.post(
-                    f"_No uncommitted changes for `{user_path}`._",
-                    thread_ts=thread_ts,
+                if proc.returncode != 0:
+                    await rt.client.post(
+                        f":warning: git diff failed for `{user_path}`.",
+                        thread_ts=thread_ts,
+                    )
+                    return
+                # Check if file is tracked by git
+                ls_proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "ls-files",
+                    "--",
+                    resolved,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
                 )
+                ls_stdout, _ = await asyncio.wait_for(ls_proc.communicate(), timeout=10)
+                if ls_stdout.strip():
+                    # Tracked file with no changes
+                    await rt.client.post(
+                        f"_No changes vs HEAD for `{user_path}`._",
+                        thread_ts=thread_ts,
+                    )
+                    return
+                # Untracked file — verify it exists on disk
+                if not Path(resolved).exists():  # noqa: ASYNC240
+                    await rt.client.post(
+                        f":warning: File not found: `{user_path}`.",
+                        thread_ts=thread_ts,
+                    )
+                    return
+                # Generate synthetic diff via --no-index
+                rel_path = str(Path(resolved).relative_to(cwd))
+                nidx_proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "diff",
+                    "--no-index",
+                    "--",
+                    "/dev/null",
+                    rel_path,
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                nidx_stdout, _ = await asyncio.wait_for(nidx_proc.communicate(), timeout=10)
+                assert nidx_proc.returncode is not None  # set after communicate()
+                nidx_rc = nidx_proc.returncode
+                if nidx_stdout:
+                    await self._upload_diff(
+                        rt, nidx_stdout.decode(errors="replace"), user_path, basename, thread_ts
+                    )
+                elif nidx_rc >= 2:
+                    await rt.client.post(
+                        f":warning: git diff --no-index failed for `{user_path}` (exit {nidx_rc}).",
+                        thread_ts=thread_ts,
+                    )
+                elif nidx_rc == 1:
+                    # rc=1 with empty stdout: git could not access the file
+                    # (access error or file gone since exists() check)
+                    await rt.client.post(
+                        f":warning: File not found: `{user_path}`.",
+                        thread_ts=thread_ts,
+                    )
+                else:
+                    # returncode 0 with empty stdout = empty file
+                    await rt.client.post(
+                        f"_`{user_path}` is empty — nothing to show._",
+                        thread_ts=thread_ts,
+                    )
         except Exception:
             logger.debug("git diff failed for %s", user_path, exc_info=True)
             await rt.client.post(
@@ -3084,8 +3184,10 @@ class SummonSession:
                 thread_ts=thread_ts,
             )
 
-    async def _handle_diff_all(self, rt: _SessionRuntime, thread_ts: str | None) -> None:
-        """Handle bare !diff — show combined git diff for all changes."""
+    async def _handle_diff_all(  # noqa: PLR0912, PLR0915
+        self, rt: _SessionRuntime, thread_ts: str | None
+    ) -> None:
+        """Handle bare !diff — show all uncommitted changes (staged + unstaged)."""
         if not self._is_git_repo:
             if self._changed_files:
                 await self._post_change_summary(rt, thread_ts=thread_ts)
@@ -3097,27 +3199,118 @@ class SummonSession:
             return
 
         cwd = os.path.realpath(self._cwd)  # noqa: ASYNC240
+        env = _git_safe_env(cwd)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "git",
                 "diff",
+                "HEAD",
                 cwd=cwd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=_git_safe_env(cwd),
+                env=env,
             )
             stdout_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=10)
             stdout = stdout_bytes.decode(errors="replace")
 
-            if stdout:
-                if len(stdout) > _MAX_DIFF_UPLOAD_CHARS:
-                    stdout = stdout[:_MAX_DIFF_UPLOAD_CHARS]
+            # Guard: git diff failure
+            if not stdout and proc.returncode != 0:
+                await rt.client.post(
+                    ":warning: Could not run git diff.",
+                    thread_ts=thread_ts,
+                )
+                return
+
+            tracked_diff = stdout
+
+            # Gather untracked files
+            untracked_diffs = ""
+            try:
+                ls_proc = await asyncio.create_subprocess_exec(
+                    "git",
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    cwd=cwd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    env=env,
+                )
+                ls_stdout, _ = await asyncio.wait_for(ls_proc.communicate(), timeout=10)
+                untracked_files = [
+                    f for f in ls_stdout.decode(errors="replace").splitlines() if f.strip()
+                ]
+            except Exception:
+                logger.debug("git ls-files --others failed", exc_info=True)
+                untracked_files = []
+
+            capped = untracked_files[:50]
+            overflow_count = len(untracked_files) - len(capped)
+
+            # Skip untracked diffs if tracked diff alone exceeds the cap
+            parts: list[str] = []
+            if len(tracked_diff) > _MAX_UPLOAD_CHARS:
+                overflow_count += len(capped)
+            else:
+                _sem = asyncio.Semaphore(10)
+
+                async def _nidx_diff(rel_path: str) -> str:
+                    async with _sem:
+                        try:
+                            nidx_proc = await asyncio.create_subprocess_exec(
+                                "git",
+                                "diff",
+                                "--no-index",
+                                "--",
+                                "/dev/null",
+                                rel_path,
+                                cwd=cwd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                                env=env,
+                            )
+                            nidx_out, _ = await asyncio.wait_for(
+                                nidx_proc.communicate(), timeout=10
+                            )
+                            assert nidx_proc.returncode is not None  # set after communicate()
+                            if nidx_out and nidx_proc.returncode < 2:
+                                return nidx_out.decode(errors="replace")
+                        except Exception:
+                            logger.debug("--no-index failed for untracked file %s", rel_path)
+                        return ""
+
+                raw_parts = await asyncio.gather(*(_nidx_diff(uf) for uf in capped))
+
+                parts_len = 0
+                for idx, decoded in enumerate(raw_parts):
+                    if not decoded:
+                        continue
+                    combined_len = len(tracked_diff) + parts_len
+                    if combined_len > _MAX_UPLOAD_CHARS:
+                        overflow_count += sum(1 for d in raw_parts[idx:] if d)
+                        break
+                    parts.append(decoded)
+                    parts_len += len(decoded)
+            untracked_diffs = "\n".join(parts)
+            if overflow_count > 0 and len(tracked_diff) <= _MAX_UPLOAD_CHARS:
+                untracked_diffs += f"\n... and {overflow_count} more untracked files"
+
+            combined = tracked_diff
+            if tracked_diff and untracked_diffs:
+                combined = tracked_diff + "\n\n" + untracked_diffs
+            elif untracked_diffs:
+                combined = untracked_diffs
+
+            if combined:
+                if len(combined) > _MAX_UPLOAD_CHARS:
+                    _suffix = "\n... (truncated)"
+                    combined = combined[: _MAX_UPLOAD_CHARS - len(_suffix)] + _suffix
                     await rt.client.post(
-                        f":warning: Diff truncated to {_MAX_DIFF_UPLOAD_CHARS:,} chars.",
+                        f":warning: Diff truncated to {_MAX_UPLOAD_CHARS:,} chars.",
                         thread_ts=thread_ts,
                     )
                 await rt.client.upload(
-                    content=stdout,
+                    content=combined,
                     filename="changes.diff",
                     title="All uncommitted changes",
                     snippet_type="diff",
@@ -3132,6 +3325,84 @@ class SummonSession:
             logger.debug("git diff (all) failed", exc_info=True)
             await rt.client.post(
                 ":warning: Could not run git diff.",
+                thread_ts=thread_ts,
+            )
+
+    async def _handle_show_file(  # noqa: PLR0911
+        self, rt: _SessionRuntime, user_path: str, thread_ts: str | None
+    ) -> None:
+        """Handle !show <file> — display file contents."""
+        result = await self._resolve_cwd_path(rt, user_path, thread_ts)
+        if result is None:
+            return
+        _, resolved = result
+
+        try:
+            try:
+                content, truncated = await asyncio.to_thread(
+                    _read_bounded, resolved, _MAX_UPLOAD_CHARS
+                )
+            except FileNotFoundError:
+                await rt.client.post(
+                    f":warning: File not found: `{user_path}`.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except PermissionError:
+                await rt.client.post(
+                    f":warning: Permission denied: `{user_path}`.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except IsADirectoryError:
+                await rt.client.post(
+                    f":warning: `{user_path}` is a directory.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except UnicodeDecodeError:
+                await rt.client.post(
+                    f":warning: `{user_path}` appears to be a binary file.",
+                    thread_ts=thread_ts,
+                )
+                return
+            except OSError as e:
+                await rt.client.post(
+                    f":warning: Could not read `{user_path}`: {e.strerror}.",
+                    thread_ts=thread_ts,
+                )
+                return
+
+            if not content:
+                await rt.client.post(
+                    f"_`{user_path}` is empty — nothing to show._",
+                    thread_ts=thread_ts,
+                )
+                return
+
+            if truncated:
+                # Trim content to make room for the suffix within the upload cap
+                _show_suffix = "\n... (truncated)"
+                content = content[: _MAX_UPLOAD_CHARS - len(_show_suffix)] + _show_suffix
+                await rt.client.post(
+                    f":warning: File truncated at {_MAX_UPLOAD_CHARS:,} chars.",
+                    thread_ts=thread_ts,
+                )
+
+            resolved_path = Path(resolved)
+            basename = resolved_path.name
+            ext = resolved_path.suffix
+            await rt.client.upload(
+                content,
+                basename,
+                title=basename,
+                thread_ts=thread_ts,
+                snippet_type=snippet_type_for_extension(ext),
+            )
+        except Exception:
+            logger.debug("show file failed for %s", user_path, exc_info=True)
+            await rt.client.post(
+                f":warning: Could not display `{user_path}`.",
                 thread_ts=thread_ts,
             )
 
@@ -3494,6 +3765,12 @@ class SummonSession:
         diff_path = result.metadata.get("diff_file")
         if diff_path:
             await self._handle_diff_file(rt, diff_path, thread_ts)
+            return
+
+        # Handle !show <file> — display file contents
+        show_file = result.metadata.get("show_file")
+        if show_file:
+            await self._handle_show_file(rt, show_file, thread_ts)
             return
 
         # Handle !summon resume — resume a child session from within active session
@@ -3995,6 +4272,7 @@ class SummonSession:
                         or result.metadata.get("show_changes")
                         or result.metadata.get("diff_file")
                         or result.metadata.get("diff_all")
+                        or result.metadata.get("show_file")
                         or result.metadata.get("standalone")
                     )
                     if standalone_only:

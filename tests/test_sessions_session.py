@@ -4636,8 +4636,8 @@ class TestHandleDiffFileNonGit:
 
             await session._handle_diff_file(rt, "some_file.py", "thread_1")
 
-            # Should have called git diff
-            mock_exec.assert_called_once()
+            # Should have called git diff at least once (may also call ls-files for untracked check)
+            mock_exec.assert_called()
 
     async def test_git_repo_uploads_nonempty_diff(self, tmp_path):
         """In a git repo with actual changes, should upload the diff."""
@@ -4795,7 +4795,7 @@ class TestHandleDiffAll:
         assert any("could not run git diff" in p.lower() for p in posted)
 
     async def test_large_diff_truncated_and_warning_posted(self, tmp_path):
-        """Diff exceeding _MAX_DIFF_UPLOAD_CHARS should be truncated with a warning."""
+        """Diff exceeding _MAX_UPLOAD_CHARS should be truncated with a warning."""
         from summon_claude.sessions import session as session_mod
 
         session = make_session(cwd=str(tmp_path))
@@ -4805,7 +4805,7 @@ class TestHandleDiffAll:
 
         big_diff = "x" * 200
         with (
-            patch.object(session_mod, "_MAX_DIFF_UPLOAD_CHARS", 100),
+            patch.object(session_mod, "_MAX_UPLOAD_CHARS", 100),
             patch("asyncio.create_subprocess_exec") as mock_exec,
         ):
             mock_proc = AsyncMock()
@@ -4930,3 +4930,546 @@ class TestServerInfoModelCacheWiring:
 
         mock_cache.assert_called_once_with(models, None, None)
         mock_reconcile.assert_called_once_with(models)
+
+
+# ---------------------------------------------------------------------------
+# Helpers shared across diff/show test classes
+# ---------------------------------------------------------------------------
+
+
+def _make_proc(rc: int, stdout_bytes: bytes) -> AsyncMock:
+    proc = AsyncMock()
+    proc.communicate.return_value = (stdout_bytes, b"")
+    proc.returncode = rc
+    return proc
+
+
+# ---------------------------------------------------------------------------
+# TestDiffFileReturncode
+# ---------------------------------------------------------------------------
+
+
+class TestDiffFileReturncode:
+    """_handle_diff_file: non-zero returncode from git diff posts a warning."""
+
+    async def test_diff_file_nonzero_returncode_posts_warning(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        with patch("asyncio.create_subprocess_exec", return_value=_make_proc(128, b"")):
+            await session._handle_diff_file(rt, "some_file.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("git diff failed" in p.lower() for p in posted)
+
+    async def test_diff_file_nonzero_returncode_no_upload(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        with patch("asyncio.create_subprocess_exec", return_value=_make_proc(128, b"")):
+            await session._handle_diff_file(rt, "some_file.py", "thread_1")
+
+        rt.client.upload.assert_not_called()
+
+    async def test_diff_file_outside_cwd_posts_warning(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        await session._handle_diff_file(rt, "/etc/passwd", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("outside the session directory" in p for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_diff_file_outside_cwd_no_subprocess(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        with patch("asyncio.create_subprocess_exec") as mock_exec:
+            await session._handle_diff_file(rt, "/etc/passwd", "thread_1")
+
+        mock_exec.assert_not_called()
+
+    async def test_diff_file_large_diff_posts_truncation_warning(self, tmp_path):
+        from summon_claude.sessions import session as session_mod
+
+        (tmp_path / "big.py").write_text("x")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        large_stdout = b"x" * 100
+
+        with (
+            patch.object(session_mod, "_MAX_UPLOAD_CHARS", 50),
+            patch("asyncio.create_subprocess_exec", return_value=_make_proc(0, large_stdout)),
+        ):
+            await session._handle_diff_file(rt, "big.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("truncated" in p.lower() for p in posted)
+        rt.client.upload.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestDiffFileUntracked
+# ---------------------------------------------------------------------------
+
+
+class TestDiffFileUntracked:
+    """_handle_diff_file: untracked file path through git diff --no-index."""
+
+    def _make_subprocess_factory(self, git_diff_out, ls_files_out, no_index_rc, no_index_out):
+        """Return a side_effect factory for create_subprocess_exec."""
+
+        def factory(*args, **kwargs):
+            args_list = list(args)
+            if "ls-files" in args_list:
+                return _make_proc(0, ls_files_out)
+            if "--no-index" in args_list:
+                return _make_proc(no_index_rc, no_index_out)
+            return _make_proc(0, git_diff_out)
+
+        return factory
+
+    async def test_untracked_file_gets_synthetic_diff(self, tmp_path):
+        (tmp_path / "new_file.py").write_text("print('hello')")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        diff_content = b"diff --git a/new_file.py b/new_file.py\n+print('hello')"
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"",  # untracked (not in ls-files)
+            no_index_rc=1,
+            no_index_out=diff_content,
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "new_file.py", "thread_1")
+
+        rt.client.upload.assert_called_once()
+        uploaded_content = rt.client.upload.call_args.args[0]
+        assert "diff" in uploaded_content
+
+    async def test_untracked_nonexistent_file_posts_warning(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # git diff returns empty, ls-files returns empty (untracked), file doesn't exist
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"",
+            no_index_rc=1,
+            no_index_out=b"",
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "nonexistent.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("file not found" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_untracked_empty_file_posts_empty_message(self, tmp_path):
+        (tmp_path / "empty.py").write_text("")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # --no-index returns rc=0 with empty stdout → empty file
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"",
+            no_index_rc=0,
+            no_index_out=b"",
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "empty.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("empty" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_no_index_error_posts_warning(self, tmp_path):
+        (tmp_path / "bad.py").write_text("x")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # --no-index returns rc=2 → error
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"",
+            no_index_rc=2,
+            no_index_out=b"",
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "bad.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("no-index failed" in p.lower() or "exit 2" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_no_index_toctou_posts_file_not_found(self, tmp_path):
+        (tmp_path / "gone.py").write_text("x")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # --no-index returns rc=1 with empty stdout → TOCTOU (file deleted)
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"",
+            no_index_rc=1,
+            no_index_out=b"",
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "gone.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("file not found" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_tracked_file_no_changes_posts_vs_head(self, tmp_path):
+        (tmp_path / "tracked.py").write_text("x = 1")
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # git diff returns empty, ls-files returns the filename (tracked)
+        factory = self._make_subprocess_factory(
+            git_diff_out=b"",
+            ls_files_out=b"tracked.py\n",
+            no_index_rc=1,
+            no_index_out=b"",
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_file(rt, "tracked.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("no changes vs head" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestDiffAllReturncode
+# ---------------------------------------------------------------------------
+
+
+class TestDiffAllReturncode:
+    """_handle_diff_all: non-zero returncode from initial git diff posts a warning."""
+
+    async def test_diff_all_nonzero_returncode_posts_warning(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        with patch("asyncio.create_subprocess_exec", return_value=_make_proc(128, b"")):
+            await session._handle_diff_all(rt, "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("could not run git diff" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# TestDiffAllUntracked
+# ---------------------------------------------------------------------------
+
+
+class TestDiffAllUntracked:
+    """_handle_diff_all: untracked file handling and size limits."""
+
+    def _make_factory(self, tracked_out, untracked_files_out, no_index_out=b""):
+        """Return a create_subprocess_exec side_effect.
+
+        Call order: git diff → git ls-files --others → git diff --no-index (per file).
+        """
+
+        def factory(*args, **kwargs):
+            args_list = list(args)
+            if "ls-files" in args_list:
+                return _make_proc(0, untracked_files_out)
+            if "--no-index" in args_list:
+                return _make_proc(1, no_index_out)
+            # Initial git diff
+            return _make_proc(0, tracked_out)
+
+        return factory
+
+    async def test_diff_all_includes_untracked_files(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        untracked_diff = b"diff --git a/newfile.py b/newfile.py\n+x = 1\n"
+        factory = self._make_factory(
+            tracked_out=b"",
+            untracked_files_out=b"newfile.py\n",
+            no_index_out=untracked_diff,
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_all(rt, "thread_1")
+
+        rt.client.upload.assert_called_once()
+        call_kwargs = rt.client.upload.call_args.kwargs
+        assert "newfile.py" in call_kwargs.get("content", "")
+
+    async def test_diff_all_combines_tracked_and_untracked(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        tracked_diff = b"diff --git a/old.py b/old.py\n-old line\n+new line\n"
+        untracked_diff = b"diff --git a/new.py b/new.py\n+x = 1\n"
+        factory = self._make_factory(
+            tracked_out=tracked_diff,
+            untracked_files_out=b"new.py\n",
+            no_index_out=untracked_diff,
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=factory):
+            await session._handle_diff_all(rt, "thread_1")
+
+        rt.client.upload.assert_called_once()
+        uploaded = rt.client.upload.call_args.kwargs.get("content", "")
+        assert "old.py" in uploaded
+        assert "new.py" in uploaded
+
+    async def test_diff_all_caps_at_50_files(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # 55 untracked files → only 50 should be processed
+        files_list = "\n".join(f"file{i}.py" for i in range(55)) + "\n"
+        no_index_calls = {"count": 0}
+
+        def counting_factory(*args, **kwargs):
+            args_list = list(args)
+            if "ls-files" in args_list:
+                return _make_proc(0, files_list.encode())
+            if "--no-index" in args_list:
+                no_index_calls["count"] += 1
+                return _make_proc(1, b"diff content\n")
+            return _make_proc(0, b"")
+
+        with patch("asyncio.create_subprocess_exec", side_effect=counting_factory):
+            await session._handle_diff_all(rt, "thread_1")
+
+        assert no_index_calls["count"] <= 50
+        # The overflow message should mention the extra files
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        uploaded = (
+            rt.client.upload.call_args.kwargs.get("content", "") if rt.client.upload.called else ""
+        )
+        combined = " ".join(posted) + " " + uploaded
+        assert "5 more untracked files" in combined
+
+    async def test_diff_all_early_exit_on_size(self, tmp_path):
+        from summon_claude.sessions import session as session_mod
+
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        no_index_calls = {"count": 0}
+
+        def factory(*args, **kwargs):
+            args_list = list(args)
+            if "ls-files" in args_list:
+                return _make_proc(0, b"extra.py\n")
+            if "--no-index" in args_list:
+                no_index_calls["count"] += 1
+                return _make_proc(1, b"x" * 5)
+            # Initial git diff returns content larger than the cap
+            return _make_proc(0, b"x" * 101)
+
+        with (
+            patch.object(session_mod, "_MAX_UPLOAD_CHARS", 100),
+            patch("asyncio.create_subprocess_exec", side_effect=factory),
+        ):
+            await session._handle_diff_all(rt, "thread_1")
+
+        # Early exit before scanning untracked files because tracked diff > cap
+        assert no_index_calls["count"] == 0
+
+    async def test_diff_all_parallel_gather_with_budget_break(self, tmp_path):
+        """All untracked files are diffed in parallel; budget-filter trims post-gather."""
+        from summon_claude.sessions import session as session_mod
+
+        session = make_session(cwd=str(tmp_path))
+        session._is_git_repo = True
+        session._changed_files = {}
+        rt = make_rt(AsyncMock())
+
+        # 10 untracked files, tracked diff nearly fills the cap
+        files_list = "\n".join(f"file{i}.py" for i in range(10)) + "\n"
+        calls = {"count": 0}
+
+        def factory(*args, **kwargs):
+            args_list = list(args)
+            if "ls-files" in args_list:
+                return _make_proc(0, files_list.encode())
+            if "--no-index" in args_list:
+                calls["count"] += 1
+                return _make_proc(1, b"diff content\n")
+            # tracked diff fills most of the cap
+            return _make_proc(0, b"x" * 95)
+
+        with (
+            patch.object(session_mod, "_MAX_UPLOAD_CHARS", 100),
+            patch("asyncio.create_subprocess_exec", side_effect=factory),
+        ):
+            await session._handle_diff_all(rt, "thread_1")
+
+        # Upload is always called: combined exceeds cap and gets truncated
+        rt.client.upload.assert_called_once()
+        # Truncation warning must be posted
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("truncated" in p.lower() for p in posted)
+        # All 10 files are diffed in parallel, then budget-filtered post-gather.
+        # With tracked=95 chars and cap=100, only 1 file's output (13 chars) fits
+        # before budget break at idx=1 (95+13=108 > 100); remaining 9 become overflow.
+        assert calls["count"] == 10  # all ran in parallel
+
+
+# ---------------------------------------------------------------------------
+# TestShowCommand
+# ---------------------------------------------------------------------------
+
+
+class TestShowCommand:
+    """_handle_show_file: file display with various edge cases."""
+
+    async def test_show_file_valid(self, tmp_path):
+        f = tmp_path / "hello.py"
+        f.write_text("print('hello')")
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        await session._handle_show_file(rt, "hello.py", "thread_1")
+
+        rt.client.upload.assert_called_once()
+        uploaded_content = rt.client.upload.call_args.args[0]
+        assert "print('hello')" in uploaded_content
+        assert rt.client.upload.call_args.kwargs.get("snippet_type") is not None
+
+    async def test_show_file_not_found(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        await session._handle_show_file(rt, "missing.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("file not found" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_permission_denied(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        with patch(
+            "summon_claude.sessions.session._read_bounded",
+            side_effect=PermissionError("denied"),
+        ):
+            await session._handle_show_file(rt, "secret.py", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("permission denied" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_directory(self, tmp_path):
+        d = tmp_path / "mydir"
+        d.mkdir()
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        await session._handle_show_file(rt, "mydir", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("is a directory" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_binary(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        with patch(
+            "summon_claude.sessions.session._read_bounded",
+            side_effect=UnicodeDecodeError("utf-8", b"", 0, 1, "invalid"),
+        ):
+            await session._handle_show_file(rt, "binary.bin", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("binary" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_truncated(self, tmp_path):
+        from summon_claude.sessions import session as session_mod
+
+        f = tmp_path / "big.txt"
+        f.write_text("x" * 20)
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        with patch.object(session_mod, "_MAX_UPLOAD_CHARS", 10):
+            await session._handle_show_file(rt, "big.txt", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("truncated" in p.lower() for p in posted)
+        rt.client.upload.assert_called_once()
+
+    async def test_show_file_empty(self, tmp_path):
+        f = tmp_path / "empty.txt"
+        f.write_text("")
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        await session._handle_show_file(rt, "empty.txt", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("empty" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_outside_cwd(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        await session._handle_show_file(rt, "/etc/passwd", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("outside the session directory" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()
+
+    async def test_show_file_generic_oserror(self, tmp_path):
+        session = make_session(cwd=str(tmp_path))
+        rt = make_rt(AsyncMock())
+
+        with patch(
+            "summon_claude.sessions.session._read_bounded",
+            side_effect=OSError(22, "Invalid argument"),
+        ):
+            await session._handle_show_file(rt, "weird.bin", "thread_1")
+
+        posted = [str(c) for c in rt.client.post.call_args_list]
+        assert any("invalid argument" in p.lower() for p in posted)
+        rt.client.upload.assert_not_called()

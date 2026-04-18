@@ -37,12 +37,6 @@ pytestmark = [
 ]
 
 
-@pytest.fixture(autouse=True)
-def _strip_claudecode(monkeypatch):
-    """Remove CLAUDECODE env var so SDK subprocesses don't detect nesting."""
-    monkeypatch.delenv("CLAUDECODE", raising=False)
-
-
 # Common options applied to all SDK sessions.
 # Must match session.py's ClaudeAgentOptions configuration.
 _COMMON_OPTS = {"setting_sources": ["user", "project"]}
