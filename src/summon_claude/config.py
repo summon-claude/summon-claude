@@ -70,7 +70,7 @@ def _find_project_root() -> Path | None:
     return None
 
 
-@functools.lru_cache(maxsize=1)
+@functools.cache
 def get_git_main_repo_root(cwd: Path) -> Path | None:
     """Return the main repo root for the given directory (worktree-aware).
 

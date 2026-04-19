@@ -9,6 +9,7 @@ import pytest
 from conftest import make_test_config
 
 from summon_claude.config import (
+    ConfigOption,
     PluginSkill,
     SummonConfig,
     _parse_frontmatter,
@@ -550,6 +551,31 @@ class TestGetGitMainRepoRoot:
 
         assert result is None
 
+    def test_oserror_returns_none(self, tmp_path):
+        """OSError from subprocess.run (e.g. permission denied) returns None."""
+        from summon_claude.config import get_git_main_repo_root
+
+        with patch("subprocess.run", side_effect=OSError("permission denied")):
+            result = get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
+    def test_unicode_decode_error_returns_none(self, tmp_path):
+        """Non-UTF-8 git output (UnicodeDecodeError on stdout.decode()) returns None."""
+        from summon_claude.config import get_git_main_repo_root
+
+        fake_result = MagicMock()
+        fake_result.returncode = 0
+        fake_result.stdout = MagicMock()
+        fake_result.stdout.decode.side_effect = UnicodeDecodeError(
+            "utf-8", b"\xff\xfe", 0, 1, "invalid start byte"
+        )
+
+        with patch("subprocess.run", return_value=fake_result):
+            result = get_git_main_repo_root(tmp_path)
+
+        assert result is None
+
     def test_empty_stdout_returns_none(self, tmp_path):
         """Empty stdout (edge case) returns None."""
         from summon_claude.config import get_git_main_repo_root
@@ -592,6 +618,39 @@ class TestGetGitMainRepoRoot:
             result = get_git_main_repo_root(tmp_path)
 
         assert result is None
+
+    def test_cache_stores_per_cwd(self, tmp_path):
+        """functools.cache stores results per unique cwd — no cross-eviction."""
+        from summon_claude.config import get_git_main_repo_root
+
+        dir_a = tmp_path / "a"
+        dir_a.mkdir()
+        dir_b = tmp_path / "b"
+        dir_b.mkdir()
+
+        result_a = MagicMock(returncode=0, stdout=b".git\n")
+        result_b = MagicMock(returncode=128, stdout=b"")
+
+        with (
+            patch("subprocess.run", return_value=result_a),
+            patch("summon_claude.config.Path.home", return_value=tmp_path),
+        ):
+            assert get_git_main_repo_root(dir_a) is not None
+
+        with (
+            patch("subprocess.run", return_value=result_b),
+            patch("summon_claude.config.Path.home", return_value=tmp_path),
+        ):
+            assert get_git_main_repo_root(dir_b) is None
+
+        # Calling dir_a again must return cached result without re-invoking git.
+        # subprocess.run still mocked to return result_b (which returns None),
+        # but cache should return the original non-None result for dir_a.
+        with (
+            patch("subprocess.run", return_value=result_b),
+            patch("summon_claude.config.Path.home", return_value=tmp_path),
+        ):
+            assert get_git_main_repo_root(dir_a) is not None
 
 
 class TestDetectInstallModeWorktree:
@@ -666,7 +725,7 @@ class TestDetectInstallModeWorktree:
         fake_result.stdout = str(main_git).encode() + b"\n"
 
         with (
-            patch("subprocess.run", return_value=fake_result),
+            patch("subprocess.run", return_value=fake_result) as mock_run,
             patch("summon_claude.config.Path.home", return_value=tmp_path.parent),
         ):
             mode, root = _detect_install_mode()
@@ -674,6 +733,13 @@ class TestDetectInstallModeWorktree:
         assert mode == "local"
         # project_root stays as the worktree root, not main repo root
         assert root == worktree
+        # Verify get_git_main_repo_root was called with the worktree (project_root),
+        # not the main repo root or any other path.
+        assert mock_run.called
+        actual_cwd = mock_run.call_args.kwargs.get("cwd")
+        assert actual_cwd == worktree, (
+            f"subprocess.run cwd={actual_cwd!r}, expected worktree={worktree!r}"
+        )
 
     def test_worktree_no_virtual_env_is_global(self, tmp_path, monkeypatch):
         """(c) Worktree with no VIRTUAL_ENV → global mode."""
@@ -794,6 +860,48 @@ class TestDetectInstallModeWorktree:
             config_dir = get_config_dir()
 
         assert config_dir == tmp_path / ".summon"
+
+
+class TestResolveHelpHint:
+    """Tests for ConfigOption.resolve_help_hint()."""
+
+    def test_string(self):
+        """resolve_help_hint() returns a str help_hint as-is."""
+        opt = ConfigOption(
+            field_name="test",
+            env_key="TEST",
+            group="g",
+            label="l",
+            help_text="h",
+            input_type="text",
+            help_hint="static hint",
+        )
+        assert opt.resolve_help_hint() == "static hint"
+
+    def test_callable(self):
+        """resolve_help_hint() calls a callable help_hint and returns the result."""
+        opt = ConfigOption(
+            field_name="test",
+            env_key="TEST",
+            group="g",
+            label="l",
+            help_text="h",
+            input_type="text",
+            help_hint=lambda: "lazy hint",
+        )
+        assert opt.resolve_help_hint() == "lazy hint"
+
+    def test_none(self):
+        """resolve_help_hint() returns None when help_hint is None."""
+        opt = ConfigOption(
+            field_name="test",
+            env_key="TEST",
+            group="g",
+            label="l",
+            help_text="h",
+            input_type="text",
+        )
+        assert opt.resolve_help_hint() is None
 
 
 class TestModelChoices:

@@ -153,6 +153,31 @@ class TestConfigLoadsFromXdg:
         assert "xoxb-from-xdg" in content
         assert "xapp-from-xdg" in content
 
+    def test_summon_config_instantiation_loads_from_xdg(self, tmp_path, monkeypatch):
+        """SummonConfig() reads tokens from the XDG config file at instantiation time.
+
+        Verifies the lazy injection contract: get_config_file() is called inside
+        __init__, not at class-definition / import time, so the XDG env var set
+        after import is respected.
+        """
+        xdg_config = tmp_path / "xdg_config"
+        xdg_config.mkdir(parents=True)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+
+        config_dir = xdg_config / "summon"
+        config_dir.mkdir(parents=True)
+        config_file = config_dir / "config.env"
+        config_file.write_text(
+            "SUMMON_SLACK_BOT_TOKEN=xoxb-from-xdg\n"
+            "SUMMON_SLACK_APP_TOKEN=xapp-from-xdg\n"
+            "SUMMON_SLACK_SIGNING_SECRET=abc123def456\n"
+        )
+
+        cfg = SummonConfig()
+        assert cfg.slack_bot_token == "xoxb-from-xdg"
+        assert cfg.slack_app_token == "xapp-from-xdg"
+        assert cfg.slack_signing_secret == "abc123def456"
+
 
 class TestGetClaudeConfigDir:
     def test_returns_default_when_env_not_set(self, monkeypatch):

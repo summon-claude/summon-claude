@@ -62,6 +62,8 @@ def _guard_no_global_xdg_writes():
 
     def _snapshot(p: Path) -> set[Path]:
         try:
+            # set() must stay inside try: rglob() returns a lazy generator and
+            # OSError can be raised during iteration, not just at generator creation.
             return set(p.rglob("*"))
         except OSError:
             return set()
@@ -129,7 +131,7 @@ def _isolate_data_dir(tmp_path_factory, _guard_no_global_xdg_writes):
         "XDG_CONFIG_HOME": os.environ.get("XDG_CONFIG_HOME", "").strip(),
     }
 
-    def _fake_xdg_dir(env_var: str, default_subdir: str, xdg_subdir: str) -> Path:
+    def _fake_xdg_dir(env_var: str, _default_subdir: str, xdg_subdir: str) -> Path:
         """Route XDG data and config requests to isolated temp directories.
 
         When a test explicitly changes XDG_DATA_HOME or XDG_CONFIG_HOME via
@@ -143,7 +145,7 @@ def _isolate_data_dir(tmp_path_factory, _guard_no_global_xdg_writes):
             p = Path(explicit)
             if p.is_absolute():
                 return p / xdg_subdir
-        if "DATA" in env_var or "share" in default_subdir:
+        if env_var == "XDG_DATA_HOME":
             return data_dir
         return config_dir
 

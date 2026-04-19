@@ -35,53 +35,7 @@ import summon_claude.github_auth
 import summon_claude.sessions.manager
 import summon_claude.sessions.registry
 import summon_claude.sessions.session
-from summon_claude.config import ConfigOption, get_config_dir, get_data_dir
-
-# ---------------------------------------------------------------------------
-# Guard tests for isolation infrastructure contracts
-# ---------------------------------------------------------------------------
-
-
-def test_resolve_help_hint_string():
-    """resolve_help_hint() returns a str help_hint as-is."""
-    opt = ConfigOption(
-        field_name="test",
-        env_key="TEST",
-        group="g",
-        label="l",
-        help_text="h",
-        input_type="text",
-        help_hint="static hint",
-    )
-    assert opt.resolve_help_hint() == "static hint"
-
-
-def test_resolve_help_hint_callable():
-    """resolve_help_hint() calls a callable help_hint and returns the result."""
-    opt = ConfigOption(
-        field_name="test",
-        env_key="TEST",
-        group="g",
-        label="l",
-        help_text="h",
-        input_type="text",
-        help_hint=lambda: "lazy hint",
-    )
-    assert opt.resolve_help_hint() == "lazy hint"
-
-
-def test_resolve_help_hint_none():
-    """resolve_help_hint() returns None when help_hint is None."""
-    opt = ConfigOption(
-        field_name="test",
-        env_key="TEST",
-        group="g",
-        label="l",
-        help_text="h",
-        input_type="text",
-    )
-    assert opt.resolve_help_hint() is None
-
+from summon_claude.config import get_config_dir, get_data_dir
 
 # ---------------------------------------------------------------------------
 # Prove get_data_dir() / get_config_dir() return temp paths during tests

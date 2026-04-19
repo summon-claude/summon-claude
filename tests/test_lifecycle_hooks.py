@@ -600,6 +600,44 @@ class TestListWorktreePaths:
 
         assert paths == []
 
+    def test_skips_path_outside_home_and_logs_warning(self, tmp_path, caplog):
+        """A worktree path outside Path.home() is dropped and a WARNING is logged."""
+        import logging
+        import subprocess as _subprocess
+
+        from summon_claude.sessions.hooks import _list_worktree_paths
+
+        home = Path.home()
+        in_home_path = home / "projects" / "repo"
+        out_of_home_path = Path("/opt/outside-home/repo")
+
+        fake_output = (
+            f"worktree {in_home_path}\n"
+            "HEAD abc123\n"
+            "branch refs/heads/main\n"
+            "\n"
+            f"worktree {out_of_home_path}\n"
+            "HEAD def456\n"
+            "branch refs/heads/other\n"
+        )
+        mock_result = _subprocess.CompletedProcess(
+            args=["git", "worktree", "list", "--porcelain"],
+            returncode=0,
+            stdout=fake_output,
+            stderr="",
+        )
+        with (
+            patch("summon_claude.sessions.hooks.subprocess.run", return_value=mock_result),
+            caplog.at_level(logging.WARNING, logger="summon_claude.sessions.hooks"),
+        ):
+            paths = _list_worktree_paths(tmp_path)
+
+        assert in_home_path.resolve() in paths
+        assert out_of_home_path.resolve() not in paths
+        assert any("outside home" in record.getMessage() for record in caplog.records), (
+            "Expected a WARNING about path outside home directory"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Hooks CLI commands: show, set, clear
