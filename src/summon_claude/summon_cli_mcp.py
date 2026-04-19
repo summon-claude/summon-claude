@@ -62,9 +62,12 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
     _ipc_stop_session: Callable[..., Awaitable[bool]] | None = None,
     _ipc_send_message: Callable[..., Awaitable[dict]] | None = None,
     _ipc_resume_session: Callable[..., Awaitable[dict]] | None = None,
+    _ipc_clear_session: Callable[..., Awaitable[dict]] | None = None,
     _ipc_queue_session: Callable[..., int] | None = None,
     _web_client: Any | None = None,
     pm_status_ts: str | None = None,
+    config: Any | None = None,  # noqa: ARG001 — used by Task 3 triage auto-detection
+    triage_jira_cloud_id: str | None = None,  # noqa: ARG001 — used by Task 3 triage auto-detection
 ) -> list[SdkMcpTool]:
     """Create MCP tool instances for session lifecycle and scheduling.
 
@@ -734,6 +737,108 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             }
 
     @tool(
+        "session_clear",
+        (
+            "Clear a child session's conversation context. The session stays active "
+            "but starts fresh — no prior messages or tool history. "
+            "session_id: the session ID to clear."
+        ),
+        {"session_id": str},
+    )
+    async def session_clear(args: dict) -> dict:  # noqa: PLR0911
+        target_id = args.get("session_id", "")
+        if not target_id:
+            return {
+                "content": [{"type": "text", "text": "Error: session_id is required."}],
+                "is_error": True,
+            }
+
+        if target_id == session_id:
+            return {
+                "content": [{"type": "text", "text": "Error: cannot clear your own session."}],
+                "is_error": True,
+            }
+
+        try:
+            target = await registry.get_session(target_id)
+
+            # Scope guard: session must exist and belong to same user
+            if target is None or target.get("authenticated_user_id") != authenticated_user_id:
+                return {
+                    "content": [
+                        {"type": "text", "text": f"Error: session '{target_id}' not found."}
+                    ],
+                    "is_error": True,
+                }
+
+            # Parent-child scope guard (GPM exempt)
+            if not is_global_pm and target.get("parent_session_id") != session_id:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Error: can only clear sessions you spawned.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Target must be active
+            if target.get("status") != "active":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Error: session '{target_id}' is "
+                                f"{target.get('status', 'not active')}. "
+                                "Can only clear active sessions."
+                            ),
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            ipc_clear = _ipc_clear_session
+            if ipc_clear is None:
+                from summon_claude.cli.daemon_client import (  # noqa: PLC0415
+                    clear_session,
+                )
+
+                ipc_clear = clear_session
+
+            result = await ipc_clear(target_id)
+
+            if result.get("type") != "session_cleared":
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Error: clear_context() failed for session "
+                                f"'{target_id}'. Session may be unavailable."
+                            ),
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            target_name = target.get("session_name") or target_id[:8]
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": f"Context cleared for session '{target_name}' ({target_id}).",
+                    }
+                ]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error clearing session: {e}"}],
+                "is_error": True,
+            }
+
+    @tool(
         "session_resume",
         (
             "Resume a completed or errored session. Creates a new Summon "
@@ -1278,6 +1383,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         if not is_global_pm:
             pm_tools.insert(0, session_start)
         pm_tools.append(session_message)
+        pm_tools.append(session_clear)
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
@@ -1303,6 +1409,8 @@ def create_summon_cli_mcp_server(  # noqa: PLR0913
     on_task_change: Callable[[], Coroutine[Any, Any, None]] | None = None,
     pm_status_ts: str | None = None,
     ipc_queue: Callable[..., int] | None = None,
+    config: Any | None = None,
+    triage_jira_cloud_id: str | None = None,
 ) -> McpSdkServerConfig:
     """Create an MCP server with session lifecycle + scheduling tools."""
     tools = create_summon_cli_mcp_tools(
@@ -1320,5 +1428,7 @@ def create_summon_cli_mcp_server(  # noqa: PLR0913
         _ipc_queue_session=ipc_queue,
         _web_client=web_client,
         pm_status_ts=pm_status_ts,
+        config=config,
+        triage_jira_cloud_id=triage_jira_cloud_id,
     )
     return create_sdk_mcp_server(name="summon-cli", version="1.0.0", tools=tools)

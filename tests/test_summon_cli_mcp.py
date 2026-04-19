@@ -1072,10 +1072,11 @@ class TestMCPServerCreation:
             is_global_pm=True,
             scheduler=make_scheduler(),
         )
-        # 8 base + session_stop, session_log_status, session_resume, session_message = 4 PM
-        # (no session_start for GPM) + get_workflow_instructions = 1 GPM-only
+        # 8 base + session_stop, session_log_status, session_resume, session_message,
+        # session_clear = 5 PM (no session_start for GPM)
+        # + get_workflow_instructions = 1 GPM-only
         # session_status_update excluded (no pm_status_ts)
-        assert len(tools) == 13
+        assert len(tools) == 14
 
 
 class TestSessionStatusUpdate:

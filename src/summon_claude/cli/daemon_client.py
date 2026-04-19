@@ -140,6 +140,15 @@ async def resume_session(
     )
 
 
+async def clear_session(session_id: str) -> dict[str, Any]:
+    """Send a ``clear_session`` request to the daemon.
+
+    Returns the daemon response dict.  On success, contains
+    ``{"type": "session_cleared", "session_id": ...}``.
+    """
+    return await _request({"type": "clear_session", "session_id": session_id})
+
+
 async def stop_session(session_id: str) -> bool:
     """Send a ``stop_session`` request to the daemon.
 
