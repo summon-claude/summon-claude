@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import (
     AssistantMessage,
+    RateLimitEvent,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
@@ -333,8 +334,12 @@ class ResponseStreamer:
             async for message in messages:
                 if isinstance(message, AssistantMessage):
                     await self._handle_assistant_message(message)
+                elif isinstance(message, RateLimitEvent):
+                    logger.warning("Rate limit event received: %s", message)
                 elif isinstance(message, ResultMessage):
                     result = message
+                    if errors := getattr(result, "errors", None):
+                        logger.warning("SDK ResultMessage errors: %s", errors)
                     break
         finally:
             stop_flush.set()
@@ -360,6 +365,8 @@ class ResponseStreamer:
         """Process content blocks from an AssistantMessage."""
         if not self._turn.resolved_model and getattr(message, "model", None):
             self._turn.resolved_model = message.model
+        if usage := getattr(message, "usage", None):
+            logger.debug("Per-turn usage: %s", usage)
         parent_id = message.parent_tool_use_id
 
         for block in message.content:
