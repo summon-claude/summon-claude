@@ -52,9 +52,8 @@ def _guard_no_global_xdg_writes():
     snapshot contains actual filesystem paths. Detects net-new file/directory
     creation in the global summon data and config paths.
 
-    ORDERING: This fixture must be defined before _isolate_data_dir so that
-    pytest's session-scope autouse ordering runs it first and the snapshot is
-    taken against the real (unpatched) _xdg_dir.
+    Ordering is enforced structurally: _isolate_data_dir declares this fixture
+    as a parameter dependency, guaranteeing it runs first.
     """
     from summon_claude.config import _xdg_dir
 
@@ -96,8 +95,11 @@ def _isolate_registry_db(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True, scope="session")
-def _isolate_data_dir(tmp_path_factory):
+def _isolate_data_dir(tmp_path_factory, _guard_no_global_xdg_writes):
     """Prevent tests from writing log files or other data to the real data dir.
+
+    Depends on ``_guard_no_global_xdg_writes`` (via parameter) to ensure the
+    guard snapshots real XDG paths BEFORE this fixture patches ``_xdg_dir``.
 
     Uses 2 source-level patches instead of 13 per-module patches:
 

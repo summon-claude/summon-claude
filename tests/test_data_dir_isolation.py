@@ -129,6 +129,12 @@ def test_data_dir_is_isolated():
     real_data = Path.home() / ".local" / "share" / "summon"
     real_config = Path.home() / ".config" / "summon"
 
+    # Data and config dirs must be non-overlapping in test mode
+    assert data != config, (
+        f"get_data_dir() and get_config_dir() overlap: both return {data!r}. "
+        "Test isolation must use separate temp dirs for data and config."
+    )
+
     # Must differ from real defaults (isolation is active)
     assert data != real_data, (
         f"get_data_dir() is NOT isolated: returns real XDG path {data!r}. "
