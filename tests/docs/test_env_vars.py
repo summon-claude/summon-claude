@@ -369,3 +369,50 @@ def test_derive_default_mappings() -> None:
             assert isinstance(result, str) and result, (
                 f"{opt.env_key}: _derive_default must return a non-empty string, got {result!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Test 10 — None-default fields must have _DEFAULT_OVERRIDES entries
+# ---------------------------------------------------------------------------
+
+
+def test_none_defaults_have_overrides() -> None:
+    """Every ConfigOption with a None Pydantic default must have a _DEFAULT_OVERRIDES entry.
+
+    Without an override, _derive_default falls through to the generic
+    ``_(empty)_`` rendering, which is wrong for fields that mean "auto-detect"
+    or "inherits from another setting".  This test forces the developer to
+    choose the correct human-readable default text when adding a new field
+    with default=None.
+    """
+    from pydantic_core import PydanticUndefined
+
+    from scripts.generate_env_docs import _DEFAULT_OVERRIDES
+    from summon_claude.config import CONFIG_OPTIONS, SummonConfig
+
+    missing: list[str] = []
+    for opt in CONFIG_OPTIONS:
+        field_info = SummonConfig.model_fields.get(opt.field_name)
+        if field_info is None:
+            continue
+        if field_info.default is not None:
+            continue  # has a real default — _derive_default handles it
+        if field_info.default is PydanticUndefined:
+            continue  # required field — _derive_default returns None
+        # default is None — must have an override to render correctly
+        if opt.env_key not in _DEFAULT_OVERRIDES:
+            missing.append(opt.env_key)
+
+    assert not missing, (
+        f"ConfigOptions with default=None but no _DEFAULT_OVERRIDES entry: {sorted(missing)}. "
+        f"Add an entry to _DEFAULT_OVERRIDES in scripts/generate_env_docs.py "
+        f"(e.g. '_(auto-detect)_' or '_(empty)_')."
+    )
+
+    # Reverse: every _DEFAULT_OVERRIDES key must be a real ConfigOption
+    config_keys = {opt.env_key for opt in CONFIG_OPTIONS}
+    phantom = set(_DEFAULT_OVERRIDES.keys()) - config_keys
+    assert not phantom, (
+        f"_DEFAULT_OVERRIDES entries for non-existent ConfigOptions: {sorted(phantom)}. "
+        f"Remove stale entries from _DEFAULT_OVERRIDES."
+    )
