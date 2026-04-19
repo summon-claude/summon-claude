@@ -10,7 +10,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 .PHONY: install lint test build clean all release
 .PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-llm py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
-.PHONY: docs-prompts docs-commands docs-env docs-permissions docs-mcp docs-serve docs-build docs-check docs-check-generated docs-screenshots docs-terminal docs-test docs-test-links
+.PHONY: docs-generate docs-prompts docs-commands docs-env docs-permissions docs-mcp docs-serve docs-build docs-check docs-check-generated docs-screenshots docs-terminal docs-test docs-test-links
 
 # Default target - auto-generated from inline ## comments
 help:
@@ -80,6 +80,13 @@ py-all: py-install py-lint py-test ## Python workflow: install → lint → test
 # ============================================================================
 # DOCS
 # ============================================================================
+
+docs-generate: ## Regenerate all generated doc sections
+	uv run python scripts/generate_prompt_docs.py
+	uv run python scripts/generate_commands_docs.py
+	uv run python scripts/generate_env_docs.py
+	uv run python scripts/generate_permissions_docs.py
+	uv run python scripts/generate_mcp_docs.py
 
 docs-prompts: ## Regenerate docs/reference/prompts.md from source constants
 	uv run python scripts/generate_prompt_docs.py
