@@ -102,8 +102,6 @@ def get_source_prompts() -> dict[str, str]:
         "pm-scan": build_pm_scan_prompt(
             github_enabled=True,
             jira_enabled=True,
-            jira_jql="project = EXAMPLE AND status != Done",
-            jira_cloud_id="example-cloud-id-abc123",
         ),
         "global-pm-system": _GLOBAL_PM_SYSTEM_PROMPT_APPEND,
         "global-pm-scan": build_global_pm_scan_prompt(),

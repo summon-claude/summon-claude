@@ -733,11 +733,7 @@ class TestBuildPmSystemPromptWorkflow:
 
 class TestBuildPmScanPromptJira:
     def test_scan_prompt_jira_triage_present_when_enabled(self):
-        result = build_pm_scan_prompt(
-            jira_enabled=True,
-            jira_jql="project = FOO",
-            jira_cloud_id="abc-123",
-        )
+        result = build_pm_scan_prompt(jira_enabled=True)
         assert "Jira Triage" in result
 
     def test_scan_prompt_jira_triage_absent_when_disabled(self):
@@ -777,11 +773,7 @@ class TestBuildPmScanPromptJira:
 
     def test_scan_prompt_injection_defense(self):
         # Scan prompt references jira-triage persistent worker (injection defense in template)
-        result = build_pm_scan_prompt(
-            jira_enabled=True,
-            jira_jql="project = FOO",
-            jira_cloud_id="abc-123",
-        )
+        result = build_pm_scan_prompt(jira_enabled=True)
         assert "jira-triage" in result
 
     def test_scan_prompt_jira_disabled_by_default(self):
@@ -791,11 +783,7 @@ class TestBuildPmScanPromptJira:
 
     def test_scan_prompt_jira_structure_preserved(self):
         """Jira section must not corrupt other scan sections."""
-        result = build_pm_scan_prompt(
-            jira_enabled=True,
-            jira_jql="project = BAR",
-            jira_cloud_id="cid-1",
-        )
+        result = build_pm_scan_prompt(jira_enabled=True)
         assert "SCAN TRIGGER" in result
         assert "Session Health Check" in result
         assert "Canvas Update" in result

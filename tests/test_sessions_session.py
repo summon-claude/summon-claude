@@ -4757,17 +4757,14 @@ class TestPmJiraJqlIntegration:
         )
         assert "Jira Triage" not in result
 
-    def test_jira_enabled_without_cloud_id_has_no_cloud_line(self):
-        """When cloud_id is None, scan prompt omits Cloud ID line."""
+    def test_jira_enabled_contains_persistent_worker_pattern(self):
+        """Jira Triage section must reference jira-triage persistent worker."""
         from summon_claude.sessions.prompts.pm import build_pm_scan_prompt
 
-        result = build_pm_scan_prompt(
-            jira_enabled=True,
-            jira_jql="project = FOO",
-            jira_cloud_id=None,
-        )
+        result = build_pm_scan_prompt(jira_enabled=True)
         assert "Jira Triage" in result
-        assert "Cloud ID:" not in result
+        assert "jira-triage" in result
+        assert "session_clear" in result
 
 
 class TestHandleDiffFileNonGit:

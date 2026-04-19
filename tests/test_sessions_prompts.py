@@ -274,10 +274,7 @@ class TestRefactoredScanPrompt:
 
     def test_scan_prompt_no_inline_jql(self):
         """JQL must NOT be embedded in scan prompt (delegated to triage child)."""
-        result = build_pm_scan_prompt(
-            jira_enabled=True,
-            jira_jql="project = DEMO",
-        )
+        result = build_pm_scan_prompt(jira_enabled=True)
         assert "searchJiraIssuesUsingJql" not in result
 
     def test_scan_prompt_gh_triage_worker_pattern(self):
@@ -351,9 +348,6 @@ class TestRefactoredScanPrompt:
             github_enabled=True,
             is_git_repo=True,
             jira_enabled=True,
-            jira_jql="x" * 500,
-            jira_cloud_id="y" * 64,
-            stale_pr_hours=999,
         )
         assert len(result) < 20_000
 

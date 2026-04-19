@@ -2210,15 +2210,6 @@ class SummonSession:
         if pm_jira_enabled and not jira_cloud_id:
             logger.warning("Jira enabled but no cloud_id — disabling Jira triage for PM")
             pm_jira_enabled = False
-        pm_jira_jql: str | None = None
-        pm_jira_cloud_id: str | None = jira_cloud_id if pm_jira_enabled else None
-        if pm_jira_enabled and self._project_id:
-            try:
-                project_row = await rt.registry.get_project(self._project_id)
-                if project_row:
-                    pm_jira_jql = project_row.get("jira_jql") or None
-            except Exception as e:
-                logger.warning("Failed to fetch project Jira config: %s", e)
 
         # Scribe Jira guard: disable if cloud_id is missing (plan T9 S4)
         scribe_jira_enabled = bool(jira_mcp) and is_scribe
@@ -2243,8 +2234,6 @@ class SummonSession:
                         github_enabled=bool(self._config.github_mcp_config()),
                         is_git_repo=is_git_repo,
                         jira_enabled=pm_jira_enabled,
-                        jira_jql=pm_jira_jql,
-                        jira_cloud_id=pm_jira_cloud_id,
                     ),
                     internal=True,
                     max_lifetime_s=0,

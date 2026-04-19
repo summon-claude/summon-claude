@@ -386,14 +386,11 @@ def build_pm_system_prompt(
     }
 
 
-def build_pm_scan_prompt(  # noqa: PLR0913
+def build_pm_scan_prompt(
     *,
     github_enabled: bool = False,
     is_git_repo: bool = True,
     jira_enabled: bool = False,
-    jira_jql: str | None = None,  # noqa: ARG001 — removed in Task 3
-    jira_cloud_id: str | None = None,  # noqa: ARG001 — removed in Task 3
-    stale_pr_hours: int = 24,  # noqa: ARG001 — consumed in Task 3
 ) -> str:
     """Build the PM periodic scan prompt with conditional sections.
 
