@@ -23,8 +23,6 @@ from typing import Any
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import (
     BaseSettings,
-    DotEnvSettingsSource,
-    PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
 
@@ -671,49 +669,22 @@ class SummonConfig(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="SUMMON_",
-        # Placeholder — NOT the real config path.  The actual env_file is
-        # resolved lazily in settings_customise_sources() so get_config_file()
-        # is never called at class-definition time (import time).  A non-None
-        # placeholder is required so pydantic-settings populates
-        # dotenv_settings.env_file with a non-None value, making it
-        # distinguishable from the _env_file=None test override.
-        env_file=(".env",),
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
-    @classmethod
-    def settings_customise_sources(
-        cls,
-        settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
-        """Defer env_file resolution to instantiation time (not import time).
+    def __init__(self, /, **values: Any):
+        """Inject the config file path lazily when the caller doesn't specify one.
 
-        Constructs a fresh DotEnvSettingsSource with the config file path
-        resolved at call time, so get_config_file() is evaluated lazily.
+        ``get_config_file()`` is called here (instantiation time) instead of in
+        ``model_config`` (class-definition / import time) so it runs AFTER test
+        fixtures can patch ``_xdg_dir`` and ``get_local_root``.
 
-        When ``_env_file=None`` is passed to the constructor (e.g. in tests),
-        pydantic-settings sets ``dotenv_settings.env_file = None``.  We honour
-        that override: a None env_file means "no dotenv loading" so we pass
-        the original dotenv_settings through unchanged (it will load nothing).
+        Pass ``_env_file=None`` to suppress dotenv loading (used by tests).
         """
-        # Honour _env_file=None override: pydantic-settings sets
-        # dotenv_settings.env_file=None when the caller passes _env_file=None.
-        # The model_config placeholder (".env",) is non-None, so this branch
-        # only fires for the explicit None override (i.e. tests).
-        if getattr(dotenv_settings, "env_file", None) is None:
-            return (init_settings, env_settings, dotenv_settings, file_secret_settings)
-        # Normal path: resolve the real config file path lazily at instantiation.
-        lazy_dotenv = DotEnvSettingsSource(
-            settings_cls,
-            env_file=(str(get_config_file()), ".env"),  # global first, local overrides
-            env_file_encoding="utf-8",
-        )
-        return (init_settings, env_settings, lazy_dotenv, file_secret_settings)
+        if "_env_file" not in values:
+            values["_env_file"] = (str(get_config_file()), ".env")
+        super().__init__(**values)
 
     # Slack credentials — repr=False to prevent leakage in logs/tracebacks
     slack_bot_token: str = Field(repr=False)

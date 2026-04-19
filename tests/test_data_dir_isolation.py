@@ -42,24 +42,6 @@ from summon_claude.config import ConfigOption, get_config_dir, get_data_dir
 # ---------------------------------------------------------------------------
 
 
-def test_dotenv_settings_source_has_env_file_attribute():
-    """Guard: pydantic-settings DotEnvSettingsSource must expose env_file.
-
-    SummonConfig.settings_customise_sources relies on
-    ``getattr(dotenv_settings, 'env_file', None)`` to detect when
-    ``_env_file=None`` was passed.  If pydantic-settings renames or removes
-    the attribute, the test-mode bypass breaks silently.
-    """
-    from pydantic_settings import BaseSettings, DotEnvSettingsSource
-
-    src = DotEnvSettingsSource(BaseSettings, env_file=None)
-    assert hasattr(src, "env_file"), (
-        "DotEnvSettingsSource no longer has env_file attribute — "
-        "update SummonConfig.settings_customise_sources"
-    )
-    assert src.env_file is None
-
-
 def test_resolve_help_hint_string():
     """resolve_help_hint() returns a str help_hint as-is."""
     opt = ConfigOption(
