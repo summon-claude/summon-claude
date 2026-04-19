@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.docs.conftest import parse_mcp_tool_refs
+from tests.docs.conftest import REPO_ROOT, parse_mcp_tool_refs
 
 pytestmark = pytest.mark.docs
 
@@ -43,26 +43,10 @@ def _normalize_schema(raw: dict) -> tuple[set[str], set[str] | None]:
     return props, None  # required info unavailable
 
 
-_SERVER_PREFIXES: dict[str, str | None] = {
-    "summon-slack": "slack_",
-    "summon-canvas": "summon_canvas_",
-    "summon-cli": None,  # everything else
-}
-
-
 def _parse_doc(docs_dir: Path) -> str:
     doc_path = docs_dir / _MCP_TOOLS_DOC
     assert doc_path.exists(), f"MCP tools doc not found: {doc_path}"
     return doc_path.read_text(encoding="utf-8")
-
-
-def _tools_for_server(server: str, all_names: set[str]) -> set[str]:
-    prefix = _SERVER_PREFIXES[server]
-    if prefix is None:
-        # summon-cli: anything that doesn't match the other two prefixes
-        other_prefixes = tuple(p for p in _SERVER_PREFIXES.values() if p is not None)
-        return {n for n in all_names if not n.startswith(other_prefixes)}
-    return {n for n in all_names if n.startswith(prefix)}
 
 
 def _parse_param_table(tool_name: str, content: str) -> tuple[set[str], set[str]]:
@@ -222,6 +206,8 @@ def test_mcp_tool_counts_match(docs_dir: Path, mcp_tool_names: set[str]) -> None
         heading_counts[server_name] = len(tool_headings)
 
     # --- Count from source ---
+    from scripts.generate_mcp_docs import _SERVER_PREFIXES, _tools_for_server
+
     source_counts: dict[str, int] = {
         server: len(_tools_for_server(server, mcp_tool_names)) for server in _SERVER_PREFIXES
     }
@@ -248,3 +234,19 @@ def test_mcp_tool_counts_match(docs_dir: Path, mcp_tool_names: set[str]) -> None
         print(f"  Source counts: {source_counts}")
 
     assert not count_errors, "MCP tool counts don't match:\n" + "\n".join(count_errors)
+
+
+# ---------------------------------------------------------------------------
+# Test 5
+# ---------------------------------------------------------------------------
+
+
+def test_generated_sections_match() -> None:
+    """mcp-tools.md generated sections must be up to date with source tools."""
+    from scripts.generate_mcp_docs import generate, get_generated_sections
+
+    doc_path = REPO_ROOT / "docs" / "reference" / "mcp-tools.md"
+    content = doc_path.read_text(encoding="utf-8")
+    sections = get_generated_sections()
+    updated = generate(content, sections)
+    assert content == updated, "mcp-tools.md is stale — run `make docs-generate` to regenerate"

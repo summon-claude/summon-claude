@@ -2,11 +2,13 @@
 
 summon provides three internal MCP servers that Claude uses within sessions. These are **not** user-facing CLI commands — they are tools available to Claude's agent loop during a running session.
 
+<!-- mcp:summary -->
 | Server | Available to | Tools |
 |--------|-------------|-------|
 | `summon-slack` | All sessions | 8 tools — Slack actions and reading |
-| `summon-cli` | All sessions (8 tools) + PM sessions (5–6 additional) | Session lifecycle, scheduling, tasks |
+| `summon-cli` | All sessions (8 tools) + PM sessions (7 additional) | 15 tools — Session lifecycle, scheduling, tasks |
 | `summon-canvas` | Sessions with a canvas | 3 tools — canvas read/write |
+<!-- /mcp:summary -->
 
 ---
 
