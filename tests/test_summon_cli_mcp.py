@@ -920,6 +920,101 @@ class TestSessionMessage:
         assert result.get("is_error")
 
 
+class TestSessionClear:
+    """Tests for the session_clear MCP tool."""
+
+    @pytest.fixture
+    def clear_tools(self, populated_registry: SessionRegistry) -> tuple:
+        mock_clear = AsyncMock(return_value={"type": "session_cleared", "session_id": "child-2222"})
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                _ipc_clear_session=mock_clear,
+            )
+        }
+        return tools, mock_clear
+
+    async def test_clears_child(self, clear_tools):
+        tools, mock_clear = clear_tools
+        result = await tools["session_clear"].handler({"session_id": "child-2222"})
+        assert not result.get("is_error")
+        assert "Context cleared" in result["content"][0]["text"]
+        mock_clear.assert_awaited_once_with("child-2222")
+
+    async def test_rejects_missing_id(self, clear_tools):
+        tools, mock_clear = clear_tools
+        result = await tools["session_clear"].handler({})
+        assert result.get("is_error")
+        mock_clear.assert_not_awaited()
+
+    async def test_rejects_self(self, clear_tools):
+        tools, _ = clear_tools
+        result = await tools["session_clear"].handler({"session_id": "parent-1111"})
+        assert result.get("is_error")
+        assert "cannot clear your own session" in result["content"][0]["text"]
+
+    async def test_rejects_non_child(self, clear_tools):
+        tools, mock_clear = clear_tools
+        result = await tools["session_clear"].handler({"session_id": "done-4444"})
+        assert result.get("is_error")
+        assert "can only clear sessions you spawned" in result["content"][0]["text"]
+        mock_clear.assert_not_awaited()
+
+    async def test_rejects_inactive(self, populated_registry, clear_tools):
+        await populated_registry.update_status("child-2222", "completed")
+        tools, mock_clear = clear_tools
+        result = await tools["session_clear"].handler({"session_id": "child-2222"})
+        assert result.get("is_error")
+        assert "Can only clear active sessions" in result["content"][0]["text"]
+
+    async def test_returns_error_on_ipc_failure(self, populated_registry):
+        mock_clear = AsyncMock(return_value={"type": "error", "message": "failed"})
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="parent-1111",
+                authenticated_user_id="U_OWNER",
+                channel_id="C100",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                _ipc_clear_session=mock_clear,
+            )
+        }
+        result = await tools["session_clear"].handler({"session_id": "child-2222"})
+        assert result.get("is_error")
+        assert "clear_context() failed" in result["content"][0]["text"]
+
+    async def test_gpm_bypasses_parent_child_guard(self, populated_registry):
+        """PA-001: GPM must bypass parent-child scope guard on session_clear."""
+        mock_clear = AsyncMock(return_value={"type": "session_cleared", "session_id": "child-2222"})
+        tools = {
+            t.name: t
+            for t in create_summon_cli_mcp_tools(
+                registry=populated_registry,
+                session_id="gpm-9999",  # NOT the parent of child-2222
+                authenticated_user_id="U_OWNER",
+                channel_id="C_GPM",
+                cwd="/home/user/proj",
+                scheduler=make_scheduler(),
+                is_pm=True,
+                is_global_pm=True,
+                _ipc_clear_session=mock_clear,
+            )
+        }
+        result = await tools["session_clear"].handler({"session_id": "child-2222"})
+        assert not result.get("is_error")
+        assert "Context cleared" in result["content"][0]["text"]
+
+
 class TestSessionResume:
     """Tests for the session_resume MCP tool."""
 
