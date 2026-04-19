@@ -335,7 +335,7 @@ class ResponseStreamer:
                 if isinstance(message, AssistantMessage):
                     await self._handle_assistant_message(message)
                 elif isinstance(message, RateLimitEvent):
-                    logger.warning("Rate limit event received: %s", message)
+                    logger.info("Rate limit event received: %s", message)
                 elif isinstance(message, ResultMessage):
                     result = message
                     if errors := getattr(result, "errors", None):
