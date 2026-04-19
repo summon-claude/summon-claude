@@ -992,6 +992,21 @@ class TestModelChoices:
         assert "totally-unknown-model-xyz" in mock_echo.call_args[0][0]
         assert mock_echo.call_args[1].get("err") is True
 
+    def test_warn_unrecognized_model_prefix_match_no_warning(self):
+        """Dated snapshot prefix-matches cached model → no warning."""
+        from unittest.mock import patch as _patch
+
+        from summon_claude.config import _warn_unrecognized_model
+
+        cached = ([{"value": "claude-opus-4-6"}], None)
+        with (
+            _patch("summon_claude.cli.model_cache.load_cached_models", return_value=cached),
+            _patch("click.echo") as mock_echo,
+        ):
+            result = _warn_unrecognized_model("claude-opus-4-6-20260401")
+        assert result is None
+        mock_echo.assert_not_called()
+
     def test_warn_unrecognized_model_no_cache_skips_warning(self):
         """No cached models → returns None, no warning (graceful degradation)."""
         from unittest.mock import patch as _patch

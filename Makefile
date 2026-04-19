@@ -71,7 +71,7 @@ py-test-quick: ## Run quick Python tests (excludes Slack, LLM, and external link
 
 py-test-sdk: ## Run SDK integration tests (requires Claude CLI, makes API calls)
 	@echo "Running SDK integration tests..."
-	uv run pytest tests/test_sdk_integration.py -v -m slow
+	uv run pytest tests/test_sdk_integration.py -v -m llm
 
 py-build: ## Build sdist and wheel
 	uv build

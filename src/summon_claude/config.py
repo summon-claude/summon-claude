@@ -1237,8 +1237,8 @@ def _warn_unrecognized_model(value: str) -> str | None:
         cached = load_cached_models()
         if cached:
             models, _ = cached
-            known = {m.get("value", "") for m in models}
-            if value not in known:
+            known = [m.get("value", "") for m in models]
+            if not any(value.startswith(k) or k.startswith(value) for k in known if k):
                 click.echo(
                     f"Warning: '{value}' is not a recognized model. It will be used as-is.",
                     err=True,
