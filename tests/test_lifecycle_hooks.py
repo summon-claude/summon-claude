@@ -545,12 +545,16 @@ class TestListWorktreePaths:
 
         from summon_claude.sessions.hooks import _list_worktree_paths
 
+        home = Path.home()
+        main_path = home / "projects" / "repo"
+        wt_path = home / "projects" / "repo" / ".claude" / "worktrees" / "feat-a"
+
         fake_output = (
-            "worktree /repo/main\n"
+            f"worktree {main_path}\n"
             "HEAD abc123\n"
             "branch refs/heads/main\n"
             "\n"
-            "worktree /repo/.claude/worktrees/feat-a\n"
+            f"worktree {wt_path}\n"
             "HEAD def456\n"
             "branch refs/heads/worktree-feat-a\n"
         )
@@ -564,8 +568,8 @@ class TestListWorktreePaths:
             paths = _list_worktree_paths(tmp_path)
 
         assert len(paths) == 2
-        assert paths[0] == Path("/repo/main").resolve()
-        assert paths[1] == Path("/repo/.claude/worktrees/feat-a").resolve()
+        assert paths[0] == main_path.resolve()
+        assert paths[1] == wt_path.resolve()
 
     def test_returns_empty_list_on_nonzero_returncode(self, tmp_path):
         """Returns [] (fail-closed) when git exits with non-zero status."""

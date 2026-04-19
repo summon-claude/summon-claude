@@ -109,25 +109,22 @@ def test_resolve_help_hint_none():
 @pytest.mark.xdist_group("data_dir_isolation")
 def test_data_dir_is_isolated():
     """Prove that during test execution, get_data_dir() and get_config_dir()
-    return isolated temp paths (not the real XDG/home directories).
+    return isolated temp paths that do NOT leak to any real directory.
 
-    The _isolate_data_dir fixture (session autouse) patches _xdg_dir and
-    get_local_root so all callers get temp paths.  This test verifies the
-    expected isolation is in effect by:
-    1. Calling get_data_dir() and checking it differs from the real XDG path.
-    2. Calling get_config_dir() and checking it differs from the real XDG path.
+    Checks:
+    1. Data and config dirs are non-overlapping (separate temp dirs).
+    2. Neither points to a global XDG default (~/.local/share/summon, ~/.config/summon).
+    3. Neither points to the XDG fallback (~/.summon).
+    4. Neither is under Path.home() at all (proves no leak to global OR local dirs).
+    5. Neither is under CWD (proves no leak to local-mode project_root/.summon).
 
     If this test fails, it typically means one of:
     - import-time evaluation was reintroduced into config.py
     - _isolate_data_dir fixture coverage gap for a new module
     """
-    # Ensure global mode (no local root) so we go through _xdg_dir path
-    # _reset_install_mode (autouse) already cleared caches and deleted VIRTUAL_ENV
     data = get_data_dir()
     config = get_config_dir()
-
-    real_data = Path.home() / ".local" / "share" / "summon"
-    real_config = Path.home() / ".config" / "summon"
+    home = Path.home()
 
     # Data and config dirs must be non-overlapping in test mode
     assert data != config, (
@@ -135,14 +132,37 @@ def test_data_dir_is_isolated():
         "Test isolation must use separate temp dirs for data and config."
     )
 
-    # Must differ from real defaults (isolation is active)
-    assert data != real_data, (
-        f"get_data_dir() is NOT isolated: returns real XDG path {data!r}. "
-        "Check _isolate_data_dir fixture and import-time evaluations in config.py."
+    # Must not point to any real global XDG path
+    assert data != home / ".local" / "share" / "summon", (
+        f"get_data_dir() leaked to global XDG data dir: {data!r}"
     )
-    assert config != real_config, (
-        f"get_config_dir() is NOT isolated: returns real XDG path {config!r}. "
-        "Check _isolate_data_dir fixture and import-time evaluations in config.py."
+    assert config != home / ".config" / "summon", (
+        f"get_config_dir() leaked to global XDG config dir: {config!r}"
+    )
+
+    # Must not point to the XDG fallback (~/.summon)
+    assert data != home / ".summon", f"get_data_dir() leaked to XDG fallback dir: {data!r}"
+    assert config != home / ".summon", f"get_config_dir() leaked to XDG fallback dir: {config!r}"
+
+    # Must not be under home at all (catches any home-relative leak)
+    assert not data.is_relative_to(home), (
+        f"get_data_dir() leaked under $HOME: {data!r}. "
+        "Test paths must be in pytest temp dirs, not under the user's home."
+    )
+    assert not config.is_relative_to(home), (
+        f"get_config_dir() leaked under $HOME: {config!r}. "
+        "Test paths must be in pytest temp dirs, not under the user's home."
+    )
+
+    # Must not be under CWD (catches local-mode project_root/.summon leak)
+    cwd = Path.cwd()
+    assert not data.is_relative_to(cwd), (
+        f"get_data_dir() leaked under CWD: {data!r}. "
+        "Test paths must be in pytest temp dirs, not under the project root."
+    )
+    assert not config.is_relative_to(cwd), (
+        f"get_config_dir() leaked under CWD: {config!r}. "
+        "Test paths must be in pytest temp dirs, not under the project root."
     )
 
 
