@@ -331,6 +331,7 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         description="Show available commands",
         handler=_handle_help,
         max_args=1,
+        argument_hint="[command]",
     ),
     "status": CommandDef(
         description="Show session status",
@@ -358,11 +359,13 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         description="Switch or display the active model",
         handler=_handle_model,
         max_args=1,
+        argument_hint="[model]",
     ),
     "effort": CommandDef(
         description="Switch or display the effort level",
         handler=_handle_effort,
         max_args=1,
+        argument_hint="[level]",
     ),
     "auto": CommandDef(
         description="Toggle or inspect auto-mode classifier",
@@ -375,11 +378,13 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
         description="Compact conversation context",
         handler=_handle_compact,
         max_args=None,
+        argument_hint="[instructions]",
     ),
     "summon": CommandDef(
         description="Spawn or resume a session",
         handler=_handle_summon,
         max_args=2,
+        argument_hint="[start|resume [id]]",
     ),
     # --- Passthrough (forwarded to Claude CLI) ---
     "review": CommandDef(description="Review code changes"),

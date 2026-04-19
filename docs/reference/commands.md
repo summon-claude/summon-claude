@@ -37,16 +37,16 @@ These commands are handled locally by summon without forwarding to Claude.
 | `!auto [on\|off\|rules]` | `!automode` | Toggle or inspect auto-mode classifier |
 | `!changes` |  | Show all files changed in this session |
 | `!clear` | `!new`, `!reset` | Clear conversation history |
-| `!compact` |  | Compact conversation context |
+| `!compact [instructions]` |  | Compact conversation context |
 | `!diff [file_path]` |  | Show git diff (all changes, or specify a file) |
-| `!effort` |  | Switch or display the effort level |
+| `!effort [level]` |  | Switch or display the effort level |
 | `!end` | `!quit`, `!exit`, `!logout` | End this session |
-| `!help` |  | Show available commands |
-| `!model` |  | Switch or display the active model |
+| `!help [command]` |  | Show available commands |
+| `!model [model]` |  | Switch or display the active model |
 | `!show <file>` |  | Show current file contents |
 | `!status` |  | Show session status |
 | `!stop` |  | Cancel the current Claude turn |
-| `!summon` |  | Spawn or resume a session |
+| `!summon [start\|resume [id]]` |  | Spawn or resume a session |
 <!-- /commands:session -->
 
 ### !help
