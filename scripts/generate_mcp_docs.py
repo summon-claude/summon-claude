@@ -33,7 +33,7 @@ _MCP_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
-# Server -> tool name prefix mapping (mirrors conftest._SERVER_PREFIXES).
+# Server -> tool name prefix mapping.  Imported by tests/docs/test_mcp_tools.py.
 # Order determines summary table row order — matches the doc section order.
 _SERVER_PREFIXES: dict[str, str | None] = {
     "summon-slack": "slack_",
