@@ -8,7 +8,7 @@ CURRENT_BRANCH := $(shell git branch --show-current)
 
 .PHONY: help
 .PHONY: install lint test build clean all release
-.PHONY: py-install py-lint py-typecheck py-test py-test-slack py-test-llm py-test-quick py-build py-clean py-all
+.PHONY: py-install py-lint py-typecheck py-test py-test-sdk py-test-slack py-test-llm py-test-quick py-build py-clean py-all
 .PHONY: repo-hooks-install repo-hooks-clean
 .PHONY: docs-generate docs-serve docs-build docs-check docs-check-generated docs-screenshots docs-terminal docs-test docs-test-links
 
@@ -68,6 +68,10 @@ py-test-llm: ## Run LLM classifier integration tests (requires Claude CLI, makes
 py-test-quick: ## Run quick Python tests (excludes Slack, LLM, and external link checks; fail-fast)
 	@echo "Running quick pytest..."
 	uv run pytest --maxfail=1 -q -m "not slack and not llm and not link_check"
+
+py-test-sdk: ## Run SDK integration tests (requires Claude CLI, makes API calls)
+	@echo "Running SDK integration tests..."
+	uv run pytest tests/test_sdk_integration.py -v -m slow
 
 py-build: ## Build sdist and wheel
 	uv build
