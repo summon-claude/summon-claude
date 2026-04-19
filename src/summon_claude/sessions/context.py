@@ -2,26 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import ClaudeSDKClient
 
 logger = logging.getLogger(__name__)
 
-_1M = 1_000_000
 _200K = 200_000
-
-# Models that support a 1M context window (via beta header or [1m] suffix).
-_1M_CAPABLE_PREFIXES: tuple[str, ...] = (
-    "claude-opus-4-6",
-    "claude-sonnet-4-6",
-    "claude-sonnet-4-5",
-    "claude-sonnet-4-0",
-    "claude-sonnet-4-2",  # future-proof dated snapshots
-)
 
 # Prefix -> default (non-1M) context window.  Order matters: more specific
 # prefixes must come before shorter ones so startswith matching works.
@@ -133,86 +123,26 @@ class ContextUsage:
     percentage: float  # 0-100
 
 
-def compute_context_usage(usage: dict[str, Any] | None, model: str | None) -> ContextUsage | None:
-    """Compute context usage from a ResultMessage usage dict.
+async def get_sdk_context_usage(client: ClaudeSDKClient) -> ContextUsage | None:
+    """Get context usage from the SDK's get_context_usage() method.
 
-    Returns None if usage is missing or has no input_tokens.
+    Returns None on any error (network, method not available, etc.).
+    Must be called while the client is still connected (inside the
+    ``async with ClaudeSDKClient()`` block).
     """
-    if not usage:
-        return None
-    input_tokens = usage.get("input_tokens")
-    if input_tokens is None:
-        return None
-    total = (
-        input_tokens
-        + usage.get("cache_creation_input_tokens", 0)
-        + usage.get("cache_read_input_tokens", 0)
-    )
-    context_window = DEFAULT_CONTEXT_WINDOW
-    if model:
-        # Claude Code appends "[1m]" to the model ID when 1M context is active.
-        is_1m = "[1m]" in model
-        base_model = model.replace("[1m]", "")
-        matched = False
-        for prefix, size in CONTEXT_WINDOW_SIZES.items():
-            if base_model.startswith(prefix):
-                context_window = size
-                matched = True
-                break
-        if not matched:
-            runtime_size = _runtime_context_sizes.get(base_model)
-            if runtime_size is not None:
-                context_window = runtime_size
-        if is_1m and any(base_model.startswith(p) for p in _1M_CAPABLE_PREFIXES):
-            context_window = _1M
-    pct = (total / context_window) * 100 if context_window > 0 else 0.0
-    return ContextUsage(input_tokens=total, context_window=context_window, percentage=pct)
-
-
-_TAIL_BYTES = 65536  # 64KB tail read for efficient transcript parsing
-
-
-def derive_transcript_path(cwd: str, session_id: str) -> Path:
-    """Derive the JSONL transcript path from cwd and Claude session ID.
-
-    Claude Code stores transcripts at:
-    ``~/.claude/projects/{path_hash}/sessions/{session_id}.jsonl``
-    where ``path_hash`` is the SHA-256 hex digest of the absolute cwd path.
-    """
-    path_hash = hashlib.sha256(cwd.encode()).hexdigest()
-    return Path.home() / ".claude" / "projects" / path_hash / "sessions" / f"{session_id}.jsonl"
-
-
-def get_last_step_usage(transcript_path: Path) -> dict[str, Any] | None:
-    """Read the last API step's usage from the JSONL transcript.
-
-    Performs an efficient tail read (last 64KB) to avoid reading the
-    entire file, which can be several MB for long sessions.
-
-    Skips entries with ``parentToolUseId`` (subagent steps) and returns
-    the last top-level step's ``usage`` dict.
-    """
-    if not transcript_path.is_file():
-        return None
     try:
-        with transcript_path.open("rb") as f:
-            f.seek(0, 2)
-            size = f.tell()
-            f.seek(max(0, size - _TAIL_BYTES))
-            if f.tell() > 0:
-                f.readline()  # Skip partial first line
-            last_usage = None
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    continue
-                if entry.get("parentToolUseId"):
-                    continue
-                usage = entry.get("message", {}).get("usage")
-                if usage and usage.get("input_tokens") is not None:
-                    last_usage = usage
-        return last_usage
+        usage = await client.get_context_usage()
+        total_tokens = usage.get("totalTokens")
+        max_tokens = usage.get("maxTokens")
+        percentage = usage.get("percentage")
+        if total_tokens is None or max_tokens is None or percentage is None:
+            logger.debug("get_context_usage() returned incomplete data: %s", usage)
+            return None
+        return ContextUsage(
+            input_tokens=total_tokens,
+            context_window=max_tokens,
+            percentage=percentage,
+        )
     except Exception as e:
-        logger.debug("Failed to read transcript %s: %s", transcript_path, e)
+        logger.debug("get_context_usage() failed: %s", e)
         return None

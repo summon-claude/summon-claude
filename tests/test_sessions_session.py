@@ -3608,8 +3608,6 @@ class TestFinalizeEscalatingWarnings:
 
     async def _run_finalize(self, session, rt, pct, **sr_kwargs):
         """Call _finalize_turn_result with a given context percentage."""
-        from pathlib import Path
-
         from summon_claude.sessions.context import ContextUsage
 
         session._claude_session_id = "already-set"
@@ -3622,10 +3620,9 @@ class TestFinalizeEscalatingWarnings:
         streamer = self._make_streamer()
 
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch(
                 "summon_claude.sessions.session._detect_git",
@@ -3652,10 +3649,9 @@ class TestFinalizeEscalatingWarnings:
 
         detect_mock = AsyncMock(return_value=(False, None))
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch("summon_claude.sessions.session._detect_git", detect_mock),
         ):
@@ -3679,18 +3675,15 @@ class TestFinalizeEscalatingWarnings:
 
     async def test_no_context_data_skips_warnings(self):
         """When _last_context is None, the warning block is skipped entirely."""
-        from pathlib import Path
-
         session = make_session()
         session._claude_session_id = "already-set"
         session._last_context = None
         rt = make_rt(AsyncMock())
 
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch(
                 "summon_claude.sessions.session._detect_git",
