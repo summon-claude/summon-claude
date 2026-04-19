@@ -2787,6 +2787,7 @@
 
 <h1 id="mcp-tool-reference">MCP Tool Reference<a class="headerlink" href="#mcp-tool-reference" title="Permanent link">&para;</a></h1>
 <p>summon provides three internal MCP servers that Claude uses within sessions. These are <strong>not</strong> user-facing CLI commands — they are tools available to Claude's agent loop during a running session.</p>
+<!-- mcp:summary -->
 <table>
 <thead>
 <tr>
@@ -2803,8 +2804,8 @@
 </tr>
 <tr>
 <td><code>summon-cli</code></td>
-<td>All sessions (8 tools) + PM sessions (5–6 additional)</td>
-<td>Session lifecycle, scheduling, tasks</td>
+<td>All sessions (8 tools) + PM sessions (7 additional)</td>
+<td>15 tools — Session lifecycle, scheduling, tasks</td>
 </tr>
 <tr>
 <td><code>summon-canvas</code></td>
@@ -2813,6 +2814,8 @@
 </tr>
 </tbody>
 </table>
+<!-- /mcp:summary -->
+
 <hr />
 <h2 id="summon-slack">summon-slack<a class="headerlink" href="#summon-slack" title="Permanent link">&para;</a></h2>
 <p>Provides Slack posting and reading actions. All tools operate on the session's own channel by default. Cross-channel reads are gated by the allowed-channels list.</p>

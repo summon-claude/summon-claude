@@ -2437,7 +2437,10 @@
 <hr />
 <h2 id="read-only-by-default">Read-only by default<a class="headerlink" href="#read-only-by-default" title="Permanent link">&para;</a></h2>
 <p>Summon sessions start in <strong>read-only mode</strong>. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until containment is active.</p>
-<p><strong>Write-gated tools:</strong> <code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code> (and the SDK alias <code>str_replace_editor</code>)</p>
+<!-- permissions:write-gated -->
+<p><strong>Write-gated tools:</strong> <code>Bash</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Write</code> (and the SDK alias <code>str_replace_editor</code>)</p>
+<!-- /permissions:write-gated -->
+
 <p>Containment is activated in two ways depending on whether the session directory is a git repository:</p>
 <ul>
 <li><strong>Git repository:</strong> Claude must call <code>EnterWorktree</code> to create an isolated working copy. The containment root is the worktree directory.</li>
@@ -2459,6 +2462,7 @@
 <hr />
 <h2 id="auto-approved-tools">Auto-approved tools<a class="headerlink" href="#auto-approved-tools" title="Permanent link">&para;</a></h2>
 <p>The following tools are always approved without prompting. They are read-only and cannot modify your system:</p>
+<!-- permissions:auto-approve -->
 <table>
 <thead>
 <tr>
@@ -2509,6 +2513,8 @@
 </tr>
 </tbody>
 </table>
+<!-- /permissions:auto-approve -->
+
 <p>Summon's own MCP tools (<code>summon-cli</code>, <code>summon-slack</code>, <code>summon-canvas</code>) are also auto-approved — they are internal tools already scoped to the session's permissions.</p>
 <hr />
 <h2 id="approval-flow">Approval flow<a class="headerlink" href="#approval-flow" title="Permanent link">&para;</a></h2>
@@ -2568,8 +2574,12 @@
 <hr />
 <h2 id="github-mcp-permissions">GitHub MCP permissions<a class="headerlink" href="#github-mcp-permissions" title="Permanent link">&para;</a></h2>
 <p>When GitHub is authenticated (via <code>summon auth github login</code>), Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:</p>
-<p><strong>Auto-approved (read-only):</strong> Any tool with a <code>get_</code>, <code>list_</code>, or <code>search_</code> prefix, plus <code>pull_request_read</code> and <code>get_file_contents</code>.</p>
+<!-- permissions:github-allow -->
+<p><strong>Auto-approved (read-only):</strong> Any tool with a <code>get_</code>, <code>list_</code>, <code>search_</code> prefix, plus <code>get_file_contents</code> and <code>pull_request_read</code>.</p>
+<!-- /permissions:github-allow -->
+
 <p><strong>Always require Slack approval</strong> — checked before prefix rules, so no <code>allowedTools</code> pattern can bypass them:</p>
+<!-- permissions:github-deny -->
 <table>
 <thead>
 <tr>
@@ -2579,15 +2589,7 @@
 </thead>
 <tbody>
 <tr>
-<td><code>merge_pull_request</code></td>
-<td>Irreversible</td>
-</tr>
-<tr>
-<td><code>delete_branch</code></td>
-<td>Irreversible</td>
-</tr>
-<tr>
-<td><code>close_pull_request</code></td>
+<td><code>add_issue_comment</code></td>
 <td>Visible to others</td>
 </tr>
 <tr>
@@ -2595,23 +2597,7 @@
 <td>Visible to others</td>
 </tr>
 <tr>
-<td><code>push_files</code></td>
-<td>Writes to remote</td>
-</tr>
-<tr>
-<td><code>create_or_update_file</code></td>
-<td>Writes to remote</td>
-</tr>
-<tr>
-<td><code>update_pull_request_branch</code></td>
-<td>Modifies shared branch</td>
-</tr>
-<tr>
-<td><code>pull_request_review_write</code></td>
-<td>Visible to others</td>
-</tr>
-<tr>
-<td><code>create_pull_request</code></td>
+<td><code>close_pull_request</code></td>
 <td>Visible to others</td>
 </tr>
 <tr>
@@ -2619,11 +2605,37 @@
 <td>Visible to others</td>
 </tr>
 <tr>
-<td><code>add_issue_comment</code></td>
+<td><code>create_or_update_file</code></td>
+<td>Writes to remote</td>
+</tr>
+<tr>
+<td><code>create_pull_request</code></td>
 <td>Visible to others</td>
+</tr>
+<tr>
+<td><code>delete_branch</code></td>
+<td>Irreversible</td>
+</tr>
+<tr>
+<td><code>merge_pull_request</code></td>
+<td>Irreversible</td>
+</tr>
+<tr>
+<td><code>pull_request_review_write</code></td>
+<td>Visible to others</td>
+</tr>
+<tr>
+<td><code>push_files</code></td>
+<td>Writes to remote</td>
+</tr>
+<tr>
+<td><code>update_pull_request_branch</code></td>
+<td>Modifies shared branch</td>
 </tr>
 </tbody>
 </table>
+<!-- /permissions:github-deny -->
+
 <p>Any GitHub MCP tool not on either list also requires Slack approval (fail-closed).</p>
 <div class="admonition warning">
 <p class="admonition-title">Defense in depth</p>
@@ -2632,8 +2644,12 @@
 <hr />
 <h2 id="jira-mcp-permissions">Jira MCP permissions<a class="headerlink" href="#jira-mcp-permissions" title="Permanent link">&para;</a></h2>
 <p>When Jira is authenticated (via <code>summon auth jira login</code>), Claude has access to Jira tools via the Atlassian Rovo MCP server. Jira uses a <strong>strictly read-only</strong> permission model — all write operations are hard-denied, not routed to Slack for approval.</p>
-<p><strong>Auto-approved (read-only):</strong> Tools matching <code>get*</code>, <code>search*</code>, or <code>lookup*</code> prefixes, plus the exact match <code>atlassianUserInfo</code>.</p>
+<!-- permissions:jira-allow -->
+<p><strong>Auto-approved (read-only):</strong> Tools matching <code>get*</code>, <code>lookup*</code>, <code>search*</code> prefixes, plus the exact match <code>atlassianUserInfo</code>.</p>
+<!-- /permissions:jira-allow -->
+
 <p><strong>Hard-denied (always blocked)</strong> — checked before auto-approve prefixes:</p>
+<!-- permissions:jira-deny -->
 <table>
 <thead>
 <tr>
@@ -2643,31 +2659,11 @@
 </thead>
 <tbody>
 <tr>
-<td><code>createJiraIssue</code></td>
-<td>Write operation</td>
-</tr>
-<tr>
-<td><code>editJiraIssue</code></td>
-<td>Write operation</td>
-</tr>
-<tr>
-<td><code>transitionJiraIssue</code></td>
-<td>Write operation</td>
-</tr>
-<tr>
 <td><code>addCommentToJiraIssue</code></td>
 <td>Write operation</td>
 </tr>
 <tr>
 <td><code>addWorklogToJiraIssue</code></td>
-<td>Write operation</td>
-</tr>
-<tr>
-<td><code>createIssueLink</code></td>
-<td>Write operation</td>
-</tr>
-<tr>
-<td><code>createConfluencePage</code></td>
 <td>Write operation</td>
 </tr>
 <tr>
@@ -2679,15 +2675,37 @@
 <td>Write operation</td>
 </tr>
 <tr>
-<td><code>updateConfluencePage</code></td>
+<td><code>createConfluencePage</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createIssueLink</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>createJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>editJiraIssue</code></td>
 <td>Write operation</td>
 </tr>
 <tr>
 <td><code>fetchAtlassian</code></td>
 <td>Generic ARI accessor — bypasses per-tool gating</td>
 </tr>
+<tr>
+<td><code>transitionJiraIssue</code></td>
+<td>Write operation</td>
+</tr>
+<tr>
+<td><code>updateConfluencePage</code></td>
+<td>Write operation</td>
+</tr>
 </tbody>
 </table>
+<!-- /permissions:jira-deny -->
+
 <div class="admonition warning">
 <p class="admonition-title"><code>fetchAtlassian</code> is not a read-only tool</p>
 <p>Despite its name, <code>fetchAtlassian</code> is a generic Atlassian Resource Identifier (ARI) accessor that can fetch arbitrary resources across projects and products. It bypasses the per-tool permission model and is always blocked.</p>
@@ -2780,7 +2798,7 @@ Which database should I use for the session store?
 </tr>
 <tr>
 <td>6a</td>
-<td>Google MCP (read-only prefix → Allow; all others → HITL)</td>
+<td>Google MCP (<code>_GOOGLE_READ_TOOL_PREFIXES</code>: read-only prefix → Allow; all others → HITL)</td>
 <td>Allow or HITL</td>
 </tr>
 <tr>
@@ -2825,6 +2843,10 @@ Which database should I use for the session store?
 </tr>
 </tbody>
 </table>
+<!-- permissions:google-read -->
+<p><strong>Google read-only prefixes (step 6a):</strong> <code>check_</code>, <code>debug_</code>, <code>get_</code>, <code>inspect_</code>, <code>list_</code>, <code>query_</code>, <code>read_</code>, <code>search_</code></p>
+<!-- /permissions:google-read -->
+
 <hr />
 <h2 id="authorization-scope">Authorization scope<a class="headerlink" href="#authorization-scope" title="Permanent link">&para;</a></h2>
 <p>Only the authenticated user for a session can approve or deny permission requests. The authenticated user is the person who claimed the session with <code>/summon CODE</code> in Slack.</p>

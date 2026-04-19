@@ -2335,6 +2335,7 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <hr />
 <h2 id="slack-credentials">Slack Credentials<a class="headerlink" href="#slack-credentials" title="Permanent link">&para;</a></h2>
 <p>These three options must be set before summon can start. See <a href="../../getting-started/slack-setup/">Slack Setup</a> for instructions on obtaining these values.</p>
+<!-- config:slack-credentials -->
 <table>
 <thead>
 <tr>
@@ -2361,8 +2362,11 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:slack-credentials -->
+
 <hr />
 <h2 id="session-defaults">Session Defaults<a class="headerlink" href="#session-defaults" title="Permanent link">&para;</a></h2>
+<!-- config:session-defaults -->
 <table>
 <thead>
 <tr>
@@ -2393,10 +2397,13 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:session-defaults -->
+
 <p>See <a href="../../guide/sessions/">Sessions</a> for how model and effort affect behavior.</p>
 <hr />
 <h2 id="scribe">Scribe<a class="headerlink" href="#scribe" title="Permanent link">&para;</a></h2>
 <p>Core settings for the background scribe agent. See <a href="../../guide/scribe/">Scribe</a> for full setup and configuration details.</p>
+<!-- config:scribe -->
 <table>
 <thead>
 <tr>
@@ -2445,8 +2452,11 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:scribe -->
+
 <h3 id="scribe-google">Scribe Google<a class="headerlink" href="#scribe-google" title="Permanent link">&para;</a></h3>
 <p>Google Workspace data collector settings. Requires the <code>google</code> optional extra (<code>uv tool install summon-claude[google]</code>).</p>
+<!-- config:scribe-google -->
 <table>
 <thead>
 <tr>
@@ -2460,13 +2470,16 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <tr>
 <td><code>SUMMON_SCRIBE_GOOGLE_ENABLED</code></td>
 <td>boolean</td>
-<td>auto-detect</td>
+<td><em>auto-detect</em></td>
 <td>Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist.</td>
 </tr>
 </tbody>
 </table>
+<!-- /config:scribe-google -->
+
 <h3 id="scribe-slack">Scribe Slack<a class="headerlink" href="#scribe-slack" title="Permanent link">&para;</a></h3>
 <p>Slack monitoring via browser automation. Requires the <code>slack-browser</code> optional extra (<code>uv tool install summon-claude[slack-browser]</code>).</p>
+<!-- config:scribe-slack -->
 <table>
 <thead>
 <tr>
@@ -2497,6 +2510,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:scribe-slack -->
+
 <hr />
 <h2 id="github">GitHub<a class="headerlink" href="#github" title="Permanent link">&para;</a></h2>
 <p>GitHub integration uses OAuth device flow authentication. Run <code>summon auth github login</code> to authenticate interactively.</p>
@@ -2526,6 +2541,7 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <p class="admonition-title">Advanced</p>
 <p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
 </div>
+<!-- config:global-pm -->
 <table>
 <thead>
 <tr>
@@ -2556,12 +2572,15 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:global-pm -->
+
 <hr />
 <h2 id="display">Display<a class="headerlink" href="#display" title="Permanent link">&para;</a></h2>
 <div class="admonition note">
 <p class="admonition-title">Advanced</p>
 <p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
 </div>
+<!-- config:display -->
 <table>
 <thead>
 <tr>
@@ -2580,12 +2599,15 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:display -->
+
 <hr />
 <h2 id="behavior">Behavior<a class="headerlink" href="#behavior" title="Permanent link">&para;</a></h2>
 <div class="admonition note">
 <p class="admonition-title">Advanced</p>
 <p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
 </div>
+<!-- config:behavior -->
 <table>
 <thead>
 <tr>
@@ -2622,12 +2644,15 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:behavior -->
+
 <hr />
 <h2 id="thinking">Thinking<a class="headerlink" href="#thinking" title="Permanent link">&para;</a></h2>
 <div class="admonition note">
 <p class="admonition-title">Advanced</p>
 <p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
 </div>
+<!-- config:thinking -->
 <table>
 <thead>
 <tr>
@@ -2652,6 +2677,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:thinking -->
+
 <hr />
 <h2 id="auto-mode">Auto Mode<a class="headerlink" href="#auto-mode" title="Permanent link">&para;</a></h2>
 <div class="admonition note">
@@ -2659,6 +2686,7 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 <p>These options are hidden behind "Configure advanced settings?" in the <code>summon init</code> wizard. They can always be set directly with <code>summon config set</code>.</p>
 </div>
 <p>The auto-mode classifier uses a secondary Sonnet model to automatically approve or block tool calls based on configurable prose rules. It only activates <strong>after the agent enters a worktree</strong> — read-only sessions never use the classifier.</p>
+<!-- config:auto-mode -->
 <table>
 <thead>
 <tr>
@@ -2695,6 +2723,8 @@ summon<span class="w"> </span>config<span class="w"> </span>edit
 </tr>
 </tbody>
 </table>
+<!-- /config:auto-mode -->
+
 <p>See <a href="../permissions/#auto-mode-classifier">Permissions</a> for the full classification flow and default rules.</p>
 <hr />
 <h2 id="standard-variables-that-affect-summon">Standard Variables That Affect summon<a class="headerlink" href="#standard-variables-that-affect-summon" title="Permanent link">&para;</a></h2>

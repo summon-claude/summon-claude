@@ -2752,11 +2752,27 @@ To run only doc tests:</p>
 </tr>
 <tr>
 <td><code>test_env_vars.py</code></td>
-<td><code>SUMMON_*</code> env vars in docs match <code>SummonConfig</code> fields</td>
+<td><code>SUMMON_*</code> env vars in docs match <code>SummonConfig</code> fields and generated content</td>
 </tr>
 <tr>
 <td><code>test_mcp_tools.py</code></td>
 <td>MCP tool docs match source tool schemas and counts</td>
+</tr>
+<tr>
+<td><code>test_session_commands.py</code></td>
+<td>Session/passthrough/blocked command tables match <code>COMMAND_ACTIONS</code></td>
+</tr>
+<tr>
+<td><code>test_permissions.py</code></td>
+<td>Permission tables match source permission constants</td>
+</tr>
+<tr>
+<td><code>test_configuration.py</code></td>
+<td>Configuration group sections match <code>CONFIG_OPTIONS</code> groups</td>
+</tr>
+<tr>
+<td><code>test_prompts.py</code></td>
+<td>Prompt sections match source prompt constants</td>
 </tr>
 <tr>
 <td><code>test_bash_codeblocks.py</code></td>
@@ -2785,7 +2801,7 @@ summon start --model opus
 <p>The <code>notest</code> attribute is invisible to documentation readers — markdown renderers ignore unknown attributes after the language identifier.</p>
 <h3 id="ci-integration">CI integration<a class="headerlink" href="#ci-integration" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong><code>test</code> job:</strong> <code>make py-test</code> runs guard tests (CLI, env vars, MCP, prompts) + bash code blocks. <code>make docs-test</code> runs markdown code block validation separately</li>
+<li><strong><code>test</code> job:</strong> <code>make py-test</code> runs all guard tests (CLI commands, env vars, MCP tools, prompts, session commands, permissions, configuration) + bash code blocks. <code>make docs-test</code> runs doc guard tests with generated-content freshness checks</li>
 <li><strong><code>link-check</code> job:</strong> <code>make docs-test-links</code> runs external URL link validation (advisory — visible red X on failure, does not block merge)</li>
 </ul>
 <hr />
@@ -2794,7 +2810,7 @@ summon start --model opus
 <ol>
 <li><strong><code>lint</code></strong> — <code>make py-lint</code> (ruff check + format)</li>
 <li><strong><code>typecheck</code></strong> — <code>make py-typecheck</code> (pyright)</li>
-<li><strong><code>test</code></strong> — <code>make py-test</code> + <code>make docs-test</code> (full pytest suite + markdown code block validation)</li>
+<li><strong><code>test</code></strong> — <code>make py-test</code> + <code>make docs-test</code> (full pytest suite + generated-content freshness + doc guard tests)</li>
 <li><strong><code>docs</code></strong> — <code>mkdocs build --strict</code> (docs build check, PRs only)</li>
 <li><strong><code>link-check</code></strong> — <code>make docs-test-links</code> (external URL validation, advisory — does not block merge)</li>
 </ol>

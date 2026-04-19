@@ -2486,6 +2486,7 @@ Fix the login bug !stop
 <hr />
 <h2 id="session-commands">Session commands<a class="headerlink" href="#session-commands" title="Permanent link">&para;</a></h2>
 <p>These commands are handled locally by summon without forwarding to Claude.</p>
+<!-- commands:session -->
 <table>
 <thead>
 <tr>
@@ -2496,77 +2497,74 @@ Fix the login bug !stop
 </thead>
 <tbody>
 <tr>
-<td><code>!help [COMMAND]</code></td>
-<td></td>
-<td>List all commands, or show details for one command</td>
-</tr>
-<tr>
-<td><code>!status</code></td>
-<td></td>
-<td>Show session status (model, effort, cost, uptime, turn count)</td>
-</tr>
-<tr>
-<td><code>!end</code></td>
-<td><code>!quit</code>, <code>!exit</code>, <code>!logout</code></td>
-<td>End the session gracefully</td>
-</tr>
-<tr>
-<td><code>!stop</code></td>
-<td></td>
-<td>Cancel the current Claude turn (interrupt mid-response)</td>
-</tr>
-<tr>
-<td><code>!clear</code></td>
-<td><code>!new</code>, <code>!reset</code></td>
-<td>Clear conversation history (start fresh context)</td>
-</tr>
-<tr>
-<td><code>!model [MODEL]</code></td>
-<td></td>
-<td>Show current model, or switch to a different model</td>
-</tr>
-<tr>
-<td><code>!effort [LEVEL]</code></td>
-<td></td>
-<td>Show current effort, or switch effort level</td>
-</tr>
-<tr>
 <td><code>!auto [on\|off\|rules]</code></td>
 <td><code>!automode</code></td>
-<td>Toggle or inspect the auto-mode classifier</td>
-</tr>
-<tr>
-<td><code>!compact [INSTRUCTIONS]</code></td>
-<td></td>
-<td>Compact conversation context (reduces token usage)</td>
-</tr>
-<tr>
-<td><code>!summon start</code></td>
-<td></td>
-<td>Spawn a new child session in the current channel</td>
-</tr>
-<tr>
-<td><code>!summon resume [SESSION_ID]</code></td>
-<td></td>
-<td>Resume a previous Claude Code session</td>
-</tr>
-<tr>
-<td><code>!diff [FILE]</code></td>
-<td></td>
-<td>Show uncommitted changes (staged + unstaged) for all files or a specific file</td>
-</tr>
-<tr>
-<td><code>!show FILE</code></td>
-<td></td>
-<td>Show current contents of a file</td>
+<td>Toggle or inspect auto-mode classifier</td>
 </tr>
 <tr>
 <td><code>!changes</code></td>
 <td></td>
 <td>Show all files changed in this session</td>
 </tr>
+<tr>
+<td><code>!clear</code></td>
+<td><code>!new</code>, <code>!reset</code></td>
+<td>Clear conversation history</td>
+</tr>
+<tr>
+<td><code>!compact [instructions]</code></td>
+<td></td>
+<td>Compact conversation context</td>
+</tr>
+<tr>
+<td><code>!diff [file_path]</code></td>
+<td></td>
+<td>Show git diff (all changes, or specify a file)</td>
+</tr>
+<tr>
+<td><code>!effort [level]</code></td>
+<td></td>
+<td>Switch or display the effort level</td>
+</tr>
+<tr>
+<td><code>!end</code></td>
+<td><code>!quit</code>, <code>!exit</code>, <code>!logout</code></td>
+<td>End this session</td>
+</tr>
+<tr>
+<td><code>!help [command]</code></td>
+<td></td>
+<td>Show available commands</td>
+</tr>
+<tr>
+<td><code>!model [model]</code></td>
+<td></td>
+<td>Switch or display the active model</td>
+</tr>
+<tr>
+<td><code>!show &lt;file&gt;</code></td>
+<td></td>
+<td>Show current file contents</td>
+</tr>
+<tr>
+<td><code>!status</code></td>
+<td></td>
+<td>Show session status</td>
+</tr>
+<tr>
+<td><code>!stop</code></td>
+<td></td>
+<td>Cancel the current Claude turn</td>
+</tr>
+<tr>
+<td><code>!summon [start\|resume [id]]</code></td>
+<td></td>
+<td>Spawn or resume a session</td>
+</tr>
 </tbody>
 </table>
+<!-- /commands:session -->
+
 <h3 id="help">!help<a class="headerlink" href="#help" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>!help
 !help status
@@ -2644,6 +2642,7 @@ Fix the login bug !stop
 <hr />
 <h2 id="claude-cli-passthroughs">Claude CLI passthroughs<a class="headerlink" href="#claude-cli-passthroughs" title="Permanent link">&para;</a></h2>
 <p>These commands are forwarded directly to the Claude Code CLI subprocess. They trigger Claude's built-in slash commands.</p>
+<!-- commands:passthrough -->
 <table>
 <thead>
 <tr>
@@ -2653,8 +2652,12 @@ Fix the login bug !stop
 </thead>
 <tbody>
 <tr>
-<td><code>!review</code></td>
-<td>Review code changes</td>
+<td><code>!claude-developer-platform</code></td>
+<td>Claude developer platform info</td>
+</tr>
+<tr>
+<td><code>!debug</code></td>
+<td>Debug session issues</td>
 </tr>
 <tr>
 <td><code>!init</code></td>
@@ -2665,28 +2668,27 @@ Fix the login bug !stop
 <td>Review PR comments</td>
 </tr>
 <tr>
+<td><code>!review</code></td>
+<td>Review code changes</td>
+</tr>
+<tr>
 <td><code>!security-review</code></td>
-<td>Run a security review</td>
+<td>Run security review</td>
 </tr>
 <tr>
 <td><code>!simplify</code></td>
 <td>Simplify and refine code</td>
 </tr>
-<tr>
-<td><code>!debug</code></td>
-<td>Debug session issues</td>
-</tr>
-<tr>
-<td><code>!claude-developer-platform</code></td>
-<td>Claude developer platform information</td>
-</tr>
 </tbody>
 </table>
+<!-- /commands:passthrough -->
+
 <p>Passthrough commands produce output in the session channel, the same as if you had typed them in a local Claude terminal.</p>
 <hr />
 <h2 id="blocked-commands">Blocked commands<a class="headerlink" href="#blocked-commands" title="Permanent link">&para;</a></h2>
 <p>Some Claude CLI commands are blocked in Slack sessions because they depend on a local terminal or produce output that can't be rendered in Slack.</p>
 <h3 id="blocked-with-specific-reasons">Blocked with specific reasons<a class="headerlink" href="#blocked-with-specific-reasons" title="Permanent link">&para;</a></h3>
+<!-- commands:blocked-specific -->
 <table>
 <thead>
 <tr>
@@ -2696,30 +2698,35 @@ Fix the login bug !stop
 </thead>
 <tbody>
 <tr>
-<td><code>!insights</code></td>
-<td>Generates a local HTML report — not viewable in Slack</td>
-</tr>
-<tr>
 <td><code>!context</code></td>
-<td>Use <code>!status</code> instead</td>
+<td>Use <code>!status</code> for context info</td>
 </tr>
 <tr>
 <td><code>!cost</code></td>
-<td>Use <code>!status</code> instead</td>
+<td>Use <code>!status</code> for cost info</td>
 </tr>
 <tr>
-<td><code>!release-notes</code></td>
-<td>Not available in Slack sessions</td>
+<td><code>!insights</code></td>
+<td>Generates a local HTML report — not viewable in Slack</td>
 </tr>
 <tr>
 <td><code>!login</code></td>
 <td>Not available in Slack sessions</td>
 </tr>
+<tr>
+<td><code>!release-notes</code></td>
+<td>Not available in Slack sessions</td>
+</tr>
 </tbody>
 </table>
+<!-- /commands:blocked-specific -->
+
 <h3 id="cli-only-commands">CLI-only commands<a class="headerlink" href="#cli-only-commands" title="Permanent link">&para;</a></h3>
 <p>These commands require the interactive Claude CLI and are blocked with: <em>"Only available in the interactive CLI"</em></p>
-<p><code>!config</code> (<code>!settings</code>), <code>!doctor</code>, <code>!desktop</code> (<code>!app</code>), <code>!feedback</code> (<code>!bug</code>), <code>!permissions</code> (<code>!allowed-tools</code>), <code>!mobile</code> (<code>!ios</code>, <code>!android</code>), <code>!resume</code> (<code>!continue</code>), <code>!rewind</code> (<code>!checkpoint</code>), <code>!remote-control</code> (<code>!rc</code>), <code>!add-dir</code>, <code>!agents</code>, <code>!chrome</code>, <code>!copy</code>, <code>!export</code>, <code>!extra-usage</code>, <code>!fast</code>, <code>!fork</code>, <code>!hooks</code>, <code>!ide</code>, <code>!install-github-app</code>, <code>!install-slack-app</code>, <code>!keybindings</code>, <code>!mcp</code>, <code>!memory</code>, <code>!output-style</code>, <code>!passes</code>, <code>!plan</code>, <code>!plugin</code>, <code>!privacy-settings</code>, <code>!reload-plugins</code>, <code>!remote-env</code>, <code>!rename</code>, <code>!sandbox</code>, <code>!skills</code>, <code>!stats</code>, <code>!statusline</code>, <code>!stickers</code>, <code>!tasks</code>, <code>!terminal-setup</code>, <code>!theme</code>, <code>!upgrade</code>, <code>!usage</code>, <code>!vim</code></p>
+<!-- commands:cli-only -->
+<p><code>!add-dir</code>, <code>!agents</code>, <code>!batch</code>, <code>!chrome</code>, <code>!claude-api</code>, <code>!config</code> (<code>!settings</code>), <code>!copy</code>, <code>!desktop</code> (<code>!app</code>), <code>!doctor</code>, <code>!export</code>, <code>!extra-usage</code>, <code>!fast</code>, <code>!feedback</code> (<code>!bug</code>), <code>!fork</code>, <code>!heapdump</code>, <code>!hooks</code>, <code>!ide</code>, <code>!install-github-app</code>, <code>!install-slack-app</code>, <code>!keybindings</code>, <code>!mcp</code>, <code>!memory</code>, <code>!mobile</code> (<code>!ios</code>, <code>!android</code>), <code>!output-style</code>, <code>!passes</code>, <code>!permissions</code> (<code>!allowed-tools</code>), <code>!plan</code>, <code>!plugin</code>, <code>!privacy-settings</code>, <code>!reload-plugins</code>, <code>!remote-control</code> (<code>!rc</code>), <code>!remote-env</code>, <code>!rename</code>, <code>!resume</code> (<code>!continue</code>), <code>!rewind</code> (<code>!checkpoint</code>), <code>!sandbox</code>, <code>!skills</code>, <code>!stats</code>, <code>!statusline</code>, <code>!stickers</code>, <code>!tasks</code>, <code>!terminal-setup</code>, <code>!theme</code>, <code>!upgrade</code>, <code>!usage</code>, <code>!vim</code></p>
+<!-- /commands:cli-only -->
+
 <p>When a blocked command is used, summon responds with a clear explanation rather than forwarding it to Claude.</p>
 <hr />
 <h2 id="plugin-skills">Plugin skills<a class="headerlink" href="#plugin-skills" title="Permanent link">&para;</a></h2>

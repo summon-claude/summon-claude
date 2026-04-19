@@ -56,9 +56,9 @@ Core settings for the background scribe agent. See [Scribe](https://summon-claud
 
 Google Workspace data collector settings. Requires the `google` optional extra (`uv tool install summon-claude[google]`).
 
-| Config Key                     | Type    | Default     | Description                                                                                                                        |
-| ------------------------------ | ------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `SUMMON_SCRIBE_GOOGLE_ENABLED` | boolean | auto-detect | Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist. |
+| Config Key                     | Type    | Default       | Description                                                                                                                        |
+| ------------------------------ | ------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `SUMMON_SCRIBE_GOOGLE_ENABLED` | boolean | *auto-detect* | Enable the Google Workspace data collector for scribe. Auto-detected when workspace-mcp is installed and Google credentials exist. |
 
 ### Scribe Slack
 

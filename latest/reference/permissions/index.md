@@ -8,7 +8,7 @@ ______________________________________________________________________
 
 Summon sessions start in **read-only mode**. Claude can freely use research tools (Read, Grep, Glob, WebSearch, etc.) but write-capable tools are blocked until containment is active.
 
-**Write-gated tools:** `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `Bash` (and the SDK alias `str_replace_editor`)
+**Write-gated tools:** `Bash`, `Edit`, `MultiEdit`, `NotebookEdit`, `Write` (and the SDK alias `str_replace_editor`)
 
 Containment is activated in two ways depending on whether the session directory is a git repository:
 
@@ -132,23 +132,23 @@ ______________________________________________________________________
 
 When GitHub is authenticated (via `summon auth github login`), Claude has access to GitHub tools via the remote MCP server. These follow separate permission tiers:
 
-**Auto-approved (read-only):** Any tool with a `get_`, `list_`, or `search_` prefix, plus `pull_request_read` and `get_file_contents`.
+**Auto-approved (read-only):** Any tool with a `get_`, `list_`, `search_` prefix, plus `get_file_contents` and `pull_request_read`.
 
 **Always require Slack approval** — checked before prefix rules, so no `allowedTools` pattern can bypass them:
 
 | Tool                         | Reason                 |
 | ---------------------------- | ---------------------- |
-| `merge_pull_request`         | Irreversible           |
-| `delete_branch`              | Irreversible           |
-| `close_pull_request`         | Visible to others      |
-| `close_issue`                | Visible to others      |
-| `push_files`                 | Writes to remote       |
-| `create_or_update_file`      | Writes to remote       |
-| `update_pull_request_branch` | Modifies shared branch |
-| `pull_request_review_write`  | Visible to others      |
-| `create_pull_request`        | Visible to others      |
-| `create_issue`               | Visible to others      |
 | `add_issue_comment`          | Visible to others      |
+| `close_issue`                | Visible to others      |
+| `close_pull_request`         | Visible to others      |
+| `create_issue`               | Visible to others      |
+| `create_or_update_file`      | Writes to remote       |
+| `create_pull_request`        | Visible to others      |
+| `delete_branch`              | Irreversible           |
+| `merge_pull_request`         | Irreversible           |
+| `pull_request_review_write`  | Visible to others      |
+| `push_files`                 | Writes to remote       |
+| `update_pull_request_branch` | Modifies shared branch |
 
 Any GitHub MCP tool not on either list also requires Slack approval (fail-closed).
 
@@ -162,23 +162,23 @@ ______________________________________________________________________
 
 When Jira is authenticated (via `summon auth jira login`), Claude has access to Jira tools via the Atlassian Rovo MCP server. Jira uses a **strictly read-only** permission model — all write operations are hard-denied, not routed to Slack for approval.
 
-**Auto-approved (read-only):** Tools matching `get*`, `search*`, or `lookup*` prefixes, plus the exact match `atlassianUserInfo`.
+**Auto-approved (read-only):** Tools matching `get*`, `lookup*`, `search*` prefixes, plus the exact match `atlassianUserInfo`.
 
 **Hard-denied (always blocked)** — checked before auto-approve prefixes:
 
 | Tool                            | Reason                                          |
 | ------------------------------- | ----------------------------------------------- |
-| `createJiraIssue`               | Write operation                                 |
-| `editJiraIssue`                 | Write operation                                 |
-| `transitionJiraIssue`           | Write operation                                 |
 | `addCommentToJiraIssue`         | Write operation                                 |
 | `addWorklogToJiraIssue`         | Write operation                                 |
-| `createIssueLink`               | Write operation                                 |
-| `createConfluencePage`          | Write operation                                 |
 | `createConfluenceFooterComment` | Write operation                                 |
 | `createConfluenceInlineComment` | Write operation                                 |
-| `updateConfluencePage`          | Write operation                                 |
+| `createConfluencePage`          | Write operation                                 |
+| `createIssueLink`               | Write operation                                 |
+| `createJiraIssue`               | Write operation                                 |
+| `editJiraIssue`                 | Write operation                                 |
 | `fetchAtlassian`                | Generic ARI accessor — bypasses per-tool gating |
+| `transitionJiraIssue`           | Write operation                                 |
+| `updateConfluencePage`          | Write operation                                 |
 
 `fetchAtlassian` is not a read-only tool
 
@@ -252,23 +252,25 @@ ______________________________________________________________________
 
 The full permission evaluation order in `handle()`:
 
-| Step | Check                                                      | Result                                                                                                                                                 |
-| ---- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1    | AskUserQuestion intercept                                  | Route to interactive UI                                                                                                                                |
-| 2    | Write gate (`_WRITE_GATED_TOOLS`)                          | SDK deny → Deny; safe-dir → Allow; no containment → Deny; first write → HITL; within containment root → Allow; outside containment root → fall through |
-| 3    | SDK deny suggestions                                       | Deny                                                                                                                                                   |
-| 4    | Static auto-approve (`_AUTO_APPROVE_TOOLS`)                | Allow                                                                                                                                                  |
-| 5    | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`)          | Always HITL                                                                                                                                            |
-| 6    | GitHub auto-approve (prefix matching)                      | Allow                                                                                                                                                  |
-| 6a   | Google MCP (read-only prefix → Allow; all others → HITL)   | Allow or HITL                                                                                                                                          |
-| 6b   | Jira hard-deny (`_JIRA_MCP_HARD_DENY`)                     | Always Deny                                                                                                                                            |
-| 6c   | Jira auto-approve (prefix + exact matching)                | Allow                                                                                                                                                  |
-| 7    | Summon MCP auto-approve (prefix matching)                  | Allow                                                                                                                                                  |
-| 8    | Session-lifetime cached approvals                          | Allow (GitHub deny-list excluded)                                                                                                                      |
-| 9    | Per-argument cache (exact match on primary arg)            | Allow if arg matches (GitHub deny-list excluded)                                                                                                       |
-| 10   | Auto-classifier (Sonnet, only active after worktree entry) | Allow, Block, or fall through on uncertain                                                                                                             |
-| 11   | SDK allow suggestions                                      | Allow (write-gated tools excluded — CWD containment cannot be overridden)                                                                              |
-| 12   | Slack HITL (interactive message, deleted after)            | User decides                                                                                                                                           |
+| Step | Check                                                                                  | Result                                                                                                                                                 |
+| ---- | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1    | AskUserQuestion intercept                                                              | Route to interactive UI                                                                                                                                |
+| 2    | Write gate (`_WRITE_GATED_TOOLS`)                                                      | SDK deny → Deny; safe-dir → Allow; no containment → Deny; first write → HITL; within containment root → Allow; outside containment root → fall through |
+| 3    | SDK deny suggestions                                                                   | Deny                                                                                                                                                   |
+| 4    | Static auto-approve (`_AUTO_APPROVE_TOOLS`)                                            | Allow                                                                                                                                                  |
+| 5    | GitHub deny-list (`_GITHUB_MCP_REQUIRE_APPROVAL`)                                      | Always HITL                                                                                                                                            |
+| 6    | GitHub auto-approve (prefix matching)                                                  | Allow                                                                                                                                                  |
+| 6a   | Google MCP (`_GOOGLE_READ_TOOL_PREFIXES`: read-only prefix → Allow; all others → HITL) | Allow or HITL                                                                                                                                          |
+| 6b   | Jira hard-deny (`_JIRA_MCP_HARD_DENY`)                                                 | Always Deny                                                                                                                                            |
+| 6c   | Jira auto-approve (prefix + exact matching)                                            | Allow                                                                                                                                                  |
+| 7    | Summon MCP auto-approve (prefix matching)                                              | Allow                                                                                                                                                  |
+| 8    | Session-lifetime cached approvals                                                      | Allow (GitHub deny-list excluded)                                                                                                                      |
+| 9    | Per-argument cache (exact match on primary arg)                                        | Allow if arg matches (GitHub deny-list excluded)                                                                                                       |
+| 10   | Auto-classifier (Sonnet, only active after worktree entry)                             | Allow, Block, or fall through on uncertain                                                                                                             |
+| 11   | SDK allow suggestions                                                                  | Allow (write-gated tools excluded — CWD containment cannot be overridden)                                                                              |
+| 12   | Slack HITL (interactive message, deleted after)                                        | User decides                                                                                                                                           |
+
+**Google read-only prefixes (step 6a):** `check_`, `debug_`, `get_`, `inspect_`, `list_`, `query_`, `read_`, `search_`
 
 ______________________________________________________________________
 
