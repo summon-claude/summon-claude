@@ -92,51 +92,47 @@ async def test_text_block_content():
 
 
 async def test_can_use_tool_callback():
-    """can_use_tool callback should be invoked when Claude reads a file."""
-    invoked_tools: list[str] = []
-    received_messages: list[str] = []
+    """can_use_tool callback should be invoked for permission-gated tools.
 
-    async def _auto_approve(tool_name: str, input_data: dict, context):
+    Uses AskUserQuestion as the trigger tool since it reliably goes through
+    can_use_tool on all CLI versions (unlike Read/Bash which may be
+    auto-approved in plan mode on newer CLIs).
+    """
+    invoked_tools: list[str] = []
+
+    async def _handle_tools(tool_name: str, input_data: dict, context):
         from claude_agent_sdk import PermissionResultAllow
 
         invoked_tools.append(tool_name)
+        if tool_name == "AskUserQuestion":
+            questions = input_data.get("questions", [])
+            answers = {}
+            for q in questions:
+                options = q.get("options", [])
+                if options:
+                    answers[q["question"]] = options[0]["label"]
+            return PermissionResultAllow(updated_input={"questions": questions, "answers": answers})
         return PermissionResultAllow()
 
     with tempfile.TemporaryDirectory() as cwd:
-        Path(cwd, "secret.txt").write_text("SUMMON_TOOL_TEST_42")
-
         options = ClaudeAgentOptions(
             cwd=cwd,
             max_turns=3,
-            # permission_mode="plan" forces CLI to ask for ALL tool uses,
-            # ensuring the can_use_tool callback is always invoked.
             permission_mode="plan",
-            can_use_tool=_auto_approve,
+            can_use_tool=_handle_tools,
             **_COMMON_OPTS,
         )
         async with ClaudeSDKClient(options) as client:
             await client.query(
-                "Read the file secret.txt in the current directory and tell me its exact contents."
+                "Ask me a yes/no question using the AskUserQuestion tool. "
+                "Use options Yes and No. Do not just type the question."
             )
             async for msg in client.receive_response():
-                msg_type = type(msg).__name__
-                if isinstance(msg, AssistantMessage):
-                    blocks = [
-                        f"{type(b).__name__}({getattr(b, 'name', '')}{getattr(b, 'text', '')[:80]})"
-                        for b in msg.content
-                    ]
-                    received_messages.append(f"{msg_type}: {blocks}")
-                elif isinstance(msg, ResultMessage):
-                    received_messages.append(
-                        f"{msg_type}: turns={msg.num_turns} cost={msg.total_cost_usd}"
-                    )
-                else:
-                    received_messages.append(msg_type)
+                if isinstance(msg, ResultMessage):
+                    break
 
-    debug = "\n  ".join(received_messages)
     assert len(invoked_tools) >= 1, (
-        f"Expected can_use_tool callback to be invoked, got: {invoked_tools}\n"
-        f"Messages received:\n  {debug}"
+        f"Expected can_use_tool callback to be invoked, got: {invoked_tools}"
     )
 
 
@@ -290,22 +286,44 @@ class TestSDKCommandInventory:
     """Verify COMMAND_ACTIONS covers all SDK commands."""
 
     @pytest_asyncio.fixture(scope="class", loop_scope="class")
-    async def server_info(self):
-        """Get server_info from a real Claude SDK connection."""
-        options = ClaudeAgentOptions(cwd="/tmp")
+    async def server_info(self, tmp_path_factory):
+        """Get server_info from a real Claude SDK connection.
+
+        Uses setting_sources=[] to prevent user/project plugin discovery
+        from leaking plugin skills into the command list.
+        """
+        cwd = str(tmp_path_factory.mktemp("sdk_info"))
+        options = ClaudeAgentOptions(cwd=cwd, setting_sources=[])
         async with ClaudeSDKClient(options) as client:
             info = await client.get_server_info()
         yield info
 
     async def test_all_sdk_commands_in_inventory(self, server_info):
+        """Every CLI-native SDK command must be in COMMAND_ACTIONS.
+
+        Plugin skills (registered dynamically via register_plugin_skills)
+        are excluded — they appear in server_info.commands but are added
+        to COMMAND_ACTIONS at session startup, not at import time.
+        """
         if not server_info:
             pytest.skip("No server_info available")
+        from summon_claude.sessions.commands import _ALIAS_LOOKUP
+
         commands = server_info.get("commands", [])
+        missing = []
         for item in commands:
             name = (
                 item.get("name", item).lstrip("/") if isinstance(item, dict) else item.lstrip("/")
             )
-            assert name in COMMAND_ACTIONS, f"SDK command '{name}' not in COMMAND_ACTIONS — add it"
+            if name in COMMAND_ACTIONS or name in _ALIAS_LOOKUP:
+                continue
+            # Plugin skills are dynamically registered — skip them.
+            # They have argumentHint containing "skill" or come from installed plugins.
+            hint = item.get("argumentHint", "") if isinstance(item, dict) else ""
+            if "skill" in hint.lower():
+                continue
+            missing.append(name)
+        assert not missing, f"SDK commands not in COMMAND_ACTIONS: {missing}"
 
     async def test_models_available(self, server_info):
         if not server_info:

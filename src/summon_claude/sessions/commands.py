@@ -432,6 +432,10 @@ COMMAND_ACTIONS: dict[str, CommandDef] = {
     "batch": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
     "claude-api": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
     "chrome": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "fewer-permission-prompts": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "loop": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "team-onboarding": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
+    "update-config": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
     "copy": CommandDef(description=_CLI_ONLY, block_reason=_CLI_ONLY),
     "diff": CommandDef(
         description="Show git diff (all changes, or specify a file)",
