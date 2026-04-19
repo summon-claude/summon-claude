@@ -7,9 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from tests.docs.conftest import REPO_ROOT
+
 pytestmark = pytest.mark.docs
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _COMMANDS_DOC = "reference/commands.md"
 
 
@@ -103,10 +104,10 @@ def test_generated_sections_match() -> None:
     """commands.md generated sections must be up to date with COMMAND_ACTIONS."""
     from scripts.generate_commands_docs import generate
 
-    doc_path = _REPO_ROOT / "docs" / "reference" / "commands.md"
+    doc_path = REPO_ROOT / "docs" / "reference" / "commands.md"
     content = doc_path.read_text(encoding="utf-8")
     updated = generate(content)
-    assert content == updated, "commands.md is stale — run `make docs-commands` to regenerate"
+    assert content == updated, "commands.md is stale — run `make docs-generate` to regenerate"
 
 
 # ---------------------------------------------------------------------------
@@ -153,3 +154,32 @@ def test_build_cli_only_list_empty() -> None:
     from scripts.generate_commands_docs import _build_cli_only_list
 
     assert _build_cli_only_list([]) == ""
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — CommandDef description and block_reason must not contain pipe chars
+# ---------------------------------------------------------------------------
+
+
+def test_command_descriptions_no_pipe_chars() -> None:
+    """CommandDef.description and block_reason must not contain '|'.
+
+    Pipe chars in table cells break the markdown table without escaping.
+    All three table builders interpolate description/block_reason unescaped;
+    this guard catches the problem at the source.
+    """
+    from summon_claude.sessions.commands import COMMAND_ACTIONS
+
+    violations: list[str] = []
+    for name, defn in COMMAND_ACTIONS.items():
+        if ":" in name:
+            continue
+        if "|" in defn.description:
+            violations.append(f"  {name!r}: description contains '|': {defn.description!r}")
+        if defn.block_reason and "|" in defn.block_reason:
+            violations.append(f"  {name!r}: block_reason contains '|': {defn.block_reason!r}")
+
+    assert not violations, (
+        "CommandDef fields contain unescaped '|' chars that would break markdown tables:\n"
+        + "\n".join(violations)
+    )

@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.generate_permissions_docs import _strip_prefix
 from summon_claude.sessions.permissions import (
     _AUTO_APPROVE_TOOLS,
     _GITHUB_MCP_AUTO_APPROVE,
@@ -19,15 +20,11 @@ from summon_claude.sessions.permissions import (
     _SUMMON_MCP_AUTO_APPROVE_PREFIXES,
     _WRITE_GATED_TOOLS,
 )
+from tests.docs.conftest import REPO_ROOT
 
 pytestmark = pytest.mark.docs
 
 _PERMISSIONS_DOC = "reference/permissions.md"
-
-
-def _strip_prefix(name: str, prefix: str) -> str:
-    """Strip MCP namespace prefix from a tool name."""
-    return name[len(prefix) :] if name.startswith(prefix) else name
 
 
 def _load_doc(docs_dir: Path) -> str:
@@ -292,7 +289,7 @@ def test_jira_auto_approve_match(docs_dir: Path) -> None:
     # The doc uses backtick-and-asterisk form like `get*`, so match against backtick patterns
     expected_prefixes = {_strip_prefix(p, "mcp__jira__") for p in _JIRA_MCP_AUTO_APPROVE_PREFIXES}
     # Use backtick-bounded match to avoid false-passing on common English words
-    missing_prefixes = [p for p in expected_prefixes if f"`{p}" not in line]
+    missing_prefixes = [p for p in expected_prefixes if f"`{p}*`" not in line]
     assert not missing_prefixes, (
         f"Jira auto-approve prefixes missing from doc prose: {sorted(missing_prefixes)}"
     )
@@ -459,14 +456,12 @@ def test_all_permission_constants_are_covered() -> None:
 # Test 11: Generated sections match source
 # ---------------------------------------------------------------------------
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-
 
 def test_generated_sections_match() -> None:
     """permissions.md generated sections must be up to date with permission constants."""
     from scripts.generate_permissions_docs import _get_sections, generate
 
-    doc_path = _REPO_ROOT / "docs" / "reference" / "permissions.md"
+    doc_path = REPO_ROOT / "docs" / "reference" / "permissions.md"
     content = doc_path.read_text(encoding="utf-8")
     try:
         sections = _get_sections()
@@ -474,4 +469,4 @@ def test_generated_sections_match() -> None:
         pytest.fail(str(e))
         raise  # unreachable — satisfies type checker
     updated = generate(content, sections)
-    assert content == updated, "permissions.md is stale — run `make docs-permissions` to regenerate"
+    assert content == updated, "permissions.md is stale — run `make docs-generate` to regenerate"

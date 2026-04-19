@@ -7,9 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.docs.conftest import parse_env_var_refs
-
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from tests.docs.conftest import REPO_ROOT, parse_env_var_refs
 
 pytestmark = pytest.mark.docs
 
@@ -98,13 +96,6 @@ def test_all_config_fields_are_documented(
 # Test 3 — types and defaults in the doc table match SummonConfig metadata
 # ---------------------------------------------------------------------------
 
-# Mapping from Python type to the doc-table "Type" column value prefix
-_TYPE_MAP: dict[str, str] = {
-    "str": "text",
-    "int": "integer",
-    "bool": "boolean",
-}
-
 # Defaults that docs render differently than Python repr.
 # Cross-ref: _DEFAULT_OVERRIDES in scripts/generate_env_docs.py covers the same set.
 FUZZY_DEFAULTS: dict[str, str | None] = {
@@ -162,18 +153,22 @@ def _parse_env_var_tables(content: str) -> dict[str, dict[str, str | None]]:
     return result
 
 
-def test_env_var_types_match_docs(  # noqa: PLR0912
+def test_env_var_types_match_docs(
     docs_dir: Path,
     summon_config_fields: dict[str, object],
 ) -> None:
     """Types and defaults in environment-variables.md match SummonConfig."""
     from pydantic_core import PydanticUndefined as _PydanticUndefined
 
+    from scripts.generate_env_docs import _derive_type
+    from summon_claude.config import CONFIG_OPTIONS
+
     ref_doc = docs_dir / "reference" / "environment-variables.md"
     assert ref_doc.exists(), f"Reference doc not found: {ref_doc}"
 
     content = ref_doc.read_text(encoding="utf-8")
     doc_rows = _parse_env_var_tables(content)
+    opt_by_key = {o.env_key: o for o in CONFIG_OPTIONS}
 
     mismatches: list[str] = []
 
@@ -188,18 +183,10 @@ def test_env_var_types_match_docs(  # noqa: PLR0912
             continue  # malformed table row, skip
 
         # --- type check ---
-        is_secret = not field_info.repr
-        if is_secret:
-            expected_type_prefix = "secret"
-        else:
-            ann = field_info.annotation
-            # Handle Optional[X] / X | None — strip None from union args
-            if hasattr(ann, "__args__"):
-                non_none = [a for a in ann.__args__ if a is not type(None)]
-                py_type = non_none[0].__name__ if non_none else "str"
-            else:
-                py_type = getattr(ann, "__name__", str(ann))
-            expected_type_prefix = _TYPE_MAP.get(py_type, py_type)
+        opt = opt_by_key.get(var)
+        if opt is None:
+            continue
+        expected_type_prefix = _derive_type(opt, field_info)
 
         # "choice:" in docs is a valid rendering for str fields with constrained values
         type_ok = doc_type.startswith(expected_type_prefix) or (
@@ -239,12 +226,12 @@ def test_env_var_content_matches_generated() -> None:
     """Generated env-var tables must match current doc content."""
     from scripts.generate_env_docs import generate, get_group_tables
 
-    doc_path = _REPO_ROOT / "docs" / "reference" / "environment-variables.md"
+    doc_path = REPO_ROOT / "docs" / "reference" / "environment-variables.md"
     content = doc_path.read_text(encoding="utf-8")
     tables = get_group_tables()
     updated = generate(content, tables)
     assert content == updated, (
-        "environment-variables.md is stale — run `make docs-env` to regenerate"
+        "environment-variables.md is stale — run `make docs-generate` to regenerate"
     )
 
 
@@ -355,6 +342,8 @@ def test_derive_type_mappings() -> None:
 
 def test_derive_default_mappings() -> None:
     """_derive_default must return expected types for all CONFIG_OPTIONS."""
+    from pydantic_core import PydanticUndefined
+
     from scripts.generate_env_docs import _derive_default
     from summon_claude.config import CONFIG_OPTIONS, SummonConfig
 
@@ -365,6 +354,10 @@ def test_derive_default_mappings() -> None:
         result = _derive_default(opt, field_info)
         if opt.input_type == "secret":
             assert result is None, f"{opt.env_key}: secret field must return None (3-col table)"
+        elif field_info.default is PydanticUndefined:
+            assert result is None, (
+                f"{opt.env_key}: required non-secret field must return None, got {result!r}"
+            )
         else:
             assert isinstance(result, str) and result, (
                 f"{opt.env_key}: _derive_default must return a non-empty string, got {result!r}"
@@ -395,10 +388,10 @@ def test_none_defaults_have_overrides() -> None:
         field_info = SummonConfig.model_fields.get(opt.field_name)
         if field_info is None:
             continue
-        if field_info.default is not None:
-            continue  # has a real default — _derive_default handles it
         if field_info.default is PydanticUndefined:
             continue  # required field — _derive_default returns None
+        if field_info.default is not None:
+            continue  # has a real default — _derive_default handles it
         # default is None — must have an override to render correctly
         if opt.env_key not in _DEFAULT_OVERRIDES:
             missing.append(opt.env_key)

@@ -175,7 +175,8 @@ def generate(content: str, tables: dict[str, str]) -> str:
     def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
         marker = m.group(2)
         if marker not in tables:
-            return m.group(0)  # leave unknown markers unchanged
+            msg = f"Unknown config marker {marker!r} — typo? Known: {sorted(tables)}"
+            raise ValueError(msg)
         table = tables[marker]
         return f"{m.group(1)}{table}\n{m.group(3)}"
 

@@ -174,7 +174,8 @@ def generate(content: str, sections: dict[str, str]) -> str:
     def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
         marker = m.group(2)
         if marker not in sections:
-            return m.group(0)
+            msg = f"Unknown permissions marker {marker!r} — typo? Known: {sorted(sections)}"
+            raise ValueError(msg)
         return f"{m.group(1)}{sections[marker]}\n{m.group(3)}"
 
     return _MARKER_RE.sub(_replace, content)

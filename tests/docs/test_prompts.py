@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.docs
+from tests.docs.conftest import REPO_ROOT
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+pytestmark = pytest.mark.docs
 
 _PROMPTS_DOC = "reference/prompts.md"
 
@@ -126,8 +126,8 @@ def test_generated_sections_match() -> None:
     """prompts.md generated sections must be up to date with source prompts."""
     from scripts.generate_prompt_docs import generate, get_source_prompts
 
-    doc_path = _REPO_ROOT / "docs" / "reference" / "prompts.md"
+    doc_path = REPO_ROOT / "docs" / "reference" / "prompts.md"
     content = doc_path.read_text(encoding="utf-8")
     prompts = get_source_prompts()
     updated = generate(content, prompts)
-    assert content == updated, "prompts.md is stale — run `make docs-prompts` to regenerate"
+    assert content == updated, "prompts.md is stale — run `make docs-generate` to regenerate"

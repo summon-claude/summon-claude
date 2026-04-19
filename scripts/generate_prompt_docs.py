@@ -133,7 +133,8 @@ def generate(content: str, prompts: dict[str, str]) -> str:
     def _replace(m: re.Match) -> str:  # type: ignore[type-arg]
         marker = m.group(2)
         if marker not in prompts:
-            return m.group(0)  # leave unknown markers unchanged
+            msg = f"Unknown prompt marker {marker!r} — typo? Known: {sorted(prompts)}"
+            raise ValueError(msg)
         text = prompts[marker].strip()
         return f"{m.group(1)}```text\n{text}\n```\n{m.group(3)}"
 
