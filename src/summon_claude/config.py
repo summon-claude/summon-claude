@@ -1227,7 +1227,8 @@ def _warn_unrecognized_model(value: str) -> str | None:
     """Soft-validate a model string; warn but never block.
 
     Returns None always. Emits a click.echo warning if value does not
-    prefix-match any model in the SDK model cache.
+    prefix-match any model in the SDK model cache (or _FALLBACK_MODEL_CHOICES
+    when no cache is available).
     """
     try:
         import click  # noqa: PLC0415
@@ -1238,11 +1239,13 @@ def _warn_unrecognized_model(value: str) -> str | None:
         if cached:
             models, _ = cached
             known = [m.get("value", "") for m in models]
-            if not any(value.startswith(k) for k in known if k):
-                click.echo(
-                    f"Warning: '{value}' is not a recognized model. It will be used as-is.",
-                    err=True,
-                )
+        else:
+            known = list(_FALLBACK_MODEL_CHOICES)
+        if not any(value.startswith(k) for k in known if k):
+            click.echo(
+                f"Warning: '{value}' is not a recognized model. It will be used as-is.",
+                err=True,
+            )
     except Exception:
         logger.debug("Failed to warn unrecognized model", exc_info=True)
     return None

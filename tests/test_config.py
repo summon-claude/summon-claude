@@ -1007,8 +1007,8 @@ class TestModelChoices:
         assert result is None
         mock_echo.assert_not_called()
 
-    def test_warn_unrecognized_model_no_cache_skips_warning(self):
-        """No cached models → returns None, no warning (graceful degradation)."""
+    def test_warn_unrecognized_model_no_cache_uses_fallback(self):
+        """No cached models → falls back to _FALLBACK_MODEL_CHOICES for validation."""
         from unittest.mock import patch as _patch
 
         from summon_claude.config import _warn_unrecognized_model
@@ -1017,9 +1017,21 @@ class TestModelChoices:
             _patch("summon_claude.cli.model_cache.load_cached_models", return_value=None),
             _patch("click.echo") as mock_echo,
         ):
-            result = _warn_unrecognized_model("anything")
-        assert result is None
-        mock_echo.assert_not_called()
+            # Known fallback model → no warning
+            _warn_unrecognized_model("claude-opus-4-6")
+            mock_echo.assert_not_called()
+            # Unknown model → warning
+            _warn_unrecognized_model("totally-unknown-xyz")
+            mock_echo.assert_called_once()
+
+    def test_fallback_model_choices_are_valid_prefixes(self):
+        """Every _FALLBACK_MODEL_CHOICES entry should be a plausible claude model prefix."""
+        from summon_claude.config import _FALLBACK_MODEL_CHOICES
+
+        for choice in _FALLBACK_MODEL_CHOICES:
+            assert choice.startswith("claude-"), (
+                f"_FALLBACK_MODEL_CHOICES entry {choice!r} doesn't start with 'claude-'"
+            )
 
     def test_model_config_options_use_choice_type(self):
         """All three model ConfigOptions use input_type='choice' and choices_fn."""
