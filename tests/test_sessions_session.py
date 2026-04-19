@@ -3400,7 +3400,7 @@ class TestSessionRestartLoop:
         from summon_claude.sessions.context import ContextUsage
 
         session._last_context = ContextUsage(
-            input_tokens=100000, context_window=200000, percentage=50.0
+            total_tokens=100000, max_tokens=200000, percentage=50.0
         )
         rt = make_rt(registry)
         router = AsyncMock()
@@ -3481,7 +3481,7 @@ class TestEscalatingContextWarnings:
         from summon_claude.sessions.context import ContextUsage
 
         session._last_context = ContextUsage(
-            input_tokens=160000, context_window=200000, percentage=80.0
+            total_tokens=160000, max_tokens=200000, percentage=80.0
         )
         # Call the warning logic directly by simulating _finalize_turn_result
         # We test the threshold logic in isolation
@@ -3508,7 +3508,7 @@ class TestEscalatingContextWarnings:
         from summon_claude.sessions.context import ContextUsage
 
         session._last_context = ContextUsage(
-            input_tokens=185000, context_window=200000, percentage=92.0
+            total_tokens=185000, max_tokens=200000, percentage=92.0
         )
         pct = session._last_context.percentage
         assert pct > _CONTEXT_URGENT_THRESHOLD
@@ -3526,7 +3526,7 @@ class TestEscalatingContextWarnings:
         from summon_claude.sessions.context import ContextUsage
 
         session._last_context = ContextUsage(
-            input_tokens=196000, context_window=200000, percentage=98.0
+            total_tokens=196000, max_tokens=200000, percentage=98.0
         )
         pct = session._last_context.percentage
         assert pct > _CONTEXT_AUTO_COMPACT_THRESHOLD
@@ -3608,24 +3608,21 @@ class TestFinalizeEscalatingWarnings:
 
     async def _run_finalize(self, session, rt, pct, **sr_kwargs):
         """Call _finalize_turn_result with a given context percentage."""
-        from pathlib import Path
-
         from summon_claude.sessions.context import ContextUsage
 
         session._claude_session_id = "already-set"
         session._last_context = ContextUsage(
-            input_tokens=int(200000 * pct / 100),
-            context_window=200000,
+            total_tokens=int(200000 * pct / 100),
+            max_tokens=200000,
             percentage=pct,
         )
         sr = self._make_stream_result(**sr_kwargs)
         streamer = self._make_streamer()
 
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch(
                 "summon_claude.sessions.session._detect_git",
@@ -3645,17 +3642,14 @@ class TestFinalizeEscalatingWarnings:
         session._last_topic_model = None  # different from "opus" → triggers update
         session._last_topic_branch = None
         session._claude_session_id = "already-set"
-        session._last_context = ContextUsage(
-            input_tokens=20000, context_window=200000, percentage=10.0
-        )
+        session._last_context = ContextUsage(total_tokens=20000, max_tokens=200000, percentage=10.0)
         rt = make_rt(AsyncMock())
 
         detect_mock = AsyncMock(return_value=(False, None))
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch("summon_claude.sessions.session._detect_git", detect_mock),
         ):
@@ -3679,18 +3673,15 @@ class TestFinalizeEscalatingWarnings:
 
     async def test_no_context_data_skips_warnings(self):
         """When _last_context is None, the warning block is skipped entirely."""
-        from pathlib import Path
-
         session = make_session()
         session._claude_session_id = "already-set"
         session._last_context = None
         rt = make_rt(AsyncMock())
 
         with (
-            patch("summon_claude.sessions.session.get_last_step_usage", return_value=None),
             patch(
-                "summon_claude.sessions.session.derive_transcript_path",
-                return_value=Path("/fake"),
+                "summon_claude.sessions.session.get_sdk_context_usage",
+                return_value=None,
             ),
             patch(
                 "summon_claude.sessions.session._detect_git",
@@ -4885,11 +4876,10 @@ class TestShutdownCanvasException:
 
 
 class TestServerInfoModelCacheWiring:
-    """Test that server_info models trigger cache refresh and reconciliation."""
+    """Test that server_info models trigger cache refresh."""
 
-    async def test_server_info_triggers_cache_and_reconciliation(self, registry):
-        """When server_info.models is non-empty, both cache_sdk_models and
-        reconcile_context_window_sizes are called with the model list."""
+    async def test_server_info_triggers_cache(self, registry):
+        """When server_info.models is non-empty, cache_sdk_models is called."""
         models = [{"value": "claude-opus-4-6"}]
 
         class _FakeSDKClient:
@@ -4921,15 +4911,11 @@ class TestServerInfoModelCacheWiring:
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             patch("summon_claude.cli.model_cache.cache_sdk_models") as mock_cache,
-            patch(
-                "summon_claude.sessions.session.reconcile_context_window_sizes"
-            ) as mock_reconcile,
             contextlib.suppress(RuntimeError),
         ):
             await session._run_session_tasks(rt, AsyncMock())
 
         mock_cache.assert_called_once_with(models, None, None)
-        mock_reconcile.assert_called_once_with(models)
 
 
 # ---------------------------------------------------------------------------

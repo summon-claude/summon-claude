@@ -66,10 +66,7 @@ from summon_claude.sessions.commands import (
 )
 from summon_claude.sessions.context import (
     ContextUsage,
-    compute_context_usage,
-    derive_transcript_path,
-    get_last_step_usage,
-    reconcile_context_window_sizes,
+    get_sdk_context_usage,
 )
 from summon_claude.sessions.permissions import ApprovalBridge, PermissionHandler
 from summon_claude.sessions.prompts import (
@@ -2272,7 +2269,6 @@ class SummonSession:
 
                                 init_model = server_info.get("model")
                                 cache_sdk_models(models, None, init_model)
-                                reconcile_context_window_sizes(models)
                             # Best-effort: resolve initial model from init data
                             init_model = server_info.get("model")
                             if init_model and (not self._model or self._model == "default"):
@@ -2640,13 +2636,10 @@ class SummonSession:
         if stream_result.model is not None:
             self._last_model_seen = stream_result.model
 
-        # Compute accurate context from JSONL transcript BEFORE recording
+        # Get accurate context usage from SDK BEFORE recording
         # so the DB gets current-turn data, not previous-turn
-        if self._claude_session_id:
-            tp = derive_transcript_path(self._cwd, self._claude_session_id)
-            transcript_usage = get_last_step_usage(tp)
-            if transcript_usage:
-                self._last_context = compute_context_usage(transcript_usage, self._last_model_seen)
+        if self._claude:
+            self._last_context = await get_sdk_context_usage(self._claude) or self._last_context
 
         ctx_pct = self._last_context.percentage if self._last_context else None
         await rt.registry.record_turn(self._session_id, cost, context_pct=ctx_pct)

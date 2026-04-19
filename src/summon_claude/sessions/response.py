@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 from claude_agent_sdk import (
     AssistantMessage,
+    RateLimitEvent,
     ResultMessage,
     TextBlock,
     ThinkingBlock,
@@ -289,8 +290,8 @@ class ResponseStreamer:
                 short_names.append(f"+{len(self._turn.files_touched) - 3} more")
             parts.append(", ".join(short_names))
         if context is not None:
-            ctx_k = context.input_tokens // 1000
-            win_k = context.context_window // 1000
+            ctx_k = context.total_tokens // 1000
+            win_k = context.max_tokens // 1000
             parts.append(f"{ctx_k}k/{win_k}k ({context.percentage:.0f}%)")
         return " \u00b7 ".join(parts) if parts else "Processing..."
 
@@ -333,8 +334,13 @@ class ResponseStreamer:
             async for message in messages:
                 if isinstance(message, AssistantMessage):
                     await self._handle_assistant_message(message)
+                elif isinstance(message, RateLimitEvent):
+                    logger.info("Rate limit event received: %s", message)
                 elif isinstance(message, ResultMessage):
                     result = message
+                    if message.errors:
+                        safe = redact_secrets(str(message.errors))
+                        logger.warning("SDK ResultMessage errors: %s", safe)
                     break
         finally:
             stop_flush.set()
@@ -360,6 +366,8 @@ class ResponseStreamer:
         """Process content blocks from an AssistantMessage."""
         if not self._turn.resolved_model and getattr(message, "model", None):
             self._turn.resolved_model = message.model
+        if message.usage:
+            logger.debug("Per-turn usage: %s", message.usage)
         parent_id = message.parent_tool_use_id
 
         for block in message.content:

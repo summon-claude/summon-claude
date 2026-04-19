@@ -21,7 +21,7 @@ dependencies = [
     "packaging==26.0",
     "aiosqlite==0.22.1",
     "click==8.3.1",
-    "claude-agent-sdk==0.1.48",
+    "claude-agent-sdk==0.1.63",
     "pydantic-settings==2.13.1",
     "python-daemon==3.1.2",
     "slack-bolt==1.27.0",
