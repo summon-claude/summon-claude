@@ -1157,67 +1157,6 @@ class SessionManager:
                             )
         return pm_resumed
 
-    def _start_child_session(  # noqa: PLR0913
-        self,
-        project: dict[str, Any],
-        user_id: str,
-        cwd: str,
-        name: str,
-        model: str | None = None,
-        resume_from_session_id: str | None = None,
-    ) -> None:
-        """Create and start a regular (non-PM) child session for *project*.
-
-        Currently unused (zero callers). Callers must supply a meaningful
-        task description as *name* (e.g., ``"fix-auth"``).
-        """
-        if not pathlib.Path(cwd).is_dir():
-            raise FileNotFoundError(f"Directory not found: {cwd}")
-
-        new_session_id = str(uuid.uuid4())
-        options = SessionOptions(
-            cwd=cwd,
-            name=name,
-            model=model,
-            project_id=project["project_id"],
-            resume_from_session_id=resume_from_session_id,
-        )
-        options = self._inject_proxy_options(options)
-        new_session = SummonSession(
-            config=self._config,
-            options=options,
-            auth=None,
-            session_id=new_session_id,
-            web_client=self._web_client,
-            dispatcher=self._dispatcher,
-            bot_user_id=self._bot_user_id,
-            ipc_spawn=self.create_session_with_spawn_token,
-            ipc_resume=self._ipc_resume,
-            ipc_queue=self.queue_session,
-        )
-        new_session.authenticate(user_id)
-
-        self._cancel_grace_timer()
-        self._sessions[new_session_id] = new_session
-        task = asyncio.create_task(
-            self._supervised_session(new_session, new_session_id),
-            name=f"session-child-{new_session_id}",
-        )
-        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
-        self._tasks[new_session_id] = task
-
-        logger.info(
-            "SessionManager: started child session %s for project %s (cwd=%s)",
-            new_session_id,
-            project["name"],
-            cwd,
-        )
-
-        # Update PM topic now that a new child is tracked
-        t = asyncio.create_task(self._update_pm_topic(project["project_id"]))
-        t.add_done_callback(self._on_background_task_done)
-        self._background_tasks.add(t)
-
     def _start_pm_for_project(self, project: dict[str, Any], user_id: str) -> None:
         """Create and start a single PM session for *project*."""
         project_dir = project["directory"]
