@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import socket
 import struct
@@ -1916,9 +1917,7 @@ class TestCascadeRestart:
         assert result == set()
         manager.create_resumed_session.assert_not_called()
         errored_calls = [
-            c
-            for c in mock_reg.update_status.call_args_list
-            if len(c.args) >= 2 and c.args == ("old-sess-1", "errored")
+            c for c in mock_reg.update_status.call_args_list if c.args == ("old-sess-1", "errored")
         ]
         assert len(errored_calls) == 1
         assert "not found" in errored_calls[0].kwargs["error_message"].lower()
@@ -2041,8 +2040,6 @@ class TestCascadeRestart:
 
         project = _mock_project(directory="/new/project/dir")
         manager.create_resumed_session = AsyncMock()
-
-        import logging
 
         with (
             caplog.at_level(logging.DEBUG, logger="summon_claude.sessions.manager"),
