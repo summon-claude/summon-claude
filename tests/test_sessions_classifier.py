@@ -650,6 +650,7 @@ class TestClassifyIntegration:
             result = await classifier.classify("Bash", {"command": "ls"}, "")
 
         assert result.decision == "uncertain"
+        assert "timed out" in result.reason
 
     async def test_do_classify_end_to_end_with_mocked_sdk(self):
         """_do_classify spawns SDK, reads response, parses JSON, updates counters."""

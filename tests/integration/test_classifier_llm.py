@@ -10,7 +10,7 @@ nesting internally. Run with::
     uv run pytest tests/integration/test_classifier_llm.py -m llm -v
 
 These tests make real API calls — each parameterized case spawns a Claude
-subprocess. Expect ~5-10 seconds per case.
+subprocess. Expect ~2-5 seconds per case.
 """
 
 from __future__ import annotations
