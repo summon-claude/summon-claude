@@ -85,6 +85,8 @@ class SessionManager:
         web_client: AsyncWebClient,
         bot_user_id: str,
         dispatcher: EventDispatcher,
+        *,
+        bot_team_id: str | None = None,
         event_probe: EventProbe | None = None,
         jira_proxy_port: int | None = None,
         jira_proxy_token: str | None = None,
@@ -92,6 +94,7 @@ class SessionManager:
         self._config = config
         self._web_client = web_client
         self._bot_user_id = bot_user_id
+        self._bot_team_id = bot_team_id
         self._dispatcher = dispatcher
         self._event_probe = event_probe
         self._jira_proxy_port = jira_proxy_port
@@ -182,6 +185,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -266,6 +270,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             parent_session_id=spawn_auth.parent_session_id,
             parent_channel_id=spawn_auth.parent_channel_id,
             ipc_spawn=self.create_session_with_spawn_token,
@@ -885,6 +890,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             parent_session_id=parent_session_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
@@ -976,6 +982,7 @@ class SessionManager:
                 web_client=self._web_client,
                 dispatcher=self._dispatcher,
                 bot_user_id=self._bot_user_id,
+                bot_team_id=self._bot_team_id,
                 ipc_spawn=self.create_session_with_spawn_token,
                 ipc_resume=self._ipc_resume,
                 ipc_queue=self.queue_session,
@@ -1157,6 +1164,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1206,6 +1214,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1377,6 +1386,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1504,6 +1514,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1728,6 +1739,7 @@ class SessionManager:
                     web_client=self._web_client,
                     dispatcher=self._dispatcher,
                     bot_user_id=self._bot_user_id,
+                    bot_team_id=self._bot_team_id,
                     parent_session_id=live_pm_sid,
                     parent_channel_id=entry.parent_channel_id,
                     ipc_spawn=self.create_session_with_spawn_token,
