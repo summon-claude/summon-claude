@@ -1885,6 +1885,183 @@ class TestCascadeRestart:
             *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
         )
 
+    async def test_restart_suspended_missing_directory_marks_errored(self):
+        """When project directory is missing, suspended sessions are marked errored."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "old-sess-1",
+            "session_name": "proj-abc",
+            "cwd": "/old/path",
+            "status": "suspended",
+            "slack_channel_id": "C123",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/nonexistent/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=False),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            result = await manager._restart_suspended_sessions([project], "user-1")
+
+        assert result == set()
+        manager.create_resumed_session.assert_not_called()
+        errored_calls = [
+            c
+            for c in mock_reg.update_status.call_args_list
+            if len(c.args) >= 2 and c.args == ("old-sess-1", "errored")
+        ]
+        assert len(errored_calls) == 1
+        assert "not found" in errored_calls[0].kwargs["error_message"].lower()
+
+    async def test_restart_suspended_uses_project_directory_not_session_cwd(self):
+        """PM sessions always use project directory as cwd, not stale session cwd."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "sess-1",
+            "session_name": "proj-pm-abc",
+            "cwd": "/old/stale/dir",
+            "status": "suspended",
+            "slack_channel_id": "C123",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-123"})
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/new/project/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await manager._restart_suspended_sessions([project], "user-1")
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.cwd == "/new/project/dir"
+
+    async def test_restart_suspended_child_preserves_valid_subdirectory_cwd(self):
+        """Non-PM child sessions preserve their cwd if it exists and is inside the project tree."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "sess-2",
+            "session_name": "proj-abc",
+            "cwd": "/new/project/dir/subdir",
+            "status": "suspended",
+            "slack_channel_id": "C456",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-456"})
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/new/project/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await manager._restart_suspended_sessions([project], "user-1")
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.cwd == "/new/project/dir/subdir"
+
+    async def test_restart_suspended_child_falls_back_on_escaped_cwd(self):
+        """Non-PM child sessions fall back to project dir if old cwd is outside the project tree."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "sess-3",
+            "session_name": "proj-abc",
+            "cwd": "/completely/different/path",
+            "status": "suspended",
+            "slack_channel_id": "C789",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-789"})
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/new/project/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await manager._restart_suspended_sessions([project], "user-1")
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.cwd == "/new/project/dir"
+
+    async def test_restart_suspended_logs_cwd_change(self, caplog):
+        """Debug log emitted when session cwd differs from project directory."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "sess-1",
+            "session_name": "proj-abc",
+            "cwd": "/old/stale/dir",
+            "status": "suspended",
+            "slack_channel_id": "C123",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-123"})
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/new/project/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        import logging
+
+        with (
+            caplog.at_level(logging.DEBUG, logger="summon_claude.sessions.manager"),
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await manager._restart_suspended_sessions([project], "user-1")
+
+        cwd_change_logs = [
+            r
+            for r in caplog.records
+            if "/old/stale/dir" in r.message and "/new/project/dir" in r.message
+        ]
+        assert len(cwd_change_logs) == 1
+        assert cwd_change_logs[0].levelno == logging.DEBUG
+
 
 # ---------------------------------------------------------------------------
 # send_message IPC handler tests
