@@ -2683,6 +2683,9 @@ class TestHandleSpawn:
             # Verify project_id was propagated to child options
             child_opts = mock_ipc_spawn.call_args[0][0]
             assert child_opts.project_id == "proj-42"
+            # Verify spawn name uses short format (no parent name prefix)
+            assert child_opts.name.startswith("spawn-")
+            assert len(child_opts.name) == len("spawn-") + 6  # 3 hex bytes
 
     async def test_spawn_blocked_missing_ipc_spawn(self):
         """_handle_spawn posts error when _ipc_spawn callback is not registered."""
