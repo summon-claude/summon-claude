@@ -267,6 +267,8 @@ _SCRIBE_DISALLOWED_TOOLS: frozenset[str] = frozenset(
 # Triage agent: same restrictions as Scribe, but canvas write tools are
 # excluded from the block because triage children must write to their canvas
 # to report findings. Guard test pins this set.
+# Paired with _TRIAGE_SESSION_NAMES in sessions/prompts/pm.py — split to avoid
+# circular imports; both are consumed together in summon_cli_mcp.py.
 _TRIAGE_DISALLOWED_TOOLS: frozenset[str] = _SCRIBE_DISALLOWED_TOOLS - {
     "summon_canvas_write",
     "summon_canvas_update_section",
@@ -546,7 +548,7 @@ class _PendingTurn:
     compact: bool = False  # If True, consumer runs _execute_compact instead of normal turn
     clear: bool = False  # If True, consumer runs _execute_clear instead of normal turn
     clear_done: asyncio.Event | None = None  # Signalled when clear completes
-    clear_ok: list | None = None  # Mutable [bool] container — set by _execute_clear
+    clear_ok: list[bool] | None = None  # Mutable [bool] container — set by _execute_clear
 
 
 class _SessionRestartError(Exception):
@@ -3603,7 +3605,7 @@ class SummonSession:
         self,
         _rt: _SessionRuntime,
         clear_done: asyncio.Event | None,
-        clear_ok: list | None = None,
+        clear_ok: list[bool] | None = None,
     ) -> None:
         """Clear conversation context via ``/clear`` on the SDK client.
 

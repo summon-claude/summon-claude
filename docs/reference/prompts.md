@@ -27,6 +27,7 @@ Session management (summon-cli MCP):
 - `session_info`: get detailed metadata for a specific session
 - `session_message`: inject a message into a running session
 - `session_resume`: resume a stopped or suspended session
+- `session_clear`: clear a child session's conversation context (for persistent workers like gh-triage/jira-triage)
 - `session_log_status`: log a status update to the audit trail
 
 Scheduling & tasks:
@@ -654,7 +655,7 @@ Use `summon_canvas_update_section` to update each section with findings:
 - `## Summary`: one-line count summary, e.g. "3 new issues, 1 review-ready, 2 stale PRs"
 
 **Step 9: Post summary**
-Post a single Slack message: "Triage complete: {counts summary}"
+Post a single Slack message with a count summary, e.g. "Triage complete: 3 new issues, 1 review-ready, 2 stale PRs"
 
 Then stop and wait for the next trigger message.
 ```
@@ -702,8 +703,8 @@ _In progress_
 
 **Step 2: Fetch Jira issues**
 Call `searchJiraIssuesUsingJql` with:
-- `cloudId`: "jira_cloud_id"
-- `jql`: "jira_jql"
+- `cloudId`: `jira_cloud_id`
+- `jql`: `jira_jql`
 
 **Step 3: Triage issues**
 For each issue returned:
@@ -721,7 +722,7 @@ Use `summon_canvas_update_section` to update each section with findings:
 - `## Summary`: one-line count summary, e.g. "5 issues: 2 high priority, 1 overdue"
 
 **Step 5: Post summary**
-Post a single Slack message: "Jira triage complete: {counts summary}"
+Post a single Slack message with a count summary, e.g. "Jira triage complete: 5 issues: 2 high priority, 1 overdue"
 
 Then stop and wait for the next trigger message.
 ```

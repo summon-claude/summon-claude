@@ -255,7 +255,7 @@ List all tasks in this session. PM sessions can also query child session tasks.
 
 ### Additional tools for PM sessions only
 
-PM (project manager) sessions are started with `--pm-profile` or via `summon project up`. They receive 5 additional tools, plus a 6th (`session_status_update`) when a pinned status message exists.
+PM (project manager) sessions are started with `--pm-profile` or via `summon project up`. They receive 6 additional tools, plus a 7th (`session_status_update`) when a pinned status message exists.
 
 #### `session_start`
 
@@ -332,7 +332,7 @@ Clear a child session's conversation context. The session stays active but start
 
 **Returns:** Confirmation that context was cleared.
 
-**Notes:** Can only clear sessions that the calling session spawned (parent-child scope guard). Target must be `active`. Global PM is exempt from the parent-child constraint.
+**Notes:** Can only clear sessions that the calling session spawned (parent-child scope guard). Target must be `active` and have a triage session name (`gh-triage` or `jira-triage`). Not available to Global PM sessions.
 
 ---
 

@@ -145,8 +145,10 @@ async def clear_session(session_id: str) -> dict[str, Any]:
 
     Returns the daemon response dict.  On success, contains
     ``{"type": "session_cleared", "session_id": ...}``.
+
+    Uses 35s timeout (clear_context has a 30s internal wait_for + 5s IPC headroom).
     """
-    return await _request({"type": "clear_session", "session_id": session_id})
+    return await _request({"type": "clear_session", "session_id": session_id}, recv_timeout=35.0)
 
 
 async def stop_session(session_id: str) -> bool:

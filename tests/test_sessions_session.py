@@ -1617,7 +1617,7 @@ class TestClearContext:
 
             task = asyncio.create_task(session.clear_context())
             # Give the event loop a chance to enqueue
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0)  # yield to let task enqueue
             # Check the queue
             pt = session._pending_turns.get_nowait()
             assert isinstance(pt, _PendingTurn)
@@ -1641,6 +1641,45 @@ class TestClearContext:
         for _ in range(session._pending_turns.maxsize):
             session._pending_turns.put_nowait(_PendingTurn(message="filler"))
         result = asyncio.run(session.clear_context())
+        assert result is False
+
+    def test_clear_context_returns_false_when_execute_clear_fails(self):
+        """SDK exception in _execute_clear: clear_ok stays False, method returns False."""
+        from summon_claude.sessions.session import _PendingTurn
+
+        session = make_session()
+        session._claude = MagicMock()
+
+        async def run():
+            task = asyncio.create_task(session.clear_context())
+            await asyncio.sleep(0)  # yield to let task enqueue
+            pt = session._pending_turns.get_nowait()
+            assert isinstance(pt, _PendingTurn)
+            assert pt.clear is True
+            # Simulate _execute_clear failing: signal done but leave clear_ok[0] = False
+            pt.clear_done.set()
+            return await task
+
+        result = asyncio.run(run())
+        assert result is False
+
+    def test_clear_context_returns_false_on_timeout(self):
+        """Timeout waiting for clear_done: method returns False with warning."""
+        from unittest.mock import patch
+
+        session = make_session()
+        session._claude = MagicMock()
+
+        async def _timeout_wait_for(coro, *, timeout=None):
+            """Simulate timeout while properly cleaning up the coroutine."""
+            coro.close()
+            raise TimeoutError
+
+        async def run():
+            with patch("asyncio.wait_for", side_effect=_timeout_wait_for):
+                return await session.clear_context()
+
+        result = asyncio.run(run())
         assert result is False
 
 
@@ -2153,6 +2192,18 @@ class TestWorktreeDisallowedTools:
 
         prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
         assert "orchestration, not execution" in prompt["append"]
+
+    def test_pm_system_prompt_lists_triage_names(self):
+        """Guard: PM system prompt session_clear description must mention all triage names."""
+        from summon_claude.sessions.prompts import build_pm_system_prompt
+        from summon_claude.sessions.prompts.pm import _TRIAGE_SESSION_NAMES
+
+        prompt = build_pm_system_prompt(cwd="/tmp/test", scan_interval_s=900)
+        for name in sorted(_TRIAGE_SESSION_NAMES):
+            assert name in prompt["append"], (
+                f"Triage session name '{name}' missing from PM system prompt. "
+                f"Update _PM_SYSTEM_PROMPT_APPEND to match _TRIAGE_SESSION_NAMES."
+            )
 
 
 class TestHeadlessBoilerplate:

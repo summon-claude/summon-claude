@@ -12,6 +12,7 @@ from summon_claude.sessions.prompts.pm import (
     build_jira_triage_instructions,
     build_pm_scan_prompt,
 )
+from summon_claude.sessions.prompts.shared import sanitize_prompt_value
 
 # ---------------------------------------------------------------------------
 # _TRIAGE_SESSION_NAMES guard test
@@ -188,6 +189,43 @@ class TestJiraTriageInstructions:
 
 
 # ---------------------------------------------------------------------------
+# sanitize_prompt_value — unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizePromptValue:
+    """Direct unit tests for sanitize_prompt_value and _PROMPT_UNSAFE_RE."""
+
+    def test_emoji_stripped(self):
+        """Emoji (non-ASCII) is stripped, leaving surrounding ASCII intact."""
+        assert sanitize_prompt_value("cloud-\U0001f525-id") == "cloud--id"
+
+    def test_multibyte_cjk_stripped(self):
+        """CJK multibyte characters are stripped."""
+        assert sanitize_prompt_value("proj-\u4e2d\u6587-name") == "proj--name"
+
+    def test_accented_letter_stripped(self):
+        """Precomposed accented letters (non-ASCII) are stripped."""
+        assert sanitize_prompt_value("caf\u00e9-id") == "caf-id"
+
+    def test_pure_ascii_unchanged(self):
+        """Printable ASCII (excluding unsafe chars) passes through unmodified."""
+        assert sanitize_prompt_value("abc-123_FOO") == "abc-123_FOO"
+
+    def test_mixed_unicode_and_unsafe_ascii(self):
+        """Both non-ASCII and unsafe ASCII chars are removed in a single pass."""
+        assert sanitize_prompt_value("\U0001f525`[test]") == "test"
+
+    def test_leading_trailing_whitespace_stripped(self):
+        """strip() is called after substitution."""
+        assert sanitize_prompt_value("  hello  ") == "hello"
+
+    def test_newline_replaced_with_space(self):
+        """Newlines become spaces (not stripped by regex — handled before sub)."""
+        assert sanitize_prompt_value("line1\nline2") == "line1 line2"
+
+
+# ---------------------------------------------------------------------------
 # Triage template size guard
 # ---------------------------------------------------------------------------
 
@@ -317,6 +355,17 @@ class TestRefactoredScanPrompt:
         result = build_pm_scan_prompt(jira_enabled=True)
         assert "Do NOT stop" in result
 
+    def test_session_health_check_triage_children_awareness_github_only(self):
+        """Health Check must mention triage children for GitHub-only path."""
+        result = build_pm_scan_prompt(github_enabled=True, is_git_repo=True, jira_enabled=False)
+        assert "Do NOT stop" in result
+
+    def test_scan_prompt_no_triage_bullet_when_disabled(self):
+        """Triage bullet must be absent when both github and jira are disabled."""
+        result = build_pm_scan_prompt(github_enabled=False, jira_enabled=False)
+        assert "Do NOT stop" not in result
+        assert "gh-triage" not in result
+
     def test_session_health_check_duplicate_name_handling(self):
         """Health Check must address duplicate-name records after project down/up."""
         result = build_pm_scan_prompt()
@@ -375,8 +424,6 @@ class TestSessionClearMcpGuard:
         """session_clear must be available to PM sessions."""
         # Use a minimal in-memory registry (no DB) for this guard test
         import asyncio
-        import os
-        import tempfile
 
         from conftest import make_scheduler
 

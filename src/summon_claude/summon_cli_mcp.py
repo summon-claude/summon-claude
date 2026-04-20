@@ -91,6 +91,9 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         _ipc_clear_session: Override for daemon IPC clear (testing).
         _ipc_queue_session: Override for daemon queue_session (testing).
         _web_client: AsyncWebClient for cross-channel Slack posts (testing).
+        pm_status_ts: Pinned status message timestamp (enables session_status_update tool).
+        config: SummonConfig for triage auto-detection (stale PR hours).
+        triage_jira_cloud_id: Jira cloud ID for triage instruction interpolation.
     """
     if is_global_pm and not is_pm:
         raise ValueError("is_global_pm requires is_pm=True")
@@ -368,6 +371,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 )
             triage_extra_disallowed = tuple(sorted(_TRIAGE_DISALLOWED_TOOLS))
 
+        # Build options before cap check — queuing path needs options to hand off.
         options = SessionOptions(
             cwd=target_cwd,
             name=name,
@@ -813,13 +817,34 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                     "is_error": True,
                 }
 
-            # Parent-child scope guard (GPM exempt)
-            if not is_global_pm and target.get("parent_session_id") != session_id:
+            # Parent-child scope guard
+            if target.get("parent_session_id") != session_id:
                 return {
                     "content": [
                         {
                             "type": "text",
                             "text": "Error: can only clear sessions you spawned.",
+                        }
+                    ],
+                    "is_error": True,
+                }
+
+            # Name guard: session_clear is restricted to triage workers
+            from summon_claude.sessions.prompts.pm import (  # noqa: PLC0415
+                _TRIAGE_SESSION_NAMES,
+            )
+
+            target_session_name = target.get("session_name") or ""
+            if target_session_name not in _TRIAGE_SESSION_NAMES:
+                return {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": (
+                                f"Error: session_clear is only allowed for triage sessions "
+                                f"({', '.join(sorted(_TRIAGE_SESSION_NAMES))}). "
+                                f"Session '{target_session_name}' is not a triage session."
+                            ),
                         }
                     ],
                     "is_error": True,
@@ -849,21 +874,8 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
 
                 ipc_clear = clear_session
 
-            result = await ipc_clear(target_id)
-
-            if result.get("type") != "session_cleared":
-                return {
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": (
-                                f"Error: clear_context() failed for session "
-                                f"'{target_id}'. Session may be unavailable."
-                            ),
-                        }
-                    ],
-                    "is_error": True,
-                }
+            # _request() raises DaemonError on failure — return is always success.
+            await ipc_clear(target_id)
 
             target_name = target.get("session_name") or target_id[:8]
             return {
@@ -1421,11 +1433,12 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
             session_log_status,
             session_resume,
         ]
-        # GPM: no session_start (oversight, not spawner)
+        # GPM: no session_start (oversight, not spawner); no session_clear (triage-only)
         if not is_global_pm:
             pm_tools.insert(0, session_start)
         pm_tools.append(session_message)
-        pm_tools.append(session_clear)
+        if not is_global_pm:
+            pm_tools.append(session_clear)
         tools.extend(pm_tools)
         if _pm_status_tool is not None:
             tools.append(_pm_status_tool)
