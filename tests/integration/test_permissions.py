@@ -84,40 +84,53 @@ async def _extract_batch_id_from_channel(
     web_client,
     channel_id,
     action_prefix="approve:",
+    retries=5,
 ):
-    """Extract batch_id from the most recent interactive message in the channel."""
-    history = await web_client.conversations_history(
-        channel=channel_id,
-        limit=5,
-    )
-    for msg in history.get("messages", []):
-        blocks = msg.get("blocks") or []
-        for block in blocks:
-            if block.get("type") == "actions":
-                for element in block.get("elements", []):
-                    value = element.get("value", "")
-                    if value.startswith(action_prefix):
-                        return value[len(action_prefix) :]
+    """Extract batch_id from the most recent interactive message in the channel.
+
+    Retries with 0.5s intervals to handle Slack API posting latency.
+    """
+    for attempt in range(retries):
+        history = await web_client.conversations_history(
+            channel=channel_id,
+            limit=5,
+        )
+        for msg in history.get("messages", []):
+            blocks = msg.get("blocks") or []
+            for block in blocks:
+                if block.get("type") == "actions":
+                    for element in block.get("elements", []):
+                        value = element.get("value", "")
+                        if value.startswith(action_prefix):
+                            return value[len(action_prefix) :]
+        if attempt < retries - 1:
+            await asyncio.sleep(0.5)
     raise ValueError(
         f"Could not extract batch_id with prefix {action_prefix!r} from channel {channel_id}"
     )
 
 
-async def _extract_request_id_from_channel(web_client, channel_id):
-    """Extract request_id from the most recent AskUserQuestion message."""
-    history = await web_client.conversations_history(
-        channel=channel_id,
-        limit=5,
-    )
-    for msg in history.get("messages", []):
-        blocks = msg.get("blocks") or []
-        for block in blocks:
-            if block.get("type") == "actions":
-                for el in block.get("elements", []):
-                    val = el.get("value", "")
-                    parts = val.split("|")
-                    if len(parts) == 3:
-                        return parts[0]
+async def _extract_request_id_from_channel(web_client, channel_id, retries=5):
+    """Extract request_id from the most recent AskUserQuestion message.
+
+    Retries with 0.5s intervals to handle Slack API posting latency.
+    """
+    for attempt in range(retries):
+        history = await web_client.conversations_history(
+            channel=channel_id,
+            limit=5,
+        )
+        for msg in history.get("messages", []):
+            blocks = msg.get("blocks") or []
+            for block in blocks:
+                if block.get("type") == "actions":
+                    for el in block.get("elements", []):
+                        val = el.get("value", "")
+                        parts = val.split("|")
+                        if len(parts) == 3:
+                            return parts[0]
+        if attempt < retries - 1:
+            await asyncio.sleep(0.5)
     raise ValueError(f"Could not extract request_id from channel {channel_id}")
 
 
@@ -373,13 +386,17 @@ class TestSessionApprove:
         slack_harness,
         test_channel,
     ):
-        """approve_session caches the tool — second call auto-approves."""
+        """approve_session caches the tool — second call auto-approves.
+
+        Uses a non-write-gated tool name so the bare tool name is cached
+        (write-gated tools like Bash cache per-argument instead).
+        """
         slack_client = SlackClient(slack_harness.client, test_channel)
         handler = _make_permission_handler(slack_client, debounce_ms=50)
 
         # First call — posts interactive message
         task1 = asyncio.create_task(
-            handler.handle("Bash", {"command": "ls"}, None),
+            handler.handle("SomeTool", {}, None),
         )
         await asyncio.sleep(0.3)
 
@@ -393,7 +410,7 @@ class TestSessionApprove:
         assert isinstance(result1, PermissionResultAllow)
 
         # Second call for same tool — should auto-approve without posting
-        result2 = await handler.handle("Bash", {"command": "echo hello"}, None)
+        result2 = await handler.handle("SomeTool", {}, None)
         assert isinstance(result2, PermissionResultAllow)
 
 
@@ -457,12 +474,16 @@ class TestAskUserQuestion:
         action_blocks = [b for b in blocks if b.get("type") == "actions"]
         assert action_blocks, "AskUserQuestion should produce an actions block"
 
-        # Resolve by simulating option click
+        # Resolve by simulating option click (AskUserQuestion uses
+        # handle_ask_user_action, not handle_action)
         request_id = await _extract_request_id_from_channel(
             slack_harness.client,
             test_channel,
         )
-        await handler.handle_action(f"{request_id}|0|a", "U_OWNER")
+        await handler.handle_ask_user_action(
+            value=f"{request_id}|0|0",
+            user_id="U_OWNER",
+        )
         result = await task
 
         assert isinstance(result, PermissionResultAllow)
