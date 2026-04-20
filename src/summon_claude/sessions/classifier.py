@@ -14,7 +14,7 @@ import json
 import logging
 import re
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass
 from html import escape as _html_escape
 from typing import TYPE_CHECKING, Any, Literal
@@ -263,13 +263,13 @@ class SummonAutoClassifier:
     """Evaluates tool calls against prose rules using a Sonnet classifier."""
 
     def __init__(
-        self, config: SummonConfig, cwd: str = "", project_rules: dict | None = None
+        self, config: SummonConfig, cwd: str = "", project_rules: dict[str, Any] | None = None
     ) -> None:
         self._config = config
         self._cwd = cwd
         self._consecutive_blocks = 0
         self._block_timestamps: deque[float] = deque()
-        self._cache: dict[str, tuple[ClassifyResult, float]] = {}
+        self._cache: OrderedDict[str, tuple[ClassifyResult, float]] = OrderedDict()
         self._content_classify_sem = asyncio.Semaphore(3)
         # Always start with global config defaults
         self._deny_rules = get_effective_deny_rules(config.auto_mode_deny)
@@ -352,8 +352,7 @@ class SummonAutoClassifier:
             # Cache definitive decisions only — uncertain results should always re-evaluate.
             if result.decision in ("allow", "block"):
                 if len(self._cache) >= _MAX_CACHE_SIZE:
-                    oldest_key = min(self._cache, key=lambda k: self._cache[k][1])
-                    del self._cache[oldest_key]
+                    self._cache.popitem(last=False)  # O(1) eviction of oldest entry
                 self._cache[key] = (result, time.monotonic())
             return result
         except Exception as e:
@@ -383,19 +382,15 @@ class SummonAutoClassifier:
             env={"CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK": "1"},
         )
 
-        client_ctx = ClaudeSDKClient(options)
-        client = await client_ctx.__aenter__()
-        try:
+        parts: list[str] = []
+        async with ClaudeSDKClient(options) as client:
             await client.query(user_message)
-            parts: list[str] = []
             async for msg in client.receive_response():
                 if isinstance(msg, AssistantMessage):
                     for block in msg.content:
                         if isinstance(block, TextBlock):
                             parts.append(block.text)
-            return "".join(parts)
-        finally:
-            await client_ctx.__aexit__(None, None, None)
+        return "".join(parts)
 
     async def _do_classify(
         self,
@@ -423,8 +418,11 @@ class SummonAutoClassifier:
         """Evaluate free-form content for safety concerns.
 
         Unlike classify(), this does NOT update fallback counters — sentinel
-        evaluations must not count toward the fallback threshold (SEC-D-010).
+        evaluations must not count toward the fallback threshold (content checks
+        are warn-only and must not accelerate classifier shutdown).
         Concurrent calls are capped at 3 via _content_classify_sem.
+        Semaphore acquisition happens outside the timeout so each classification
+        gets the full timeout budget for the actual query.
         """
         safe_content = _html_escape(content, quote=True)
         user_message = (
@@ -432,19 +430,19 @@ class SummonAutoClassifier:
             "\n\nClassify the subagent output."
         )
         try:
-            return await asyncio.wait_for(
-                self._do_classify_content(user_message),
-                timeout=_CLASSIFIER_TIMEOUT_S,
-            )
+            async with self._content_classify_sem:
+                return await asyncio.wait_for(
+                    self._do_classify_content(user_message),
+                    timeout=_CLASSIFIER_TIMEOUT_S,
+                )
         except Exception as e:
             logger.warning("Content classifier error: %s", e)
             return ClassifyResult("uncertain", f"Content classifier error: {e}")
 
     async def _do_classify_content(self, user_message: str) -> ClassifyResult:
-        """Inner classify_content — semaphore + subprocess in single timeout scope."""
-        async with self._content_classify_sem:
-            response_text = await self._query_sonnet(_CONTENT_CLASSIFIER_PROMPT, user_message)
-            return self._parse_response(response_text)
+        """Inner classify_content — runs the query after semaphore is acquired."""
+        response_text = await self._query_sonnet(_CONTENT_CLASSIFIER_PROMPT, user_message)
+        return self._parse_response(response_text)
 
     def _parse_response(self, text: str) -> ClassifyResult:
         """Parse classifier JSON response."""

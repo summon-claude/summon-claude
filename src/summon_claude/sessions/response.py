@@ -316,7 +316,7 @@ class ResponseStreamer:
 
     # --- Streaming ---
 
-    async def stream_with_flush(self, messages: AsyncIterator) -> StreamResult | None:  # noqa: PLR0912
+    async def stream_with_flush(self, messages: AsyncIterator) -> StreamResult | None:  # noqa: PLR0912, PLR0915
         """Stream with a background flush task for periodic Slack updates."""
         # Preserve fields set by start_turn() across the per-stream reset
         saved_snippet = self._turn.user_snippet
@@ -335,6 +335,7 @@ class ResponseStreamer:
 
         flush_task = asyncio.create_task(flush_loop())
 
+        keys_before = set(self._pending_agent_verifications)
         try:
             async for message in messages:
                 if isinstance(message, AssistantMessage):
@@ -367,6 +368,13 @@ class ResponseStreamer:
             flush_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await flush_task
+            # On aborted turns (no ResultMessage), clean up entries added this
+            # turn — the subagent will never send a notification. On normal
+            # completion, entries persist for cross-turn resolution.
+            if result is None:
+                added_this_turn = set(self._pending_agent_verifications) - keys_before
+                for stale_key in added_this_turn:
+                    self._pending_agent_verifications.pop(stale_key, None)
 
         # Final flush
         if self._turn.thinking_buffer:
@@ -669,7 +677,7 @@ class ResponseStreamer:
         tool_name = block.name
         input_data = block.input or {}
         summary = _format_tool_summary(tool_name, input_data)
-        blocks = self._make_tool_use_blocks(tool_name, summary, input_data, approval=approval)
+        blocks = self._make_tool_use_blocks(tool_name, summary, approval=approval)
         if parent_id:
             await self._router.post_to_subagent_thread(
                 parent_id, f"Tool: {tool_name}", blocks=blocks
@@ -730,7 +738,6 @@ class ResponseStreamer:
         self,
         tool_name: str,
         summary: str,
-        input_data: dict[str, Any],  # noqa: ARG002
         approval: ApprovalInfo | None = None,
     ) -> list[dict[str, Any]]:
         """Build Block Kit blocks for a tool use context message."""

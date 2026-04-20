@@ -373,6 +373,68 @@ class TestResponseStreamerSubagentThreads:
         callback.assert_not_called()
         assert streamer._pending_agent_verifications == {}
 
+    async def test_pending_agent_verification_resolves_across_turns(self):
+        """Entry added in turn 1 resolves when TaskNotificationMessage arrives in turn 2."""
+        from claude_agent_sdk import TaskNotificationMessage
+
+        callback = AsyncMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_subagent_return=callback)
+
+        task_input = {"prompt": "Do something long-running"}
+
+        # Turn 1: Task ToolUseBlock is seen — entry added, no notification arrives
+        task_block = make_tool_use_block("Task", task_input, tool_use_id="tu_cross")
+        turn1_messages = [
+            make_assistant_message([task_block]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(turn1_messages))
+
+        # Entry must persist across the turn boundary
+        assert "tu_cross" in streamer._pending_agent_verifications
+
+        # Turn 2: TaskNotificationMessage arrives for the same tool_use_id
+        notif = TaskNotificationMessage(
+            subtype="task_notification",
+            data={},
+            task_id="task-cross",
+            status="completed",
+            output_file="",
+            summary="Cross-turn done",
+            uuid="uuid-cross",
+            session_id="sess-1",
+            tool_use_id="tu_cross",
+        )
+        turn2_messages = [notif, make_result_message()]
+        await streamer.stream_with_flush(agen(turn2_messages))
+        await asyncio.sleep(0.05)
+
+        # Callback must fire and entry must be consumed
+        assert "tu_cross" not in streamer._pending_agent_verifications
+        callback.assert_called_once_with(task_input, "Cross-turn done")
+
+    async def test_aborted_turn_cleans_up_pending_verifications(self):
+        """Task entries added during an aborted turn (no ResultMessage) are cleaned up."""
+        callback = AsyncMock()
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+        streamer = ResponseStreamer(router, on_subagent_return=callback)
+
+        task_input = {"prompt": "will be aborted"}
+        task_block = make_tool_use_block("Task", task_input, tool_use_id="tu_abort")
+
+        async def abort_after_task():
+            yield make_assistant_message([task_block])
+            # No ResultMessage — stream ends without completing
+
+        await streamer.stream_with_flush(abort_after_task())
+
+        # Entry should be cleaned up since no ResultMessage was received
+        assert "tu_abort" not in streamer._pending_agent_verifications
+        callback.assert_not_called()
+
 
 class TestFormatToolSummary:
     def test_bash_shows_command(self):

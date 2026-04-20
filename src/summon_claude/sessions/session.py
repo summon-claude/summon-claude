@@ -608,7 +608,8 @@ async def verify_subagent_return(
     """Verify a subagent's return value for safety concerns.
 
     Warn-only — posts a Slack notice on "block", never prevents the result.
-    Does NOT update classifier fallback counters (SEC-D-010).
+    Does NOT update classifier fallback counters (content checks are warn-only
+    and must not accelerate classifier shutdown).
     """
     classifier = permission_handler.classifier
     if not permission_handler.classifier_enabled or classifier is None:

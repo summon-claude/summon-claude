@@ -618,8 +618,16 @@ def project_update(
                 click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
         if effective is not None:
             click.echo(f"Project {name_or_id!r} auto-mode rules updated.")
-            click.echo(f"Effective deny:\n{get_effective_deny_rules(effective.get('deny', ''))}")
-            click.echo(f"Effective allow:\n{get_effective_allow_rules(effective.get('allow', ''))}")
+            _deny_val = effective.get("deny")
+            _deny_label = (
+                "Deny rules cleared — using defaults:" if _deny_val == "" else "Effective deny:"
+            )
+            click.echo(f"{_deny_label}\n{get_effective_deny_rules(_deny_val or '')}")
+            _allow_val = effective.get("allow")
+            _allow_label = (
+                "Allow rules cleared — using defaults:" if _allow_val == "" else "Effective allow:"
+            )
+            click.echo(f"{_allow_label}\n{get_effective_allow_rules(_allow_val or '')}")
             env = effective.get("environment", "") or "(global default)"
             click.echo(f"Effective environment: {env}")
 

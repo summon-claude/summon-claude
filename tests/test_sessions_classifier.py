@@ -76,6 +76,11 @@ class TestGuardConstants:
         assert "exfiltrate" in _CONTENT_CLASSIFIER_PROMPT
         assert "uncertain" in _CONTENT_CLASSIFIER_PROMPT
 
+    def test_content_classify_semaphore_cap_pinned(self):
+        """Semaphore cap of 3 is intentional — pin to catch silent changes."""
+        classifier = SummonAutoClassifier(_make_config())
+        assert classifier._content_classify_sem._value == 3
+
 
 # ── Effective rules helpers ──────────────────────────────────────────────────
 
@@ -486,7 +491,8 @@ class TestProjectRules:
         assert classifier._environment == "global env"
 
     def test_classifier_project_rules_type_guard_non_string(self):
-        """Non-string values in project_rules are ignored (SEC-D-007)."""
+        """Non-string values in project_rules are ignored — type guard
+        prevents JSON integers/lists from being used as rules."""
         cfg = _make_config(auto_mode_deny="global deny", auto_mode_allow="global allow")
         rules = {"deny": 42, "allow": ["list", "not", "string"]}
         classifier = SummonAutoClassifier(cfg, project_rules=rules)  # type: ignore[arg-type]
@@ -500,7 +506,8 @@ class TestProjectRules:
 
 class TestClassifyContent:
     async def test_classify_content_no_counter_mutation(self):
-        """classify_content must NOT mutate fallback counters (SEC-D-010)."""
+        """classify_content must NOT mutate fallback counters — content
+        checks are warn-only and must not accelerate classifier shutdown."""
         from claude_agent_sdk import AssistantMessage, TextBlock
 
         classifier = SummonAutoClassifier(_make_config())
@@ -526,7 +533,7 @@ class TestClassifyContent:
             result = await classifier.classify_content("some subagent output")
 
         assert result.decision == "block"
-        # Fallback counters must be untouched (SEC-D-010)
+        # Fallback counters must be untouched — content checks are warn-only
         assert classifier._consecutive_blocks == 0
         assert len(classifier._block_timestamps) == 0
 
