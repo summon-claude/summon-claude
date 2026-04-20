@@ -589,15 +589,16 @@ def project_update(
         raise click.UsageError("No fields to update.")
     if jql and len(jql) > _MAX_JQL_LEN:
         raise click.BadParameter(f"JQL filter too long (max {_MAX_JQL_LEN} chars)")
-    asyncio.run(
-        async_project_update(
-            name_or_id,
-            jira_jql=jql or None,
-            auto_deny=auto_deny,
-            auto_allow=auto_allow,
-            auto_environment=auto_environment,
-        )
-    )
+    update_kwargs: dict = {}
+    if jql is not None:
+        update_kwargs["jira_jql"] = jql or None
+    if auto_deny is not None:
+        update_kwargs["auto_deny"] = auto_deny
+    if auto_allow is not None:
+        update_kwargs["auto_allow"] = auto_allow
+    if auto_environment is not None:
+        update_kwargs["auto_environment"] = auto_environment
+    asyncio.run(async_project_update(name_or_id, **update_kwargs))
     if not ctx.obj.get("quiet"):
         if jql is not None:
             if jql:

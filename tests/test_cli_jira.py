@@ -729,13 +729,7 @@ class TestProjectUpdateCLI:
             )
 
         assert result.exit_code == 0, result.output
-        mock_update.assert_called_once_with(
-            "myproj",
-            jira_jql="project = FOO",
-            auto_deny=None,
-            auto_allow=None,
-            auto_environment=None,
-        )
+        mock_update.assert_called_once_with("myproj", jira_jql="project = FOO")
         assert "set" in result.output.lower()
 
     def test_update_jql_clear(self):
@@ -751,13 +745,7 @@ class TestProjectUpdateCLI:
             )
 
         assert result.exit_code == 0, result.output
-        mock_update.assert_called_once_with(
-            "myproj",
-            jira_jql=None,
-            auto_deny=None,
-            auto_allow=None,
-            auto_environment=None,
-        )
+        mock_update.assert_called_once_with("myproj", jira_jql=None)
         assert "cleared" in result.output.lower()
 
     def test_update_no_fields_error(self):
