@@ -348,11 +348,8 @@ class ResponseStreamer:
                     ):
                         agent_input = self._pending_agent_verifications.pop(message.tool_use_id)
                         if self.on_subagent_return is not None:
-                            task = asyncio.create_task(
+                            self._spawn_background(
                                 self.on_subagent_return(agent_input, message.summary or "")
-                            )
-                            task.add_done_callback(
-                                lambda t: t.result() if not t.cancelled() else None
                             )
                 elif isinstance(message, ResultMessage):
                     result = message

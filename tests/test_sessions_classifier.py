@@ -295,18 +295,10 @@ class TestWindowedDecay:
     async def test_window_prevents_false_fallback(self):
         classifier = SummonAutoClassifier(_make_config())
         classifier._block_timestamps = deque([time.monotonic() - 3700] * 20)
-        # All timestamps are outside the window — should NOT trigger fallback
-        with (
-            patch.object(classifier, "_do_classify", side_effect=RuntimeError("should not reach")),
-        ):
-            # Patch _do_classify to raise so we know if fallback wasn't hit
-            # Actually we need classify() to run the threshold check first
-            pass
-        # Reset and test classify directly with stale timestamps
         classifier._consecutive_blocks = 0
-        # Stale timestamps should be evicted, len becomes 0 < 20 threshold
+        # Stale timestamps are evicted at classify() time; len drops to 0 < threshold
         result = await classifier.classify("Bash", {"command": "ls"}, "")
-        # Should NOT be fallback_exceeded (stale blocks evicted); will be uncertain from error
+        # fallback_exceeded must NOT fire; result is uncertain from actual classify error
         assert result.decision != "fallback_exceeded"
 
     async def test_window_triggers_fallback_for_recent_blocks(self):
@@ -409,6 +401,34 @@ class TestResultCaching:
         key3 = classifier._cache_key("Bash", {"command": "pwd"}, "ctx", ["Grep"])
         assert key1 == key2
         assert key1 != key3
+
+    async def test_cache_evicts_oldest_when_full(self):
+        """When cache reaches _MAX_CACHE_SIZE, the oldest entry is evicted on next insert."""
+        classifier = SummonAutoClassifier(_make_config())
+        now = time.monotonic()
+
+        # Fill cache with 256 entries using distinct tool names
+        for i in range(_MAX_CACHE_SIZE):
+            from summon_claude.sessions.classifier import ClassifyResult
+
+            key = classifier._cache_key(f"tool_{i}", {}, "ctx", None)
+            classifier._cache[key] = (ClassifyResult("allow", "ok"), now + i)
+
+        assert len(classifier._cache) == _MAX_CACHE_SIZE
+
+        # The oldest entry has the smallest timestamp (now + 0)
+        oldest_key = classifier._cache_key("tool_0", {}, "ctx", None)
+        assert oldest_key in classifier._cache
+
+        # Add one more entry via the classify path (mock _do_classify)
+        async def _mock_do_classify(*args, **kwargs):
+            return ClassifyResult("allow", "new")
+
+        with patch.object(classifier, "_do_classify", side_effect=_mock_do_classify):
+            await classifier.classify("tool_new", {}, "ctx")
+
+        assert len(classifier._cache) == _MAX_CACHE_SIZE
+        assert oldest_key not in classifier._cache
 
 
 # ── Per-project rules ────────────────────────────────────────────────────────

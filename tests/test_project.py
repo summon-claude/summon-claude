@@ -280,6 +280,54 @@ class TestProjectUpdate:
         with pytest.raises(KeyError, match="No project with id"):
             await registry.update_project("no-such-id", pm_channel_id="C123")
 
+    async def test_auto_mode_rules_read_merge_write(self, registry, tmp_path):
+        """Setting deny then allow in separate writes preserves both keys (read-merge-write)."""
+        import json
+
+        project_id = await registry.add_project("merge-proj", str(tmp_path))
+
+        # First write: set deny only
+        deny_rules = json.dumps({"deny": "no force push"})
+        await registry.update_project(project_id, auto_mode_rules=deny_rules)
+
+        project = await registry.get_project(project_id)
+        rules = json.loads(project["auto_mode_rules"])
+        assert rules.get("deny") == "no force push"
+        assert "allow" not in rules
+
+        # Second write: merge allow in, deny must be preserved
+        existing = json.loads(project["auto_mode_rules"])
+        existing["allow"] = "local edits ok"
+        await registry.update_project(project_id, auto_mode_rules=json.dumps(existing))
+
+        project = await registry.get_project(project_id)
+        rules = json.loads(project["auto_mode_rules"])
+        assert rules.get("deny") == "no force push"
+        assert rules.get("allow") == "local edits ok"
+
+    async def test_auto_mode_rules_partial_clear_preserves_other_keys(self, registry, tmp_path):
+        """Clearing deny to empty string via merge-write leaves allow intact."""
+        import json
+
+        project_id = await registry.add_project("partial-clear", str(tmp_path))
+
+        # Set both deny and allow
+        await registry.update_project(
+            project_id,
+            auto_mode_rules=json.dumps({"deny": "custom deny", "allow": "custom allow"}),
+        )
+
+        # Clear deny by merging empty string
+        project = await registry.get_project(project_id)
+        rules = json.loads(project["auto_mode_rules"])
+        rules["deny"] = ""
+        await registry.update_project(project_id, auto_mode_rules=json.dumps(rules))
+
+        project = await registry.get_project(project_id)
+        rules = json.loads(project["auto_mode_rules"])
+        assert rules.get("deny") == ""
+        assert rules.get("allow") == "custom allow"
+
 
 class TestRegisterWithProjectId:
     async def test_register_with_project_id(self, registry, tmp_path):

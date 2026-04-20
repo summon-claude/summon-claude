@@ -5471,7 +5471,6 @@ def _make_verify_closure(classifier_enabled=True, classifier=None, router=None):
     """Build the _verify_subagent_return closure with controllable dependencies."""
     from helpers import make_mock_slack_client
     from summon_claude.sessions.permissions import PermissionHandler
-    from summon_claude.sessions.session import _SessionRuntime
     from summon_claude.slack.router import ThreadRouter
 
     mock_ph = MagicMock(spec=PermissionHandler)

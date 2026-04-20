@@ -118,11 +118,11 @@ async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
         if project is None:
             raise click.ClickException(f"No project found: {name_or_id!r}")
 
-        # Handle standard fields (jira_jql, etc.)
-        remaining = {k: v for k, v in kwargs.items() if v is not None}
-        if remaining:
+        # Handle standard fields (jira_jql, etc.) — pass None values through so
+        # callers can explicitly clear fields (e.g. jira_jql=None clears to NULL).
+        if kwargs:
             try:
-                await registry.update_project(project["project_id"], **remaining)
+                await registry.update_project(project["project_id"], **kwargs)
             except (ValueError, KeyError) as e:
                 raise click.ClickException(str(e)) from e
 

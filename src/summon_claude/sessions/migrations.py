@@ -276,16 +276,6 @@ async def _migrate_14_to_15(db: aiosqlite.Connection) -> None:
     """)
 
 
-async def _migrate_16_to_17(db: aiosqlite.Connection) -> None:
-    """Add auto_mode_rules column to projects table for per-project classifier rules."""
-    try:
-        await db.execute("ALTER TABLE projects ADD COLUMN auto_mode_rules TEXT DEFAULT NULL")
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" not in str(e).lower():
-            raise
-        logger.debug("Column auto_mode_rules already exists, skipping")
-
-
 async def _migrate_15_to_16(db: aiosqlite.Connection) -> None:
     """Add jira_jql column to projects table for per-project Jira issue filter.
 
@@ -300,6 +290,16 @@ async def _migrate_15_to_16(db: aiosqlite.Connection) -> None:
         if "duplicate column name" not in str(e).lower():
             raise
         logger.debug("Column jira_jql already exists, skipping")
+
+
+async def _migrate_16_to_17(db: aiosqlite.Connection) -> None:
+    """Add auto_mode_rules column to projects table for per-project classifier rules."""
+    try:
+        await db.execute("ALTER TABLE projects ADD COLUMN auto_mode_rules TEXT DEFAULT NULL")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+        logger.debug("Column auto_mode_rules already exists, skipping")
 
 
 # Mapping from version N to the coroutine that migrates N → N+1.

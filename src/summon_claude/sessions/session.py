@@ -1218,7 +1218,13 @@ class SummonSession:
         if self._project_id:
             project = await registry.get_project(self._project_id)
             if project and project.get("auto_mode_rules"):
-                project_rules = json.loads(project["auto_mode_rules"])
+                try:
+                    project_rules = json.loads(project["auto_mode_rules"])
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "Invalid auto_mode_rules JSON for project %s — ignoring",
+                        self._project_id,
+                    )
         classifier = SummonAutoClassifier(self._config, cwd=self._cwd, project_rules=project_rules)
         bridge = ApprovalBridge()
         permission_handler = PermissionHandler(
