@@ -103,10 +103,11 @@ async def async_project_list() -> list[dict[str, Any]]:
     return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
-async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
+async def async_project_update(name_or_id: str, **kwargs: Any) -> dict | None:
     """Update mutable project fields by name or ID.
 
     Pass ``jira_jql=""`` to clear the JQL filter.
+    Returns effective auto-mode rules dict if auto-mode options were set, else None.
     Raises ``click.ClickException`` if the project is not found.
     """
     auto_deny = kwargs.pop("auto_deny", None)
@@ -147,6 +148,8 @@ async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
                 await registry.update_project(
                     project["project_id"], auto_mode_rules=json.dumps(rules)
                 )
+            return rules
+    return None
 
 
 async def launch_project_managers() -> None:

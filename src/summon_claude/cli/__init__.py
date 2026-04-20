@@ -73,6 +73,10 @@ from summon_claude.cli.stop import async_stop
 from summon_claude.config import SummonConfig, get_config_file, get_data_dir, is_local_install
 from summon_claude.daemon import start_daemon
 from summon_claude.sessions import registry as _registry
+from summon_claude.sessions.classifier import (
+    get_effective_allow_rules,
+    get_effective_deny_rules,
+)
 
 _BANNER_WIDTH = 50
 
@@ -598,15 +602,19 @@ def project_update(
         update_kwargs["auto_allow"] = auto_allow
     if auto_environment is not None:
         update_kwargs["auto_environment"] = auto_environment
-    asyncio.run(async_project_update(name_or_id, **update_kwargs))
+    effective = asyncio.run(async_project_update(name_or_id, **update_kwargs))
     if not ctx.obj.get("quiet"):
         if jql is not None:
             if jql:
                 click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
             else:
                 click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
-        if auto_deny is not None or auto_allow is not None or auto_environment is not None:
-            click.echo(f"Project {name_or_id!r} updated: auto-mode rules updated.")
+        if effective is not None:
+            click.echo(f"Project {name_or_id!r} auto-mode rules updated.")
+            click.echo(f"Effective deny:\n{get_effective_deny_rules(effective.get('deny', ''))}")
+            click.echo(f"Effective allow:\n{get_effective_allow_rules(effective.get('allow', ''))}")
+            env = effective.get("environment", "") or "(global default)"
+            click.echo(f"Effective environment: {env}")
 
 
 def _ensure_gitignore() -> None:
