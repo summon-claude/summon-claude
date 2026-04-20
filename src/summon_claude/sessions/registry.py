@@ -883,6 +883,7 @@ class SessionRegistry:
         db = self._check_connected()
         async with db.execute(
             "SELECT p.*,"
+            # PM name pattern must match is_pm_session_name() in session.py
             "  EXISTS("
             "    SELECT 1 FROM sessions s"
             "    WHERE s.project_id = p.project_id"

@@ -674,12 +674,15 @@ class TestPmWithoutProjectIdRaises:
     """PM session with no project_id hits the early guard in _run_session."""
 
     async def test_pm_without_project_id_raises(self):
+        """_run_session raises RuntimeError when pm_profile=True but project_id is None."""
         session = make_session(pm_profile=True)
+        session._web_client = AsyncMock()
+        session._bot_user_id = "U_BOT"
         assert session._project_id is None
-        assert session._pm_profile is True
-        # The guard in _run_session raises RuntimeError for PM without project_id
-        # Verify the condition matches what _run_session checks
-        assert session._pm_profile and not session._project_id
+
+        mock_registry = AsyncMock()
+        with pytest.raises(RuntimeError, match="PM session requires a project_id"):
+            await session._run_session(mock_registry)
 
 
 class TestPrefixResolution:

@@ -1166,7 +1166,11 @@ class SessionManager:
         model: str | None = None,
         resume_from_session_id: str | None = None,
     ) -> None:
-        """Create and start a regular (non-PM) child session for *project*."""
+        """Create and start a regular (non-PM) child session for *project*.
+
+        Currently unused (zero callers). Callers must supply a meaningful
+        task description as *name* (e.g., ``"fix-auth"``).
+        """
         if not pathlib.Path(cwd).is_dir():
             raise FileNotFoundError(f"Directory not found: {cwd}")
 
