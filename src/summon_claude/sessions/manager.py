@@ -1053,6 +1053,21 @@ class SessionManager:
                 project_id = project["project_id"]
                 sessions = await registry.get_project_sessions(project_id)
                 suspended = [s for s in sessions if s.get("status") == "suspended"]
+                project_dir = project["directory"]
+                if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
+                    logger.error(
+                        "PM: project %s directory missing: %s, marking suspended sessions errored",
+                        project["name"],
+                        project_dir,
+                    )
+                    for sess in suspended:
+                        with contextlib.suppress(Exception):
+                            await registry.update_status(
+                                sess["session_id"],
+                                "errored",
+                                error_message=f"Project directory not found: {project_dir}",
+                            )
+                    continue
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
@@ -1067,8 +1082,30 @@ class SessionManager:
                             if channel and channel.get("claude_session_id")
                             else sess.get("claude_session_id")
                         )
+                        old_cwd = sess.get("cwd")
+                        if is_pm:
+                            cwd = project["directory"]
+                        elif (
+                            old_cwd
+                            and pathlib.Path(old_cwd).is_dir()  # noqa: ASYNC240
+                            and pathlib.Path(old_cwd)  # noqa: ASYNC240
+                            .resolve()
+                            .is_relative_to(
+                                pathlib.Path(project["directory"]).resolve()  # noqa: ASYNC240
+                            )
+                        ):
+                            cwd = old_cwd
+                        else:
+                            cwd = project["directory"]
+                        if old_cwd and old_cwd != cwd:
+                            logger.debug(
+                                "PM: session %s cwd changed: %s -> %s",
+                                sess_id[:8],
+                                old_cwd,
+                                cwd,
+                            )
                         options = SessionOptions(
-                            cwd=sess.get("cwd", project["directory"]),
+                            cwd=cwd,
                             name=sess_name or "",
                             model=sess.get("model"),
                             effort=sess.get("effort") or "high",
