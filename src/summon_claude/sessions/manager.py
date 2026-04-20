@@ -1084,19 +1084,19 @@ class SessionManager:
                         )
                         old_cwd = sess.get("cwd")
                         if is_pm:
-                            cwd = project["directory"]
+                            cwd = project_dir
                         elif (
                             old_cwd
                             and pathlib.Path(old_cwd).is_dir()  # noqa: ASYNC240
                             and pathlib.Path(old_cwd)  # noqa: ASYNC240
                             .resolve()
                             .is_relative_to(
-                                pathlib.Path(project["directory"]).resolve()  # noqa: ASYNC240
+                                pathlib.Path(project_dir).resolve()  # noqa: ASYNC240
                             )
                         ):
                             cwd = old_cwd
                         else:
-                            cwd = project["directory"]
+                            cwd = project_dir
                         if old_cwd and old_cwd != cwd:
                             logger.debug(
                                 "PM: session %s cwd changed: %s -> %s",

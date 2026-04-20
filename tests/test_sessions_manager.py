@@ -2021,6 +2021,43 @@ class TestCascadeRestart:
         opts = manager.create_resumed_session.call_args[0][0]
         assert opts.cwd == "/new/project/dir"
 
+    async def test_restart_suspended_child_falls_back_on_deleted_subdirectory(self):
+        """Non-PM child falls back to project dir when its old subdirectory no longer exists."""
+        manager, _, _ = _make_manager()
+
+        suspended_session = {
+            "session_id": "sess-4",
+            "session_name": "proj-abc",
+            "cwd": "/new/project/dir/deleted-worktree",
+            "status": "suspended",
+            "slack_channel_id": "C101",
+        }
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[suspended_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-101"})
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/new/project/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        def is_dir_side_effect(self):
+            """Project dir exists, but the old child subdirectory was deleted."""
+            return str(self) == "/new/project/dir"
+
+        with (
+            patch("pathlib.Path.is_dir", is_dir_side_effect),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            await manager._restart_suspended_sessions([project], "user-1")
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.cwd == "/new/project/dir"
+
     async def test_restart_suspended_logs_cwd_change(self, caplog):
         """Debug log emitted when session cwd differs from project directory."""
         manager, _, _ = _make_manager()
