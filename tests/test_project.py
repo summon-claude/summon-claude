@@ -302,7 +302,14 @@ class TestProjectIdInUpdatableFields:
 class TestUpdatableProjectFieldsGuard:
     def test_updatable_project_fields_pins_set(self):
         expected = frozenset(
-            {"pm_channel_id", "workflow_instructions", "channel_prefix", "directory", "jira_jql"}
+            {
+                "pm_channel_id",
+                "workflow_instructions",
+                "channel_prefix",
+                "directory",
+                "jira_jql",
+                "auto_mode_rules",
+            }
         )
         assert expected == SessionRegistry._UPDATABLE_PROJECT_FIELDS
 

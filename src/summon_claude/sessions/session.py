@@ -1214,7 +1214,12 @@ class SummonSession:
             raise RuntimeError(
                 f"Session {self._session_id}: cannot build runtime without authenticated_user_id"
             )
-        classifier = SummonAutoClassifier(self._config, cwd=self._cwd)
+        project_rules = None
+        if self._project_id:
+            project = await registry.get_project(self._project_id)
+            if project and project.get("auto_mode_rules"):
+                project_rules = json.loads(project["auto_mode_rules"])
+        classifier = SummonAutoClassifier(self._config, cwd=self._cwd, project_rules=project_rules)
         bridge = ApprovalBridge()
         permission_handler = PermissionHandler(
             router,
@@ -2041,6 +2046,23 @@ class SummonSession:
 
         mcp_health_tracker = McpHealthTracker(on_degraded=_on_mcp_degraded)
 
+        async def _verify_subagent_return(agent_input: dict, agent_result: str) -> None:
+            classifier = rt.permission_handler.classifier
+            if not rt.permission_handler.classifier_enabled or classifier is None:
+                return
+            context = f"Subagent task: {agent_input.get('prompt', '')[:500]}\n"
+            context += f"Subagent result: {agent_result[:2000]}"
+            try:
+                result = await classifier.classify_content(context)
+                if result.decision == "block":
+                    await router.post_to_main(
+                        ":warning: **Security notice**: The subagent's action history "
+                        "was flagged by the auto-mode classifier. Review the results "
+                        "carefully before acting on them."
+                    )
+            except Exception:
+                logger.debug("Subagent return verification failed", exc_info=True)
+
         streamer = ResponseStreamer(
             router=router,
             user_id=self._authenticated_user_id,
@@ -2053,6 +2075,7 @@ class SummonSession:
             bridge_timeout_s=(self._config.permission_timeout_s + 60)
             if self._config.permission_timeout_s
             else 0,
+            on_subagent_return=_verify_subagent_return,
         )
 
         # Disable auto-compaction — we handle compaction via !compact

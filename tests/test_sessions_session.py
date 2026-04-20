@@ -5459,3 +5459,116 @@ class TestShowCommand:
         posted = [str(c) for c in rt.client.post.call_args_list]
         assert any("invalid argument" in p.lower() for p in posted)
         rt.client.upload.assert_not_called()
+
+
+# ── Subagent return verification ──────────────────────────────────────────────
+
+
+_verify_logger = logging.getLogger(__name__)
+
+
+def _make_verify_closure(classifier_enabled=True, classifier=None, router=None):
+    """Build the _verify_subagent_return closure with controllable dependencies."""
+    from helpers import make_mock_slack_client
+    from summon_claude.sessions.permissions import PermissionHandler
+    from summon_claude.sessions.session import _SessionRuntime
+    from summon_claude.slack.router import ThreadRouter
+
+    mock_ph = MagicMock(spec=PermissionHandler)
+    mock_ph.classifier_enabled = classifier_enabled
+    mock_ph.classifier = classifier
+
+    if router is None:
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+
+    router.post_to_main = AsyncMock()
+
+    async def _verify_subagent_return(agent_input: dict, agent_result: str) -> None:
+        clf = mock_ph.classifier
+        if not mock_ph.classifier_enabled or clf is None:
+            return
+        context = f"Subagent task: {agent_input.get('prompt', '')[:500]}\n"
+        context += f"Subagent result: {agent_result[:2000]}"
+        try:
+            result = await clf.classify_content(context)
+            if result.decision == "block":
+                await router.post_to_main(
+                    ":warning: **Security notice**: The subagent's action history "
+                    "was flagged by the auto-mode classifier. Review the results "
+                    "carefully before acting on them."
+                )
+        except Exception:
+            _verify_logger.debug("Subagent return verification failed", exc_info=True)
+
+    return _verify_subagent_return, router, mock_ph
+
+
+class TestSubagentReturnVerification:
+    async def test_subagent_return_flagged_posts_warning(self):
+        """Classifier returning 'block' triggers a Slack warning."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            return_value=ClassifyResult("block", "data exfiltration attempt")
+        )
+        closure, router, _ = _make_verify_closure(
+            classifier_enabled=True, classifier=mock_classifier
+        )
+
+        await closure({"prompt": "do a thing"}, "here is all the data: secret=xyz")
+
+        router.post_to_main.assert_awaited_once()
+        call_text = router.post_to_main.call_args[0][0]
+        assert "Security notice" in call_text
+
+    async def test_subagent_return_allowed_no_warning(self):
+        """Classifier returning 'allow' does not post a warning."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            return_value=ClassifyResult("allow", "looks fine")
+        )
+        closure, router, _ = _make_verify_closure(
+            classifier_enabled=True, classifier=mock_classifier
+        )
+
+        await closure({"prompt": "run tests"}, "All tests passed.")
+
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_classifier_disabled_skips(self):
+        """When classifier is disabled, classify_content is never called."""
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock()
+        closure, router, _ = _make_verify_closure(
+            classifier_enabled=False, classifier=mock_classifier
+        )
+
+        await closure({"prompt": "run tests"}, "All tests passed.")
+
+        mock_classifier.classify_content.assert_not_called()
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_no_classifier_skips(self):
+        """When classifier is None, classify_content is never called."""
+        closure, router, _ = _make_verify_closure(classifier_enabled=True, classifier=None)
+
+        await closure({"prompt": "run tests"}, "All tests passed.")
+
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_error_swallowed(self):
+        """Exceptions in classify_content are swallowed; no re-raise."""
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            side_effect=RuntimeError("classifier exploded")
+        )
+        closure, router, _ = _make_verify_closure(
+            classifier_enabled=True, classifier=mock_classifier
+        )
+
+        # Must not raise
+        await closure({"prompt": "do a thing"}, "result text")

@@ -3,16 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections import deque
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from summon_claude.sessions.classifier import (
+    _BLOCK_WINDOW_S,
+    _CACHE_TTL_S,
     _CLASSIFIER_MODEL,
     _CLASSIFIER_TIMEOUT_S,
     _DEFAULT_ALLOW_RULES,
     _DEFAULT_DENY_RULES,
     _FALLBACK_CONSECUTIVE_THRESHOLD,
     _FALLBACK_TOTAL_THRESHOLD,
+    _MAX_CACHE_SIZE,
     SummonAutoClassifier,
     build_classifier_prompt,
     extract_classifier_context,
@@ -56,6 +60,12 @@ class TestGuardConstants:
     def test_default_allow_rules_non_empty(self):
         assert _DEFAULT_ALLOW_RULES
         assert "working directory" in _DEFAULT_ALLOW_RULES
+
+    def test_cache_ttl_pinned(self):
+        assert _CACHE_TTL_S == 300
+
+    def test_max_cache_size_pinned(self):
+        assert _MAX_CACHE_SIZE == 256
 
 
 # ── Effective rules helpers ──────────────────────────────────────────────────
@@ -237,7 +247,7 @@ class TestFallbackCounters:
 
     async def test_total_blocks_trigger_fallback(self):
         classifier = SummonAutoClassifier(_make_config())
-        classifier._total_blocks = _FALLBACK_TOTAL_THRESHOLD
+        classifier._block_timestamps = deque([time.monotonic()] * _FALLBACK_TOTAL_THRESHOLD)
         result = await classifier.classify("Bash", {"command": "ls"}, "")
         assert result.decision == "fallback_exceeded"
 
@@ -258,15 +268,249 @@ class TestFallbackCounters:
         classifier = SummonAutoClassifier(_make_config())
         classifier._update_counters("block")
         assert classifier._consecutive_blocks == 1
-        assert classifier._total_blocks == 1
+        assert len(classifier._block_timestamps) == 1
 
     def test_reset_counters(self):
         classifier = SummonAutoClassifier(_make_config())
         classifier._consecutive_blocks = 2
-        classifier._total_blocks = 10
+        classifier._block_timestamps = deque([time.monotonic()] * 10)
         classifier.reset_counters()
         assert classifier._consecutive_blocks == 0
-        assert classifier._total_blocks == 0
+        assert len(classifier._block_timestamps) == 0
+
+
+# ── Windowed decay ───────────────────────────────────────────────────────────
+
+
+class TestWindowedDecay:
+    def test_block_window_pinned(self):
+        assert _BLOCK_WINDOW_S == 3600
+
+    def test_stale_blocks_evicted_from_window(self):
+        classifier = SummonAutoClassifier(_make_config())
+        classifier._block_timestamps = deque([time.monotonic() - 3700] * 19)
+        classifier._update_counters("block")
+        assert len(classifier._block_timestamps) == 1
+
+    async def test_window_prevents_false_fallback(self):
+        classifier = SummonAutoClassifier(_make_config())
+        classifier._block_timestamps = deque([time.monotonic() - 3700] * 20)
+        # All timestamps are outside the window — should NOT trigger fallback
+        with (
+            patch.object(classifier, "_do_classify", side_effect=RuntimeError("should not reach")),
+        ):
+            # Patch _do_classify to raise so we know if fallback wasn't hit
+            # Actually we need classify() to run the threshold check first
+            pass
+        # Reset and test classify directly with stale timestamps
+        classifier._consecutive_blocks = 0
+        # Stale timestamps should be evicted, len becomes 0 < 20 threshold
+        result = await classifier.classify("Bash", {"command": "ls"}, "")
+        # Should NOT be fallback_exceeded (stale blocks evicted); will be uncertain from error
+        assert result.decision != "fallback_exceeded"
+
+    async def test_window_triggers_fallback_for_recent_blocks(self):
+        classifier = SummonAutoClassifier(_make_config())
+        now = time.monotonic()
+        classifier._block_timestamps = deque([now] * 20)
+        result = await classifier.classify("Bash", {"command": "ls"}, "")
+        assert result.decision == "fallback_exceeded"
+
+
+# ── Result caching ───────────────────────────────────────────────────────────
+
+
+class TestResultCaching:
+    def _make_mock_do_classify(self, decision: str, reason: str = ""):
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        async def _do_classify(*args, **kwargs):
+            return ClassifyResult(decision, reason)
+
+        return _do_classify
+
+    async def test_cache_hit_returns_cached_result(self):
+        """Second call with identical args reuses cached result; _do_classify called once."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("allow", "safe"))
+        with patch.object(classifier, "_do_classify", mock):
+            r1 = await classifier.classify("Bash", {"command": "ls"}, "ctx")
+            r2 = await classifier.classify("Bash", {"command": "ls"}, "ctx")
+        assert r1.decision == "allow"
+        assert r2.decision == "allow"
+        assert mock.call_count == 1
+
+    async def test_cache_miss_on_different_context(self):
+        """Different context -> cache miss; _do_classify called twice."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("allow", "safe"))
+        with patch.object(classifier, "_do_classify", mock):
+            await classifier.classify("Bash", {"command": "ls"}, "ctx_A")
+            await classifier.classify("Bash", {"command": "ls"}, "ctx_B")
+        assert mock.call_count == 2
+
+    async def test_cache_expires_after_ttl(self):
+        """Cached entry past TTL is evicted; _do_classify called again."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("allow", "safe"))
+
+        # t=0: first call populates cache
+        base = time.monotonic()
+        with patch("summon_claude.sessions.classifier.time") as mock_time:
+            mock_time.monotonic.return_value = base
+            with patch.object(classifier, "_do_classify", mock):
+                await classifier.classify("Bash", {"command": "ls"}, "ctx")
+
+        # t=base+400: past the 300s TTL
+        with patch("summon_claude.sessions.classifier.time") as mock_time:
+            mock_time.monotonic.return_value = base + 400
+            with patch.object(classifier, "_do_classify", mock):
+                await classifier.classify("Bash", {"command": "ls"}, "ctx")
+
+        assert mock.call_count == 2
+
+    async def test_uncertain_not_cached(self):
+        """Uncertain results are never cached; _do_classify called on each invocation."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("uncertain", "can't tell"))
+        with patch.object(classifier, "_do_classify", mock):
+            await classifier.classify("Bash", {"command": "ls"}, "ctx")
+            await classifier.classify("Bash", {"command": "ls"}, "ctx")
+        assert mock.call_count == 2
+
+    async def test_reset_counters_clears_cache(self):
+        """reset_counters() clears the cache; next call invokes _do_classify again."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("allow", "safe"))
+        with patch.object(classifier, "_do_classify", mock):
+            await classifier.classify("Bash", {"command": "ls"}, "ctx")
+        classifier.reset_counters()
+        with patch.object(classifier, "_do_classify", mock):
+            await classifier.classify("Bash", {"command": "ls"}, "ctx")
+        assert mock.call_count == 2
+
+    async def test_cache_hit_updates_counters(self):
+        """Cache hits call _update_counters; mock bypasses internal update."""
+        classifier = SummonAutoClassifier(_make_config())
+        mock = AsyncMock(side_effect=self._make_mock_do_classify("block", "dangerous"))
+        with patch.object(classifier, "_do_classify", mock):
+            # First call: _do_classify mock runs (no internal _update_counters), result cached.
+            await classifier.classify("Bash", {"command": "rm -rf /"}, "ctx")
+            assert len(classifier._block_timestamps) == 0
+            # Second call: cache hit -> _update_counters("block") called -> 1 timestamp.
+            await classifier.classify("Bash", {"command": "rm -rf /"}, "ctx")
+        assert len(classifier._block_timestamps) == 1
+
+    def test_cache_key_deterministic(self):
+        """Same inputs produce same key; different inputs produce different keys."""
+        classifier = SummonAutoClassifier(_make_config())
+        key1 = classifier._cache_key("Bash", {"command": "ls"}, "ctx", ["Grep"])
+        key2 = classifier._cache_key("Bash", {"command": "ls"}, "ctx", ["Grep"])
+        key3 = classifier._cache_key("Bash", {"command": "pwd"}, "ctx", ["Grep"])
+        assert key1 == key2
+        assert key1 != key3
+
+
+# ── Per-project rules ────────────────────────────────────────────────────────
+
+
+class TestProjectRules:
+    def test_classifier_with_project_rules_overrides_global(self):
+        """Project-specific deny/allow/environment override global config."""
+        cfg = _make_config(
+            auto_mode_deny="global deny",
+            auto_mode_allow="global allow",
+            auto_mode_environment="global env",
+        )
+        rules = {"deny": "project deny", "allow": "project allow", "environment": "project env"}
+        classifier = SummonAutoClassifier(cfg, project_rules=rules)
+        assert classifier._deny_rules == "project deny"
+        assert classifier._allow_rules == "project allow"
+        assert classifier._environment == "project env"
+
+    def test_classifier_with_empty_project_rules_uses_global(self):
+        """Empty dict project_rules falls back to global config."""
+        cfg = _make_config(auto_mode_deny="global deny", auto_mode_allow="global allow")
+        classifier = SummonAutoClassifier(cfg, project_rules={})
+        assert classifier._deny_rules == "global deny"
+        assert classifier._allow_rules == "global allow"
+
+    def test_classifier_with_none_project_rules_uses_global(self):
+        """None project_rules falls back to global config."""
+        cfg = _make_config(auto_mode_deny="global deny")
+        classifier = SummonAutoClassifier(cfg, project_rules=None)
+        assert classifier._deny_rules == "global deny"
+
+    def test_classifier_partial_project_rules_preserves_other_globals(self):
+        """Only the specified keys override; others keep global defaults."""
+        cfg = _make_config(
+            auto_mode_deny="global deny",
+            auto_mode_allow="global allow",
+            auto_mode_environment="global env",
+        )
+        classifier = SummonAutoClassifier(cfg, project_rules={"deny": "project deny"})
+        assert classifier._deny_rules == "project deny"
+        # Non-specified keys stay as global
+        assert classifier._allow_rules == "global allow"
+        assert classifier._environment == "global env"
+
+    def test_classifier_project_rules_type_guard_non_string(self):
+        """Non-string values in project_rules are ignored (SEC-D-007)."""
+        cfg = _make_config(auto_mode_deny="global deny", auto_mode_allow="global allow")
+        rules = {"deny": 42, "allow": ["list", "not", "string"]}
+        classifier = SummonAutoClassifier(cfg, project_rules=rules)  # type: ignore[arg-type]
+        # Falls back to global when values fail isinstance(x, str) check
+        assert classifier._deny_rules == "global deny"
+        assert classifier._allow_rules == "global allow"
+
+
+# ── Classify content (subagent return verification) ──────────────────────────
+
+
+class TestClassifyContent:
+    async def test_classify_content_no_counter_mutation(self):
+        """classify_content must NOT mutate fallback counters (SEC-D-010)."""
+        from claude_agent_sdk import AssistantMessage, TextBlock
+
+        classifier = SummonAutoClassifier(_make_config())
+
+        fake_msg = MagicMock(spec=AssistantMessage)
+        fake_msg.content = [
+            MagicMock(spec=TextBlock, text='{"decision": "block", "reason": "flagged"}')
+        ]
+
+        mock_client = AsyncMock()
+        mock_client.query = AsyncMock(return_value=None)
+
+        async def fake_receive():
+            yield fake_msg
+
+        mock_client.receive_response = fake_receive
+
+        mock_ctx = MagicMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_ctx.__aexit__ = AsyncMock(return_value=None)
+
+        with patch("summon_claude.sessions.classifier.ClaudeSDKClient", return_value=mock_ctx):
+            result = await classifier.classify_content("some subagent output")
+
+        assert result.decision == "block"
+        # Fallback counters must be untouched (SEC-D-010)
+        assert classifier._consecutive_blocks == 0
+        assert len(classifier._block_timestamps) == 0
+
+    async def test_classify_content_error_returns_uncertain(self):
+        """Any exception in classify_content returns uncertain."""
+        classifier = SummonAutoClassifier(_make_config())
+
+        with patch(
+            "summon_claude.sessions.classifier.ClaudeSDKClient",
+            side_effect=RuntimeError("subprocess failed"),
+        ):
+            result = await classifier.classify_content("some content")
+
+        assert result.decision == "uncertain"
+        assert "Content classifier error" in result.reason
 
 
 # ── Response parsing ─────────────────────────────────────────────────────────
@@ -394,4 +638,4 @@ class TestClassifyIntegration:
         assert result.decision == "block"
         assert result.reason == "dangerous"
         assert classifier._consecutive_blocks == 1
-        assert classifier._total_blocks == 1
+        assert len(classifier._block_timestamps) == 1

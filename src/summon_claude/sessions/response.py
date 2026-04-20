@@ -23,6 +23,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     RateLimitEvent,
     ResultMessage,
+    TaskNotificationMessage,
     TextBlock,
     ThinkingBlock,
     ToolResultBlock,
@@ -222,6 +223,7 @@ class ResponseStreamer:
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
         bridge_timeout_s: float = 960.0,
+        on_subagent_return: Callable[[dict, str], Awaitable[None]] | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
@@ -232,7 +234,10 @@ class ResponseStreamer:
         self._mcp_health = mcp_health
         self._bridge = bridge
         self._bridge_timeout_s = bridge_timeout_s
+        self.on_subagent_return = on_subagent_return
 
+        # Cross-turn tracking of pending agent verifications (keyed by tool_use_id)
+        self._pending_agent_verifications: dict[str, dict] = {}
         # Per-turn routing state (reset on each stream call)
         self._turn = _TurnState()
         # Turn number counter
@@ -311,7 +316,7 @@ class ResponseStreamer:
 
     # --- Streaming ---
 
-    async def stream_with_flush(self, messages: AsyncIterator) -> StreamResult | None:
+    async def stream_with_flush(self, messages: AsyncIterator) -> StreamResult | None:  # noqa: PLR0912
         """Stream with a background flush task for periodic Slack updates."""
         # Preserve fields set by start_turn() across the per-stream reset
         saved_snippet = self._turn.user_snippet
@@ -336,6 +341,19 @@ class ResponseStreamer:
                     await self._handle_assistant_message(message)
                 elif isinstance(message, RateLimitEvent):
                     logger.info("Rate limit event received: %s", message)
+                elif isinstance(message, TaskNotificationMessage):
+                    if (
+                        message.status == "completed"
+                        and message.tool_use_id in self._pending_agent_verifications
+                    ):
+                        agent_input = self._pending_agent_verifications.pop(message.tool_use_id)
+                        if self.on_subagent_return is not None:
+                            task = asyncio.create_task(
+                                self.on_subagent_return(agent_input, message.summary or "")
+                            )
+                            task.add_done_callback(
+                                lambda t: t.result() if not t.cancelled() else None
+                            )
                 elif isinstance(message, ResultMessage):
                     result = message
                     if message.errors:
@@ -411,6 +429,7 @@ class ResponseStreamer:
         if block.name == "Task":
             description = _extract_task_description(block.input or {})
             await self._router.start_subagent_thread(block.id, description)
+            self._pending_agent_verifications[block.id] = block.input or {}
 
         if block.name == "EnterWorktree" and self._on_worktree_entered is not None:
             inp = block.input or {}

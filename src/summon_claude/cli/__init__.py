@@ -568,24 +568,44 @@ def workflow_clear(project_name: str | None) -> None:
 @cmd_project.command("update")
 @click.argument("name_or_id")
 @click.option("--jql", default=None, help='JQL filter for Jira triage. Pass "" to clear.')
+@click.option("--auto-deny", default=None, help="Auto-mode deny rules (project-specific)")
+@click.option("--auto-allow", default=None, help="Auto-mode allow rules (project-specific)")
+@click.option("--auto-environment", default=None, help="Auto-mode environment description")
 @click.pass_context
-def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None:
+def project_update(
+    ctx: click.Context,
+    name_or_id: str,
+    jql: str | None,
+    auto_deny: str | None,
+    auto_allow: str | None,
+    auto_environment: str | None,
+) -> None:
     """Update a project's configuration.
 
     NAME_OR_ID can be the project name or project ID prefix.
     Pass --jql "" to clear the Jira JQL filter.
     """
-    if jql is None:
-        raise click.UsageError("No fields to update. Use --jql to set a JQL filter.")
+    if jql is None and auto_deny is None and auto_allow is None and auto_environment is None:
+        raise click.UsageError("No fields to update.")
     if jql and len(jql) > _MAX_JQL_LEN:
         raise click.BadParameter(f"JQL filter too long (max {_MAX_JQL_LEN} chars)")
-    # Empty string clears the field; non-empty sets it.
-    asyncio.run(async_project_update(name_or_id, jira_jql=jql or None))
+    asyncio.run(
+        async_project_update(
+            name_or_id,
+            jira_jql=jql or None,
+            auto_deny=auto_deny,
+            auto_allow=auto_allow,
+            auto_environment=auto_environment,
+        )
+    )
     if not ctx.obj.get("quiet"):
-        if jql:
-            click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
-        else:
-            click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
+        if jql is not None:
+            if jql:
+                click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
+            else:
+                click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
+        if auto_deny is not None or auto_allow is not None or auto_environment is not None:
+            click.echo(f"Project {name_or_id!r} updated: auto-mode rules updated.")
 
 
 def _ensure_gitignore() -> None:

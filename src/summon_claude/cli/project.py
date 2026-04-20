@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import re
@@ -108,14 +109,40 @@ async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
     Pass ``jira_jql=""`` to clear the JQL filter.
     Raises ``click.ClickException`` if the project is not found.
     """
+    auto_deny = kwargs.pop("auto_deny", None)
+    auto_allow = kwargs.pop("auto_allow", None)
+    auto_environment = kwargs.pop("auto_environment", None)
+
     async with SessionRegistry() as registry:
         project = await registry.get_project(name_or_id)
         if project is None:
             raise click.ClickException(f"No project found: {name_or_id!r}")
-        try:
-            await registry.update_project(project["project_id"], **kwargs)
-        except (ValueError, KeyError) as e:
-            raise click.ClickException(str(e)) from e
+
+        # Handle standard fields (jira_jql, etc.)
+        remaining = {k: v for k, v in kwargs.items() if v is not None}
+        if remaining:
+            try:
+                await registry.update_project(project["project_id"], **remaining)
+            except (ValueError, KeyError) as e:
+                raise click.ClickException(str(e)) from e
+
+        # Handle auto-mode rules (read-merge-write)
+        if auto_deny is not None or auto_allow is not None or auto_environment is not None:
+            existing_raw = project.get("auto_mode_rules")
+            rules: dict[str, str] = json.loads(existing_raw) if existing_raw else {}
+            if auto_deny is not None:
+                rules["deny"] = auto_deny
+            if auto_allow is not None:
+                rules["allow"] = auto_allow
+            if auto_environment is not None:
+                rules["environment"] = auto_environment
+            # Store as NULL if all values are empty (fall back to global)
+            if all(not v for v in rules.values()):
+                await registry.update_project(project["project_id"], auto_mode_rules=None)
+            else:
+                await registry.update_project(
+                    project["project_id"], auto_mode_rules=json.dumps(rules)
+                )
 
 
 async def launch_project_managers() -> None:

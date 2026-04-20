@@ -483,6 +483,11 @@ class PermissionHandler:
         """Whether the auto-mode classifier is active."""
         return self._classifier_enabled
 
+    @property
+    def classifier(self) -> SummonAutoClassifier | None:
+        """The auto-mode classifier instance, or None if not configured."""
+        return self._classifier
+
     def set_classifier_enabled(self, enabled: bool) -> None:
         """Toggle classifier on/off. Resets fallback counters when enabling."""
         if enabled and not self._in_worktree:
@@ -697,8 +702,17 @@ class PermissionHandler:
         # (outside containment root or Bash) must go to HITL, not SDK allow.  This
         # prevents allowedTools config from bypassing CWD containment — same
         # principle as the GitHub deny-list overriding SDK suggestions.
+        # When classifier is active, it is the authority —
+        # "uncertain" means "ask the human", don't let SDK suggestions override that.
         _write_gated_fallthrough = tool_name in _WRITE_GATED_TOOLS and self._write_access_granted
-        if _sdk_suggests_allow(context, tool_name) and not _write_gated_fallthrough:
+        _classifier_active = (
+            self._classifier_enabled and self._classifier is not None and self._in_worktree
+        )
+        if (
+            _sdk_suggests_allow(context, tool_name)
+            and not _write_gated_fallthrough
+            and not _classifier_active
+        ):
             self._resolve_approval(tool_name, _LABEL_SDK_ALLOWED)
             return PermissionResultAllow()
 
