@@ -466,3 +466,46 @@ class TestAskUserQuestion:
         result = await task
 
         assert isinstance(result, PermissionResultAllow)
+
+    async def test_ask_user_action_resolves_answer(
+        self,
+        slack_harness,
+        test_channel,
+    ):
+        """Clicking an AskUserQuestion option resolves handle() with the answer."""
+        slack_client = SlackClient(slack_harness.client, test_channel)
+        handler = _make_permission_handler(slack_client, debounce_ms=50)
+
+        question_text = "Pick one?"
+        questions = [
+            {
+                "question": question_text,
+                "header": "Choice",
+                "options": [
+                    {"label": "A", "description": "Option A"},
+                    {"label": "B", "description": "Option B"},
+                ],
+                "multiSelect": False,
+            }
+        ]
+        task = asyncio.create_task(
+            handler.handle("AskUserQuestion", {"questions": questions}, None),
+        )
+        await asyncio.sleep(0.3)
+
+        request_id = await _extract_request_id_from_channel(
+            slack_harness.client,
+            test_channel,
+        )
+        await handler.handle_ask_user_action(
+            value=f"{request_id}|0|0",
+            user_id="U_OWNER",
+        )
+        result = await task
+
+        assert isinstance(result, PermissionResultAllow)
+        assert result.updated_input is not None
+        answers = result.updated_input.get("answers", {})
+        assert answers.get(question_text) == "A"
+
+        assert isinstance(result, PermissionResultAllow)

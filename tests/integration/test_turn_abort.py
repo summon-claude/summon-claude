@@ -23,11 +23,7 @@ from summon_claude.sessions.commands import CommandContext, CommandResult, _hand
 from summon_claude.sessions.permissions import PermissionHandler
 from tests.integration.conftest import EventConsumer, SlackTestHarness
 
-pytestmark = [
-    pytest.mark.slack,
-    pytest.mark.xdist_group("slack_socket"),
-    pytest.mark.asyncio(loop_scope="module"),
-]
+pytestmark = pytest.mark.asyncio(loop_scope="module")
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +123,8 @@ class TestStopCommand:
             await turn_task
 
 
+@pytest.mark.slack
+@pytest.mark.xdist_group("slack_socket")
 class TestReactionAbort:
     async def test_reaction_abort_via_socket_mode(
         self,
