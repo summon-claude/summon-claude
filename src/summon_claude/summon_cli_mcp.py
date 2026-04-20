@@ -88,6 +88,7 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
         _ipc_stop_session: Override for daemon IPC stop (testing).
         _ipc_send_message: Override for daemon IPC send_message (testing).
         _ipc_resume_session: Override for daemon IPC resume (testing).
+        _ipc_clear_session: Override for daemon IPC clear (testing).
         _ipc_queue_session: Override for daemon queue_session (testing).
         _web_client: AsyncWebClient for cross-channel Slack posts (testing).
     """
@@ -365,17 +366,14 @@ def create_summon_cli_mcp_tools(  # noqa: PLR0913, PLR0915
                 )
             triage_extra_disallowed = tuple(sorted(_TRIAGE_DISALLOWED_TOOLS))
 
-        effective_system_prompt = triage_system_prompt or system_prompt_val
-        effective_extra_disallowed = triage_extra_disallowed
-
         options = SessionOptions(
             cwd=target_cwd,
             name=name,
             model=model,
             project_id=parent_project_id,
-            system_prompt_append=effective_system_prompt,
+            system_prompt_append=triage_system_prompt or system_prompt_val,
             initial_prompt=initial_prompt_val,
-            extra_disallowed_tools=effective_extra_disallowed,
+            extra_disallowed_tools=triage_extra_disallowed,
         )
 
         # Enforce active-child cap before spawning (fail-closed)
