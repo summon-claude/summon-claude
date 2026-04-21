@@ -1073,6 +1073,94 @@ class TestMigration15To16:
             assert row[0] is None  # DEFAULT NULL
 
 
+class TestMigration16To17:
+    """Targeted tests for migration 16 → 17 (adds auto_mode_rules to projects table)."""
+
+    async def test_migrate_16_to_17_adds_auto_mode_rules(self, tmp_path):
+        """Migration must add auto_mode_rules column to projects table."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_16_to_17
+
+        db_path = tmp_path / "migrate_16_to_17.db"
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL,
+                    jira_jql TEXT DEFAULT NULL
+                )
+                """
+            )
+
+            # Confirm auto_mode_rules absent before migration
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols_before = {row[1] for row in await cursor.fetchall()}
+            assert "auto_mode_rules" not in cols_before
+
+            # Run the targeted migration
+            await _migrate_16_to_17(raw_db)
+
+            # Confirm auto_mode_rules present after migration
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols_after = {row[1] for row in await cursor.fetchall()}
+            assert "auto_mode_rules" in cols_after
+
+    async def test_migrate_16_to_17_idempotent(self, tmp_path):
+        """Running migration 16→17 twice must not raise."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_16_to_17
+
+        db_path = tmp_path / "idempotent_16_to_17.db"
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE projects (project_id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,"
+                " directory TEXT NOT NULL, channel_prefix TEXT NOT NULL)"
+            )
+            await _migrate_16_to_17(raw_db)
+            await _migrate_16_to_17(raw_db)  # Must not raise
+
+            async with raw_db.execute("PRAGMA table_info(projects)") as cursor:
+                cols = {row[1] for row in await cursor.fetchall()}
+            assert "auto_mode_rules" in cols
+
+    async def test_migrate_16_to_17_default_is_null(self, tmp_path):
+        """Existing rows must have NULL auto_mode_rules after migration."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_16_to_17
+
+        db_path = tmp_path / "default_null_16_to_17.db"
+        async with aiosqlite.connect(str(db_path), isolation_level=None) as raw_db:
+            await raw_db.execute(
+                """
+                CREATE TABLE projects (
+                    project_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    directory TEXT NOT NULL,
+                    channel_prefix TEXT NOT NULL
+                )
+                """
+            )
+            await raw_db.execute(
+                "INSERT INTO projects (project_id, name, directory, channel_prefix)"
+                " VALUES ('proj-1', 'Test', '/tmp', 'tst')"
+            )
+
+            await _migrate_16_to_17(raw_db)
+
+            async with raw_db.execute(
+                "SELECT auto_mode_rules FROM projects WHERE project_id = 'proj-1'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None
+            assert row[0] is None  # DEFAULT NULL
+
+
 class TestSpawnTokens:
     async def test_store_and_consume_spawn_token(self, registry):
         from datetime import UTC, datetime, timedelta
@@ -1431,6 +1519,7 @@ class TestReleasedMigrationsImmutable:
         "_migrate_13_to_14": "cc893dd5f5eacae0",
         "_migrate_14_to_15": "d9d62bd4554b85bd",
         "_migrate_15_to_16": "72d8ce098dcaa6a0",
+        "_migrate_16_to_17": "4ee7cc86287aa662",
     }
 
     def test_released_migrations_unchanged(self):

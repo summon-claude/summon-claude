@@ -1539,6 +1539,73 @@ class TestClassifierIntegration:
         assert handler._containment_root is not None
         assert handler.classifier_enabled is False
 
+    async def test_sdk_allow_suggestion_skipped_when_classifier_active(self):
+        """Classifier active + SDK suggest allow -> HITL reached, SDK allow bypassed."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(return_value=ClassifyResult("uncertain", "can't tell"))
+        handler, _, _ = _make_classifier_handler(mock_classifier, classifier_configured=True)
+
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [mock_suggestion]
+
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        # Use a non-write-gated tool to avoid write gate interference
+        result = await handler.handle("mcp__custom__tool", {}, context)
+
+        handler._request_approval.assert_awaited_once()
+        assert isinstance(result, PermissionResultAllow)
+
+    async def test_sdk_allow_suggestion_honored_when_classifier_inactive(self):
+        """Classifier inactive -> SDK allow suggestion is honored (no HITL)."""
+        mock_classifier = AsyncMock()
+        handler, _, _ = _make_classifier_handler(
+            mock_classifier, classifier_configured=False, in_worktree=False
+        )
+
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [mock_suggestion]
+
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+
+        result = await handler.handle("mcp__custom__tool", {}, context)
+
+        assert isinstance(result, PermissionResultAllow)
+        handler._request_approval.assert_not_called()
+
+    async def test_sdk_allow_suggestion_honored_after_fallback_exceeded(self):
+        """After fallback_exceeded disables classifier, SDK allow is honored."""
+        from summon_claude.sessions.classifier import ClassifyResult
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify = AsyncMock(
+            return_value=ClassifyResult("fallback_exceeded", "too many blocks")
+        )
+        handler, _, router = _make_classifier_handler(mock_classifier)
+        router.post_to_main = AsyncMock()
+
+        mock_suggestion = MagicMock()
+        mock_suggestion.behavior = "allow"
+        context = MagicMock()
+        context.suggestions = [mock_suggestion]
+
+        # First call triggers fallback — classifier_enabled becomes False
+        handler._request_approval = AsyncMock(return_value=PermissionResultAllow())
+        await handler.handle("mcp__custom__tool", {}, context)
+        assert handler.classifier_enabled is False
+
+        # Second call: classifier is disabled, SDK allow should be honored
+        handler._request_approval.reset_mock()
+        result = await handler.handle("mcp__custom__tool", {}, context)
+        assert isinstance(result, PermissionResultAllow)
+        handler._request_approval.assert_not_called()
+
     async def test_auto_on_rejected_pre_worktree(self):
         """set_classifier_enabled(True) is a no-op pre-worktree."""
         mock_classifier = MagicMock()
@@ -1937,7 +2004,7 @@ class TestApprovalBridgeResolution:
         fut = bridge.create_future("Agent")
         assert fut.done()
         info = fut.result()
-        assert info.label == "blocked"
+        assert info.label == "auto-mode blocked"
         assert info.is_denial is True
 
     async def test_write_gate_containment_resolves_bridge(self, tmp_path):

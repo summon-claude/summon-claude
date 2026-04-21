@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import pathlib
 import re
@@ -102,20 +103,53 @@ async def async_project_list() -> list[dict[str, Any]]:
     return result  # noqa: RET504 — pyright requires pre-init before async with
 
 
-async def async_project_update(name_or_id: str, **kwargs: Any) -> None:
+async def async_project_update(name_or_id: str, **kwargs: Any) -> dict | None:
     """Update mutable project fields by name or ID.
 
     Pass ``jira_jql=""`` to clear the JQL filter.
+    Returns effective auto-mode rules dict if auto-mode options were set, else None.
     Raises ``click.ClickException`` if the project is not found.
     """
+    auto_deny = kwargs.pop("auto_deny", None)
+    auto_allow = kwargs.pop("auto_allow", None)
+    auto_environment = kwargs.pop("auto_environment", None)
+
     async with SessionRegistry() as registry:
         project = await registry.get_project(name_or_id)
         if project is None:
             raise click.ClickException(f"No project found: {name_or_id!r}")
-        try:
-            await registry.update_project(project["project_id"], **kwargs)
-        except (ValueError, KeyError) as e:
-            raise click.ClickException(str(e)) from e
+
+        # Handle standard fields (jira_jql, etc.) — pass None values through so
+        # callers can explicitly clear fields (e.g. jira_jql=None clears to NULL).
+        if kwargs:
+            try:
+                await registry.update_project(project["project_id"], **kwargs)
+            except (ValueError, KeyError) as e:
+                raise click.ClickException(str(e)) from e
+
+        # Handle auto-mode rules (read-merge-write)
+        if auto_deny is not None or auto_allow is not None or auto_environment is not None:
+            existing_raw = project.get("auto_mode_rules")
+            try:
+                parsed = json.loads(existing_raw) if existing_raw else {}
+            except json.JSONDecodeError:
+                parsed = {}
+            rules: dict[str, str] = parsed if isinstance(parsed, dict) else {}
+            if auto_deny is not None:
+                rules["deny"] = auto_deny
+            if auto_allow is not None:
+                rules["allow"] = auto_allow
+            if auto_environment is not None:
+                rules["environment"] = auto_environment
+            # Store as NULL if all values are empty (fall back to global)
+            if all(not v for v in rules.values()):
+                await registry.update_project(project["project_id"], auto_mode_rules=None)
+            else:
+                await registry.update_project(
+                    project["project_id"], auto_mode_rules=json.dumps(rules)
+                )
+            return rules
+    return None
 
 
 async def launch_project_managers() -> None:

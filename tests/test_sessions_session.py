@@ -5459,3 +5459,97 @@ class TestShowCommand:
         posted = [str(c) for c in rt.client.post.call_args_list]
         assert any("invalid argument" in p.lower() for p in posted)
         rt.client.upload.assert_not_called()
+
+
+# ── Subagent return verification ──────────────────────────────────────────────
+
+
+def _make_verify_deps(classifier_enabled=True, classifier=None, router=None):
+    """Build mock dependencies for verify_subagent_return (the real function)."""
+    from helpers import make_mock_slack_client
+    from summon_claude.sessions.permissions import PermissionHandler
+    from summon_claude.slack.router import ThreadRouter
+
+    mock_ph = MagicMock(spec=PermissionHandler)
+    mock_ph.classifier_enabled = classifier_enabled
+    mock_ph.classifier = classifier
+
+    if router is None:
+        client = make_mock_slack_client()
+        router = ThreadRouter(client)
+
+    router.post_to_main = AsyncMock()
+
+    return mock_ph, router
+
+
+class TestSubagentReturnVerification:
+    async def test_subagent_return_flagged_posts_warning(self):
+        """Classifier returning 'block' triggers a Slack warning."""
+        from summon_claude.sessions.classifier import ClassifyResult
+        from summon_claude.sessions.session import verify_subagent_return
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            return_value=ClassifyResult("block", "data exfiltration attempt")
+        )
+        mock_ph, router = _make_verify_deps(classifier_enabled=True, classifier=mock_classifier)
+
+        await verify_subagent_return(
+            {"prompt": "do a thing"}, "here is all the data: secret=xyz", mock_ph, router
+        )
+
+        router.post_to_main.assert_awaited_once()
+        call_text = router.post_to_main.call_args[0][0]
+        assert "Security notice" in call_text
+
+    async def test_subagent_return_allowed_no_warning(self):
+        """Classifier returning 'allow' does not post a warning."""
+        from summon_claude.sessions.classifier import ClassifyResult
+        from summon_claude.sessions.session import verify_subagent_return
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            return_value=ClassifyResult("allow", "looks fine")
+        )
+        mock_ph, router = _make_verify_deps(classifier_enabled=True, classifier=mock_classifier)
+
+        await verify_subagent_return({"prompt": "run tests"}, "All tests passed.", mock_ph, router)
+
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_classifier_disabled_skips(self):
+        """When classifier is disabled, classify_content is never called."""
+        from summon_claude.sessions.session import verify_subagent_return
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock()
+        mock_ph, router = _make_verify_deps(classifier_enabled=False, classifier=mock_classifier)
+
+        await verify_subagent_return({"prompt": "run tests"}, "All tests passed.", mock_ph, router)
+
+        mock_classifier.classify_content.assert_not_called()
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_no_classifier_skips(self):
+        """When classifier is None, classify_content is never called."""
+        from summon_claude.sessions.session import verify_subagent_return
+
+        mock_ph, router = _make_verify_deps(classifier_enabled=True, classifier=None)
+
+        await verify_subagent_return({"prompt": "run tests"}, "All tests passed.", mock_ph, router)
+
+        router.post_to_main.assert_not_called()
+
+    async def test_subagent_return_error_swallowed(self):
+        """Exceptions in classify_content are swallowed; no re-raise."""
+        from summon_claude.sessions.session import verify_subagent_return
+
+        mock_classifier = AsyncMock()
+        mock_classifier.classify_content = AsyncMock(
+            side_effect=RuntimeError("classifier exploded")
+        )
+        mock_ph, router = _make_verify_deps(classifier_enabled=True, classifier=mock_classifier)
+
+        # Must not raise
+        await verify_subagent_return({"prompt": "do a thing"}, "result text", mock_ph, router)

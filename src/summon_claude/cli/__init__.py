@@ -73,6 +73,10 @@ from summon_claude.cli.stop import async_stop
 from summon_claude.config import SummonConfig, get_config_file, get_data_dir, is_local_install
 from summon_claude.daemon import start_daemon
 from summon_claude.sessions import registry as _registry
+from summon_claude.sessions.classifier import (
+    get_effective_allow_rules,
+    get_effective_deny_rules,
+)
 
 _BANNER_WIDTH = 50
 
@@ -400,6 +404,7 @@ def session_cleanup(ctx: click.Context, archive: bool) -> None:
 
 
 _MAX_JQL_LEN = 500
+_MAX_AUTO_RULE_LEN = 2000
 
 
 @cli.group("project")
@@ -568,24 +573,63 @@ def workflow_clear(project_name: str | None) -> None:
 @cmd_project.command("update")
 @click.argument("name_or_id")
 @click.option("--jql", default=None, help='JQL filter for Jira triage. Pass "" to clear.')
+@click.option("--auto-deny", default=None, help="Auto-mode deny rules (project-specific)")
+@click.option("--auto-allow", default=None, help="Auto-mode allow rules (project-specific)")
+@click.option("--auto-environment", default=None, help="Auto-mode environment description")
 @click.pass_context
-def project_update(ctx: click.Context, name_or_id: str, jql: str | None) -> None:
+def project_update(
+    ctx: click.Context,
+    name_or_id: str,
+    jql: str | None,
+    auto_deny: str | None,
+    auto_allow: str | None,
+    auto_environment: str | None,
+) -> None:
     """Update a project's configuration.
 
     NAME_OR_ID can be the project name or project ID prefix.
     Pass --jql "" to clear the Jira JQL filter.
     """
-    if jql is None:
-        raise click.UsageError("No fields to update. Use --jql to set a JQL filter.")
+    if jql is None and auto_deny is None and auto_allow is None and auto_environment is None:
+        raise click.UsageError("No fields to update.")
     if jql and len(jql) > _MAX_JQL_LEN:
         raise click.BadParameter(f"JQL filter too long (max {_MAX_JQL_LEN} chars)")
-    # Empty string clears the field; non-empty sets it.
-    asyncio.run(async_project_update(name_or_id, jira_jql=jql or None))
+    if auto_deny and len(auto_deny) > _MAX_AUTO_RULE_LEN:
+        raise click.BadParameter(f"--auto-deny too long (max {_MAX_AUTO_RULE_LEN} chars)")
+    if auto_allow and len(auto_allow) > _MAX_AUTO_RULE_LEN:
+        raise click.BadParameter(f"--auto-allow too long (max {_MAX_AUTO_RULE_LEN} chars)")
+    if auto_environment and len(auto_environment) > _MAX_AUTO_RULE_LEN:
+        raise click.BadParameter(f"--auto-environment too long (max {_MAX_AUTO_RULE_LEN} chars)")
+    update_kwargs: dict = {}
+    if jql is not None:
+        update_kwargs["jira_jql"] = jql or None
+    if auto_deny is not None:
+        update_kwargs["auto_deny"] = auto_deny
+    if auto_allow is not None:
+        update_kwargs["auto_allow"] = auto_allow
+    if auto_environment is not None:
+        update_kwargs["auto_environment"] = auto_environment
+    effective = asyncio.run(async_project_update(name_or_id, **update_kwargs))
     if not ctx.obj.get("quiet"):
-        if jql:
-            click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
-        else:
-            click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
+        if jql is not None:
+            if jql:
+                click.echo(f"Project {name_or_id!r} updated: JQL filter set.")
+            else:
+                click.echo(f"Project {name_or_id!r} updated: JQL filter cleared.")
+        if effective is not None:
+            click.echo(f"Project {name_or_id!r} auto-mode rules updated.")
+            _deny_val = effective.get("deny")
+            _deny_label = (
+                "Block rules cleared — using defaults:" if _deny_val == "" else "Block rules:"
+            )
+            click.echo(f"{_deny_label}\n{get_effective_deny_rules(_deny_val or '')}")
+            _allow_val = effective.get("allow")
+            _allow_label = (
+                "Allow rules cleared — using defaults:" if _allow_val == "" else "Allow rules:"
+            )
+            click.echo(f"{_allow_label}\n{get_effective_allow_rules(_allow_val or '')}")
+            env = effective.get("environment", "") or "(global default)"
+            click.echo(f"Effective environment: {env}")
 
 
 def _ensure_gitignore() -> None:
