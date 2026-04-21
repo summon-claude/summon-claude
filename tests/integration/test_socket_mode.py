@@ -37,14 +37,15 @@ class TestSocketConnect:
         assert nonce in event.get("text", "")
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestSocketDisconnect:
-    async def test_socket_disconnect_clean(self, paused_consumer, slack_harness):
+    async def test_socket_disconnect_clean(self, event_store, slack_harness):
         """A stopped consumer's socket client reports disconnected."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         try:
@@ -55,26 +56,30 @@ class TestSocketDisconnect:
         assert not await consumer._handler.client.is_connected()
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestSocketReconnect:
-    async def test_socket_reconnect_after_close(self, paused_consumer, slack_harness, test_channel):
+    async def test_socket_reconnect_after_close(self, event_store, slack_harness, test_channel):
         """A consumer can be stopped and restarted; events flow after restart."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         await consumer.stop()
 
         await asyncio.wait_for(consumer.start(), timeout=15.0)
+        # Slack's routing table takes 1-3s to register a new consumer
+        await asyncio.sleep(2.0)
         try:
+            event_store.reset_reader()
             # Canary: confirm events are flowing after restart
             canary = f"canary-{secrets.token_hex(4)}"
             await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
             await consumer.wait_for_event(
                 lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-                timeout=10.0,
+                timeout=15.0,
             )
             consumer.drain()
 
@@ -113,14 +118,15 @@ class TestHealthMonitorConnected:
         on_exhausted.assert_not_called()
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestHealthMonitorDisconnected:
-    async def test_health_monitor_detects_disconnect(self, paused_consumer, slack_harness):
+    async def test_health_monitor_detects_disconnect(self, event_store, slack_harness):
         """_HealthMonitor reports unhealthy after socket is closed."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         assert consumer._handler is not None

@@ -25,16 +25,15 @@ pytestmark = [
 ]
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestForceDisconnect:
-    async def test_reconnect_after_force_disconnect(
-        self, paused_consumer, slack_harness, test_channel
-    ):
+    async def test_reconnect_after_force_disconnect(self, event_store, slack_harness, test_channel):
         """Force-disconnecting via SDK and starting a new consumer delivers events."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         assert consumer._handler is not None
@@ -44,22 +43,28 @@ class TestForceDisconnect:
             logger.debug("disconnect raised (expected in test)", exc_info=True)
         await consumer.stop()
 
-        # Allow SDK disconnect handlers to complete before starting a new consumer
-        await asyncio.sleep(0.5)
+        # Allow SDK disconnect handlers and Slack's routing table to settle
+        await asyncio.sleep(2.0)
 
         new_consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(new_consumer.start(), timeout=15.0)
+        # Slack's routing table takes 1-3s to register a new consumer
+        await asyncio.sleep(2.0)
         try:
+            # Reset reader so we only see events from this point forward
+            event_store.reset_reader()
+
             # Canary: confirm events are flowing before testing
             canary = f"canary-{secrets.token_hex(4)}"
             await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
             await new_consumer.wait_for_event(
                 lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-                timeout=10.0,
+                timeout=15.0,
             )
             new_consumer.drain()
 
@@ -73,12 +78,13 @@ class TestForceDisconnect:
         finally:
             await new_consumer.stop()
 
-    async def test_reconnect_preserves_channel(self, paused_consumer, slack_harness, test_channel):
+    async def test_reconnect_preserves_channel(self, event_store, slack_harness, test_channel):
         """Messages posted across disconnect/reconnect cycles all appear in history."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         assert consumer._handler is not None
@@ -95,6 +101,7 @@ class TestForceDisconnect:
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(new_consumer.start(), timeout=15.0)
         try:
@@ -115,14 +122,15 @@ class TestForceDisconnect:
             await new_consumer.stop()
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestReconnectCycles:
-    async def test_rapid_disconnect_reconnect_cycles(self, paused_consumer, slack_harness):
+    async def test_rapid_disconnect_reconnect_cycles(self, event_store, slack_harness):
         """Three rapid disconnect/reconnect cycles all report connected after reconnect."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
             app_token=slack_harness.app_token,
             signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
         await asyncio.wait_for(consumer.start(), timeout=15.0)
         assert consumer._handler is not None
@@ -140,7 +148,7 @@ class TestReconnectCycles:
             await consumer.stop()
 
 
-@pytest.mark.xdist_group("slack_socket")
+@pytest.mark.xdist_group("slack_socket_isolated")
 class TestHealthMonitorRecovery:
     async def test_reconnect_exhaustion(self):
         """_HealthMonitor triggers on_exhausted after max_reconnect_attempts failures."""

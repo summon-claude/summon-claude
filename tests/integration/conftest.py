@@ -11,6 +11,15 @@ tests, acknowledging all events. This serves dual purpose: enabling
 round-trip event delivery tests (HTTP API → Socket Mode → assertion)
 and preventing Slack from auto-disabling event subscriptions on the
 test app (events with no consumer trigger auto-disable).
+
+**Shared event store**: Slack distributes Socket Mode events round-robin
+across all connected consumers for the same app token. Multiple xdist
+workers (or isolated test consumers) each see only a subset of events.
+``SharedEventStore`` solves this: every consumer appends every received
+event to a shared JSONL file, and ``wait_for_event`` reads from that
+file. Since all consumers feed the same pool, every worker sees every
+event — nonce-based filtering works correctly regardless of how many
+consumers are connected.
 """
 
 from __future__ import annotations
@@ -18,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import fcntl
+import json
 import logging
 import os
 import secrets
@@ -138,11 +148,106 @@ class SlackTestHarness:
                 await self.client.conversations_archive(channel=cid)
 
 
+class SharedEventStore:
+    """Cross-process event fan-out backed by an append-only JSONL file.
+
+    Slack distributes Socket Mode events round-robin across all connected
+    consumers for the same app token. With multiple xdist workers each
+    running their own consumer, any single consumer only sees a subset of
+    events. This store solves the problem: every consumer appends every
+    event it receives to a shared file, and ``wait_for_event`` reads from
+    that file. Since all consumers feed the same pool, every worker sees
+    every event — nonce-based filtering works correctly.
+
+    The file is append-only. Each ``write`` of a newline-terminated JSON
+    line is atomic for sizes < PIPE_BUF (4096+ on POSIX). Each reader
+    maintains its own file offset so it never re-reads old events.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._path.touch(exist_ok=True)
+        self._write_fd: int | None = None
+        self._read_offset: int = 0
+
+    def open_writer(self) -> None:
+        """Open the file for appending (unbuffered, O_APPEND for atomicity)."""
+        self._write_fd = os.open(str(self._path), os.O_WRONLY | os.O_APPEND)
+
+    def close_writer(self) -> None:
+        if self._write_fd is not None:
+            os.close(self._write_fd)
+            self._write_fd = None
+
+    def put(self, event: dict) -> None:
+        """Append an event. Thread-safe for lines < PIPE_BUF."""
+        line = json.dumps(event, separators=(",", ":")) + "\n"
+        if self._write_fd is not None:
+            os.write(self._write_fd, line.encode())
+
+    def _read_new(self) -> list[dict]:
+        """Read events appended since the last call. Non-blocking."""
+        events: list[dict] = []
+        try:
+            with self._path.open("rb") as f:
+                f.seek(self._read_offset)
+                data = f.read()
+        except FileNotFoundError:
+            return events
+        if not data:
+            return events
+        self._read_offset += len(data)
+        for line in data.decode().splitlines():
+            stripped = line.strip()
+            if stripped:
+                with contextlib.suppress(json.JSONDecodeError):
+                    events.append(json.loads(stripped))
+        return events
+
+    async def wait_for_event(
+        self,
+        predicate: Callable[[dict], bool],
+        timeout: float = 15.0,
+    ) -> dict:
+        """Poll the shared file for an event matching *predicate*.
+
+        Non-matching events are skipped. On timeout, raises
+        ``TimeoutError`` with a summary of events seen for debugging.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        seen: list[dict] = []
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"No matching event within {timeout}s. "
+                    f"Received {len(seen)} non-matching: "
+                    f"{[e.get('type') for e in seen]}"
+                )
+            for event in self._read_new():
+                if predicate(event):
+                    return event
+                seen.append(event)
+            await asyncio.sleep(0.15)
+
+    def drain(self) -> list[dict]:
+        """Read all pending events. Non-blocking."""
+        return self._read_new()
+
+    def reset_reader(self) -> None:
+        """Skip to end-of-file, ignoring all prior events."""
+        try:
+            self._read_offset = self._path.stat().st_size
+        except FileNotFoundError:
+            self._read_offset = 0
+
+
 class EventConsumer:
-    """Socket Mode event consumer for integration tests.
+    """Socket Mode event consumer backed by a ``SharedEventStore``.
 
     Maintains a real WebSocket connection to Slack, acknowledging all
-    received events and collecting them in a queue for test assertions.
+    received events and writing them to the shared store.
 
     Serves dual purpose:
       1. Enables round-trip event delivery tests (HTTP API → Socket Mode)
@@ -153,17 +258,23 @@ class EventConsumer:
     (messages, reactions) generate capturable events — essential since
     tests can only act as the bot.
 
-    **Pause/resume**: Tests that need their own isolated Socket Mode
-    connection must first pause this consumer to avoid event theft
-    (Slack distributes events round-robin across all connected consumers
-    for the same app token). Use the ``paused_consumer`` fixture.
+    Multiple consumers can coexist (across xdist workers or within
+    isolated tests) because they all write to the same shared store.
+    Slack's round-robin distribution doesn't matter — every event
+    reaches the store regardless of which consumer received it.
     """
 
-    def __init__(self, bot_token: str, app_token: str, signing_secret: str) -> None:
+    def __init__(
+        self,
+        bot_token: str,
+        app_token: str,
+        signing_secret: str,
+        event_store: SharedEventStore,
+    ) -> None:
         self._bot_token = bot_token
         self._app_token = app_token
         self._signing_secret = signing_secret
-        self._events: asyncio.Queue[dict] = asyncio.Queue()
+        self._event_store = event_store
         self._handler: AsyncSocketModeHandler | None = None
 
     async def start(self) -> None:
@@ -178,12 +289,13 @@ class EventConsumer:
         for event_type in ("message", "reaction_added", "file_shared", "app_home_opened"):
             app.event(event_type)(self._capture_event)
 
+        self._event_store.open_writer()
         handler = AsyncSocketModeHandler(app, self._app_token)
         await handler.connect_async()
         self._handler = handler
 
     async def _capture_event(self, event: dict, **kwargs: object) -> None:
-        await self._events.put(event)
+        self._event_store.put(event)
 
     async def stop(self) -> None:
         if self._handler:
@@ -193,83 +305,19 @@ class EventConsumer:
                 logging.getLogger(__name__).debug(
                     "EventConsumer: close error (expected)", exc_info=True
                 )
-
-    async def pause(self) -> None:
-        """Disconnect the Socket Mode consumer without destroying it.
-
-        Used by ``paused_consumer`` to temporarily yield the connection
-        so isolated tests can create their own consumer without event theft.
-        """
-        await self.stop()
-
-    async def resume(
-        self,
-        client: AsyncWebClient,
-        test_channel: str,
-    ) -> None:
-        """Reconnect and validate event delivery with a canary message.
-
-        Restarts the Socket Mode connection and runs a canary check to
-        ensure events are flowing before returning control to subsequent
-        tests that depend on this consumer.
-        """
-        await self.start()
-        # Slack's event routing table takes 1-3s to register a new consumer
-        await asyncio.sleep(2.0)
-        self.drain()
-
-        # Canary: confirm events are actually flowing after reconnect
-        canary = f"resume-canary-{secrets.token_hex(4)}"
-        await client.chat_postMessage(channel=test_channel, text=canary)
-        await self.wait_for_event(
-            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-            timeout=15.0,
-        )
-        self.drain()
+        self._event_store.close_writer()
 
     async def wait_for_event(
         self,
         predicate: Callable[[dict], bool],
-        timeout: float = 10.0,
+        timeout: float = 15.0,
     ) -> dict:
-        """Wait for an event matching *predicate*. Returns the event dict.
-
-        Non-matching events are discarded (each test uses a unique nonce
-        so cross-test interference is impossible). On timeout, raises
-        ``TimeoutError`` with a summary of events seen for debugging.
-        """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout
-        seen: list[dict] = []
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                raise TimeoutError(
-                    f"No matching event within {timeout}s. "
-                    f"Received {len(seen)} non-matching: "
-                    f"{[e.get('type') for e in seen]}"
-                )
-            try:
-                event = await asyncio.wait_for(self._events.get(), timeout=remaining)
-            except TimeoutError:
-                raise TimeoutError(
-                    f"No matching event within {timeout}s. "
-                    f"Received {len(seen)} non-matching: "
-                    f"{[e.get('type') for e in seen]}"
-                ) from None
-            if predicate(event):
-                return event
-            seen.append(event)
+        """Delegate to the shared event store."""
+        return await self._event_store.wait_for_event(predicate, timeout)
 
     def drain(self) -> list[dict]:
-        """Drain all events from the queue. Non-blocking."""
-        events: list[dict] = []
-        while not self._events.empty():
-            try:
-                events.append(self._events.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-        return events
+        """Drain events from the shared store."""
+        return self._event_store.drain()
 
 
 # Lock file shared across all worktrees and the main repo. Lives in ~/.cache
@@ -327,8 +375,35 @@ async def test_channel(slack_harness):
     yield channel_id
 
 
+@pytest.fixture(scope="session")
+def event_store():
+    """Session-scoped shared event store.
+
+    All EventConsumer instances (session-scoped and test-local) write to
+    this file, so every xdist worker sees every event regardless of which
+    consumer received it from Slack's round-robin distribution.
+
+    The file lives under ``~/.cache/summon-claude/`` (not in the repo) so
+    that ALL xdist workers — which are separate processes with separate
+    ``tmp_path_factory`` roots — share the same file.  This is also shared
+    across worktrees and concurrent ``git push`` hooks, working in tandem
+    with ``_slack_socket_lock`` to serialize test runs.
+
+    Each worker's reader starts at end-of-file, so stale events from prior
+    runs are automatically invisible. No truncation needed.
+    """
+    store_dir = Path.home() / ".cache" / "summon-claude"
+    store_dir.mkdir(parents=True, exist_ok=True)
+    path = store_dir / "slack-test-events.jsonl"
+    path.touch(exist_ok=True)
+    store = SharedEventStore(path)
+    # Start reading from current EOF — ignore events from prior runs
+    store.reset_reader()
+    return store
+
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
-async def event_consumer(_slack_socket_lock, slack_harness, test_channel):
+async def event_consumer(_slack_socket_lock, slack_harness, test_channel, event_store):
     """Session-scoped Socket Mode consumer — one connection for all modules.
 
     Maintains a real WebSocket connection to Slack, shared across all
@@ -344,6 +419,7 @@ async def event_consumer(_slack_socket_lock, slack_harness, test_channel):
         bot_token=slack_harness.bot_token,
         app_token=slack_harness.app_token,
         signing_secret=slack_harness.signing_secret,
+        event_store=event_store,
     )
     try:
         await asyncio.wait_for(consumer.start(), timeout=15.0)
@@ -375,23 +451,6 @@ async def event_consumer(_slack_socket_lock, slack_harness, test_channel):
 
     yield consumer
     await consumer.stop()
-
-
-@pytest_asyncio.fixture(loop_scope="session")
-async def paused_consumer(event_consumer, slack_harness, test_channel):
-    """Temporarily disconnect the session-scoped EventConsumer.
-
-    Slack distributes Socket Mode events round-robin across all connected
-    consumers for the same app token. Tests that create their own consumer
-    must use this fixture to pause the session-scoped one first, preventing
-    event theft.
-
-    On teardown, the session consumer is reconnected and validated with a
-    canary message before subsequent tests can use it.
-    """
-    await event_consumer.pause()
-    yield event_consumer
-    await event_consumer.resume(slack_harness.client, test_channel)
 
 
 @pytest.fixture
