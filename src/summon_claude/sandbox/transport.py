@@ -158,7 +158,7 @@ class MatchlockTransport(Transport):
         elif isinstance(self._options.system_prompt, str):
             cmd.extend(["--system-prompt", self._options.system_prompt])
         else:
-            sp = self._options.system_prompt
+            sp: dict[str, Any] = self._options.system_prompt  # type: ignore[assignment]
             if sp.get("type") == "file":
                 cmd.extend(["--system-prompt-file", sp["path"]])
             elif sp.get("type") == "preset" and "append" in sp:

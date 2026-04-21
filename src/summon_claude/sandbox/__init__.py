@@ -188,7 +188,7 @@ def create_bug_hunter_vm_config(
         ValueError: If domain/env-var validation fails or a required env var is not set.
     """
     # Merge network allowlist (additive)
-    merged_allowlist = list(_DEFAULT_NETWORK_ALLOWLIST)
+    merged_allowlist: list[str] = list(_DEFAULT_NETWORK_ALLOWLIST)
     if network_allowlist:
         for domain in network_allowlist:
             if not _validate_domain(domain):

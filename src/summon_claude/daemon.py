@@ -226,6 +226,7 @@ async def _cleanup_orphaned_vms() -> None:
             return
 
         # Cross-reference with registry: only destroy VMs for non-active sessions
+        orphaned_vm_ids: set[str] = set()
         async with SessionRegistry() as registry:
             async with registry.db.execute(
                 "SELECT vm_id FROM sessions WHERE vm_id IS NOT NULL "
