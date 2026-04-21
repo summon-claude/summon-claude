@@ -72,8 +72,9 @@ class TestSocketReconnect:
         await consumer.stop()
 
         await asyncio.wait_for(consumer.start(), timeout=15.0)
-        # Slack's routing table takes 1-3s to register a new consumer
-        await asyncio.sleep(2.0)
+        # Slack's routing table takes 1-3s to register a new consumer;
+        # use 3s to account for variability under load.
+        await asyncio.sleep(3.0)
         try:
             event_store.reset_reader()
             # Canary: confirm events are flowing after restart

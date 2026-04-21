@@ -19,6 +19,7 @@ import pytest
 from summon_claude.event_dispatcher import EventDispatcher, SessionHandle
 from summon_claude.sessions.commands import CommandContext, CommandResult, _handle_stop
 from summon_claude.sessions.permissions import PermissionHandler
+from tests.integration.conftest import EventConsumer
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
@@ -64,109 +65,160 @@ class TestStopCommand:
 @pytest.mark.slack
 @pytest.mark.xdist_group("slack_socket")
 class TestReactionAbort:
+    """Reaction-based abort delivery via Socket Mode.
+
+    Uses a dedicated consumer instead of the session-scoped ``event_consumer``
+    fixture because socket resilience tests (which run earlier on the same
+    worker) may leave the session-scoped consumer's connection in an
+    unreliable state for ``reaction_added`` event delivery.
+    """
+
     async def test_reaction_abort_via_socket_mode(
         self,
         slack_harness,
         test_channel,
-        event_consumer,
+        _slack_socket_lock,
+        event_store,
     ):
-        """Adding :octagonal_sign: reaction delivers reaction_added event via Socket Mode.
-
-        Posts a message, adds the abort reaction via API, and verifies
-        the reaction_added event arrives through the Socket Mode consumer.
-        This validates the full Slack round-trip for the abort signal path.
-        """
-        nonce = f"abort-target-{secrets.token_hex(6)}"
-        resp = await slack_harness.client.chat_postMessage(
-            channel=test_channel,
-            text=nonce,
+        """Adding :octagonal_sign: reaction delivers reaction_added event via Socket Mode."""
+        consumer = EventConsumer(
+            bot_token=slack_harness.bot_token,
+            app_token=slack_harness.app_token,
+            signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
-        msg_ts = resp["ts"]
+        await asyncio.wait_for(consumer.start(), timeout=15.0)
+        await asyncio.sleep(3.0)
+        try:
+            event_store.reset_reader()
 
-        # Consume the message event first
-        await event_consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and nonce in e.get("text", ""),
-            timeout=10.0,
-        )
+            # Canary: verify events are flowing
+            canary = f"canary-{secrets.token_hex(4)}"
+            await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
+            await consumer.wait_for_event(
+                lambda e: e.get("type") == "message" and canary in e.get("text", ""),
+                timeout=15.0,
+            )
+            consumer.drain()
 
-        # Add the abort reaction
-        await slack_harness.client.reactions_add(
-            channel=test_channel,
-            name="octagonal_sign",
-            timestamp=msg_ts,
-        )
+            nonce = f"abort-target-{secrets.token_hex(6)}"
+            resp = await slack_harness.client.chat_postMessage(
+                channel=test_channel,
+                text=nonce,
+            )
+            msg_ts = resp["ts"]
 
-        # Verify reaction_added event arrives via Socket Mode
-        event = await event_consumer.wait_for_event(
-            lambda e: e.get("type") == "reaction_added" and e.get("item", {}).get("ts") == msg_ts,
-            timeout=10.0,
-        )
-        assert event["reaction"] == "octagonal_sign"
-        assert event["item"]["channel"] == test_channel
+            # Consume the message event first
+            await consumer.wait_for_event(
+                lambda e: e.get("type") == "message" and nonce in e.get("text", ""),
+                timeout=15.0,
+            )
+
+            await asyncio.sleep(1.0)
+
+            # Add the abort reaction
+            await slack_harness.client.reactions_add(
+                channel=test_channel,
+                name="octagonal_sign",
+                timestamp=msg_ts,
+            )
+
+            # Verify reaction_added event arrives via Socket Mode
+            event = await consumer.wait_for_event(
+                lambda e: (
+                    e.get("type") == "reaction_added" and e.get("item", {}).get("ts") == msg_ts
+                ),
+                timeout=15.0,
+            )
+            assert event["reaction"] == "octagonal_sign"
+            assert event["item"]["channel"] == test_channel
+        finally:
+            await consumer.stop()
 
     async def test_dispatch_reaction_triggers_abort_callback(
         self,
         slack_harness,
         test_channel,
-        event_consumer,
+        _slack_socket_lock,
+        event_store,
     ):
-        """Full round-trip: post → react → event → dispatch → abort fires.
-
-        Posts a real message to Slack, adds :octagonal_sign: via API,
-        captures the reaction_added event via Socket Mode, then feeds
-        it through EventDispatcher to verify the abort callback fires.
-        """
+        """Full round-trip: post → react → event → dispatch → abort fires."""
         bot_user_id = await slack_harness.resolve_bot_user_id()
-
-        dispatcher = EventDispatcher()
-        abort_event = asyncio.Event()
-
-        def _abort() -> None:
-            abort_event.set()
-
-        handle = SessionHandle(
-            session_id="test-abort-rt",
-            channel_id=test_channel,
-            message_queue=asyncio.Queue(maxsize=10),
-            permission_handler=MagicMock(spec=PermissionHandler),
-            abort_callback=_abort,
-            authenticated_user_id=bot_user_id,
+        consumer = EventConsumer(
+            bot_token=slack_harness.bot_token,
+            app_token=slack_harness.app_token,
+            signing_secret=slack_harness.signing_secret,
+            event_store=event_store,
         )
-        dispatcher.register(test_channel, handle)
+        await asyncio.wait_for(consumer.start(), timeout=15.0)
+        await asyncio.sleep(3.0)
+        try:
+            event_store.reset_reader()
 
-        nonce = f"abort-dispatch-{secrets.token_hex(6)}"
-        resp = await slack_harness.client.chat_postMessage(
-            channel=test_channel,
-            text=nonce,
-        )
-        msg_ts = resp["ts"]
+            # Canary: verify events are flowing
+            canary = f"canary-{secrets.token_hex(4)}"
+            await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
+            await consumer.wait_for_event(
+                lambda e: e.get("type") == "message" and canary in e.get("text", ""),
+                timeout=15.0,
+            )
+            consumer.drain()
 
-        # Consume the message event
-        await event_consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and nonce in e.get("text", ""),
-            timeout=10.0,
-        )
+            dispatcher = EventDispatcher()
+            abort_event = asyncio.Event()
 
-        # Add abort reaction
-        await slack_harness.client.reactions_add(
-            channel=test_channel,
-            name="octagonal_sign",
-            timestamp=msg_ts,
-        )
+            def _abort() -> None:
+                abort_event.set()
 
-        # Capture the reaction event from Socket Mode
-        event = await event_consumer.wait_for_event(
-            lambda e: e.get("type") == "reaction_added" and e.get("item", {}).get("ts") == msg_ts,
-            timeout=10.0,
-        )
+            handle = SessionHandle(
+                session_id="test-abort-rt",
+                channel_id=test_channel,
+                message_queue=asyncio.Queue(maxsize=10),
+                permission_handler=MagicMock(spec=PermissionHandler),
+                abort_callback=_abort,
+                authenticated_user_id=bot_user_id,
+            )
+            dispatcher.register(test_channel, handle)
 
-        # Feed the real event through the dispatcher
-        await dispatcher.dispatch_reaction(event)
+            nonce = f"abort-dispatch-{secrets.token_hex(6)}"
+            resp = await slack_harness.client.chat_postMessage(
+                channel=test_channel,
+                text=nonce,
+            )
+            msg_ts = resp["ts"]
 
-        assert abort_event.is_set(), "abort callback should have fired"
+            # Consume the message event
+            await consumer.wait_for_event(
+                lambda e: e.get("type") == "message" and nonce in e.get("text", ""),
+                timeout=15.0,
+            )
 
-        # Cleanup: unregister to avoid interference with other tests
-        dispatcher.unregister(test_channel)
+            await asyncio.sleep(1.0)
+
+            # Add abort reaction
+            await slack_harness.client.reactions_add(
+                channel=test_channel,
+                name="octagonal_sign",
+                timestamp=msg_ts,
+            )
+
+            # Capture the reaction event from Socket Mode
+            event = await consumer.wait_for_event(
+                lambda e: (
+                    e.get("type") == "reaction_added" and e.get("item", {}).get("ts") == msg_ts
+                ),
+                timeout=15.0,
+            )
+
+            # Feed the real event through the dispatcher
+            await dispatcher.dispatch_reaction(event)
+
+            assert abort_event.is_set(), "abort callback should have fired"
+
+            # Cleanup
+            dispatcher.unregister(test_channel)
+        finally:
+            await consumer.stop()
 
 
 class TestReactionAuthorization:

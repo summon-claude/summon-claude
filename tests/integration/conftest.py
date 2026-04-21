@@ -441,16 +441,26 @@ async def event_consumer(_slack_socket_lock, slack_harness, test_channel, event_
     # Brief pause after connect: Slack's event routing table takes 1-3s to
     # fully register a new consumer after rapid consumer cycling (e.g. the
     # isolated tests disconnect/reconnect their own consumers just before us).
-    await asyncio.sleep(2.0)
+    await asyncio.sleep(3.0)
 
-    canary = f"canary-{secrets.token_hex(4)}"
-    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
-    try:
-        await consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-            timeout=15.0,
-        )
-    except TimeoutError:
+    # Canary with retry — Slack's routing table may not be fully settled on
+    # the first attempt, especially when other workers are generating events.
+    canary_ok = False
+    for attempt in range(2):
+        event_store.reset_reader()
+        canary = f"canary-{secrets.token_hex(4)}"
+        await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
+        try:
+            await consumer.wait_for_event(
+                lambda e, c=canary: e.get("type") == "message" and c in e.get("text", ""),
+                timeout=15.0,
+            )
+            canary_ok = True
+            break
+        except TimeoutError:
+            if attempt == 0:
+                await asyncio.sleep(2.0)
+    if not canary_ok:
         await consumer.stop()
         pytest.fail(
             "Socket Mode canary failed -- events not flowing. "

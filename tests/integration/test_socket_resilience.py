@@ -46,7 +46,7 @@ class TestForceDisconnect:
         await consumer.stop()
 
         # Allow SDK disconnect handlers and Slack's routing table to settle
-        await asyncio.sleep(2.0)
+        await asyncio.sleep(3.0)
 
         new_consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -55,8 +55,9 @@ class TestForceDisconnect:
             event_store=event_store,
         )
         await asyncio.wait_for(new_consumer.start(), timeout=15.0)
-        # Slack's routing table takes 1-3s to register a new consumer
-        await asyncio.sleep(2.0)
+        # Slack's routing table takes 1-3s to register a new consumer;
+        # use 3s to account for variability under load.
+        await asyncio.sleep(3.0)
         try:
             # Reset reader so we only see events from this point forward
             event_store.reset_reader()

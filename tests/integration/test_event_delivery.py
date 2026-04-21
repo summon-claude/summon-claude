@@ -11,6 +11,7 @@ trigger persistent auto-disable.
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 
 import pytest
@@ -84,6 +85,10 @@ class TestReactionEvents:
         await event_consumer.wait_for_event(
             lambda e: e.get("type") == "message" and nonce in e.get("text", ""),
         )
+
+        # Brief pause — Slack's event routing sometimes needs a moment after
+        # message delivery before reaction events flow reliably.
+        await asyncio.sleep(1.0)
 
         # Use raw API — slack_client.react() swallows errors, which would
         # cause a misleading 10s timeout instead of an immediate failure.
