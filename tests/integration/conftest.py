@@ -186,7 +186,7 @@ class SharedEventStore:
             os.write(self._write_fd, line.encode())
 
     def _read_new(self) -> list[dict]:
-        """Read events appended since the last call. Non-blocking."""
+        """Read events appended since the last call (synchronous file I/O)."""
         events: list[dict] = []
         try:
             with self._path.open("rb") as f:
@@ -216,19 +216,19 @@ class SharedEventStore:
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        seen: list[dict] = []
+        seen: list[str] = []
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
                 raise TimeoutError(
                     f"No matching event within {timeout}s. "
                     f"Received {len(seen)} non-matching: "
-                    f"{[e.get('type') for e in seen]}"
+                    f"{seen}"
                 )
             for event in self._read_new():
                 if predicate(event):
                     return event
-                seen.append(event)
+                seen.append(event.get("type", "unknown"))
             await asyncio.sleep(0.15)
 
     def drain(self) -> list[dict]:
@@ -289,9 +289,9 @@ class EventConsumer:
         for event_type in ("message", "reaction_added", "file_shared", "app_home_opened"):
             app.event(event_type)(self._capture_event)
 
-        self._event_store.open_writer()
         handler = AsyncSocketModeHandler(app, self._app_token)
         await handler.connect_async()
+        self._event_store.open_writer()
         self._handler = handler
 
     async def _capture_event(self, event: dict, **kwargs: object) -> None:
@@ -336,8 +336,9 @@ def _slack_socket_lock():
     non-deterministic timeouts.  This lock serialises access so only
     one process holds a Socket Mode connection at a time.
     """
-    _SOCKET_MODE_LOCK.parent.mkdir(parents=True, exist_ok=True)
-    fd = _SOCKET_MODE_LOCK.open("w")
+    _SOCKET_MODE_LOCK.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    raw_fd = os.open(str(_SOCKET_MODE_LOCK), os.O_WRONLY | os.O_CREAT, 0o600)
+    fd = os.fdopen(raw_fd, "w")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
         yield
@@ -393,9 +394,10 @@ def event_store():
     runs are automatically invisible. No truncation needed.
     """
     store_dir = Path.home() / ".cache" / "summon-claude"
-    store_dir.mkdir(parents=True, exist_ok=True)
+    store_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     path = store_dir / "slack-test-events.jsonl"
     path.touch(exist_ok=True)
+    path.chmod(0o600)
     store = SharedEventStore(path)
     # Start reading from current EOF — ignore events from prior runs
     store.reset_reader()
@@ -424,6 +426,7 @@ async def event_consumer(_slack_socket_lock, slack_harness, test_channel, event_
     try:
         await asyncio.wait_for(consumer.start(), timeout=15.0)
     except TimeoutError:
+        await consumer.stop()
         pytest.skip("Socket Mode connection timed out (15s)")
     except Exception as exc:
         await consumer.stop()

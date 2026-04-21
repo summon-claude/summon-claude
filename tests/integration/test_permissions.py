@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -74,8 +75,6 @@ def _make_permission_handler(
         authenticated_user_id=authenticated_user_id,
     )
     # Bypass write gate — these tests exercise HITL flow, not the gate
-    from unittest.mock import AsyncMock
-
     handler._check_write_gate = AsyncMock(return_value=None)
     return handler
 
@@ -528,5 +527,3 @@ class TestAskUserQuestion:
         assert result.updated_input is not None
         answers = result.updated_input.get("answers", {})
         assert answers.get(question_text) == "A"
-
-        assert isinstance(result, PermissionResultAllow)

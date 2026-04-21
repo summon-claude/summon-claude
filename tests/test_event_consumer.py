@@ -14,6 +14,41 @@ import pytest
 
 from tests.integration.conftest import EventConsumer, SharedEventStore
 
+# ---------------------------------------------------------------------------
+# SharedEventStore
+# ---------------------------------------------------------------------------
+
+
+class TestSharedEventStore:
+    """Direct unit tests for SharedEventStore."""
+
+    def test_put_before_open_writer_is_noop(self, tmp_path):
+        """put() before open_writer() silently drops the event (no write_fd)."""
+        path = tmp_path / "events.jsonl"
+        store = SharedEventStore(path)
+        # _write_fd is None at construction — put() must not raise or write
+        store.put({"type": "message"})
+        assert path.read_bytes() == b""
+
+    def test_reset_reader_skips_preexisting_events(self, tmp_path):
+        """reset_reader() causes subsequent drain() to skip events written before the call."""
+        path = tmp_path / "events.jsonl"
+        store = SharedEventStore(path)
+        store.open_writer()
+        store.put({"type": "old_event"})
+        store.close_writer()
+
+        # reset_reader() advances the read offset to current EOF
+        store.reset_reader()
+
+        store.open_writer()
+        store.put({"type": "new_event"})
+        store.close_writer()
+
+        events = store.drain()
+        assert len(events) == 1
+        assert events[0]["type"] == "new_event"
+
 
 @pytest.fixture
 def event_store(tmp_path):
@@ -128,7 +163,7 @@ class TestWaitForEvent:
 class TestDrain:
     """Tests for EventConsumer.drain()."""
 
-    async def test_drain_returns_all_events(self, event_store):
+    def test_drain_returns_all_events(self, event_store):
         """drain() returns all pending events in order."""
         consumer = _make_consumer(event_store)
         event_store.open_writer()
@@ -141,7 +176,7 @@ class TestDrain:
         assert events[1]["type"] == "reaction_added"
         event_store.close_writer()
 
-    async def test_drain_advances_reader(self, event_store):
+    def test_drain_advances_reader(self, event_store):
         """After drain(), subsequent drain() returns empty."""
         consumer = _make_consumer(event_store)
         event_store.open_writer()
@@ -151,7 +186,7 @@ class TestDrain:
         assert consumer.drain() == []
         event_store.close_writer()
 
-    async def test_drain_empty_returns_empty_list(self, event_store):
+    def test_drain_empty_returns_empty_list(self, event_store):
         """drain() on empty store returns empty list."""
         consumer = _make_consumer(event_store)
         assert consumer.drain() == []
@@ -281,14 +316,16 @@ class TestLifecycle:
         await consumer.stop()  # must not raise
 
     async def test_stop_closes_handler(self, event_store):
-        """stop() calls close_async() on the handler."""
+        """stop() calls close_async() on the handler and closes the writer."""
         consumer = _make_consumer(event_store)
         mock_handler = AsyncMock()
         mock_handler.close_async = AsyncMock()
         consumer._handler = mock_handler
+        event_store.open_writer()
 
         await consumer.stop()
         mock_handler.close_async.assert_awaited_once()
+        assert event_store._write_fd is None
 
     async def test_stop_catches_close_error(self, event_store):
         """stop() catches and logs close_async() errors without raising."""
@@ -296,8 +333,10 @@ class TestLifecycle:
         mock_handler = AsyncMock()
         mock_handler.close_async = AsyncMock(side_effect=RuntimeError("close failed"))
         consumer._handler = mock_handler
+        event_store.open_writer()
 
         await consumer.stop()  # must not raise
+        assert event_store._write_fd is None
 
     async def test_handler_stays_none_on_connect_failure(self, event_store):
         """If connect_async() raises, _handler remains None."""

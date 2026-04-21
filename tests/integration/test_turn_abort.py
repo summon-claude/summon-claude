@@ -168,34 +168,35 @@ class TestReactionAbort:
         # Cleanup: unregister to avoid interference with other tests
         dispatcher.unregister(test_channel)
 
-    async def test_reaction_from_non_owner_ignored(
-        self,
-        slack_harness,
-        test_channel,
-    ):
+
+class TestReactionAuthorization:
+    """Pure-logic abort authorization tests — no Slack credentials needed."""
+
+    async def test_reaction_from_non_owner_ignored(self):
         """Reactions from non-owner users do not trigger abort."""
+        channel_id = "C_TEST_CHANNEL"
         dispatcher = EventDispatcher()
         abort_event = asyncio.Event()
 
         handle = SessionHandle(
             session_id="test-abort-nouser",
-            channel_id=test_channel,
+            channel_id=channel_id,
             message_queue=asyncio.Queue(maxsize=10),
             permission_handler=MagicMock(spec=PermissionHandler),
             abort_callback=abort_event.set,
             authenticated_user_id="U_REAL_OWNER",
         )
-        dispatcher.register(test_channel, handle)
+        dispatcher.register(channel_id, handle)
 
         # Dispatch a reaction from a different user
         await dispatcher.dispatch_reaction(
             {
                 "user": "U_INTRUDER",
                 "reaction": "octagonal_sign",
-                "item": {"channel": test_channel, "ts": "123.456"},
+                "item": {"channel": channel_id, "ts": "123.456"},
             }
         )
 
         assert not abort_event.is_set(), "abort should NOT fire for non-owner"
 
-        dispatcher.unregister(test_channel)
+        dispatcher.unregister(channel_id)
