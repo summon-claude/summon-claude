@@ -768,12 +768,12 @@ class TestClassifierSettingSources:
     Follows the same inspect.getsource pattern as TestScribeSettingSources.
     """
 
-    def test_do_classify_setting_sources_empty(self):
-        """setting_sources=[] is passed to ClaudeAgentOptions in _do_classify."""
+    def test_query_sonnet_setting_sources_empty(self):
+        """setting_sources=[] is passed to ClaudeAgentOptions in _query_sonnet."""
         import inspect
 
         from summon_claude.sessions import classifier as classifier_mod
 
-        source = inspect.getsource(classifier_mod.SummonAutoClassifier._do_classify)
+        source = inspect.getsource(classifier_mod.SummonAutoClassifier._query_sonnet)
         assert "setting_sources" in source
         assert "setting_sources=[]" in source
