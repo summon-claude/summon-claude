@@ -9,91 +9,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import secrets
 from unittest.mock import AsyncMock
 
 import pytest
-import pytest_asyncio
 
 from summon_claude.slack.bolt import _HealthMonitor
-from tests.integration.conftest import EventConsumer, SlackTestHarness
+from tests.integration.conftest import EventConsumer
 
 logger = logging.getLogger(__name__)
 
 pytestmark = [
     pytest.mark.slack,
-    pytest.mark.xdist_group("slack_socket"),
-    pytest.mark.asyncio(loop_scope="module"),
+    pytest.mark.asyncio(loop_scope="session"),
 ]
 
 
-# ---------------------------------------------------------------------------
-# Module-scoped fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def slack_harness(_slack_socket_lock):
-    """Module-scoped harness — skips if credentials not set."""
-    if not os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN"):
-        pytest.skip("SUMMON_TEST_SLACK_BOT_TOKEN not set")
-    harness = SlackTestHarness()
-    await harness.resolve_bot_user_id()
-    yield harness
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def test_channel(slack_harness):
-    """Module-scoped test channel for resilience tests."""
-    channel_id = await slack_harness.create_test_channel(prefix="resilience")
-    yield channel_id
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def event_consumer(slack_harness, test_channel):
-    """Module-scoped Socket Mode consumer — connects once for all tests.
-
-    A single long-lived connection eliminates per-test reconnection overhead
-    and the flaky event delivery window during Socket Mode handshake. Tests
-    use unique nonces in predicates, so cross-test interference is impossible.
-    """
-    consumer = EventConsumer(
-        bot_token=slack_harness.bot_token,
-        app_token=slack_harness.app_token,
-        signing_secret=slack_harness.signing_secret,
-    )
-    try:
-        await asyncio.wait_for(consumer.start(), timeout=15.0)
-    except TimeoutError:
-        pytest.skip("Socket Mode connection timed out (15s)")
-    except Exception as exc:
-        await consumer.stop()
-        pytest.skip(f"Socket Mode connection failed: {exc}")
-
-    canary = f"canary-{secrets.token_hex(4)}"
-    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
-    try:
-        await consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-            timeout=10.0,
-        )
-    except TimeoutError:
-        await consumer.stop()
-        pytest.skip("Socket Mode canary failed — events not flowing")
-    consumer.drain()
-
-    yield consumer
-    await consumer.stop()
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
-
-
+@pytest.mark.xdist_group("slack_socket")
 class TestForceDisconnect:
-    async def test_reconnect_after_force_disconnect(self, slack_harness, test_channel):
+    async def test_reconnect_after_force_disconnect(
+        self, paused_consumer, slack_harness, test_channel
+    ):
         """Force-disconnecting via SDK and starting a new consumer delivers events."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -137,7 +73,7 @@ class TestForceDisconnect:
         finally:
             await new_consumer.stop()
 
-    async def test_reconnect_preserves_channel(self, slack_harness, test_channel):
+    async def test_reconnect_preserves_channel(self, paused_consumer, slack_harness, test_channel):
         """Messages posted across disconnect/reconnect cycles all appear in history."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -179,8 +115,9 @@ class TestForceDisconnect:
             await new_consumer.stop()
 
 
+@pytest.mark.xdist_group("slack_socket")
 class TestReconnectCycles:
-    async def test_rapid_disconnect_reconnect_cycles(self, slack_harness):
+    async def test_rapid_disconnect_reconnect_cycles(self, paused_consumer, slack_harness):
         """Three rapid disconnect/reconnect cycles all report connected after reconnect."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -203,6 +140,7 @@ class TestReconnectCycles:
             await consumer.stop()
 
 
+@pytest.mark.xdist_group("slack_socket")
 class TestHealthMonitorRecovery:
     async def test_reconnect_exhaustion(self):
         """_HealthMonitor triggers on_exhausted after max_reconnect_attempts failures."""

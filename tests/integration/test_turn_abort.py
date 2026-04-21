@@ -11,78 +11,16 @@ Requires SUMMON_TEST_SLACK_BOT_TOKEN — skipped when credentials are absent.
 from __future__ import annotations
 
 import asyncio
-import os
 import secrets
 from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
 
 from summon_claude.event_dispatcher import EventDispatcher, SessionHandle
 from summon_claude.sessions.commands import CommandContext, CommandResult, _handle_stop
 from summon_claude.sessions.permissions import PermissionHandler
-from tests.integration.conftest import EventConsumer, SlackTestHarness
 
-pytestmark = pytest.mark.asyncio(loop_scope="module")
-
-
-# ---------------------------------------------------------------------------
-# Module-scoped fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def slack_harness(_slack_socket_lock):
-    """Module-scoped harness — skips if credentials not set."""
-    if not os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN"):
-        pytest.skip("SUMMON_TEST_SLACK_BOT_TOKEN not set")
-    harness = SlackTestHarness()
-    await harness.resolve_bot_user_id()
-    yield harness
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def test_channel(slack_harness):
-    """Module-scoped test channel for abort tests."""
-    channel_id = await slack_harness.create_test_channel(prefix="abort")
-    yield channel_id
-
-
-@pytest_asyncio.fixture(scope="module", loop_scope="module")
-async def event_consumer(slack_harness, test_channel):
-    """Module-scoped Socket Mode consumer for reaction event capture."""
-    consumer = EventConsumer(
-        bot_token=slack_harness.bot_token,
-        app_token=slack_harness.app_token,
-        signing_secret=slack_harness.signing_secret,
-    )
-    try:
-        await asyncio.wait_for(consumer.start(), timeout=15.0)
-    except TimeoutError:
-        pytest.skip("Socket Mode connection timed out (15s)")
-    except Exception as exc:
-        await consumer.stop()
-        pytest.skip(f"Socket Mode connection failed: {exc}")
-
-    canary = f"canary-{secrets.token_hex(4)}"
-    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
-    try:
-        await consumer.wait_for_event(
-            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
-            timeout=10.0,
-        )
-    except TimeoutError:
-        await consumer.stop()
-        pytest.skip("Socket Mode canary failed — events not flowing")
-    consumer.drain()
-
-    yield consumer
-    await consumer.stop()
-
-
-# ---------------------------------------------------------------------------
-# Tests
-# ---------------------------------------------------------------------------
+pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 
 class TestStopCommand:

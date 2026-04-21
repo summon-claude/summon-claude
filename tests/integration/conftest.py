@@ -26,6 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import pytest_asyncio
 from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
 from slack_bolt.async_app import AsyncApp
 from slack_sdk.http_retry.async_handler import AsyncRetryHandler
@@ -57,8 +58,7 @@ if _env_file.exists():
             key, _, value = entry.partition("=")
             os.environ.setdefault(key.strip(), value.strip())
 
-# Shared channel state — created once, reused across all tests
-_shared_channel_id: str | None = None
+# Channel cleanup tracking — channels are archived at session end
 _channels_to_cleanup: list[str] = []
 
 
@@ -152,6 +152,11 @@ class EventConsumer:
     Uses ``ignoring_self_events_enabled=False`` so the bot's own actions
     (messages, reactions) generate capturable events — essential since
     tests can only act as the bot.
+
+    **Pause/resume**: Tests that need their own isolated Socket Mode
+    connection must first pause this consumer to avoid event theft
+    (Slack distributes events round-robin across all connected consumers
+    for the same app token). Use the ``paused_consumer`` fixture.
     """
 
     def __init__(self, bot_token: str, app_token: str, signing_secret: str) -> None:
@@ -188,6 +193,39 @@ class EventConsumer:
                 logging.getLogger(__name__).debug(
                     "EventConsumer: close error (expected)", exc_info=True
                 )
+
+    async def pause(self) -> None:
+        """Disconnect the Socket Mode consumer without destroying it.
+
+        Used by ``paused_consumer`` to temporarily yield the connection
+        so isolated tests can create their own consumer without event theft.
+        """
+        await self.stop()
+
+    async def resume(
+        self,
+        client: AsyncWebClient,
+        test_channel: str,
+    ) -> None:
+        """Reconnect and validate event delivery with a canary message.
+
+        Restarts the Socket Mode connection and runs a canary check to
+        ensure events are flowing before returning control to subsequent
+        tests that depend on this consumer.
+        """
+        await self.start()
+        # Slack's event routing table takes 1-3s to register a new consumer
+        await asyncio.sleep(2.0)
+        self.drain()
+
+        # Canary: confirm events are actually flowing after reconnect
+        canary = f"resume-canary-{secrets.token_hex(4)}"
+        await client.chat_postMessage(channel=test_channel, text=canary)
+        await self.wait_for_event(
+            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
+            timeout=15.0,
+        )
+        self.drain()
 
     async def wait_for_event(
         self,
@@ -234,7 +272,10 @@ class EventConsumer:
         return events
 
 
-_SOCKET_MODE_LOCK = Path(__file__).resolve().parents[2] / ".cache" / "slack-test.lock"
+# Lock file shared across all worktrees and the main repo. Lives in ~/.cache
+# (not repo-local .cache/) so concurrent runs from different worktrees or
+# overlapping git push hooks all serialize through the same file.
+_SOCKET_MODE_LOCK = Path.home() / ".cache" / "summon-claude" / "slack-test.lock"
 
 
 @pytest.fixture(scope="session")
@@ -257,9 +298,9 @@ def _slack_socket_lock():
         fd.close()
 
 
-@pytest.fixture
-async def slack_harness(_slack_socket_lock):
-    """Harness — skips if credentials not set."""
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def slack_harness():
+    """Session-scoped harness — skips if credentials not set."""
     if not os.environ.get("SUMMON_TEST_SLACK_BOT_TOKEN"):
         pytest.skip("SUMMON_TEST_SLACK_BOT_TOKEN not set")
 
@@ -268,29 +309,89 @@ async def slack_harness(_slack_socket_lock):
     yield harness
 
 
-@pytest.fixture
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def test_channel(slack_harness):
-    """Shared test channel — created once, reused across all tests.
+    """Session-scoped test channel — created once, shared across all tests.
 
-    First call exercises create_channel + invite_user + set_topic,
-    providing transitive lifecycle signal. Subsequent calls return
-    the cached channel_id.
+    Exercises create_channel + invite_user + set_topic, providing
+    transitive lifecycle signal for those code paths.
     """
-    global _shared_channel_id  # noqa: PLW0603
-    if _shared_channel_id is None:
-        _shared_channel_id = await slack_harness.create_test_channel()
-        # Transitive lifecycle signal: invite a real user via raw web_client
-        user_id = await slack_harness.find_non_bot_user()
-        if user_id:
-            with contextlib.suppress(Exception):
-                await slack_harness.client.conversations_invite(
-                    channel=_shared_channel_id, users=user_id
-                )
-        # Transitive lifecycle signal: set topic
-        await slack_harness.client.conversations_setTopic(
-            channel=_shared_channel_id, topic="Integration test channel"
+    channel_id = await slack_harness.create_test_channel()
+    user_id = await slack_harness.find_non_bot_user()
+    if user_id:
+        with contextlib.suppress(Exception):
+            await slack_harness.client.conversations_invite(channel=channel_id, users=user_id)
+    await slack_harness.client.conversations_setTopic(
+        channel=channel_id, topic="Integration test channel"
+    )
+    yield channel_id
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def event_consumer(_slack_socket_lock, slack_harness, test_channel):
+    """Session-scoped Socket Mode consumer — one connection for all modules.
+
+    Maintains a real WebSocket connection to Slack, shared across all
+    Socket Mode tests. Runs a one-time canary (post -> wait -> drain)
+    to validate event delivery before any tests execute.
+
+    Failure modes:
+      - No credentials -> handled by slack_harness (pytest.skip)
+      - Connection timeout -> pytest.skip (infrastructure issue)
+      - Canary timeout -> pytest.fail (event pipeline broken)
+    """
+    consumer = EventConsumer(
+        bot_token=slack_harness.bot_token,
+        app_token=slack_harness.app_token,
+        signing_secret=slack_harness.signing_secret,
+    )
+    try:
+        await asyncio.wait_for(consumer.start(), timeout=15.0)
+    except TimeoutError:
+        pytest.skip("Socket Mode connection timed out (15s)")
+    except Exception as exc:
+        await consumer.stop()
+        pytest.skip(f"Socket Mode connection failed: {exc}")
+
+    # Brief pause after connect: Slack's event routing table takes 1-3s to
+    # fully register a new consumer after rapid consumer cycling (e.g. the
+    # isolated tests disconnect/reconnect their own consumers just before us).
+    await asyncio.sleep(2.0)
+
+    canary = f"canary-{secrets.token_hex(4)}"
+    await slack_harness.client.chat_postMessage(channel=test_channel, text=canary)
+    try:
+        await consumer.wait_for_event(
+            lambda e: e.get("type") == "message" and canary in e.get("text", ""),
+            timeout=15.0,
         )
-    yield _shared_channel_id
+    except TimeoutError:
+        await consumer.stop()
+        pytest.fail(
+            "Socket Mode canary failed -- events not flowing. "
+            "Credentials are valid but the event delivery pipeline is broken."
+        )
+    consumer.drain()
+
+    yield consumer
+    await consumer.stop()
+
+
+@pytest_asyncio.fixture(loop_scope="session")
+async def paused_consumer(event_consumer, slack_harness, test_channel):
+    """Temporarily disconnect the session-scoped EventConsumer.
+
+    Slack distributes Socket Mode events round-robin across all connected
+    consumers for the same app token. Tests that create their own consumer
+    must use this fixture to pause the session-scoped one first, preventing
+    event theft.
+
+    On teardown, the session consumer is reconnected and validated with a
+    canary message before subsequent tests can use it.
+    """
+    await event_consumer.pause()
+    yield event_consumer
+    await event_consumer.resume(slack_harness.client, test_channel)
 
 
 @pytest.fixture
