@@ -39,7 +39,7 @@ class TestSocketConnect:
 
 @pytest.mark.xdist_group("slack_socket_isolated")
 class TestSocketDisconnect:
-    async def test_socket_disconnect_clean(self, event_store, slack_harness):
+    async def test_socket_disconnect_clean(self, _slack_socket_lock, event_store, slack_harness):
         """A stopped consumer's socket client reports disconnected."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -58,7 +58,9 @@ class TestSocketDisconnect:
 
 @pytest.mark.xdist_group("slack_socket_isolated")
 class TestSocketReconnect:
-    async def test_socket_reconnect_after_close(self, event_store, slack_harness, test_channel):
+    async def test_socket_reconnect_after_close(
+        self, _slack_socket_lock, event_store, slack_harness, test_channel
+    ):
         """A consumer can be stopped and restarted; events flow after restart."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -120,7 +122,9 @@ class TestHealthMonitorConnected:
 
 @pytest.mark.xdist_group("slack_socket_isolated")
 class TestHealthMonitorDisconnected:
-    async def test_health_monitor_detects_disconnect(self, event_store, slack_harness):
+    async def test_health_monitor_detects_disconnect(
+        self, _slack_socket_lock, event_store, slack_harness
+    ):
         """_HealthMonitor reports unhealthy after socket is closed."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,

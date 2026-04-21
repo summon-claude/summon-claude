@@ -27,7 +27,9 @@ pytestmark = [
 
 @pytest.mark.xdist_group("slack_socket_isolated")
 class TestForceDisconnect:
-    async def test_reconnect_after_force_disconnect(self, event_store, slack_harness, test_channel):
+    async def test_reconnect_after_force_disconnect(
+        self, _slack_socket_lock, event_store, slack_harness, test_channel
+    ):
         """Force-disconnecting via SDK and starting a new consumer delivers events."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -78,7 +80,9 @@ class TestForceDisconnect:
         finally:
             await new_consumer.stop()
 
-    async def test_reconnect_preserves_channel(self, event_store, slack_harness, test_channel):
+    async def test_reconnect_preserves_channel(
+        self, _slack_socket_lock, event_store, slack_harness, test_channel
+    ):
         """Messages posted across disconnect/reconnect cycles all appear in history."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
@@ -124,7 +128,9 @@ class TestForceDisconnect:
 
 @pytest.mark.xdist_group("slack_socket_isolated")
 class TestReconnectCycles:
-    async def test_rapid_disconnect_reconnect_cycles(self, event_store, slack_harness):
+    async def test_rapid_disconnect_reconnect_cycles(
+        self, _slack_socket_lock, event_store, slack_harness
+    ):
         """Three rapid disconnect/reconnect cycles all report connected after reconnect."""
         consumer = EventConsumer(
             bot_token=slack_harness.bot_token,
