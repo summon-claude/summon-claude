@@ -1830,6 +1830,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="6. Auto-mode Classifier (post-worktree only)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#content-classification-warn-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content classification (warn-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2350,6 +2367,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="6. Auto-mode Classifier (post-worktree only)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#content-classification-warn-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content classification (warn-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2647,6 +2681,8 @@
 <li><strong>Tool-use denied in classifier</strong>: The classifier subprocess is configured with <code>can_use_tool</code> that denies all tool calls, preventing the classifier itself from taking actions.</li>
 </ul>
 <p>The intended security layering is: <strong>read-only</strong> (pre-containment) → <strong>write gate</strong> (containment entry + one-time approval) → <strong>auto-classifier</strong> (post-worktree, configurable rules) → <strong>Slack HITL</strong> (fallback).</p>
+<h4 id="content-classification-warn-only">Content classification (warn-only)<a class="headerlink" href="#content-classification-warn-only" title="Permanent link">&para;</a></h4>
+<p>The classifier also evaluates subagent output via <code>classify_content()</code>, but in <strong>warn-only mode</strong>: a "block" posts a Slack notice without suppressing the result. By the time the result arrives, the subagent has already acted; blocking the text would hide information without undoing anything. Content evaluations do not update fallback counters, so flagged output cannot shut down the tool classifier.</p>
 <h3 id="7-sdk-allow-suggestions">7. SDK Allow Suggestions<a class="headerlink" href="#7-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
 <p>If the SDK provides an <code>allow</code> suggestion (from <code>settings.json</code> <code>allowedTools</code>), the tool is approved. Write-gated tools that fell through CWD containment checks (paths outside the containment root, or <code>Bash</code>) are excluded — <code>allowedTools</code> cannot override CWD containment.</p>
 <h3 id="8-slack-approval-buttons-fallback">8. Slack Approval Buttons (fallback)<a class="headerlink" href="#8-slack-approval-buttons-fallback" title="Permanent link">&para;</a></h3>

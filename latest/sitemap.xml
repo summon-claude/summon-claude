@@ -2,166 +2,166 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/changelog/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/troubleshooting/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/context/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/daemon/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/database/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/overview/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/security/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/slack-integration/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/concepts/threading/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/development/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/development/contributing/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/development/releasing/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/development/testing/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/configuration/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/installation/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/quickstart/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/slack-setup/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/getting-started/upgrading/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/canvas/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/configuration/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/cron-tasks/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/doctor/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/github-integration/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/hooks/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/jira-integration/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/pm-agents/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/projects/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/scribe-integrations/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/scribe/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/guide/sessions/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/cli/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/commands/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/environment-variables/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/mcp-tools/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/permissions/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://summon-claude.github.io/summon-claude/latest/reference/prompts/</loc>
-         <lastmod>2026-04-19</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
 </urlset>
