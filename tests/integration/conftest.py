@@ -341,6 +341,11 @@ def _slack_socket_lock():
     fd = os.fdopen(raw_fd, "w")
     try:
         fcntl.flock(fd, fcntl.LOCK_EX)
+        # Truncate stale event store from prior runs while we hold
+        # exclusive access.  Safe: no other process is reading/writing.
+        events_path = _SOCKET_MODE_LOCK.parent / "slack-test-events.jsonl"
+        if events_path.exists():
+            events_path.write_bytes(b"")
         yield
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
@@ -390,8 +395,9 @@ def event_store():
     across worktrees and concurrent ``git push`` hooks, working in tandem
     with ``_slack_socket_lock`` to serialize test runs.
 
-    Each worker's reader starts at end-of-file, so stale events from prior
-    runs are automatically invisible. No truncation needed.
+    The file is truncated by ``_slack_socket_lock`` at lock acquisition
+    (safe — exclusive access is held).  Each worker's reader also starts
+    at end-of-file via ``reset_reader`` for within-session isolation.
     """
     store_dir = Path.home() / ".cache" / "summon-claude"
     store_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
