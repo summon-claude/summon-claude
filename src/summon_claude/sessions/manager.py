@@ -1068,6 +1068,7 @@ class SessionManager:
                                 error_message=f"Project directory not found: {project_dir}",
                             )
                     continue
+                resolved_project_dir = pathlib.Path(project_dir).resolve()  # noqa: ASYNC240
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
@@ -1090,16 +1091,14 @@ class SessionManager:
                             and pathlib.Path(old_cwd).is_dir()  # noqa: ASYNC240
                             and pathlib.Path(old_cwd)  # noqa: ASYNC240
                             .resolve()
-                            .is_relative_to(
-                                pathlib.Path(project_dir).resolve()  # noqa: ASYNC240
-                            )
+                            .is_relative_to(resolved_project_dir)
                         ):
                             cwd = old_cwd
                         else:
                             cwd = project_dir
                         if old_cwd and old_cwd != cwd:
                             logger.debug(
-                                "PM: session %s cwd changed: %s -> %s",
+                                "project_up: session %s cwd changed: %s -> %s",
                                 sess_id[:8],
                                 old_cwd,
                                 cwd,
