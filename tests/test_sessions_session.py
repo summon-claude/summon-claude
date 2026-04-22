@@ -748,6 +748,10 @@ class TestIsPmSessionName:
     def test_empty_string(self):
         assert is_pm_session_name("") is False
 
+    def test_bare_pm_without_dash(self):
+        # "pm" alone has neither "-pm-" substring nor "pm-" prefix (no trailing dash)
+        assert is_pm_session_name("pm") is False
+
     def test_pm_starts_with_pm_dash(self):
         # Regression guard: "pm-abc" must detect as PM via startswith("pm-")
         assert is_pm_session_name("pm-abc") is True
@@ -4419,6 +4423,160 @@ class TestZzzGetOrCreatePmChannel:
 
         assert channel_name == "myproj-pm"
         web.conversations_rename.assert_not_awaited()
+
+    async def test_pm_channel_creation_when_no_pm_channel_id(self, tmp_path):
+        """Creates new channel named {prefix}-0-pm and persists pm_channel_id."""
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        web = AsyncMock()
+        web.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_NEW", "name": "newproj-0-pm"}}
+        )
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("newproj", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_NEW"
+        assert channel_name == "newproj-0-pm"
+        web.conversations_create.assert_awaited_once()
+        call_kwargs = web.conversations_create.await_args
+        assert call_kwargs.kwargs.get("name") == "newproj-0-pm"
+        assert call_kwargs.kwargs.get("is_private") is True
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_NEW")
+
+    async def test_pm_channel_creation_name_taken_fallback(self, tmp_path):
+        """name_taken error triggers pagination to find the existing channel."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [{"id": "C_TAKEN", "name": "newproj2-0-pm", "creator": "U_BOT"}],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+        web.conversations_join = AsyncMock()
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("newproj2", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_TAKEN"
+        assert channel_name == "newproj2-0-pm"
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_TAKEN")
+
+    async def test_pm_channel_name_taken_rejects_non_bot_creator(self, tmp_path):
+        """name_taken fallback skips channels not created by the bot."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [{"id": "C_HIJACK", "name": "proj3-0-pm", "creator": "U_OTHER"}],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("proj3", str(tmp_path))
+            with pytest.raises(RuntimeError, match="exists but bot cannot access"):
+                await session._get_or_create_pm_channel(web, registry, project_id)
+
+    async def test_pm_channel_name_taken_unarchives_bot_channel(self, tmp_path):
+        """name_taken fallback unarchives an archived bot-created channel."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [
+                    {
+                        "id": "C_ARCHIVED",
+                        "name": "proj4-0-pm",
+                        "creator": "U_BOT",
+                        "is_archived": True,
+                    }
+                ],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+        web.conversations_unarchive = AsyncMock()
+        web.conversations_join = AsyncMock()
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("proj4", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_ARCHIVED"
+        web.conversations_unarchive.assert_awaited_once_with(channel="C_ARCHIVED")
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_ARCHIVED")
+
+    async def test_pm_channel_name_taken_unarchive_failure_raises(self, tmp_path):
+        """Unarchive failure skips channel; raises RuntimeError when no valid channel."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [
+                    {
+                        "id": "C_STUCK",
+                        "name": "proj5-0-pm",
+                        "creator": "U_BOT",
+                        "is_archived": True,
+                    }
+                ],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+        web.conversations_unarchive = AsyncMock(side_effect=Exception("admin restriction"))
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("proj5", str(tmp_path))
+            with pytest.raises(RuntimeError, match="exists but bot cannot access"):
+                await session._get_or_create_pm_channel(web, registry, project_id)
 
 
 # ---------------------------------------------------------------------------

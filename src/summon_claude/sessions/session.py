@@ -343,6 +343,9 @@ def _make_channel_name(prefix: str, session_name: str, hex_bytes: int = 3) -> st
     Collision space: hex_bytes=3 gives ~16.7M values, hex_bytes=2 gives
     65,536 values per (prefix, slug) pair.  The _create_channel retry loop
     (3 attempts) mitigates single collisions.
+
+    If *session_name* already starts with *prefix*-, the duplicate prefix
+    segment is stripped to avoid ``prefix-prefix-name-hex`` names.
     """
     hex_suffix = secrets.token_hex(hex_bytes)
     slug = _slugify(session_name) if session_name else "session"
@@ -1071,6 +1074,7 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
+        proj: dict | None = None  # cached project lookup, reused for auto_mode_rules
         if self._channel_id_option:
             channel_id, channel_name = await self._reuse_channel(
                 web_client, registry, self._channel_id_option
@@ -1089,14 +1093,14 @@ class SummonSession:
             # Resolve effective prefix and hex length for ad-hoc/child sessions
             if self._project_id:
                 try:
-                    _proj = await registry.get_project(self._project_id)
+                    proj = await registry.get_project(self._project_id)
                 except Exception:
-                    _proj = None
+                    proj = None
                     logger.warning(
                         "Could not resolve project %s for channel prefix", self._project_id
                     )
-                if _proj:
-                    self._effective_prefix = _proj.get("channel_prefix", self._effective_prefix)
+                if proj:
+                    self._effective_prefix = proj.get("channel_prefix", self._effective_prefix)
                     self._effective_hex_bytes = 2  # 4-char hex for PM-spawned children
             channel_id, channel_name = await self._create_channel(web_client)
 
@@ -1277,7 +1281,7 @@ class SummonSession:
             )
         project_rules = None
         if self._project_id:
-            project = await registry.get_project(self._project_id)
+            project = proj if proj is not None else await registry.get_project(self._project_id)
             if project and project.get("auto_mode_rules"):
                 try:
                     parsed = json.loads(project["auto_mode_rules"])
@@ -1565,6 +1569,29 @@ class SummonSession:
                     channels = resp.get("channels", [])
                     for ch in channels:
                         if ch.get("name") == new_channel_name:
+                            if ch.get("creator") != self._bot_user_id:
+                                logger.warning(
+                                    "PM: channel #%s exists but was created by %s, not bot"
+                                    " (%s) — skipping to prevent channel hijack",
+                                    new_channel_name,
+                                    ch.get("creator"),
+                                    self._bot_user_id,
+                                )
+                                continue
+                            if ch.get("is_archived"):
+                                logger.info(
+                                    "PM: channel #%s is archived — unarchiving",
+                                    new_channel_name,
+                                )
+                                try:
+                                    await web_client.conversations_unarchive(channel=ch["id"])
+                                except Exception as _unarch_err:
+                                    logger.warning(
+                                        "PM: failed to unarchive #%s: %s",
+                                        new_channel_name,
+                                        _unarch_err,
+                                    )
+                                    continue
                             new_id = ch["id"]
                             cname = ch["name"]
                             found = True

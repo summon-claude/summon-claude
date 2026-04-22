@@ -1082,6 +1082,31 @@ class TestDispatchSpawnToken:
         assert response["type"] == "error"
         assert "initial_prompt" in response["message"]
 
+    async def test_dispatch_create_session_rejects_pm_name(self):
+        """Defense-in-depth: create_session rejects PM-pattern session names."""
+        manager, _, _ = _make_manager()
+        response = await manager._dispatch_control(
+            {
+                "type": "create_session",
+                "options": {"cwd": "/tmp", "name": "pm-evil"},
+            }
+        )
+        assert response["type"] == "error"
+        assert "PM naming pattern" in response["message"]
+
+    async def test_dispatch_spawn_rejects_pm_name(self):
+        """Defense-in-depth: spawn rejects PM-pattern session names."""
+        manager, _, _ = _make_manager()
+        response = await manager._dispatch_control(
+            {
+                "type": "create_session_with_spawn_token",
+                "options": {"cwd": "/tmp", "name": "fix-pm-bug"},
+                "spawn_token": "tok",
+            }
+        )
+        assert response["type"] == "error"
+        assert "PM naming pattern" in response["message"]
+
 
 class TestDispatchStripsProxyFields:
     """IPC boundary safety: CLI must not inject jira_proxy_port/token."""

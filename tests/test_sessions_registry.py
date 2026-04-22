@@ -1161,6 +1161,62 @@ class TestMigration16To17:
             assert row[0] is None  # DEFAULT NULL
 
 
+class TestMigration17To18:
+    """Targeted tests for migration 17 → 18 (adds idx_sessions_project_id index)."""
+
+    async def test_migrate_17_to_18_adds_project_id_index(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "migrate_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project_id TEXT)"
+            )
+            await raw_db.commit()
+
+            async with raw_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_project_id'"
+            ) as cursor:
+                assert await cursor.fetchone() is None
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_project_id'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None, "idx_sessions_project_id not created by migration 17→18"
+
+    async def test_migrate_17_to_18_idempotent(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "idempotent_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project_id TEXT)"
+            )
+            await raw_db.commit()
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_project_id'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None
+
+
 class TestSpawnTokens:
     async def test_store_and_consume_spawn_token(self, registry):
         from datetime import UTC, datetime, timedelta

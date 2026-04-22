@@ -206,6 +206,39 @@ class TestProjectList:
         assert proj["pm_running"] == 0
         assert proj["last_pm_status"] == "completed"
 
+    async def test_list_shows_errored_status_new_format(self, registry, tmp_path):
+        """last_pm_error resolves correctly for the new pm-{hex} name format (LIKE 'pm-%')."""
+        project_id = await registry.add_project("err-new-proj", str(tmp_path))
+        await registry.register(
+            "sess-err-new",
+            1234,
+            str(tmp_path),
+            name="pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("sess-err-new", "errored", error_message="SDK crash")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "err-new-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "errored"
+        assert proj["last_pm_error"] == "SDK crash"
+
+    async def test_list_shows_completed_status_new_format(self, registry, tmp_path):
+        """last_pm_status resolves correctly for the new pm-{hex} name format (LIKE 'pm-%')."""
+        project_id = await registry.add_project("done-new-proj", str(tmp_path))
+        await registry.register(
+            "sess-done-new",
+            1234,
+            str(tmp_path),
+            name="pm-abc123",
+            project_id=project_id,
+        )
+        await registry.update_status("sess-done-new", "completed")
+        projects = await registry.list_projects()
+        proj = next(p for p in projects if p["name"] == "done-new-proj")
+        assert proj["pm_running"] == 0
+        assert proj["last_pm_status"] == "completed"
+
     async def test_list_excludes_child_sessions_from_pm_status(self, registry, tmp_path):
         """Child sessions with the same project_id must not affect PM status."""
         project_id = await registry.add_project("parent-proj", str(tmp_path))

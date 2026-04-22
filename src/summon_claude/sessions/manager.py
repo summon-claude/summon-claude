@@ -536,6 +536,15 @@ class SessionManager:
                         "type": "error",
                         "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
                     }
+                if options.name and is_pm_session_name(options.name):
+                    return {
+                        "type": "error",
+                        "message": (
+                            "session name must not match PM naming pattern "
+                            "(avoid 'pm-' prefix and '-pm-' substring). "
+                            "Use a task description like 'fix-auth' or 'add-search'."
+                        ),
+                    }
                 try:
                     short_code = await self.create_session(options)
                 except ValueError as e:
@@ -596,6 +605,15 @@ class SessionManager:
                     return {
                         "type": "error",
                         "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
+                    }
+                if options.name and is_pm_session_name(options.name):
+                    return {
+                        "type": "error",
+                        "message": (
+                            "session name must not match PM naming pattern "
+                            "(avoid 'pm-' prefix and '-pm-' substring). "
+                            "Use a task description like 'fix-auth' or 'add-search'."
+                        ),
                     }
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
@@ -958,7 +976,7 @@ class SessionManager:
             auth = await self._generate_auth(session_id)
             options = SessionOptions(
                 cwd=cwd,
-                name=f"pm-auth-{secrets.token_hex(3)}",
+                name=f"project-auth-{secrets.token_hex(3)}",
                 auth_only=True,
             )
             options = self._inject_proxy_options(options)
