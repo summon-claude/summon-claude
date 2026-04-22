@@ -701,6 +701,86 @@ class TestCleanupOrphanedVMs:
         run_mock.assert_called_once()
         mock_reg.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_orphaned_vm_destroyed(self):
+        """VM in matchlock list with matching DB vm_id → kill + rm called."""
+        from summon_claude.daemon import _cleanup_orphaned_vms
+
+        list_output = b"vm-deadbeef\trunning\tnode:24-slim\t2026-01-01\t1234\n"
+        calls: list[list[str]] = []
+
+        async def fake_run_process(cmd, **kwargs):
+            calls.append(list(cmd))
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = list_output if "list" in cmd else b""
+            result.stderr = b""
+            return result
+
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall = AsyncMock(return_value=[("vm-deadbeef",)])
+        mock_cursor.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor.__aexit__ = AsyncMock(return_value=False)
+
+        mock_db = MagicMock()
+        mock_db.execute = MagicMock(return_value=mock_cursor)
+
+        mock_registry = AsyncMock()
+        mock_registry.db = mock_db
+        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
+        mock_registry.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("shutil.which", return_value="/usr/local/bin/matchlock"),
+            patch("anyio.run_process", side_effect=fake_run_process),
+            patch("summon_claude.daemon.SessionRegistry", return_value=mock_registry),
+        ):
+            await _cleanup_orphaned_vms()
+
+        kill_calls = [c for c in calls if "kill" in c]
+        rm_calls = [c for c in calls if "rm" in c]
+        assert any("vm-deadbeef" in str(c) for c in kill_calls)
+        assert any("vm-deadbeef" in str(c) for c in rm_calls)
+
+    @pytest.mark.asyncio
+    async def test_vm_not_in_db_not_destroyed(self):
+        """VM in matchlock list but NOT in DB → not destroyed."""
+        from summon_claude.daemon import _cleanup_orphaned_vms
+
+        list_output = b"vm-cafebabe\trunning\tnode:24-slim\t2026-01-01\t999\n"
+        calls: list[list[str]] = []
+
+        async def fake_run_process(cmd, **kwargs):
+            calls.append(list(cmd))
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = list_output if "list" in cmd else b""
+            result.stderr = b""
+            return result
+
+        mock_cursor = AsyncMock()
+        mock_cursor.fetchall = AsyncMock(return_value=[])
+        mock_cursor.__aenter__ = AsyncMock(return_value=mock_cursor)
+        mock_cursor.__aexit__ = AsyncMock(return_value=False)
+
+        mock_db = MagicMock()
+        mock_db.execute = MagicMock(return_value=mock_cursor)
+
+        mock_registry = AsyncMock()
+        mock_registry.db = mock_db
+        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
+        mock_registry.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("shutil.which", return_value="/usr/local/bin/matchlock"),
+            patch("anyio.run_process", side_effect=fake_run_process),
+            patch("summon_claude.daemon.SessionRegistry", return_value=mock_registry),
+        ):
+            await _cleanup_orphaned_vms()
+
+        destroy_calls = [c for c in calls if "kill" in c or "rm" in c]
+        assert destroy_calls == [], "VM not in DB must not be destroyed"
+
 
 # ---------------------------------------------------------------------------
 # IPC framing protocol tests (absorbed from test_ipc.py)

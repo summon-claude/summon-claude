@@ -939,3 +939,59 @@ class TestMatchlockTransportConnect:
             await transport.connect()
 
         transport._backend.destroy_vm.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# MatchlockTransport.close() — process termination
+# ---------------------------------------------------------------------------
+
+
+class TestMatchlockTransportClose:
+    def _make_transport_with_process(self, returncode=None):
+        config = VmConfig(claude_code_version="1.2.3", workspace_path="/workspace")
+        options = ClaudeAgentOptions()
+        backend = MagicMock()
+        transport = MatchlockTransport(
+            backend, config, options, vm_handle="vm-deadbeef", cli_path="matchlock"
+        )
+        process = MagicMock()
+        process.returncode = returncode
+        process.terminate = MagicMock()
+        process.kill = MagicMock()
+        process.wait = AsyncMock()
+        transport._process = process
+        transport._master_fd = 42
+        transport._ready = True
+        return transport, process
+
+    @pytest.mark.anyio
+    async def test_close_terminates_running_process(self) -> None:
+        transport, process = self._make_transport_with_process(returncode=None)
+        process.wait = AsyncMock(side_effect=lambda: setattr(process, "returncode", 0))
+
+        with patch("os.close"):
+            await transport.close()
+
+        process.terminate.assert_called_once()
+        assert transport._process is None
+        assert transport._ready is False
+
+    @pytest.mark.anyio
+    async def test_close_skips_terminate_for_exited_process(self) -> None:
+        transport, process = self._make_transport_with_process(returncode=0)
+
+        with patch("os.close"):
+            await transport.close()
+
+        process.terminate.assert_not_called()
+        assert transport._process is None
+
+    @pytest.mark.anyio
+    async def test_close_cleans_up_master_fd(self) -> None:
+        transport, _ = self._make_transport_with_process(returncode=0)
+
+        with patch("os.close") as mock_close:
+            await transport.close()
+
+        mock_close.assert_called_once_with(42)
+        assert transport._master_fd is None

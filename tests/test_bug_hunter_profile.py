@@ -252,7 +252,14 @@ class TestBugHunterMutualExclusion:
             self._make_session(bug_hunter_profile=True, scribe_profile=True)
 
 
-class TestBugHunterMemoryVolumePath:
+class TestBugHunterMemorySlugAlgorithm:
+    """Tests the slug algorithm used by session.py:1346-1347 for memory isolation.
+
+    Tests a reimplementation of the two-line formula — not the production code
+    path (which requires full SummonSession construction). Catches slug logic
+    regressions only, not wiring issues.
+    """
+
     def _compute_memory_vol_path(self, project_id: str | None) -> str:
         from summon_claude.config import get_data_dir
 
