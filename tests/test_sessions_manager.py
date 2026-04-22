@@ -2771,7 +2771,7 @@ class TestRestartSuspendedSessionsResume:
     """Additional tests for _restart_suspended_sessions edge cases."""
 
     async def test_project_up_resume_suspended_pm(self):
-        """Suspended PM session is detected by name and resumed with pm_profile=True."""
+        """Suspended PM session is resumed with pm_profile=True from DB flag."""
         manager, _, _ = _make_manager()
         manager._project_up_in_flight = True
 
@@ -2780,7 +2780,7 @@ class TestRestartSuspendedSessionsResume:
 
         pm_session = {
             "session_id": "pm-old",
-            "session_name": "pm-abc123",  # new format: startswith("pm-") → is_pm=True
+            "session_name": "pm-abc123",
             "cwd": "/tmp/myproj",
             "model": "claude-opus-4-6",
             "status": "suspended",
@@ -2788,6 +2788,7 @@ class TestRestartSuspendedSessionsResume:
             "slack_channel_name": "zzz-myproj-0-pm",
             "claude_session_id": "claude-pm-sid",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
 
         captured_options: list = []
@@ -2959,7 +2960,7 @@ class TestMultiProjectPmResume:
 
         pm1 = {
             "session_id": "pm-old-1",
-            "session_name": "pm-aaa",  # new format: startswith("pm-") → is_pm=True
+            "session_name": "pm-aaa",
             "cwd": "/tmp/proj1",
             "model": "claude-opus-4-6",
             "status": "suspended",
@@ -2967,10 +2968,11 @@ class TestMultiProjectPmResume:
             "slack_channel_name": "zzz-proj1-0-pm",
             "claude_session_id": "cl-pm1",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
         pm2 = {
             "session_id": "pm-old-2",
-            "session_name": "pm-bbb",  # new format
+            "session_name": "pm-bbb",
             "cwd": "/tmp/proj2",
             "model": "claude-opus-4-6",
             "status": "suspended",
@@ -2978,6 +2980,7 @@ class TestMultiProjectPmResume:
             "slack_channel_name": "zzz-proj2-0-pm",
             "claude_session_id": "cl-pm2",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
 
         captured_options: list = []

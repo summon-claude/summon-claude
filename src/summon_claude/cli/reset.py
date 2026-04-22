@@ -11,7 +11,6 @@ import click
 from summon_claude.cli.interactive import is_interactive
 from summon_claude.config import get_config_dir, get_data_dir
 from summon_claude.daemon import is_daemon_running
-from summon_claude.sessions.session import is_pm_session_name
 
 
 class _IpcError(Exception):
@@ -35,12 +34,10 @@ async def _check_running_sessions() -> tuple[bool, bool, bool]:
         raise _IpcError(str(exc)) from exc
 
     has_adhoc = any(
-        not session.get("project_id") and not is_pm_session_name(session.get("session_name", ""))
-        for session in sessions
+        not session.get("project_id") and not session.get("pm_profile") for session in sessions
     )
     has_project = any(
-        session.get("project_id") or is_pm_session_name(session.get("session_name", ""))
-        for session in sessions
+        session.get("project_id") or session.get("pm_profile") for session in sessions
     )
     return (True, has_adhoc, has_project)
 

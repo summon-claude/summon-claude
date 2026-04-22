@@ -211,6 +211,7 @@ class SessionRegistry:
         parent_session_id: str | None = None,
         authenticated_user_id: str | None = None,
         project_id: str | None = None,
+        pm_profile: bool = False,
     ) -> None:
         """Insert a new session with status pending_auth."""
         db = self._check_connected()
@@ -226,8 +227,9 @@ class SessionRegistry:
                     INSERT INTO sessions
                         (session_id, pid, status, session_name, cwd, model,
                          started_at, last_activity_at,
-                         parent_session_id, authenticated_user_id, project_id)
-                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?, ?)
+                         parent_session_id, authenticated_user_id, project_id,
+                         pm_profile)
+                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -240,6 +242,7 @@ class SessionRegistry:
                         parent_session_id,
                         authenticated_user_id,
                         project_id,
+                        1 if pm_profile else 0,
                     ),
                 )
             except Exception as exc:
@@ -872,8 +875,8 @@ class SessionRegistry:
     async def list_projects(self) -> list[dict]:
         """List all projects with PM status fields.
 
-        Only considers PM sessions (name matching ``%-pm-%`` or ``pm-%``)
-        to avoid pollution from child sessions that inherit the project_id.
+        Only considers PM sessions (``pm_profile = 1``) to avoid pollution
+        from child sessions that inherit the project_id.
 
         Each row includes:
         - ``pm_running``: 1 if an active/pending_auth PM session exists
@@ -882,10 +885,8 @@ class SessionRegistry:
         """
         db = self._check_connected()
         async with db.execute(
-            # pm_sessions CTE matches is_pm_session_name() in session.py — update both together
             "WITH pm_sessions AS ("
-            "  SELECT * FROM sessions"
-            "  WHERE session_name LIKE '%-pm-%' OR session_name LIKE 'pm-%'"
+            "  SELECT * FROM sessions WHERE pm_profile = 1"
             ")"
             " SELECT p.*,"
             "  EXISTS("

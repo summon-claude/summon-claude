@@ -12,7 +12,6 @@ from summon_claude.cli.helpers import print_local_daemon_hint, resolve_or_pick, 
 from summon_claude.cli.interactive import format_session_option, interactive_select, is_interactive
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.registry import SessionRegistry
-from summon_claude.sessions.session import is_pm_session_name
 
 logger = logging.getLogger(__name__)
 
@@ -20,8 +19,7 @@ logger = logging.getLogger(__name__)
 async def _check_pm_stop(session: dict[str, Any], ctx: click.Context) -> bool:
     """If *session* is a PM, warn about orphaned children. Returns True to proceed."""
     project_id = session.get("project_id")
-    sname = session.get("session_name", "")
-    if not project_id or not is_pm_session_name(sname):
+    if not project_id or not session.get("pm_profile"):
         return True
 
     siblings: list[dict[str, Any]] = []
@@ -32,7 +30,7 @@ async def _check_pm_stop(session: dict[str, Any], ctx: click.Context) -> bool:
         for s in siblings
         if s["session_id"] != session["session_id"]
         and s.get("status") in ("pending_auth", "active")
-        and not is_pm_session_name(s.get("session_name") or "")
+        and not s.get("pm_profile")
     ]
     if not active_children:
         return True
@@ -51,8 +49,7 @@ async def _check_pm_stop(session: dict[str, Any], ctx: click.Context) -> bool:
 async def _notify_pm_of_child_stop(session: dict[str, Any]) -> None:
     """Best-effort: post a notification to the PM's channel when a child session is stopped."""
     project_id = session.get("project_id")
-    sname = session.get("session_name", "")
-    if not project_id or is_pm_session_name(sname):
+    if not project_id or session.get("pm_profile"):
         return  # not a child session
 
     project: dict[str, Any] | None = None
@@ -64,7 +61,7 @@ async def _notify_pm_of_child_stop(session: dict[str, Any]) -> None:
     if not pm_channel_id:
         return
 
-    label = sname or session.get("session_id", "?")[:8]
+    label = session.get("session_name") or session.get("session_id", "?")[:8]
     try:
         from slack_sdk.web.async_client import AsyncWebClient  # noqa: PLC0415
 

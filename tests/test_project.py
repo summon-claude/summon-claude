@@ -152,6 +152,7 @@ class TestProjectList:
             str(tmp_path),
             name="running-pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-pm", "active")
         projects = await registry.list_projects()
@@ -160,7 +161,7 @@ class TestProjectList:
         assert proj["last_pm_status"] == "active"
 
     async def test_list_includes_pm_running_new_format(self, registry, tmp_path):
-        """list_projects detects PM via the new 'pm-{hex}' name format (LIKE 'pm-%')."""
+        """list_projects detects PM via pm_profile column."""
         project_id = await registry.add_project("new-fmt-proj", str(tmp_path))
         await registry.register(
             "sess-pm-new",
@@ -168,6 +169,7 @@ class TestProjectList:
             str(tmp_path),
             name="pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-pm-new", "active")
         projects = await registry.list_projects()
@@ -183,6 +185,7 @@ class TestProjectList:
             str(tmp_path),
             name="err-pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-err", "errored", error_message="SDK crash")
         projects = await registry.list_projects()
@@ -199,6 +202,7 @@ class TestProjectList:
             str(tmp_path),
             name="done-pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-done", "completed")
         projects = await registry.list_projects()
@@ -207,7 +211,7 @@ class TestProjectList:
         assert proj["last_pm_status"] == "completed"
 
     async def test_list_shows_errored_status_new_format(self, registry, tmp_path):
-        """last_pm_error resolves correctly for the new pm-{hex} name format (LIKE 'pm-%')."""
+        """last_pm_error resolves correctly via pm_profile column."""
         project_id = await registry.add_project("err-new-proj", str(tmp_path))
         await registry.register(
             "sess-err-new",
@@ -215,6 +219,7 @@ class TestProjectList:
             str(tmp_path),
             name="pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-err-new", "errored", error_message="SDK crash")
         projects = await registry.list_projects()
@@ -224,7 +229,7 @@ class TestProjectList:
         assert proj["last_pm_error"] == "SDK crash"
 
     async def test_list_shows_completed_status_new_format(self, registry, tmp_path):
-        """last_pm_status resolves correctly for the new pm-{hex} name format (LIKE 'pm-%')."""
+        """last_pm_status resolves correctly via pm_profile column."""
         project_id = await registry.add_project("done-new-proj", str(tmp_path))
         await registry.register(
             "sess-done-new",
@@ -232,6 +237,7 @@ class TestProjectList:
             str(tmp_path),
             name="pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("sess-done-new", "completed")
         projects = await registry.list_projects()
@@ -249,6 +255,7 @@ class TestProjectList:
             str(tmp_path),
             name="parent-pm-abc123",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("pm-sess", "active")
         # Child session errored (more recently)
@@ -1426,7 +1433,8 @@ class TestStopProjectManagersOutput:
         sessions = [
             {
                 "session_id": "pm-sid",
-                "session_name": "pm-abc123",  # new format: startswith("pm-") → is_pm
+                "session_name": "pm-abc123",
+                "pm_profile": True,
                 "status": "active",
             },
             {
@@ -1464,7 +1472,12 @@ class TestStopProjectManagersOutput:
         projects = [{"project_id": "p1", "name": "my-proj", "channel_prefix": "my-proj"}]
         # PM listed first to prove the sort overrides input order
         sessions = [
-            {"session_id": "pm-sid", "session_name": "pm-abc123", "status": "active"},
+            {
+                "session_id": "pm-sid",
+                "session_name": "pm-abc123",
+                "status": "active",
+                "pm_profile": 1,
+            },
             {"session_id": "child-sid", "session_name": "my-proj-def456", "status": "active"},
         ]
 
@@ -1504,7 +1517,8 @@ class TestStopProjectManagersOutput:
         sessions = [
             {
                 "session_id": "pm-only",
-                "session_name": "pm-aaa",  # new format
+                "session_name": "pm-aaa",
+                "pm_profile": True,
                 "status": "active",
             }
         ]
@@ -1536,7 +1550,12 @@ class TestStopProjectManagersOutput:
             {"project_id": "p2", "name": "beta"},
         ]
         alpha_sessions = [
-            {"session_id": "pm-alpha", "session_name": "pm-abc", "status": "active"},
+            {
+                "session_id": "pm-alpha",
+                "session_name": "pm-abc",
+                "status": "active",
+                "pm_profile": 1,
+            },
         ]
 
         with (
@@ -1555,7 +1574,6 @@ class TestStopProjectManagersOutput:
             result = await stop_project_managers(name="alpha")
 
         assert result == ["pm-alpha"]
-        # get_project_sessions only called for alpha, not beta
         reg.get_project_sessions.assert_called_once_with("p1")
 
     async def test_stop_by_name_suspends_child_sessions(self):
@@ -1567,7 +1585,12 @@ class TestStopProjectManagersOutput:
             {"project_id": "p2", "name": "beta"},
         ]
         alpha_sessions = [
-            {"session_id": "pm-alpha", "session_name": "pm-abc", "status": "active"},
+            {
+                "session_id": "pm-alpha",
+                "session_name": "pm-abc",
+                "status": "active",
+                "pm_profile": 1,
+            },
             {"session_id": "child-alpha", "session_name": "alpha-worker", "status": "active"},
         ]
 
@@ -1631,6 +1654,7 @@ class TestSuspendedStatus:
             str(tmp_path),
             name="pm-aaa",
             project_id=project_id,
+            pm_profile=True,
         )
         await registry.update_status("susp-pm", "suspended")
         projects = await registry.list_projects()
@@ -1728,13 +1752,14 @@ class TestStopPMAwareness:
         assert await _check_pm_stop(session, ctx) is True
 
     async def test_check_pm_stop_no_children_returns_true(self):
-        """PM with no active children passes through (new format exercises startswith path)."""
+        """PM with no active children passes through."""
         from summon_claude.cli.stop import _check_pm_stop
 
         session = {
             "session_id": "pm-1",
-            "session_name": "pm-abc",  # new format: no "-pm-" substring
+            "session_name": "pm-abc",
             "project_id": "p1",
+            "pm_profile": True,
         }
         ctx = MagicMock()
 
@@ -1751,8 +1776,9 @@ class TestStopPMAwareness:
 
         pm_session = {
             "session_id": "pm-1",
-            "session_name": "pm-abc",  # new format
+            "session_name": "pm-abc",
             "project_id": "p1",
+            "pm_profile": True,
         }
         child_session = {
             "session_id": "child-1",

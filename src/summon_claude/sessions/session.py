@@ -896,6 +896,7 @@ class SummonSession:
                 parent_session_id=self._parent_session_id,
                 authenticated_user_id=self._authenticated_user_id,
                 project_id=self._project_id,
+                pm_profile=self._pm_profile or self._global_pm_profile,
             )
             await registry.log_event(
                 "session_created",
@@ -1676,6 +1677,15 @@ class SummonSession:
                         )
                         continue
                     channel_id = ch["id"]
+                    if ch.get("is_archived"):
+                        logger.info("Global PM: channel #%s is archived — unarchiving", ch_name)
+                        try:
+                            await web_client.conversations_unarchive(channel=channel_id)
+                        except Exception as _unarch_err:
+                            logger.warning(
+                                "Global PM: failed to unarchive #%s: %s", ch_name, _unarch_err
+                            )
+                            continue
                     await web_client.conversations_join(channel=channel_id)
                     if ch_name == zzz_gpm_name:
                         # Restore canonical name (strip zzz- prefix on resume)

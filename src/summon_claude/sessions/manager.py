@@ -494,6 +494,30 @@ class SessionManager:
     # Unix socket control API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_session_options(options: SessionOptions) -> dict | None:
+        """Validate session options at the IPC boundary. Returns error dict or None."""
+        if options.system_prompt_append and len(options.system_prompt_append) > MAX_PROMPT_CHARS:
+            return {
+                "type": "error",
+                "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
+            }
+        if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
+            return {
+                "type": "error",
+                "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
+            }
+        if options.name and is_pm_session_name(options.name):
+            return {
+                "type": "error",
+                "message": (
+                    "session name must not match PM naming pattern "
+                    "(avoid 'pm-' prefix and '-pm-' substring). "
+                    "Use a task description like 'fix-auth' or 'add-search'."
+                ),
+            }
+        return None
+
     async def handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -523,28 +547,8 @@ class SessionManager:
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
                 # Defense-in-depth: validate free-text fields at daemon boundary
-                if (
-                    options.system_prompt_append
-                    and len(options.system_prompt_append) > MAX_PROMPT_CHARS
-                ):
-                    return {
-                        "type": "error",
-                        "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
-                    return {
-                        "type": "error",
-                        "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.name and is_pm_session_name(options.name):
-                    return {
-                        "type": "error",
-                        "message": (
-                            "session name must not match PM naming pattern "
-                            "(avoid 'pm-' prefix and '-pm-' substring). "
-                            "Use a task description like 'fix-auth' or 'add-search'."
-                        ),
-                    }
+                if err := self._validate_session_options(options):
+                    return err
                 try:
                     short_code = await self.create_session(options)
                 except ValueError as e:
@@ -576,6 +580,7 @@ class SessionManager:
                             "channel_id": s.channel_id,
                             "session_name": s.name,
                             "project_id": s.project_id,
+                            "pm_profile": s.is_pm,
                             "status": "active",
                         }
                         for sid, s in self._sessions.items()
@@ -592,29 +597,8 @@ class SessionManager:
                     spawn_token = msg["spawn_token"]
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid request: {e}"}
-                # Defense-in-depth: re-validate free-text fields at the daemon boundary
-                if (
-                    options.system_prompt_append
-                    and len(options.system_prompt_append) > MAX_PROMPT_CHARS
-                ):
-                    return {
-                        "type": "error",
-                        "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
-                    return {
-                        "type": "error",
-                        "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.name and is_pm_session_name(options.name):
-                    return {
-                        "type": "error",
-                        "message": (
-                            "session name must not match PM naming pattern "
-                            "(avoid 'pm-' prefix and '-pm-' substring). "
-                            "Use a task description like 'fix-auth' or 'add-search'."
-                        ),
-                    }
+                if err := self._validate_session_options(options):
+                    return err
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
                 except ValueError as e:
@@ -1105,7 +1089,7 @@ class SessionManager:
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
-                    is_pm = is_pm_session_name(sess_name)
+                    is_pm = bool(sess.get("pm_profile"))
                     try:
                         channel_id = sess.get("slack_channel_id")
                         if not channel_id:
