@@ -2026,3 +2026,55 @@ class TestChildChannelMethods:
         )
         channels = await registry.get_all_active_channels("U_OWNER")
         assert "C_SUSP_GAA" not in channels
+
+
+class TestMigration17To18BugHunterUniqueIndex:
+    """Verify migration 17→18 enforces one active bug-hunter per project.
+
+    Uses raw SQL INSERTs to bypass register()'s application-level name
+    uniqueness check, which would reject a second 'bug-hunter' session
+    before the DB-level unique index is tested.
+    """
+
+    async def _insert_session(self, registry, session_id, name, status, project_id):
+        await registry.db.execute(
+            "INSERT INTO sessions "
+            "(session_id, pid, cwd, session_name, model, status, project_id, started_at) "
+            "VALUES (?, ?, '/tmp', ?, 'claude-sonnet-4-6', ?, ?, datetime('now'))",
+            (session_id, os.getpid(), name, status, project_id),
+        )
+        await registry.db.commit()
+
+    async def test_unique_index_prevents_duplicate_active(self, registry):
+        import sqlite3
+
+        proj_id = await registry.add_project("bh-test-one", "/tmp/bh1")
+
+        await self._insert_session(registry, "bh-1", "bug-hunter", "active", proj_id)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            await self._insert_session(registry, "bh-2", "bug-hunter", "active", proj_id)
+
+    async def test_allows_active_after_completed(self, registry):
+        proj_id = await registry.add_project("bh-test-two", "/tmp/bh2")
+
+        await self._insert_session(registry, "bh-done", "bug-hunter", "active", proj_id)
+        await registry.db.execute(
+            "UPDATE sessions SET status = 'completed' WHERE session_id = 'bh-done'"
+        )
+        await registry.db.commit()
+
+        await self._insert_session(registry, "bh-new", "bug-hunter", "active", proj_id)
+        session = await registry.get_session("bh-new")
+        assert session["status"] == "active"
+
+    async def test_pending_auth_also_blocked(self, registry):
+        """pending_auth counts as 'active' for the uniqueness constraint."""
+        import sqlite3
+
+        proj_id = await registry.add_project("bh-test-pend", "/tmp/bhp")
+
+        await self._insert_session(registry, "bh-pend-1", "bug-hunter", "pending_auth", proj_id)
+
+        with pytest.raises(sqlite3.IntegrityError):
+            await self._insert_session(registry, "bh-pend-2", "bug-hunter", "pending_auth", proj_id)

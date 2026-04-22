@@ -8,6 +8,8 @@ import shutil
 import anyio
 
 from summon_claude.sandbox import (
+    MATCHLOCK_INSTALL_HINT,
+    MATCHLOCK_UPGRADE_HINT,
     SandboxBackend,
     SandboxNotAvailableError,
     VmConfig,
@@ -27,8 +29,7 @@ class MatchlockBackend(SandboxBackend):
         cli_path = shutil.which("matchlock")
         if not cli_path:
             raise SandboxNotAvailableError(
-                "Bug hunter requires Matchlock. Install via: "
-                "brew install jingkaihe/essentials/matchlock"
+                f"Bug hunter requires Matchlock. Install via:\n{MATCHLOCK_INSTALL_HINT}"
             )
         self._cli = cli_path
         self._version_checked = False
@@ -65,7 +66,7 @@ class MatchlockBackend(SandboxBackend):
         if version < _MIN_VERSION:
             raise SandboxNotAvailableError(
                 f"Bug hunter requires Matchlock v{'.'.join(str(x) for x in _MIN_VERSION)}+. "
-                f"Found v{version_str}. Run: brew upgrade jingkaihe/essentials/matchlock"
+                f"Found v{version_str}. Upgrade via:\n{MATCHLOCK_UPGRADE_HINT}"
             )
         self._version_checked = True
 

@@ -122,11 +122,13 @@ class MatchlockTransport(Transport):
         options: ClaudeAgentOptions,
         *,
         vm_handle: VmHandle | None = None,
+        cli_path: str = "matchlock",
     ) -> None:
         self._backend = backend
         self._config = vm_config
         self._options = options
         self._vm_handle: VmHandle | None = vm_handle
+        self._cli_path = cli_path
         self._process: anyio.abc.Process | None = None
         self._master_fd: int | None = None
         self._ready = False
@@ -281,9 +283,10 @@ class MatchlockTransport(Transport):
         return cmd
 
     def _apply_skills_defaults(self) -> tuple[list[str], list[str] | None]:
-        """Delegate to SubprocessCLITransport._apply_skills_defaults via mixin call.
+        """Compute effective allowed_tools and setting_sources from skills options.
 
-        We replicate the logic directly to avoid instantiating SubprocessCLITransport.
+        Replicates SubprocessCLITransport._apply_skills_defaults logic directly
+        to avoid instantiating SubprocessCLITransport inside the VM transport.
         """
         allowed_tools: list[str] = list(self._options.allowed_tools)
         setting_sources: list[str] | None = (
@@ -316,8 +319,10 @@ class MatchlockTransport(Transport):
             return
 
         # Create VM if no existing handle
+        vm_was_created = False
         if self._vm_handle is None:
             self._vm_handle = await self._backend.create_vm(self._config)
+            vm_was_created = True
 
         # Allocate PTY
         master_fd, slave_fd = pty.openpty()
@@ -354,7 +359,7 @@ class MatchlockTransport(Transport):
 
             # 4. Wrap in matchlock exec -i <handle> -- sh -c <full_cmd>
             exec_cmd = [
-                "matchlock",
+                self._cli_path,
                 "exec",
                 "-i",
                 self._vm_handle,
@@ -373,6 +378,10 @@ class MatchlockTransport(Transport):
         except Exception:
             os.close(master_fd)
             os.close(slave_fd)
+            if vm_was_created and self._vm_handle:
+                with suppress(Exception):
+                    await self._backend.destroy_vm(self._vm_handle)
+                self._vm_handle = None
             raise
 
         # Close slave_fd on the host side — the child process holds it
@@ -390,6 +399,26 @@ class MatchlockTransport(Transport):
         if not self._ready or self._process is None or self._process.stdin is None:
             raise RuntimeError("MatchlockTransport is not connected")
         await self._process.stdin.send(data.encode())
+
+    def _truncate_buffer_if_needed(self) -> None:
+        """Guard against unbounded buffer growth from a misbehaving process.
+
+        Keeps the last partial line so we don't drop a valid in-progress message.
+        """
+        if len(self._buffer) > _MAX_BUFFER_BYTES:
+            last_newline = self._buffer.rfind("\n")
+            if last_newline >= 0:
+                logger.warning(
+                    "Transport buffer exceeded %d bytes, discarding completed lines",
+                    _MAX_BUFFER_BYTES,
+                )
+                self._buffer = self._buffer[last_newline + 1 :]
+            else:
+                logger.warning(
+                    "Transport buffer exceeded %d bytes with no newline, clearing",
+                    _MAX_BUFFER_BYTES,
+                )
+                self._buffer = ""
 
     async def read_messages(self) -> AsyncIterator[dict[str, Any]]:
         """Read and yield parsed JSON messages from the PTY master fd."""
@@ -409,22 +438,7 @@ class MatchlockTransport(Transport):
             text = _strip_ansi(raw.decode(errors="replace"))
             self._buffer += text
 
-            # Guard against unbounded buffer growth from a misbehaving process.
-            # Keep the last partial line so we don't drop a valid in-progress message.
-            if len(self._buffer) > _MAX_BUFFER_BYTES:
-                last_newline = self._buffer.rfind("\n")
-                if last_newline >= 0:
-                    logger.warning(
-                        "Transport buffer exceeded %d bytes, discarding completed lines",
-                        _MAX_BUFFER_BYTES,
-                    )
-                    self._buffer = self._buffer[last_newline + 1 :]
-                else:
-                    logger.warning(
-                        "Transport buffer exceeded %d bytes with no newline, clearing",
-                        _MAX_BUFFER_BYTES,
-                    )
-                    self._buffer = ""
+            self._truncate_buffer_if_needed()
 
             # Process complete lines
             while "\n" in self._buffer:
@@ -485,4 +499,7 @@ async def create_matchlock_transport(
     if vm_handle is not None and not await backend.is_running(vm_handle):
         logger.warning("VM %s is not running — creating fresh VM (crash recovery)", vm_handle)
         vm_handle = None  # Force new VM creation in connect()
-    return MatchlockTransport(backend, vm_config, options, vm_handle=vm_handle)
+    from summon_claude.sandbox.matchlock import MatchlockBackend  # noqa: PLC0415
+
+    cli_path = backend._cli if isinstance(backend, MatchlockBackend) else "matchlock"  # noqa: SLF001
+    return MatchlockTransport(backend, vm_config, options, vm_handle=vm_handle, cli_path=cli_path)

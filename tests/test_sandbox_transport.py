@@ -317,3 +317,284 @@ class TestCreateMatchlockTransportFactory:
 
         backend.is_running.assert_not_called()
         assert transport._vm_handle is None
+
+
+# ---------------------------------------------------------------------------
+# read_messages buffer overflow guard
+# ---------------------------------------------------------------------------
+
+
+class TestReadMessagesBufferGuard:
+    """Tests for _truncate_buffer_if_needed — the production truncation method."""
+
+    def _make_transport(self) -> MatchlockTransport:
+        config = VmConfig(claude_code_version="1.2.3", workspace_path="/workspace")
+        options = ClaudeAgentOptions()
+        backend = MagicMock()
+        transport = MatchlockTransport(backend, config, options)
+        transport._ready = True
+        return transport
+
+    def test_buffer_truncated_keeps_partial_line(self):
+        from summon_claude.sandbox.transport import _MAX_BUFFER_BYTES
+
+        transport = self._make_transport()
+        junk = "x" * _MAX_BUFFER_BYTES
+        partial = '{"type": "partial"}'
+        transport._buffer = junk + "\n" + partial
+
+        transport._truncate_buffer_if_needed()
+
+        assert transport._buffer == partial
+
+    def test_buffer_truncated_clears_without_newline(self):
+        from summon_claude.sandbox.transport import _MAX_BUFFER_BYTES
+
+        transport = self._make_transport()
+        transport._buffer = "x" * (_MAX_BUFFER_BYTES + 1)
+
+        transport._truncate_buffer_if_needed()
+
+        assert transport._buffer == ""
+
+    def test_buffer_within_limit_untouched(self):
+        from summon_claude.sandbox.transport import _MAX_BUFFER_BYTES
+
+        transport = self._make_transport()
+        content = "x" * (_MAX_BUFFER_BYTES - 1)
+        transport._buffer = content
+
+        transport._truncate_buffer_if_needed()
+
+        assert transport._buffer == content
+
+
+# ---------------------------------------------------------------------------
+# _check_version failure paths
+# ---------------------------------------------------------------------------
+
+
+class TestCheckVersion:
+    def _make_backend(self):
+        from summon_claude.sandbox.matchlock import MatchlockBackend
+
+        with patch("shutil.which", return_value="/usr/local/bin/matchlock"):
+            return MatchlockBackend()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "version_output",
+        [b"matchlock version 0.2.8", b"matchlock version 0.1.0"],
+    )
+    async def test_check_version_too_old(self, version_output: bytes) -> None:
+        from summon_claude.sandbox import SandboxNotAvailableError
+
+        backend = self._make_backend()
+
+        async def fake_run_process(cmd, **kwargs):
+            result = MagicMock()
+            result.stdout = version_output
+            result.stderr = b""
+            result.returncode = 0
+            return result
+
+        with (
+            patch("anyio.run_process", side_effect=fake_run_process),
+            pytest.raises(SandboxNotAvailableError, match="upgrade"),
+        ):
+            await backend._check_version()
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize(
+        "version_output",
+        [b"matchlock garbage-output", b"matchlock version not-a-version", b""],
+    )
+    async def test_check_version_unparseable(self, version_output: bytes) -> None:
+        from summon_claude.sandbox import SandboxNotAvailableError
+
+        backend = self._make_backend()
+
+        async def fake_run_process(cmd, **kwargs):
+            result = MagicMock()
+            result.stdout = version_output
+            result.stderr = b""
+            result.returncode = 0
+            return result
+
+        with (
+            patch("anyio.run_process", side_effect=fake_run_process),
+            pytest.raises(SandboxNotAvailableError, match="Cannot parse"),
+        ):
+            await backend._check_version()
+
+    @pytest.mark.anyio
+    async def test_check_version_cli_failure(self) -> None:
+        from summon_claude.sandbox import SandboxNotAvailableError
+
+        backend = self._make_backend()
+
+        async def fake_run_process(cmd, **kwargs):
+            result = MagicMock()
+            result.stdout = b""
+            result.stderr = b"matchlock: command failed"
+            result.returncode = 1
+            return result
+
+        with (
+            patch("anyio.run_process", side_effect=fake_run_process),
+            pytest.raises(SandboxNotAvailableError, match="Failed to get"),
+        ):
+            await backend._check_version()
+
+
+# ---------------------------------------------------------------------------
+# create_vm cleanup path
+# ---------------------------------------------------------------------------
+
+
+class TestCreateVmCleanup:
+    @pytest.mark.anyio
+    async def test_useradd_failure_calls_destroy_vm(self) -> None:
+        from summon_claude.sandbox.matchlock import MatchlockBackend
+
+        config = VmConfig(claude_code_version="1.2.3", workspace_path="/host/workspace")
+        call_log: list[list[str]] = []
+
+        async def fake_run_process(cmd, **kwargs):
+            call_log.append(list(cmd))
+            result = MagicMock()
+            result.stderr = b""
+            result.returncode = 0
+            if "--version" in cmd:
+                result.stdout = b"matchlock version 0.2.9"
+            elif "run" in cmd:
+                result.stdout = b"vm-aabbccdd"
+            elif "useradd" in cmd:
+                result.stdout = b""
+                result.stderr = b"useradd: user already exists"
+                result.returncode = 9
+            else:
+                result.stdout = b""
+            return result
+
+        with (
+            patch("shutil.which", return_value="/usr/local/bin/matchlock"),
+            patch("anyio.run_process", side_effect=fake_run_process),
+        ):
+            backend = MatchlockBackend()
+            with pytest.raises(RuntimeError, match="useradd failed"):
+                await backend.create_vm(config)
+
+        kill_cmds = [cmd for cmd in call_log if "kill" in cmd]
+        assert kill_cmds, "destroy_vm was not called (no 'kill' command)"
+        assert any("vm-aabbccdd" in cmd for cmd in kill_cmds)
+
+
+# ---------------------------------------------------------------------------
+# create_bug_hunter_vm_config factory
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBugHunterVmConfig:
+    def _base_env(self) -> dict[str, str]:
+        return {"ANTHROPIC_API_KEY": "sk-test"}
+
+    def test_happy_path_returns_vmconfig(self, monkeypatch):
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        config = create_bug_hunter_vm_config(
+            workspace_path="/host/repo",
+            claude_code_version="latest",
+        )
+        assert isinstance(config, VmConfig)
+        assert config.workspace_path == "/host/repo"
+
+    def test_default_allowlist_always_included(self, monkeypatch):
+        from summon_claude.sandbox import _DEFAULT_NETWORK_ALLOWLIST, create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        config = create_bug_hunter_vm_config(
+            workspace_path="/host/repo",
+            claude_code_version="latest",
+        )
+        for domain in _DEFAULT_NETWORK_ALLOWLIST:
+            assert domain in config.network_allowlist
+
+    def test_extra_allowlist_is_additive(self, monkeypatch):
+        from summon_claude.sandbox import _DEFAULT_NETWORK_ALLOWLIST, create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        config = create_bug_hunter_vm_config(
+            workspace_path="/host/repo",
+            claude_code_version="latest",
+            network_allowlist=("example.com",),
+        )
+        assert "example.com" in config.network_allowlist
+        for domain in _DEFAULT_NETWORK_ALLOWLIST:
+            assert domain in config.network_allowlist
+
+    def test_invalid_domain_raises(self, monkeypatch):
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        with pytest.raises(ValueError, match="Invalid domain"):
+            create_bug_hunter_vm_config(
+                workspace_path="/host/repo",
+                claude_code_version="latest",
+                network_allowlist=("not a domain!!!",),
+            )
+
+    def test_missing_anthropic_api_key_raises(self, monkeypatch):
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            create_bug_hunter_vm_config(workspace_path="/host/repo", claude_code_version="latest")
+
+    def test_missing_custom_secret_raises(self, monkeypatch):
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.delenv("MY_TOKEN", raising=False)
+        with pytest.raises(ValueError, match="MY_TOKEN"):
+            create_bug_hunter_vm_config(
+                workspace_path="/host/repo",
+                claude_code_version="latest",
+                secrets={"MY_TOKEN": "api.example.com"},
+            )
+
+    def test_vertex_adc_warning_logged(self, monkeypatch, caplog):
+        import logging
+
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        monkeypatch.setenv("CLAUDE_CODE_USE_VERTEX", "1")
+        monkeypatch.setenv(
+            "GOOGLE_APPLICATION_CREDENTIALS",
+            "/home/user/.config/gcloud/application_default_credentials.json",
+        )
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sandbox"):
+            create_bug_hunter_vm_config(
+                workspace_path="/host/repo",
+                claude_code_version="latest",
+            )
+        assert any("Vertex" in r.message or "user credentials" in r.message for r in caplog.records)
+
+    def test_pre_install_latest_tag(self, monkeypatch):
+        from summon_claude.sandbox import create_bug_hunter_vm_config
+
+        for k, v in self._base_env().items():
+            monkeypatch.setenv(k, v)
+        config = create_bug_hunter_vm_config(
+            workspace_path="/host/repo",
+            claude_code_version="latest",
+        )
+        assert any("@latest" in step for step in config.pre_install)

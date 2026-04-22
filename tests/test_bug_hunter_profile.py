@@ -195,8 +195,8 @@ class TestBugHunterSessionProperties:
 
 
 class TestBugHunterPmSpawnGate:
-    def test_session_start_rejects_bug_hunter_from_non_pm(self):
-        """bug_hunter_profile=True is rejected when is_pm=False."""
+    def test_session_start_absent_for_non_pm(self):
+        """Non-PM sessions do not receive the session_start MCP tool."""
         from unittest.mock import AsyncMock
 
         from summon_claude.sessions.scheduler import SessionScheduler
@@ -219,6 +219,6 @@ class TestBugHunterPmSpawnGate:
         session_start = next(
             (t for t in tools if getattr(t, "name", None) == "session_start"), None
         )
-        # Non-PM sessions don't get session_start at all, so this gate is upstream
-        # (bug_hunter_profile is validated inside session_start handler when is_pm=False)
+        # Non-PM sessions don't get session_start at all — the gate is upstream of
+        # any bug_hunter_profile validation inside the handler.
         assert session_start is None

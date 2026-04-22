@@ -14,6 +14,7 @@ import click
 from summon_claude.cli import daemon_client
 from summon_claude.cli.helpers import print_local_daemon_hint
 from summon_claude.daemon import is_daemon_running
+from summon_claude.sandbox import MATCHLOCK_INSTALL_HINT
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
 from summon_claude.sessions.registry import SessionRegistry
@@ -72,9 +73,8 @@ async def async_project_add(
     """
     if bug_hunter_enabled and not shutil.which("matchlock"):
         raise click.ClickException(
-            "Bug hunter requires Matchlock "
-            "(brew install jingkaihe/essentials/matchlock). "
-            "Install it first, then re-run with --bug-hunter."
+            f"Bug hunter requires Matchlock. Install it first, then re-run with --bug-hunter.\n"
+            f"{MATCHLOCK_INSTALL_HINT}"
         )
     resolved = _resolve_directory(directory)
     project_id: str = ""

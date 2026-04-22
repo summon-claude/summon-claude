@@ -119,6 +119,8 @@ from summon_claude.summon_cli_mcp import create_summon_cli_mcp_server
 
 if TYPE_CHECKING:
     from summon_claude.event_dispatcher import EventDispatcher
+    from summon_claude.sandbox import VmConfig
+    from summon_claude.sandbox.matchlock import MatchlockBackend
 
 logger = logging.getLogger(__name__)
 
@@ -781,8 +783,8 @@ class SummonSession:
         self._scribe_welcomed: bool = False
 
         # Bug hunter VM state — populated in _run_session if bug_hunter_profile=True
-        self._bh_backend: Any | None = None  # MatchlockBackend
-        self._bh_vm_config: Any | None = None  # VmConfig
+        self._bh_backend: MatchlockBackend | None = None
+        self._bh_vm_config: VmConfig | None = None
         self._bh_vm_handle: str | None = None  # VmHandle
 
     # ------------------------------------------------------------------
@@ -1359,7 +1361,7 @@ class SummonSession:
                 # VM is the containment boundary — activate containment and grant
                 # unattended write access immediately (SEC-D-001)
                 permission_handler.notify_containment_active(
-                    containment_root=Path(bh_vm_config.guest_workspace_path),
+                    containment_root=Path(self._cwd),
                     is_git_repo=False,
                 )
                 permission_handler.grant_unattended_write_access(
@@ -1368,6 +1370,10 @@ class SummonSession:
                 logger.info("Bug hunter VM created: %s", bh_vm_handle)
             except (SandboxNotAvailableError, RuntimeError, ValueError) as e:
                 logger.error("Bug hunter: failed to start — %s", e)
+                if self._bh_vm_handle and self._bh_backend:
+                    with contextlib.suppress(Exception):
+                        await self._bh_backend.destroy_vm(self._bh_vm_handle)
+                    self._bh_vm_handle = None
                 try:
                     await client.post(f":warning: Bug hunter could not start.\n{e}")
                 except Exception:
@@ -2321,35 +2327,9 @@ class SummonSession:
                     max_lifetime_s=0,
                 )
             if is_bug_hunter and self._bh_vm_config is not None:
-                from summon_claude.sandbox.bug_hunter_memory import (  # noqa: PLC0415
-                    get_last_scan_hash,
-                )
-
-                bh_mem_path = (
-                    Path(self._bh_vm_config.memory_volume_path)
-                    if self._bh_vm_config.memory_volume_path
-                    else None
-                )
-                last_scan_hash = get_last_scan_hash(bh_mem_path) if bh_mem_path else None
-                # git hash — best-effort (empty string triggers first-scan logic)
-                try:
-                    import anyio  # noqa: PLC0415
-
-                    _gh_result = await anyio.run_process(
-                        ["git", "-C", self._cwd, "rev-parse", "HEAD"],
-                        check=False,
-                    )
-                    git_hash = (
-                        _gh_result.stdout.decode().strip() if _gh_result.returncode == 0 else ""
-                    )
-                except Exception:
-                    git_hash = ""
                 await scheduler.create(
                     cron_expr=_build_scan_cron(self._scan_interval_s),
-                    prompt=build_bug_hunter_scan_prompt(
-                        git_hash=git_hash,
-                        last_scan_hash=last_scan_hash,
-                    ),
+                    prompt=build_bug_hunter_scan_prompt(),
                     internal=True,
                     max_lifetime_s=0,
                 )
@@ -2483,6 +2463,8 @@ class SummonSession:
 
             async with claude_client as claude:
                 self._claude = claude
+                if bh_transport is not None:
+                    self._bh_vm_handle = bh_transport._vm_handle  # noqa: SLF001
                 try:
                     # Validate SDK commands and extract model info from server info
                     try:

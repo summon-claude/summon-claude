@@ -33,6 +33,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 # recv_msg/send_msg imported lazily in handle_client to avoid circular import
 # (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
 from summon_claude.config import get_data_dir
+from summon_claude.sandbox import MATCHLOCK_INSTALL_HINT
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -892,7 +893,7 @@ class SessionManager:
     # project up — daemon-side orchestration
     # ------------------------------------------------------------------
 
-    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:
+    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
         """IPC handler for ``project_up``.
 
         Checks which projects need a PM, creates an auth session if any do,
@@ -916,7 +917,14 @@ class SessionManager:
             scribe_running = any(s.is_scribe for s in self._sessions.values())
             # Bug hunter is checked independently of needing_pm — a project
             # may have its PM running but still need a bug hunter started.
-            bh_needing = [p for p in projects if p.get("bug_hunter_enabled")]
+            running_bh_project_ids = {
+                s.project_id for s in self._sessions.values() if s.is_bug_hunter
+            }
+            bh_needing = [
+                p
+                for p in projects
+                if p.get("bug_hunter_enabled") and p["project_id"] not in running_bh_project_ids
+            ]
             if not needing_pm and gpm_running and scribe_running and not bh_needing:
                 self._project_up_in_flight = False
                 return {"type": "project_up_complete"}
@@ -1446,7 +1454,7 @@ class SessionManager:
                 await self._alert_channel(
                     pm_session,
                     ":warning: *Bug hunter could not start* — Matchlock is not installed.\n"
-                    "Install via: `brew install jingkaihe/essentials/matchlock`\n"
+                    f"Install via:\n```{MATCHLOCK_INSTALL_HINT}```\n"
                     "Then run `summon project up` to retry.",
                 )
             return

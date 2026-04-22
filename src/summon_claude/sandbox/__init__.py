@@ -13,17 +13,28 @@ logger = logging.getLogger(__name__)
 # VM ID format: vm-[0-9a-f]{8}
 _VM_ID_RE = re.compile(r"^vm-[0-9a-f]{8}$")
 
-# Semver pattern: MAJOR.MINOR.PATCH with optional pre-release/build
-_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+")
+# Semver pattern: strict MAJOR.MINOR.PATCH only (no pre-release/build suffixes)
+_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 # Domain validation: hostname with TLD, optional port
 _DOMAIN_RE = re.compile(r"^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(:\d+)?$")
 
-# Env var name validation: must start with uppercase letter, then uppercase/digits/underscores
+# Env var name validation: must start with uppercase letter, then uppercase/digits/underscores.
+# Minimum 2 chars intentional — single-letter names rejected as too ambiguous for credentials.
 _ENV_VAR_RE = re.compile(r"^[A-Z][A-Z0-9_]+$")
 
 # Session name constant — all bug hunter sessions use this name (per SEC-D-015)
 BUG_HUNTER_SESSION_NAME = "bug-hunter"
+
+# Install/upgrade hints for Matchlock — kept here so all sites stay in sync.
+MATCHLOCK_INSTALL_HINT = (
+    "macOS:  brew install jingkaihe/essentials/matchlock\n"
+    "Linux:  see https://github.com/jingkaihe/matchlock#installation"
+)
+MATCHLOCK_UPGRADE_HINT = (
+    "macOS:  brew upgrade jingkaihe/essentials/matchlock\n"
+    "Linux:  see https://github.com/jingkaihe/matchlock#installation"
+)
 
 # TypeAlias for VM ID strings
 VmHandle = str
@@ -31,10 +42,14 @@ VmHandle = str
 # Default network allowlist — always included even when project overrides are set
 _DEFAULT_NETWORK_ALLOWLIST = (
     "api.anthropic.com",
-    "pypi.org",
+    "deb.debian.org",
     "files.pythonhosted.org",
     "github.com",
+    "proxy.golang.org",
+    "pypi.org",
     "registry.npmjs.org",
+    "static.crates.io",
+    "sum.golang.org",
 )
 
 
@@ -108,7 +123,7 @@ class VmConfig:
     pre_install: tuple[str, ...] = ()
     guest_workspace_path: str = "/workspace"
     memory_volume_path: str | None = None
-    guest_memory_path: str = field(default="", init=False)
+    guest_memory_path: str = field(default="", init=False)  # derived in __post_init__
     network_allowlist: tuple[str, ...] = ()
     secrets: tuple[tuple[str, str], ...] = ()  # ((env_var, domain), ...)
     cpu: int = 4
@@ -227,7 +242,10 @@ def create_bug_hunter_vm_config(
     npm_version_tag = "latest" if claude_code_version == "latest" else claude_code_version
     return VmConfig(
         image="node:24-slim",
-        pre_install=(f"npm install -g @anthropic-ai/claude-code@{npm_version_tag}",),
+        pre_install=(
+            "apt-get update && apt-get install -y --no-install-recommends git",
+            f"npm install -g @anthropic-ai/claude-code@{npm_version_tag}",
+        ),
         claude_code_version=claude_code_version,
         workspace_path=workspace_path,
         memory_volume_path=memory_volume_path,

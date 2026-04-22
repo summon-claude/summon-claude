@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE
+from summon_claude.sessions.prompts.shared import _HEADLESS_BOILERPLATE, sanitize_prompt_value
 
 _BUG_HUNTER_SYSTEM_PROMPT_APPEND = (
     _HEADLESS_BOILERPLATE
@@ -164,7 +164,7 @@ def build_bug_hunter_system_prompt(
     append_text = (
         _BUG_HUNTER_SYSTEM_PROMPT_APPEND.replace("{cwd}", cwd)
         .replace("{scan_interval_min}", str(scan_interval_min))
-        .replace("{project_name}", project_name)
+        .replace("{project_name}", sanitize_prompt_value(project_name))
     )
     return {
         "type": "preset",
@@ -173,26 +173,21 @@ def build_bug_hunter_system_prompt(
     }
 
 
-def build_bug_hunter_scan_prompt(
-    *,
-    git_hash: str,
-    last_scan_hash: str | None,
-) -> str:
+def build_bug_hunter_scan_prompt() -> str:
     """Build the Bug Hunter periodic scan prompt.
 
-    Args:
-        git_hash: Current HEAD git hash to scan.
-        last_scan_hash: Git hash from the previous scan, or None for first scan.
+    The prompt instructs the agent to determine scan scope dynamically by
+    reading SCAN_LOG.md at scan time. This avoids stale hashes when the
+    cron job fires hours after registration.
 
     Returns:
         A plain string injected as a conversation turn to trigger a scan cycle.
     """
-    if last_scan_hash:
-        scope = f"Scan changes since {last_scan_hash} (current HEAD: {git_hash})."
-    else:
-        scope = f"First scan — current HEAD: {git_hash}. Scan recently changed files."
     return (
-        f"[SUMMON-BUG-HUNTER-SCAN] {scope}\n\n"
+        "[SUMMON-BUG-HUNTER-SCAN] "
+        "Determine scan scope: read SCAN_LOG.md in your memory directory for "
+        "the last scanned hash. If SCAN_LOG.md is empty or missing, this is a "
+        "first scan — scan recently changed files.\n\n"
         "Run a full scan cycle: bootstrap, static analysis, LLM analysis, "
         "runtime validation, report. Update the canvas and memory files when done. "
         "Stay within the 30-minute cycle timeout."
