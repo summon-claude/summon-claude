@@ -1974,7 +1974,7 @@ class TestCascadeRestart:
         assert "old-sess-2" in attempted_ids
         assert ("old-sess-2", "errored") in update_status_calls
 
-    async def test_restart_suspended_uses_project_directory_not_session_cwd(self):
+    async def test_restart_suspended_uses_project_directory_not_session_cwd(self, caplog):
         """PM sessions always use project directory as cwd, not stale session cwd."""
         manager, _, _ = _make_manager()
 
@@ -1995,6 +1995,9 @@ class TestCascadeRestart:
         manager.create_resumed_session = AsyncMock()
 
         with (
+            caplog.at_level(logging.DEBUG, logger="summon_claude.sessions.manager"),
+            # Required for the project-dir existence check; PM path never calls
+            # is_dir on old_cwd — it unconditionally uses project_dir as cwd
             patch("pathlib.Path.is_dir", return_value=True),
             patch(
                 "summon_claude.sessions.manager.SessionRegistry",
@@ -2006,6 +2009,14 @@ class TestCascadeRestart:
         manager.create_resumed_session.assert_called_once()
         opts = manager.create_resumed_session.call_args[0][0]
         assert opts.cwd == "/new/project/dir"
+
+        cwd_change_logs = [
+            r
+            for r in caplog.records
+            if "/old/stale/dir" in r.message and "/new/project/dir" in r.message
+        ]
+        assert len(cwd_change_logs) == 1
+        assert cwd_change_logs[0].levelno == logging.DEBUG
 
     async def test_restart_suspended_child_preserves_valid_subdirectory_cwd(self):
         """Non-PM child sessions preserve their cwd if it exists and is inside the project tree."""
@@ -2061,6 +2072,8 @@ class TestCascadeRestart:
         manager.create_resumed_session = AsyncMock()
 
         with (
+            # is_dir=True for both project dir and old_cwd — is_relative_to is the
+            # discriminating factor: old_cwd exists but resolves outside the project tree
             patch("pathlib.Path.is_dir", return_value=True),
             patch(
                 "summon_claude.sessions.manager.SessionRegistry",
@@ -2288,6 +2301,100 @@ class TestCascadeRestart:
 
         cwd_change_logs = [r for r in caplog.records if "cwd changed" in r.message]
         assert len(cwd_change_logs) == 0
+
+    async def test_restart_suspended_missing_directory_no_suspended_sessions(self):
+        """Missing directory with zero suspended sessions returns empty set."""
+        manager, _, _ = _make_manager()
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[])
+        mock_reg.update_status = AsyncMock()
+
+        project = _mock_project(directory="/nonexistent/dir")
+        manager.create_resumed_session = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=False),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            result = await manager._restart_suspended_sessions([project], "user-1")
+
+        assert result == set()
+        manager.create_resumed_session.assert_not_called()
+        mock_reg.update_status.assert_not_called()
+
+    async def test_restart_suspended_missing_directory_skips_only_bad_project(self):
+        """Missing directory skips only that project; other projects resume."""
+        manager, _, _ = _make_manager()
+
+        bad_session = {
+            "session_id": "bad-sess-1",
+            "session_name": "proj-abc",
+            "cwd": "/bad/project/dir",
+            "status": "suspended",
+            "slack_channel_id": "C_BAD",
+        }
+        good_session = {
+            "session_id": "good-sess-1",
+            "session_name": "proj-abc",
+            "cwd": "/good/project/dir",
+            "status": "suspended",
+            "slack_channel_id": "C_GOOD",
+        }
+
+        bad_project = _mock_project(
+            name="bad-project", directory="/nonexistent/dir", project_id="proj-bad"
+        )
+        good_project = _mock_project(
+            name="good-project", directory="/good/project/dir", project_id="proj-good"
+        )
+
+        def get_project_sessions_side_effect(project_id):
+            if project_id == "proj-bad":
+                return [bad_session]
+            return [good_session]
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(side_effect=get_project_sessions_side_effect)
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-good"})
+        mock_reg.update_status = AsyncMock()
+
+        manager.create_resumed_session = AsyncMock()
+
+        def is_dir_side_effect(self):
+            return str(self) == "/good/project/dir"
+
+        with (
+            patch("pathlib.Path.is_dir", is_dir_side_effect),
+            patch(
+                "summon_claude.sessions.manager.SessionRegistry",
+                _mock_registry_ctx(mock_reg),
+            ),
+        ):
+            result = await manager._restart_suspended_sessions(
+                [bad_project, good_project], "user-1"
+            )
+
+        errored_calls = [
+            c for c in mock_reg.update_status.call_args_list if c.args == ("bad-sess-1", "errored")
+        ]
+        assert len(errored_calls) == 1
+
+        manager.create_resumed_session.assert_called_once()
+        opts = manager.create_resumed_session.call_args[0][0]
+        assert opts.cwd == "/good/project/dir"
+
+        completed_calls = [
+            c
+            for c in mock_reg.update_status.call_args_list
+            if c.args == ("good-sess-1", "completed")
+        ]
+        assert len(completed_calls) == 1
+
+        assert result == set()
 
 
 # ---------------------------------------------------------------------------

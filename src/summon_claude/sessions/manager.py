@@ -1054,7 +1054,8 @@ class SessionManager:
                 sessions = await registry.get_project_sessions(project_id)
                 suspended = [s for s in sessions if s.get("status") == "suspended"]
                 project_dir = project["directory"]
-                if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
+                project_path = pathlib.Path(project_dir)
+                if not project_path.is_dir():  # noqa: ASYNC240
                     logger.error(
                         "PM: project %s directory missing: %s, marking suspended sessions errored",
                         project["name"],
@@ -1068,7 +1069,7 @@ class SessionManager:
                                 error_message=f"Project directory not found: {project_dir}",
                             )
                     continue
-                resolved_project_dir = pathlib.Path(project_dir).resolve()  # noqa: ASYNC240
+                resolved_project_dir = project_path.resolve()  # noqa: ASYNC240
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
@@ -1088,10 +1089,8 @@ class SessionManager:
                             cwd = project_dir
                         elif (
                             old_cwd
-                            and pathlib.Path(old_cwd).is_dir()  # noqa: ASYNC240
-                            and pathlib.Path(old_cwd)  # noqa: ASYNC240
-                            .resolve()
-                            .is_relative_to(resolved_project_dir)
+                            and (old_cwd_path := pathlib.Path(old_cwd)).is_dir()
+                            and old_cwd_path.resolve().is_relative_to(resolved_project_dir)  # noqa: ASYNC240
                         ):
                             cwd = old_cwd
                         else:
