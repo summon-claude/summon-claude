@@ -355,6 +355,10 @@ class SummonAutoClassifier:
                     self._cache.popitem(last=False)  # O(1) eviction of oldest entry
                 self._cache[key] = (result, time.monotonic())
             return result
+        except TimeoutError:
+            msg = f"Classifier timed out after {_CLASSIFIER_TIMEOUT_S}s"
+            logger.warning(msg)
+            return ClassifyResult("uncertain", msg)
         except Exception as e:
             logger.warning("Classifier error: %s", e)
             return ClassifyResult("uncertain", f"Classifier error: {e}")
@@ -380,6 +384,12 @@ class SummonAutoClassifier:
             can_use_tool=_deny_all_tools,
             cwd=self._cwd or None,
             env={"CLAUDE_AGENT_SDK_SKIP_VERSION_CHECK": "1"},
+            # Empty setting_sources prevents the CLI from loading user/project
+            # settings, plugins, and hooks.  The classifier subprocess needs
+            # none of these — it's a stateless prompt-in-JSON-out call.
+            # Without this, every classify() spawns 7 SessionStart hooks and
+            # loads 139 tools, adding ~4s of pure overhead.
+            setting_sources=[],
         )
 
         parts: list[str] = []
