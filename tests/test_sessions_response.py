@@ -34,12 +34,18 @@ def make_streamer(
     *,
     show_thinking: bool = False,
     max_inline_chars: int = 2500,
+    team_id: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[ResponseStreamer, ThreadRouter, AsyncMock]:
     """Create a ResponseStreamer with a mocked SlackClient."""
     client = make_mock_slack_client()
     router = ThreadRouter(client)
     streamer = ResponseStreamer(
-        router, show_thinking=show_thinking, max_inline_chars=max_inline_chars
+        router,
+        show_thinking=show_thinking,
+        max_inline_chars=max_inline_chars,
+        user_id=user_id,
+        team_id=team_id,
     )
     return streamer, router, client
 
@@ -2271,3 +2277,445 @@ class TestPendingFileChangeLifecycle:
             _, _, _, thread_ts_arg = mock_upload_diff.call_args.args
             assert thread_ts_arg == subagent_ts
             assert thread_ts_arg != "active_ts"
+
+
+# ---------------------------------------------------------------------------
+# comp-5: _build_turn_header_blocks (overflow menu accessory)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTurnHeaderBlocks:
+    """Tests for the _build_turn_header_blocks helper — comp-5 overflow menus."""
+
+    def test_returns_single_section_block(self):
+        """_build_turn_header_blocks returns exactly one block of type section."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("Turn 1: Processing...")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "section"
+
+    def test_section_contains_text(self):
+        """The section block includes the provided header text."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("Turn 42: some work")
+        text_field = blocks[0]["text"]
+        assert text_field["type"] == "mrkdwn"
+        assert "Turn 42: some work" in text_field["text"]
+
+    def test_accessory_is_overflow(self):
+        """The section block has an overflow accessory."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        accessory = blocks[0]["accessory"]
+        assert accessory["type"] == "overflow"
+        assert accessory["action_id"] == "turn_overflow"
+
+    def test_overflow_has_three_options(self):
+        """The overflow menu has exactly 3 options."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        options = blocks[0]["accessory"]["options"]
+        assert len(options) == 3
+
+    def test_overflow_option_values(self):
+        """The overflow options have the expected value strings."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        values = {opt["value"] for opt in blocks[0]["accessory"]["options"]}
+        assert values == {"turn_stop", "turn_copy_sid", "turn_view_cost"}
+
+    async def test_start_turn_posts_blocks_with_overflow(self):
+        """start_turn posts Block Kit with an overflow accessory."""
+        streamer, router, client = make_streamer()
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="111.0"))
+
+        await streamer.start_turn(turn_number=1)
+
+        client.post.assert_awaited_once()
+        call_kwargs = client.post.call_args.kwargs
+        blocks = call_kwargs.get("blocks")
+        assert blocks is not None, "Expected blocks kwarg in post call"
+        assert len(blocks) == 1
+        assert blocks[0]["accessory"]["type"] == "overflow"
+
+    async def test_update_turn_summary_posts_blocks_with_overflow(self):
+        """update_turn_summary preserves overflow accessory in update call."""
+        streamer, router, client = make_streamer()
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="111.0"))
+        await streamer.start_turn(turn_number=1)
+
+        await streamer.update_turn_summary("3 tool calls")
+
+        client.update.assert_awaited_once()
+        update_kwargs = client.update.call_args.kwargs
+        blocks = update_kwargs.get("blocks")
+        assert blocks is not None, "Expected blocks kwarg in update call"
+        assert blocks[0]["accessory"]["type"] == "overflow"
+
+
+class TestHybridStreaming:
+    """Tests for the chat_stream hybrid streaming integration."""
+
+    def _make_stream_streamer(self):
+        """Create a streamer with streaming enabled and a mock AsyncChatStream."""
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        """Start a turn so turn_thread_ts is set."""
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_stream_opened_on_first_tool_use(self):
+        """A chat stream is opened when the first ToolUseBlock arrives."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_awaited_once_with("turn.0", team_id="T123", user_id="U456")
+
+    async def test_task_update_in_progress_emitted(self):
+        """TaskUpdateChunk(in_progress) is appended to the stream on ToolUseBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Find the append call with chunks (TaskUpdateChunk)
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) >= 1
+        chunk = chunk_calls[0].kwargs["chunks"][0]
+        assert chunk.status == "in_progress"
+        assert chunk.title == "Read"
+
+    async def test_task_update_complete_on_success(self):
+        """TaskUpdateChunk(complete) is emitted on successful ToolResultBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file content", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) >= 2
+        complete_chunk = chunk_calls[1].kwargs["chunks"][0]
+        assert complete_chunk.status == "complete"
+        assert complete_chunk.title == "Read"
+
+    async def test_task_update_error_on_failure(self):
+        """TaskUpdateChunk(error) is emitted on failed ToolResultBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file not found", is_error=True)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        error_chunk = chunk_calls[-1].kwargs["chunks"][0]
+        assert error_chunk.status == "error"
+
+    async def test_stream_stopped_with_summary_blocks(self):
+        """Stream stop includes summary blocks with tool count and files."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/src/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # stop() should have been called with summary blocks
+        mock_stream.stop.assert_awaited()
+        stop_kwargs = mock_stream.stop.call_args.kwargs
+        blocks = stop_kwargs.get("blocks")
+        assert blocks is not None, "stop() should include summary blocks"
+        assert blocks[0]["type"] == "context"
+        summary_text = blocks[0]["elements"][0]["text"]
+        assert "1 tool call" in summary_text
+        assert "a.py" in summary_text
+
+    async def test_stream_stopped_on_result(self):
+        """The stream is stopped when ResultMessage arrives."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        mock_stream.stop.assert_awaited_once()
+
+    async def test_fallback_on_stream_open_failure(self):
+        """Falls back to chat_postMessage when stream open fails."""
+        streamer, router, client, _ = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        client.open_chat_stream = AsyncMock(side_effect=Exception("stream_error"))
+        # Reset post mock to track new calls (start_turn already called post)
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="msg.1"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Tool use context block should still be posted via chat_postMessage
+        tool_post_calls = [
+            c
+            for c in client.post.call_args_list
+            if "blocks" in (c.kwargs or {}) and any("hammer" in str(b) for b in c.kwargs["blocks"])
+        ]
+        assert len(tool_post_calls) >= 1, "Tool use block should be posted via chat_postMessage"
+
+    async def test_fallback_on_stream_append_failure(self):
+        """Falls back after initial success when a later append fails."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # First append (in_progress) succeeds, second (complete) fails
+        call_count = 0
+        original_append = AsyncMock()
+
+        async def _append_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise Exception("append_failed")
+            return await original_append(**kwargs)
+
+        mock_stream.append = AsyncMock(side_effect=_append_side_effect)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Stream should have been stopped after failure
+        mock_stream.stop.assert_awaited()
+        # stream_failed should prevent further stream attempts
+        assert streamer._turn.stream_failed is True
+
+    async def test_flush_to_thread_uses_stream_when_active(self):
+        """_flush_to_thread routes through stream.append when a stream is open."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # Manually open a stream and set up thread flushing state
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "Some thread text"
+
+        await streamer._flush_buffer()
+
+        # Text should have gone to stream.append(markdown_text=...) not client.post
+        md_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("markdown_text")]
+        assert len(md_calls) == 1
+        assert md_calls[0].kwargs["markdown_text"] == "Some thread text"
+
+    async def test_flush_to_thread_stream_redacts_secrets(self):
+        """Secrets are redacted when flushing through the stream path."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "Token is xoxb-secret-token-here"
+
+        await streamer._flush_buffer()
+
+        md_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("markdown_text")]
+        assert len(md_calls) == 1
+        streamed_text = md_calls[0].kwargs["markdown_text"]
+        assert "xoxb-" not in streamed_text
+        assert "[REDACTED]" in streamed_text
+
+    async def test_flush_to_thread_stream_logs_validation_warnings(self, caplog):
+        """validate_agent_output warnings are logged when flushing through the stream path."""
+        import logging
+        from unittest.mock import patch
+
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "some text"
+
+        with (
+            patch(
+                "summon_claude.sessions.response.validate_agent_output",
+                return_value=("some text", ["warning: suspicious pattern detected"]),
+            ),
+            caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"),
+        ):
+            await streamer._flush_buffer()
+
+        assert any("suspicious pattern detected" in record.message for record in caplog.records)
+
+    async def test_no_stream_without_team_id(self):
+        """No stream is opened when team_id is not set."""
+        streamer, router, client = make_streamer(user_id="U456")
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_no_stream_without_user_id(self):
+        """No stream is opened when user_id is not set."""
+        streamer, router, client = make_streamer(team_id="T123")
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_no_stream_for_subagent_tools(self):
+        """TaskUpdateChunks are not emitted for subagent tool calls (parent_id set)."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # Simulate a subagent tool use (parent_tool_use_id set)
+        subagent_msg = AssistantMessage(
+            content=[make_tool_use_block("Read", {"file_path": "/b.py"}, tool_use_id="tu_sub")],
+            model="claude-opus-4-6",
+            parent_tool_use_id="parent_tu_1",
+        )
+        messages = [
+            subagent_msg,
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Stream should NOT have been opened for subagent tool
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_stream_reused_across_tool_calls(self):
+        """The same stream is reused for multiple tool calls in one turn."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result_1 = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        tool_use_2 = make_tool_use_block("Grep", {"pattern": "foo"}, tool_use_id="tu_2")
+        tool_result_2 = ToolResultBlock(tool_use_id="tu_2", content="found", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result_1]),
+            make_assistant_message([tool_use_2]),
+            make_assistant_message([tool_result_2]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # open_chat_stream should only be called once
+        client.open_chat_stream.assert_awaited_once()
+        # But there should be 4 chunk appends (2 in_progress + 2 complete)
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 4
+
+    async def test_stream_stop_failure_is_silent(self):
+        """stream.stop() failure does not propagate."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        mock_stream.stop = AsyncMock(side_effect=Exception("stop_failed"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        # Should not raise
+        result = await streamer.stream_with_flush(agen(messages))
+        assert result is not None
+
+    async def test_denied_tool_skips_task_update_chunks(self):
+        """Denied tools do not emit TaskUpdateChunk (in_progress or error)."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        # Simulate a turn already in progress (reset doesn't wipe these)
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.has_seen_tool_use = True
+
+        # Simulate denial: add tool_use_id to denied set (as bridge would)
+        streamer._turn.denied_tool_use_ids.add("tu_denied")
+        streamer._turn.tool_names["tu_denied"] = "Bash"
+
+        # Directly call _handle_tool_use_block with a denied tool
+        denied_block = make_tool_use_block("Bash", {"command": "rm"}, tool_use_id="tu_denied")
+        await streamer._handle_tool_use_block(denied_block, parent_id=None)
+
+        # in_progress should NOT have been emitted for the denied tool
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 0, (
+            f"Denied tool should not emit in_progress TaskUpdateChunk, got {chunk_calls}"
+        )
+
+        # Now handle the tool result (denied + error)
+        denied_result = ToolResultBlock(tool_use_id="tu_denied", content="denied", is_error=True)
+        await streamer._handle_tool_result_block(denied_result, parent_id=None)
+
+        # complete/error should NOT have been emitted either
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 0, (
+            f"Denied tool should not emit any TaskUpdateChunks, got {chunk_calls}"
+        )
+
+    async def test_text_only_no_stream_opened(self):
+        """Text-only content (no ToolUseBlock) never opens a stream — stop() not called."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_text_block("Here is the answer.")]),
+            make_result_message(),
+        ]
+        result = await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+        mock_stream.stop.assert_not_awaited()
+        assert result is not None

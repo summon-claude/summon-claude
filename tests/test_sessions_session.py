@@ -1023,12 +1023,7 @@ class TestProcessIncomingEvent:
 
     def _make_rt(self, permission_handler=None):
         """Build a minimal mock _SessionRuntime."""
-        if permission_handler is None:
-            mock_permission_handler = AsyncMock()
-            mock_permission_handler.has_pending_text_input = MagicMock(return_value=False)
-            mock_permission_handler.receive_text_input = AsyncMock()
-        else:
-            mock_permission_handler = permission_handler
+        mock_permission_handler = AsyncMock() if permission_handler is None else permission_handler
         return _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -1152,21 +1147,6 @@ class TestProcessIncomingEvent:
         text, _ = result
         assert "report.pdf" in text
         assert "See attached" in text
-
-    async def test_pending_text_input_consumed(self):
-        """When permission handler is waiting for free-text, message is consumed."""
-        session = self._make_session()
-
-        mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=True)
-        mock_ph.receive_text_input = AsyncMock()
-        rt = self._make_rt(permission_handler=mock_ph)
-
-        event = {"user": "U001", "text": "My free-text answer", "ts": "1"}
-        result = await session._process_incoming_event(event, rt)
-
-        assert result is None
-        mock_ph.receive_text_input.assert_awaited_once_with("My free-text answer", user_id="U001")
 
     async def test_command_prefix_dispatched(self):
         """Messages with ! prefix are dispatched as commands and return None."""
@@ -1361,12 +1341,7 @@ class TestIdentityVerification:
     """Security tests: non-owner messages are rejected at the centralized gate."""
 
     def _make_rt(self, permission_handler=None):
-        if permission_handler is None:
-            mock_ph = AsyncMock()
-            mock_ph.has_pending_text_input = MagicMock(return_value=False)
-            mock_ph.receive_text_input = AsyncMock()
-        else:
-            mock_ph = permission_handler
+        mock_ph = AsyncMock() if permission_handler is None else permission_handler
         return _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -1403,8 +1378,6 @@ class TestIdentityVerification:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=True)
-        mock_ph.receive_text_input = AsyncMock()
         rt = self._make_rt(permission_handler=mock_ph)
 
         event = {"user": "U_INTRUDER", "text": "my answer", "ts": "1"}
@@ -1473,6 +1446,34 @@ class TestPendingTurn:
         pt = _PendingTurn(message="hello")
         with pytest.raises(FrozenInstanceError):
             pt.message = "other"  # type: ignore[misc]
+
+    async def test_content_blocks_multimodal_envelope(self):
+        """content_blocks produces the correct multimodal AsyncIterator envelope."""
+        from summon_claude.sessions.session import _PendingTurn
+
+        image_block = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+        }
+        text_block = {"type": "text", "text": "what is this?"}
+        pending = _PendingTurn(
+            message="what is this?",
+            pre_sent=False,
+            content_blocks=(image_block, text_block),
+        )
+
+        async def _multimodal_iter():
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": list(pending.content_blocks)},
+            }
+
+        items = [item async for item in _multimodal_iter()]
+        assert len(items) == 1
+        envelope = items[0]
+        assert envelope["type"] == "user"
+        assert envelope["message"]["role"] == "user"
+        assert envelope["message"]["content"] == [image_block, text_block]
 
 
 class TestShutdownSentinels:
@@ -2702,7 +2703,6 @@ class TestHandleSpawn:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=False)
         rt = _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -3560,7 +3560,6 @@ class TestCompactMidMessageBlocked:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=False)
         rt = _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),

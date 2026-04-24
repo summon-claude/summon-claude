@@ -17,7 +17,7 @@ import queue
 import re
 import secrets
 import sys
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -524,6 +524,10 @@ class _PendingTurn:
     pre_sent: bool = True  # Whether query() was already called by preprocessor
     queued_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     compact: bool = False  # If True, consumer runs _execute_compact instead of normal turn
+    # Optional multimodal content blocks (e.g. image + text). When set,
+    # query() sends an AsyncIterable with a single user message whose
+    # content is this list instead of the plain message string.
+    content_blocks: tuple[dict, ...] | None = None
 
 
 class _SessionRestartError(Exception):
@@ -654,6 +658,7 @@ class SummonSession:
         web_client: AsyncWebClient | None = None,
         dispatcher: EventDispatcher | None = None,
         bot_user_id: str | None = None,
+        bot_team_id: str | None = None,
         parent_session_id: str | None = None,
         parent_channel_id: str | None = None,
         ipc_spawn: Callable[[SessionOptions, str], Awaitable[str]] | None = None,
@@ -688,8 +693,9 @@ class SummonSession:
         # Shared web_client and dispatcher from the daemon (None for standalone/test use)
         self._web_client = web_client
         self._dispatcher = dispatcher
-        # Pre-cached bot user ID from BoltRouter.start() — avoids a per-session auth_test() call
+        # Pre-cached bot user/team ID from BoltRouter.start() — avoids per-session auth_test()
         self._bot_user_id = bot_user_id
+        self._bot_team_id = bot_team_id
         # Daemon IPC callbacks (injected to avoid circular imports with cli.daemon_client)
         self._ipc_spawn = ipc_spawn
         self._ipc_resume = ipc_resume
@@ -1296,6 +1302,7 @@ class SummonSession:
                 permission_handler=permission_handler,
                 abort_callback=self._abort_current_turn,
                 authenticated_user_id=self._authenticated_user_id,
+                pending_turns=self._pending_turns,
             )
             self._dispatcher.register(channel_id, handle)
 
@@ -2094,6 +2101,7 @@ class SummonSession:
         streamer = ResponseStreamer(
             router=router,
             user_id=self._authenticated_user_id,
+            team_id=self._bot_team_id,
             show_thinking=self._config.show_thinking,
             max_inline_chars=self._config.max_inline_chars,
             on_file_change=self._on_file_change,
@@ -2402,6 +2410,10 @@ class SummonSession:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
                     break
                 self._pending_turns = asyncio.Queue(maxsize=_MAX_PENDING_TURNS)
+                # Re-register the handle so the dispatcher's reference points
+                # to the new queue (not the old one with the sentinel).
+                if self._dispatcher is not None and self._channel_id:
+                    self._dispatcher.update_pending_turns(self._channel_id, self._pending_turns)
                 self._context_warned_threshold = 0.0
                 self._last_context = None
                 self._claude_session_id = None
@@ -2566,7 +2578,20 @@ class SummonSession:
             await streamer.start_turn(self._total_turns, user_snippet=pending.message)
             # If preprocessor couldn't pre-send, call query() now
             if not pending.pre_sent:
-                await claude.query(pending.message)
+                if pending.content_blocks:
+                    # Multimodal content: send via AsyncIterable message envelope
+                    async def _multimodal_iter() -> AsyncIterator[dict]:  # type: ignore[type-arg]
+                        yield {
+                            "type": "user",
+                            "message": {
+                                "role": "user",
+                                "content": list(pending.content_blocks),
+                            },
+                        }
+
+                    await claude.query(_multimodal_iter())
+                else:
+                    await claude.query(pending.message)
             stream_result = await streamer.stream_with_flush(claude.receive_response())
             if stream_result:
                 await self._finalize_turn_result(rt, streamer, stream_result)
@@ -4144,8 +4169,7 @@ class SummonSession:
         3. Identity verification — non-owner users are rejected.
         4. Message truncation at ``_MAX_USER_MESSAGE_CHARS``.
         5. File reference extraction via ``format_file_references``.
-        6. AskUserQuestion free-text capture via ``permission_handler``.
-        7. Command detection via ``find_commands`` (standalone and mid-message).
+        6. Command detection via ``find_commands`` (standalone and mid-message).
 
         Returns ``(full_text, thread_ts)`` when the message should be forwarded
         to Claude, or ``None`` when it has been handled/filtered internally.
@@ -4189,11 +4213,6 @@ class SummonSession:
                 full_text = f"{text}\n\n{file_context}"
 
         thread_ts: str | None = event.get("ts")
-
-        # 6: Route to permission handler's pending free-text input if waiting
-        if rt.permission_handler.has_pending_text_input():
-            await rt.permission_handler.receive_text_input(text, user_id=user_id)
-            return None
 
         # 7: Detect !cmd commands anywhere in the message
         # Fast path: skip regex scan if no command prefix present

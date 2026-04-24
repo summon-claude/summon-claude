@@ -178,7 +178,7 @@ def _write_startup_error(message: str) -> None:
 
     error_path = _startup_error_path()
     error_path.parent.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.datetime.now().isoformat(timespec="seconds")  # noqa: DTZ005
+    timestamp = datetime.datetime.now(tz=datetime.UTC).isoformat(timespec="seconds")
     content = f"[{timestamp}]\n{message}\n"
     fd = os.open(str(error_path), os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     try:
@@ -335,6 +335,7 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
             config=config,
             web_client=bolt_router.web_client,
             bot_user_id=bolt_router.bot_user_id,
+            bot_team_id=bolt_router.bot_team_id,
             dispatcher=dispatcher,
             event_probe=bolt_router.event_probe,
             jira_proxy_port=jira_proxy_port,
@@ -342,6 +343,9 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         )
         dispatcher.set_command_handler(session_manager.handle_summon_command)
         dispatcher.set_resume_handler(session_manager.resume_from_channel)
+        dispatcher.set_app_home_handler(session_manager.handle_app_home)
+        if bolt_router.bot_user_id:
+            dispatcher.set_bot_user_id(bolt_router.bot_user_id)
 
         # Start Unix socket control server
         control_server = await asyncio.start_unix_server(
@@ -407,10 +411,9 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         # Cancel background tasks before draining sessions
         health_task.cancel()
         watchdog_task.cancel()
-        if warmup_task is not None:
-            warmup_task.cancel()
         cleanup_tasks = [health_task, watchdog_task]
         if warmup_task is not None:
+            warmup_task.cancel()
             cleanup_tasks.append(warmup_task)
         for task in cleanup_tasks:
             try:
@@ -428,6 +431,11 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         await session_manager.shutdown()
 
         await bolt_router.stop()
+
+        try:
+            await dispatcher.close()
+        except Exception:
+            logger.debug("dispatcher.close() failed during shutdown", exc_info=True)
 
         # Disarm SIGALRM so we don't get killed during clean exit
         _disarm_sigalrm_watchdog()

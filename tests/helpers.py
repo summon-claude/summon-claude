@@ -22,5 +22,7 @@ def make_mock_slack_client():
     client.post_interactive = AsyncMock(
         return_value=MessageRef(channel_id="C123", ts="1234567890.123456")
     )
+    client.views_open = AsyncMock()
+    client.open_chat_stream = AsyncMock()
     client.channel_id = "C123"
     return client
