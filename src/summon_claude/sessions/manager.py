@@ -22,6 +22,7 @@ import logging
 import os
 import pathlib
 import secrets
+import shutil
 import time
 import uuid
 from functools import partial
@@ -32,6 +33,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 # recv_msg/send_msg imported lazily in handle_client to avoid circular import
 # (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
 from summon_claude.config import get_data_dir
+from summon_claude.sandbox import MATCHLOCK_INSTALL_HINT
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -891,7 +893,7 @@ class SessionManager:
     # project up — daemon-side orchestration
     # ------------------------------------------------------------------
 
-    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:
+    async def _handle_project_up(self, msg: dict[str, Any]) -> dict[str, Any]:  # noqa: PLR0915
         """IPC handler for ``project_up``.
 
         Checks which projects need a PM, creates an auth session if any do,
@@ -913,11 +915,21 @@ class SessionManager:
             needing_pm = [p for p in projects if not p.get("pm_running")]
             gpm_running = any(s.is_global_pm for s in self._sessions.values())
             scribe_running = any(s.is_scribe for s in self._sessions.values())
-            if not needing_pm and gpm_running and scribe_running:
+            # Bug hunter is checked independently of needing_pm — a project
+            # may have its PM running but still need a bug hunter started.
+            running_bh_project_ids = {
+                s.project_id for s in self._sessions.values() if s.is_bug_hunter
+            }
+            bh_needing = [
+                p
+                for p in projects
+                if p.get("bug_hunter_enabled") and p["project_id"] not in running_bh_project_ids
+            ]
+            if not needing_pm and gpm_running and scribe_running and not bh_needing:
                 self._project_up_in_flight = False
                 return {"type": "project_up_complete"}
             if not needing_pm:
-                # All project PMs running but GPM or scribe needs starting.
+                # All project PMs running but GPM, scribe, or bug hunter needs starting.
                 # Grab user_id from an existing session to avoid a new auth flow.
                 user_id: str | None = None
                 for s in self._sessions.values():
@@ -933,6 +945,15 @@ class SessionManager:
                         await self._resume_or_start_scribe(user_id)
                     except Exception as e:
                         logger.error("Scribe: failed to start: %s", e)
+                    for project in bh_needing:
+                        try:
+                            await self._resume_or_start_bug_hunter(project, user_id)
+                        except Exception as e:
+                            logger.error(
+                                "Bug hunter: failed to start for project %s: %s",
+                                project.get("name", "?"),
+                                e,
+                            )
                 self._project_up_in_flight = False
                 return {"type": "project_up_complete"}
 
@@ -1028,6 +1049,23 @@ class SessionManager:
             # Resume suspended scribe or start fresh.
             await self._resume_or_start_scribe(user_id)
 
+            # Start bug hunter for ALL projects that have it enabled
+            # (not just needing_pm — a project's PM may already be running
+            # while its bug hunter still needs starting).
+            all_projects: list[dict[str, Any]] = []
+            async with SessionRegistry() as registry:
+                all_projects = await registry.list_projects()
+            for project in all_projects:
+                if project.get("bug_hunter_enabled"):
+                    try:
+                        await self._resume_or_start_bug_hunter(project, user_id)
+                    except Exception as e:
+                        logger.error(
+                            "Bug hunter: failed to start for project %s: %s",
+                            project.get("name", "?"),
+                            e,
+                        )
+
         except TimeoutError:
             logger.error("project_up orchestrator: authentication timed out")
         except Exception as e:
@@ -1073,6 +1111,17 @@ class SessionManager:
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
+                    # Skip bug hunter — it needs fresh VM creation via
+                    # _resume_or_start_bug_hunter, not generic resume
+                    if sess_name == "bug-hunter":
+                        await registry.update_status(sess_id, "completed")
+                        logger.info(
+                            "PM: cleared suspended bug-hunter %s for project %s"
+                            " (will be restarted fresh)",
+                            sess_id[:8],
+                            project["name"],
+                        )
+                        continue
                     is_pm = "-pm-" in sess_name
                     try:
                         channel_id = sess.get("slack_channel_id")
@@ -1408,6 +1457,112 @@ class SessionManager:
         self._tasks[new_session_id] = task
 
         logger.info("SessionManager: started scribe session %s", new_session_id)
+
+    async def _resume_or_start_bug_hunter(self, project: dict[str, Any], user_id: str) -> None:
+        """Start a bug hunter session for *project* if not already running.
+
+        Pre-checks for Matchlock availability so a missing install produces
+        a clear PM-channel alert without spawning a session that would
+        immediately fail.
+        """
+        project_id = project["project_id"]
+
+        # Check for already-running bug hunter in this project
+        for sess in self._sessions.values():
+            if sess.is_bug_hunter and sess.project_id == project_id:
+                logger.info(
+                    "SessionManager: bug hunter already running for project %s — skipping",
+                    project_id,
+                )
+                return
+
+        # Pre-flight: check Matchlock availability before creating the session.
+        # SandboxNotAvailableError is raised inside session.start() (not __init__),
+        # so catching it at session creation time would be dead code.
+        if not shutil.which("matchlock"):
+            logger.error("Bug hunter: Matchlock not installed for project %s", project_id)
+            pm_session = next(
+                (s for s in self._sessions.values() if s.is_pm and s.project_id == project_id),
+                None,
+            )
+            if pm_session:
+                await self._alert_channel(
+                    pm_session,
+                    ":warning: *Bug hunter could not start* — Matchlock is not installed.\n"
+                    f"Install via:\n```{MATCHLOCK_INSTALL_HINT}```\n"
+                    "Then run `summon project up` to retry.",
+                )
+            return
+
+        project_dir = project.get("directory", "")
+        if not pathlib.Path(project_dir).is_dir():  # noqa: ASYNC240
+            raise FileNotFoundError(f"Bug hunter directory not found: {project_dir!r}")
+
+        scan_interval_s = max(
+            60,
+            project.get(
+                "bug_hunter_scan_interval_minutes",
+                self._config.bug_hunter_scan_interval_minutes,
+            )
+            * 60,
+        )
+
+        new_session_id = str(uuid.uuid4())
+        bh_options = SessionOptions(
+            cwd=project_dir,
+            name="bug-hunter",
+            project_id=project_id,
+            bug_hunter_profile=True,
+            scan_interval_s=scan_interval_s,
+        )
+        bh_options = self._inject_proxy_options(bh_options)
+        new_session = SummonSession(
+            config=self._config,
+            options=bh_options,
+            auth=None,
+            session_id=new_session_id,
+            web_client=self._web_client,
+            dispatcher=self._dispatcher,
+            bot_user_id=self._bot_user_id,
+            ipc_spawn=self.create_session_with_spawn_token,
+            ipc_resume=self._ipc_resume,
+            ipc_queue=self.queue_session,
+        )
+
+        new_session.authenticate(user_id)
+
+        self._cancel_grace_timer()
+        self._sessions[new_session_id] = new_session
+        task = asyncio.create_task(
+            self._supervised_session(new_session, new_session_id),
+            name=f"session-bug-hunter-{new_session_id}",
+        )
+        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
+        self._tasks[new_session_id] = task
+
+        logger.info(
+            "SessionManager: started bug hunter session %s for project %s",
+            new_session_id,
+            project_id,
+        )
+
+        # Notify the PM channel that bug hunter is active (fire-and-forget
+        # to avoid blocking the orchestrator loop with Slack RTT)
+        pm_session = next(
+            (s for s in self._sessions.values() if s.is_pm and s.project_id == project_id),
+            None,
+        )
+        if pm_session:
+            t = asyncio.create_task(
+                self._alert_channel(
+                    pm_session,
+                    f":mag: *Bug hunter started* for {project.get('name', project_id)}. "
+                    "A bug-hunter channel will appear in Slack shortly.",
+                ),
+                name=f"bug-hunter-notify-{new_session_id}",
+            )
+            t.add_done_callback(self._on_background_task_done)
+            self._background_tasks.add(t)
 
     def _resolve_gpm_cwd(self, suspended_cwd: str | None = None) -> str:
         """Resolve Global PM working directory with mkdir."""

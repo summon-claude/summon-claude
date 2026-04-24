@@ -187,6 +187,75 @@ def _write_startup_error(message: str) -> None:
         os.close(fd)
 
 
+async def _cleanup_orphaned_vms() -> None:
+    """Destroy any Matchlock VMs left running from a previous daemon instance.
+
+    Cross-references ``matchlock list --running`` with the registry's ``vm_id``
+    column. At startup all VM-bearing sessions are orphans (the daemon's live
+    ``_sessions`` dict is empty). Fail-closed on any error.
+    """
+    try:
+        import shutil  # noqa: PLC0415
+
+        import anyio  # noqa: PLC0415
+
+        from summon_claude.sandbox import _VM_ID_RE  # noqa: PLC0415
+
+        cli_path = shutil.which("matchlock")
+        if not cli_path:
+            return  # Matchlock not installed — nothing to clean up
+
+        result = await anyio.run_process([cli_path, "list", "--running"], check=False)
+        if result.returncode != 0:
+            return
+        stdout = result.stdout.decode().strip()
+        if not stdout:
+            return
+
+        # Parse tab-separated output: ID | STATUS | IMAGE | CREATED | PID
+        running_vm_ids: set[str] = set()
+        for line in stdout.splitlines():
+            parts = line.split("\t")
+            if parts:
+                vm_id = parts[0].strip()
+                if _VM_ID_RE.match(vm_id):
+                    running_vm_ids.add(vm_id)
+
+        if not running_vm_ids:
+            return
+
+        # Cross-reference with registry: all vm_id rows are orphans at startup
+        # (_sessions is empty; _cleanup_orphaned_sessions may have partially failed)
+        orphaned_vm_ids: set[str] = set()
+        async with SessionRegistry() as registry:
+            async with registry.db.execute(
+                "SELECT vm_id FROM sessions WHERE vm_id IS NOT NULL"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            orphaned_vm_ids = {row[0] for row in rows if row[0] in running_vm_ids}
+
+        for vm_id in orphaned_vm_ids:
+            try:
+                from summon_claude.sandbox import validate_vm_id  # noqa: PLC0415
+
+                validate_vm_id(vm_id)
+            except ValueError:
+                logger.warning("Skipping invalid VM ID from DB: %r", vm_id)
+                continue
+            try:
+                await anyio.run_process([cli_path, "kill", vm_id], check=False)
+                await anyio.run_process([cli_path, "rm", vm_id], check=False)
+                logger.info("Destroyed orphaned VM %s from previous daemon", vm_id)
+            except Exception as e:
+                logger.warning("Failed to destroy orphaned VM %s: %s", vm_id, e)
+
+        if orphaned_vm_ids:
+            logger.info("Cleaned up %d orphaned VM(s) from previous daemon", len(orphaned_vm_ids))
+
+    except Exception as e:
+        logger.warning("Failed to clean up orphaned VMs: %s", e)
+
+
 async def _cleanup_orphaned_sessions(web_client: AsyncWebClient) -> None:
     """Mark any 'active' or 'pending_auth' sessions as errored on daemon startup.
 
@@ -298,6 +367,8 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
 
     # Mark any sessions left active from a previous daemon as errored
     await _cleanup_orphaned_sessions(bolt_router.web_client)
+    # Destroy any VMs left running from a previous daemon instance
+    await _cleanup_orphaned_vms()
 
     # Startup probe runs BEFORE the control socket is created (line ~304).
     # On hard failure, _run_startup_probe raises SystemExit before the socket
