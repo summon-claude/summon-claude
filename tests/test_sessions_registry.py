@@ -1162,9 +1162,9 @@ class TestMigration16To17:
 
 
 class TestMigration17To18:
-    """Targeted tests for migration 17 → 18 (adds idx_sessions_project_id index)."""
+    """Targeted tests for migration 17 → 18 (adds pm_profile column + project_id index)."""
 
-    async def test_migrate_17_to_18_adds_project_id_index(self, tmp_path):
+    async def test_migrate_17_to_18_adds_pm_profile_and_index(self, tmp_path):
         import aiosqlite
 
         from summon_claude.sessions.migrations import _migrate_17_to_18
@@ -1172,18 +1172,18 @@ class TestMigration17To18:
         db_path = tmp_path / "migrate_17_to_18.db"
         async with aiosqlite.connect(str(db_path)) as raw_db:
             await raw_db.execute(
-                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project_id TEXT)"
+                "CREATE TABLE sessions ("
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
+                ")"
             )
             await raw_db.commit()
 
-            async with raw_db.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-                " AND name='idx_sessions_project_id'"
-            ) as cursor:
-                assert await cursor.fetchone() is None
-
             await _migrate_17_to_18(raw_db)
             await raw_db.commit()
+
+            async with raw_db.execute("PRAGMA table_info(sessions)") as cursor:
+                cols = {row[1] for row in await cursor.fetchall()}
+            assert "pm_profile" in cols
 
             async with raw_db.execute(
                 "SELECT name FROM sqlite_master WHERE type='index'"
@@ -1191,6 +1191,41 @@ class TestMigration17To18:
             ) as cursor:
                 row = await cursor.fetchone()
             assert row is not None, "idx_sessions_project_id not created by migration 17→18"
+
+    async def test_migrate_17_to_18_no_backfill(self, tmp_path):
+        """Migration must NOT backfill pm_profile from session names."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "no_backfill_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions ("
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
+                ")"
+            )
+            await raw_db.executemany(
+                "INSERT INTO sessions (session_id, session_name) VALUES (?, ?)",
+                [
+                    ("s1", "pm-abc123"),
+                    ("s2", "myproj-pm-def456"),
+                    ("s3", "fix-auth"),
+                ],
+            )
+            await raw_db.commit()
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute(
+                "SELECT session_id, pm_profile FROM sessions ORDER BY session_id"
+            ) as cursor:
+                rows = {row[0]: row[1] for row in await cursor.fetchall()}
+
+            assert rows["s1"] == 0  # no backfill — pm_profile only set at creation
+            assert rows["s2"] == 0
+            assert rows["s3"] == 0
 
     async def test_migrate_17_to_18_idempotent(self, tmp_path):
         import aiosqlite
@@ -1200,96 +1235,15 @@ class TestMigration17To18:
         db_path = tmp_path / "idempotent_17_to_18.db"
         async with aiosqlite.connect(str(db_path)) as raw_db:
             await raw_db.execute(
-                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, project_id TEXT)"
-            )
-            await raw_db.commit()
-
-            await _migrate_17_to_18(raw_db)
-            await raw_db.commit()
-            await _migrate_17_to_18(raw_db)
-            await raw_db.commit()
-
-            async with raw_db.execute(
-                "SELECT name FROM sqlite_master WHERE type='index'"
-                " AND name='idx_sessions_project_id'"
-            ) as cursor:
-                row = await cursor.fetchone()
-            assert row is not None
-
-
-class TestMigration18To19:
-    """Targeted tests for migration 18 → 19 (adds pm_profile column + backfill)."""
-
-    async def test_migrate_18_to_19_adds_pm_profile_column(self, tmp_path):
-        import aiosqlite
-
-        from summon_claude.sessions.migrations import _migrate_18_to_19
-
-        db_path = tmp_path / "migrate_18_to_19.db"
-        async with aiosqlite.connect(str(db_path)) as raw_db:
-            await raw_db.execute(
                 "CREATE TABLE sessions ("
-                "  session_id TEXT PRIMARY KEY, session_name TEXT, pm_profile_check TEXT"
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
                 ")"
             )
             await raw_db.commit()
 
-            await _migrate_18_to_19(raw_db)
+            await _migrate_17_to_18(raw_db)
             await raw_db.commit()
-
-            async with raw_db.execute("PRAGMA table_info(sessions)") as cursor:
-                cols = {row[1] for row in await cursor.fetchall()}
-            assert "pm_profile" in cols
-
-    async def test_migrate_18_to_19_backfills_pm_sessions(self, tmp_path):
-        import aiosqlite
-
-        from summon_claude.sessions.migrations import _migrate_18_to_19
-
-        db_path = tmp_path / "backfill_18_to_19.db"
-        async with aiosqlite.connect(str(db_path)) as raw_db:
-            await raw_db.execute(
-                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, session_name TEXT)"
-            )
-            await raw_db.executemany(
-                "INSERT INTO sessions (session_id, session_name) VALUES (?, ?)",
-                [
-                    ("s1", "pm-abc123"),
-                    ("s2", "myproj-pm-def456"),
-                    ("s3", "fix-auth"),
-                    ("s4", "spawn-abc"),
-                ],
-            )
-            await raw_db.commit()
-
-            await _migrate_18_to_19(raw_db)
-            await raw_db.commit()
-
-            async with raw_db.execute(
-                "SELECT session_id, pm_profile FROM sessions ORDER BY session_id"
-            ) as cursor:
-                rows = {row[0]: row[1] for row in await cursor.fetchall()}
-
-            assert rows["s1"] == 1  # pm-abc123 matches pm-% prefix
-            assert rows["s2"] == 1  # myproj-pm-def456 matches %-pm-%
-            assert rows["s3"] == 0  # fix-auth is not PM
-            assert rows["s4"] == 0  # spawn-abc is not PM
-
-    async def test_migrate_18_to_19_idempotent(self, tmp_path):
-        import aiosqlite
-
-        from summon_claude.sessions.migrations import _migrate_18_to_19
-
-        db_path = tmp_path / "idempotent_18_to_19.db"
-        async with aiosqlite.connect(str(db_path)) as raw_db:
-            await raw_db.execute(
-                "CREATE TABLE sessions (session_id TEXT PRIMARY KEY, session_name TEXT)"
-            )
-            await raw_db.commit()
-
-            await _migrate_18_to_19(raw_db)
-            await raw_db.commit()
-            await _migrate_18_to_19(raw_db)  # Must not raise
+            await _migrate_17_to_18(raw_db)
             await raw_db.commit()
 
             async with raw_db.execute("PRAGMA table_info(sessions)") as cursor:
@@ -1656,8 +1610,7 @@ class TestReleasedMigrationsImmutable:
         "_migrate_14_to_15": "d9d62bd4554b85bd",
         "_migrate_15_to_16": "72d8ce098dcaa6a0",
         "_migrate_16_to_17": "4ee7cc86287aa662",
-        "_migrate_17_to_18": "59404f671cfee711",
-        "_migrate_18_to_19": "8a7a130a3c5d0ddc",
+        "_migrate_17_to_18": "388b93f98a4744f8",
     }
 
     def test_released_migrations_unchanged(self):

@@ -39,7 +39,7 @@ Each project gets one PM session. You authenticate it in Slack the same way as a
 Once bound to a channel, the PM is ready to receive instructions from you. Send it a message describing the task and it will plan and coordinate the work.
 
 !!! tip "Naming"
-    PM sessions are identified by the `pm_profile` database flag, set at session creation time. PM channels use the `{prefix}-0-pm` format. Child session channels use `{prefix}-{name}-{hex}`.
+    PM channels use the `{prefix}-0-pm` format (e.g., `myapi-0-pm`). Child session channels use `{prefix}-{name}-{hex}` (e.g., `myapi-fix-auth-a1b2c3`).
 
 ---
 

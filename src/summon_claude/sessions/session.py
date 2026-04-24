@@ -1503,37 +1503,6 @@ class SummonSession:
         )
         return channel_id, channel_name
 
-    async def _validate_reusable_channel(
-        self, web_client: AsyncWebClient, ch: dict, label: str
-    ) -> str | None:
-        """Check that *ch* was created by this bot and is not archived.
-
-        Returns the channel ID if valid, or ``None`` if the channel should
-        be skipped (wrong creator or unarchive failed).
-
-        [SEC-003] Prevents channel name-squatting by workspace members.
-        """
-        if ch.get("creator") != self._bot_user_id:
-            logger.warning(
-                "%s: channel #%s exists but was created by %s, not bot (%s) — skipping",
-                label,
-                ch.get("name"),
-                ch.get("creator"),
-                self._bot_user_id,
-            )
-            return None
-        channel_id = ch["id"]
-        if ch.get("is_archived"):
-            logger.info("%s: channel #%s is archived — unarchiving", label, ch.get("name"))
-            try:
-                await web_client.conversations_unarchive(channel=channel_id)
-            except Exception as _unarch_err:
-                logger.warning(
-                    "%s: failed to unarchive #%s: %s", label, ch.get("name"), _unarch_err
-                )
-                return None
-        return channel_id
-
     async def _get_or_create_pm_channel(  # noqa: PLR0912, PLR0915
         self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
     ) -> tuple[str, str]:
@@ -1593,10 +1562,7 @@ class SummonSession:
                     channels = resp.get("channels", [])
                     for ch in channels:
                         if ch.get("name") == new_channel_name:
-                            valid_id = await self._validate_reusable_channel(web_client, ch, "PM")
-                            if valid_id is None:
-                                continue
-                            new_id = valid_id
+                            new_id = ch["id"]
                             cname = ch["name"]
                             found = True
                             break
@@ -1605,8 +1571,7 @@ class SummonSession:
                     cursor = resp.get("response_metadata", {}).get("next_cursor")
                     if not cursor:
                         raise RuntimeError(
-                            f"Channel {new_channel_name!r} exists but no usable match"
-                            " (wrong creator or archived) — see warnings above"
+                            f"Channel {new_channel_name!r} exists but bot cannot find it"
                         ) from e
                 else:
                     raise RuntimeError(
@@ -1638,9 +1603,7 @@ class SummonSession:
             resp = await web_client.conversations_list(**kwargs)
             for ch in resp.get("channels", []):
                 if ch.get("name") == scribe_channel_name:
-                    channel_id = await self._validate_reusable_channel(web_client, ch, "Scribe")
-                    if channel_id is None:
-                        continue
+                    channel_id = ch["id"]
                     await web_client.conversations_join(channel=channel_id)
                     logger.info("Scribe: reusing existing channel #%s", scribe_channel_name)
                     return channel_id, scribe_channel_name
@@ -1670,9 +1633,7 @@ class SummonSession:
             for ch in resp.get("channels", []):
                 ch_name = ch.get("name", "")
                 if ch_name in (gpm_channel_name, zzz_gpm_name):
-                    channel_id = await self._validate_reusable_channel(web_client, ch, "Global PM")
-                    if channel_id is None:
-                        continue
+                    channel_id = ch["id"]
                     await web_client.conversations_join(channel=channel_id)
                     if ch_name == zzz_gpm_name:
                         # Restore canonical name (strip zzz- prefix on resume)

@@ -16,7 +16,7 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-CURRENT_SCHEMA_VERSION = 19
+CURRENT_SCHEMA_VERSION = 18
 
 
 # ---------------------------------------------------------------------------
@@ -303,22 +303,14 @@ async def _migrate_16_to_17(db: aiosqlite.Connection) -> None:
 
 
 async def _migrate_17_to_18(db: aiosqlite.Connection) -> None:
-    """Add index on sessions.project_id for list_projects() subquery performance."""
-    await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions (project_id)")
-
-
-async def _migrate_18_to_19(db: aiosqlite.Connection) -> None:
-    """Add pm_profile column and backfill from session name patterns."""
+    """Add pm_profile column and project_id index."""
     try:
         await db.execute("ALTER TABLE sessions ADD COLUMN pm_profile INTEGER DEFAULT 0")
     except Exception as e:
         if "duplicate column name" not in str(e).lower():
             raise
         logger.debug("Column pm_profile already exists, skipping")
-    await db.execute(
-        "UPDATE sessions SET pm_profile = 1"
-        " WHERE session_name LIKE '%-pm-%' OR session_name LIKE 'pm-%'"
-    )
+    await db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_project_id ON sessions (project_id)")
 
 
 # Mapping from version N to the coroutine that migrates N → N+1.
@@ -342,7 +334,6 @@ _MIGRATIONS: dict[int, Any] = {
     15: _migrate_15_to_16,
     16: _migrate_16_to_17,
     17: _migrate_17_to_18,
-    18: _migrate_18_to_19,
 }
 
 
