@@ -235,11 +235,11 @@ async def stop_project_managers(*, name: str | None = None) -> list[str]:  # noq
             active = [s for s in sessions if s.get("status") in ("pending_auth", "active")]
             # Stop children before PMs so a PM mid-turn doesn't react to
             # its children disappearing.
-            active.sort(key=lambda s: "-pm-" in s.get("session_name", ""))
+            active.sort(key=lambda s: bool(s.get("pm_profile")))
             for session in active:
                 sid = session["session_id"]
                 sname = session.get("session_name", "")
-                is_pm = "-pm-" in sname
+                is_pm = bool(session.get("pm_profile"))
                 try:
                     found = await daemon_client.stop_session(sid)
                     if not found:

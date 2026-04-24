@@ -211,6 +211,7 @@ class SessionRegistry:
         parent_session_id: str | None = None,
         authenticated_user_id: str | None = None,
         project_id: str | None = None,
+        pm_profile: bool = False,
     ) -> None:
         """Insert a new session with status pending_auth."""
         db = self._check_connected()
@@ -226,8 +227,9 @@ class SessionRegistry:
                     INSERT INTO sessions
                         (session_id, pid, status, session_name, cwd, model,
                          started_at, last_activity_at,
-                         parent_session_id, authenticated_user_id, project_id)
-                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?, ?)
+                         parent_session_id, authenticated_user_id, project_id,
+                         pm_profile)
+                    VALUES (?, ?, 'pending_auth', ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
@@ -240,6 +242,7 @@ class SessionRegistry:
                         parent_session_id,
                         authenticated_user_id,
                         project_id,
+                        1 if pm_profile else 0,
                     ),
                 )
             except Exception as exc:
@@ -872,8 +875,8 @@ class SessionRegistry:
     async def list_projects(self) -> list[dict]:
         """List all projects with PM status fields.
 
-        Only considers PM sessions (name matching ``%-pm-%``) to avoid
-        pollution from child sessions that inherit the project_id.
+        Only considers PM sessions (``pm_profile = 1``) to avoid pollution
+        from child sessions that inherit the project_id.
 
         Each row includes:
         - ``pm_running``: 1 if an active/pending_auth PM session exists
@@ -883,23 +886,17 @@ class SessionRegistry:
         db = self._check_connected()
         async with db.execute(
             "SELECT p.*,"
-            "  EXISTS("
-            "    SELECT 1 FROM sessions s"
-            "    WHERE s.project_id = p.project_id"
-            "      AND s.session_name LIKE '%-pm-%'"
-            "      AND s.status IN ('pending_auth', 'active')"
-            "  ) AS pm_running,"
-            "  (SELECT s2.status FROM sessions s2"
-            "   WHERE s2.project_id = p.project_id"
-            "     AND s2.session_name LIKE '%-pm-%'"
-            "   ORDER BY s2.started_at DESC LIMIT 1"
-            "  ) AS last_pm_status,"
-            "  (SELECT s2.error_message FROM sessions s2"
-            "   WHERE s2.project_id = p.project_id"
-            "     AND s2.session_name LIKE '%-pm-%'"
-            "   ORDER BY s2.started_at DESC LIMIT 1"
-            "  ) AS last_pm_error"
-            " FROM projects p ORDER BY p.name"
+            "  CASE WHEN lp.status IN ('pending_auth','active')"
+            "    THEN 1 ELSE 0 END AS pm_running,"
+            "  lp.status AS last_pm_status,"
+            "  lp.error_message AS last_pm_error"
+            " FROM projects p"
+            " LEFT JOIN ("
+            "   SELECT project_id, status, error_message,"
+            "     ROW_NUMBER() OVER (PARTITION BY project_id ORDER BY started_at DESC) AS rn"
+            "   FROM sessions WHERE pm_profile = 1"
+            " ) lp ON p.project_id = lp.project_id AND lp.rn = 1"
+            " ORDER BY p.name"
         ) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]

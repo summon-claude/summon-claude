@@ -34,12 +34,10 @@ async def _check_running_sessions() -> tuple[bool, bool, bool]:
         raise _IpcError(str(exc)) from exc
 
     has_adhoc = any(
-        not session.get("project_id") and "-pm-" not in session.get("session_name", "")
-        for session in sessions
+        not session.get("project_id") and not session.get("pm_profile") for session in sessions
     )
     has_project = any(
-        session.get("project_id") or "-pm-" in session.get("session_name", "")
-        for session in sessions
+        session.get("project_id") or session.get("pm_profile") for session in sessions
     )
     return (True, has_adhoc, has_project)
 

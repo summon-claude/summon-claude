@@ -1161,6 +1161,96 @@ class TestMigration16To17:
             assert row[0] is None  # DEFAULT NULL
 
 
+class TestMigration17To18:
+    """Targeted tests for migration 17 → 18 (adds pm_profile column + project_id index)."""
+
+    async def test_migrate_17_to_18_adds_pm_profile_and_index(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "migrate_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions ("
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
+                ")"
+            )
+            await raw_db.commit()
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute("PRAGMA table_info(sessions)") as cursor:
+                cols = {row[1] for row in await cursor.fetchall()}
+            assert "pm_profile" in cols
+
+            async with raw_db.execute(
+                "SELECT name FROM sqlite_master WHERE type='index'"
+                " AND name='idx_sessions_project_id'"
+            ) as cursor:
+                row = await cursor.fetchone()
+            assert row is not None, "idx_sessions_project_id not created by migration 17→18"
+
+    async def test_migrate_17_to_18_no_backfill(self, tmp_path):
+        """Migration must NOT backfill pm_profile from session names."""
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "no_backfill_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions ("
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
+                ")"
+            )
+            await raw_db.executemany(
+                "INSERT INTO sessions (session_id, session_name) VALUES (?, ?)",
+                [
+                    ("s1", "pm-abc123"),
+                    ("s2", "myproj-pm-def456"),
+                    ("s3", "fix-auth"),
+                ],
+            )
+            await raw_db.commit()
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute(
+                "SELECT session_id, pm_profile FROM sessions ORDER BY session_id"
+            ) as cursor:
+                rows = {row[0]: row[1] for row in await cursor.fetchall()}
+
+            assert rows["s1"] == 0  # no backfill — pm_profile only set at creation
+            assert rows["s2"] == 0
+            assert rows["s3"] == 0
+
+    async def test_migrate_17_to_18_idempotent(self, tmp_path):
+        import aiosqlite
+
+        from summon_claude.sessions.migrations import _migrate_17_to_18
+
+        db_path = tmp_path / "idempotent_17_to_18.db"
+        async with aiosqlite.connect(str(db_path)) as raw_db:
+            await raw_db.execute(
+                "CREATE TABLE sessions ("
+                "  session_id TEXT PRIMARY KEY, session_name TEXT, project_id TEXT"
+                ")"
+            )
+            await raw_db.commit()
+
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+            await _migrate_17_to_18(raw_db)
+            await raw_db.commit()
+
+            async with raw_db.execute("PRAGMA table_info(sessions)") as cursor:
+                cols = {row[1] for row in await cursor.fetchall()}
+            assert "pm_profile" in cols
+
+
 class TestSpawnTokens:
     async def test_store_and_consume_spawn_token(self, registry):
         from datetime import UTC, datetime, timedelta
@@ -1520,6 +1610,7 @@ class TestReleasedMigrationsImmutable:
         "_migrate_14_to_15": "d9d62bd4554b85bd",
         "_migrate_15_to_16": "72d8ce098dcaa6a0",
         "_migrate_16_to_17": "4ee7cc86287aa662",
+        "_migrate_17_to_18": "388b93f98a4744f8",
     }
 
     def test_released_migrations_unchanged(self):

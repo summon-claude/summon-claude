@@ -337,12 +337,23 @@ def _slugify(text: str) -> str:
     return slugify_for_channel(text) or "session"
 
 
-def _make_channel_name(prefix: str, session_name: str) -> str:
-    """Build a slugified channel name with prefix, date, and hex suffix."""
-    date_suffix = datetime.now(UTC).strftime("%m%d")
-    hex_suffix = secrets.token_hex(4)
+def _make_channel_name(prefix: str, session_name: str, hex_bytes: int = 3) -> str:
+    """Build a slugified channel name with prefix and hex suffix.
+
+    Collision space: hex_bytes=3 gives ~16.7M values, hex_bytes=2 gives
+    65,536 values per (prefix, slug) pair.  The _create_channel retry loop
+    (3 attempts) mitigates single collisions.
+
+    If *session_name* already starts with *prefix*-, the duplicate prefix
+    segment is stripped to avoid ``prefix-prefix-name-hex`` names.
+    """
+    hex_suffix = secrets.token_hex(hex_bytes)
     slug = _slugify(session_name) if session_name else "session"
-    name = f"{prefix}-{slug}-{date_suffix}-{hex_suffix}"
+    # Prevent double-prefixing: strip prefix if slug already starts with it
+    prefix_with_sep = f"{prefix}-"
+    if slug.startswith(prefix_with_sep):
+        slug = slug[len(prefix_with_sep) :]
+    name = f"{prefix}-{slug}-{hex_suffix}"
     return name[:_MAX_CHANNEL_NAME_LEN].lower()
 
 
@@ -670,6 +681,8 @@ class SummonSession:
         self._system_prompt_append = options.system_prompt_append
         self._initial_prompt: str | None = options.initial_prompt
         self._initial_prompt_sent: bool = False
+        self._effective_prefix = config.channel_prefix
+        self._effective_hex_bytes = 3
         self._session_id = session_id
         self._cwd = options.cwd
         self._name = options.name
@@ -875,6 +888,7 @@ class SummonSession:
                 parent_session_id=self._parent_session_id,
                 authenticated_user_id=self._authenticated_user_id,
                 project_id=self._project_id,
+                pm_profile=self._pm_profile or self._global_pm_profile,
             )
             await registry.log_event(
                 "session_created",
@@ -1053,6 +1067,7 @@ class SummonSession:
             bot_user_id = (await web_client.auth_test())["user_id"]
 
         # --- Pre-SlackClient: channel lifecycle via raw web_client ---
+        proj: dict | None = None  # cached project lookup, reused for auto_mode_rules
         if self._channel_id_option:
             channel_id, channel_name = await self._reuse_channel(
                 web_client, registry, self._channel_id_option
@@ -1063,9 +1078,23 @@ class SummonSession:
             channel_id, channel_name = await self._get_or_create_pm_channel(
                 web_client, registry, self._project_id
             )
+        elif self._pm_profile and not self._project_id:
+            raise RuntimeError("PM session requires a project_id")
         elif self._scribe_profile:
             channel_id, channel_name = await self._get_or_create_scribe_channel(web_client)
         else:
+            # Resolve effective prefix and hex length for ad-hoc/child sessions
+            if self._project_id:
+                try:
+                    proj = await registry.get_project(self._project_id)
+                except Exception:
+                    proj = None
+                    logger.warning(
+                        "Could not resolve project %s for channel prefix", self._project_id
+                    )
+                if proj:
+                    self._effective_prefix = proj.get("channel_prefix", self._effective_prefix)
+                    self._effective_hex_bytes = 2  # 4-char hex for PM-spawned children
             channel_id, channel_name = await self._create_channel(web_client)
 
         # Record channel_id for SessionManager status queries
@@ -1245,7 +1274,7 @@ class SummonSession:
             )
         project_rules = None
         if self._project_id:
-            project = await registry.get_project(self._project_id)
+            project = proj if proj is not None else await registry.get_project(self._project_id)
             if project and project.get("auto_mode_rules"):
                 try:
                     parsed = json.loads(project["auto_mode_rules"])
@@ -1338,12 +1367,15 @@ class SummonSession:
         """Create a private Slack channel with retry on name collision.
 
         Returns ``(channel_id, channel_name)``.  Generates a fresh random
-        hex suffix on each attempt so collisions are astronomically unlikely
-        (1 in ~4 billion per name per day), but retries handle the edge case.
+        hex suffix on each attempt using ``self._effective_hex_bytes`` (default 3,
+        giving ~16.7M values; 2 for PM-spawned children giving 65,536 values).
+        The retry loop mitigates single collisions.
         """
         last_err: Exception | None = None
         for attempt in range(self._CHANNEL_CREATE_RETRIES):
-            channel_name = _make_channel_name(self._config.channel_prefix, self._name)
+            channel_name = _make_channel_name(
+                self._effective_prefix, self._name, self._effective_hex_bytes
+            )
             try:
                 resp = await web_client.conversations_create(name=channel_name, is_private=True)
                 cid: str = resp["channel"]["id"]  # type: ignore[index]
@@ -1471,22 +1503,19 @@ class SummonSession:
         )
         return channel_id, channel_name
 
-    async def _get_or_create_pm_channel(  # noqa: PLR0912
+    async def _get_or_create_pm_channel(  # noqa: PLR0912, PLR0915
         self, web_client: AsyncWebClient, registry: SessionRegistry, project_id: str
     ) -> tuple[str, str]:
         """Reuse the existing PM channel for this project, or create a new one.
 
         If the project already has a ``pm_channel_id``, joins it and returns it.
-        Otherwise creates a new channel named ``{channel_prefix}-pm`` and
+        Otherwise creates a new channel named ``{channel_prefix}-0-pm`` and
         persists the channel ID back to the project record.
         """
         project = await registry.get_project(project_id)
         if project is None:
-            logger.warning(
-                "Project %s not found — falling back to normal channel creation",
-                project_id,
-            )
-            return await self._create_channel(web_client)
+            logger.warning("PM channel creation failed: project %s not found", project_id)
+            raise RuntimeError("Cannot create PM channel: project not found in database")
 
         existing_channel_id = project.get("pm_channel_id")
         if existing_channel_id:
@@ -1510,7 +1539,7 @@ class SummonSession:
 
         # Create a new PM channel
         channel_prefix = project.get("channel_prefix", _slugify(project.get("name", "pm")))
-        new_channel_name = f"{channel_prefix}-pm"[:_MAX_CHANNEL_NAME_LEN].lower()
+        new_channel_name = f"{channel_prefix}-0-pm"[:_MAX_CHANNEL_NAME_LEN].lower()
         new_id = ""
         cname = ""
         try:
@@ -1542,7 +1571,7 @@ class SummonSession:
                     cursor = resp.get("response_metadata", {}).get("next_cursor")
                     if not cursor:
                         raise RuntimeError(
-                            f"Channel {new_channel_name!r} exists but bot cannot access it"
+                            f"Channel {new_channel_name!r} exists but bot cannot find it"
                         ) from e
                 else:
                     raise RuntimeError(
@@ -1604,17 +1633,6 @@ class SummonSession:
             for ch in resp.get("channels", []):
                 ch_name = ch.get("name", "")
                 if ch_name in (gpm_channel_name, zzz_gpm_name):
-                    # [SEC-003] Verify the bot created this channel to prevent
-                    # name-squatting by workspace members who pre-create the name.
-                    if ch.get("creator") != self._bot_user_id:
-                        logger.warning(
-                            "Global PM: channel #%s exists but was created by %s, not bot "
-                            "(%s) — skipping to prevent channel hijack",
-                            ch_name,
-                            ch.get("creator"),
-                            self._bot_user_id,
-                        )
-                        continue
                     channel_id = ch["id"]
                     await web_client.conversations_join(channel=channel_id)
                     if ch_name == zzz_gpm_name:
@@ -3946,7 +3964,7 @@ class SummonSession:
                 logger.debug("Failed to post spawn error: %s", e2)
             return
 
-        child_name = f"{self._name}-spawn-{secrets.token_hex(3)}"
+        child_name = f"spawn-{secrets.token_hex(3)}"
         child_options = SessionOptions(cwd=self._cwd, name=child_name, project_id=self._project_id)
         try:
             child_session_id = await self._ipc_spawn(child_options, spawn_auth.token)

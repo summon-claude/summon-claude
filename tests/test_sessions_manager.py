@@ -51,6 +51,7 @@ class _StubSession:
         self.channel_id: str | None = None
         self.target_channel_id: str | None = None
         self.is_pm: bool = False
+        self.is_global_pm: bool = False
         self.project_id: str | None = None
         self._shutdown_requested = False
         self._authenticated_user_id: str | None = None
@@ -388,6 +389,34 @@ class TestSupervisedSession:
         call_args = mock_provider.chat_postMessage.call_args
         assert call_args[1]["channel"] == "C001"
         assert ":x:" in call_args[1]["text"]
+
+    async def test_pm_failure_notifies_global_pm(self):
+        """Project PM permanent failure sends mark_untrusted notification to global PM."""
+        manager, mock_provider, _ = _make_manager()
+
+        # Failing project PM
+        pm_stub = _StubSession(fail_with=RuntimeError("project not found"))
+        pm_stub.is_pm = True
+        pm_stub.is_global_pm = False
+        pm_stub.project_id = "p1"
+
+        # Global PM stub with inject_message
+        global_pm = _StubSession()
+        global_pm.is_pm = True
+        global_pm.is_global_pm = True
+        global_pm.inject_message = AsyncMock()
+
+        manager._sessions["gpm-id"] = global_pm  # type: ignore[assignment]
+
+        await manager._supervised_session(pm_stub, "pm-id")  # type: ignore[arg-type]
+
+        global_pm.inject_message.assert_awaited_once()
+        call_args = global_pm.inject_message.call_args
+        msg = call_args[0][0]
+        assert "RuntimeError" in msg
+        assert "UNTRUSTED_EXTERNAL_DATA" in msg
+        assert "[Source: session-manager-error]" in msg
+        assert call_args[1]["sender_info"] == "session-manager"
 
 
 # ---------------------------------------------------------------------------
@@ -1122,9 +1151,9 @@ class TestInjectProxyOptionsPropagation:
 
         src = inspect.getsource(SessionManager)
         count = src.count("_inject_proxy_options(")
-        # 1 definition + 9 call sites = 10 occurrences
-        assert count == 10, (
-            f"Expected 10 occurrences of _inject_proxy_options (1 def + 9 calls), "
+        # 1 definition + 8 call sites = 9 occurrences
+        assert count == 9, (
+            f"Expected 9 occurrences of _inject_proxy_options (1 def + 8 calls), "
             f"found {count}. A new SummonSession construction site may be missing the call."
         )
 
@@ -2720,7 +2749,7 @@ class TestRestartSuspendedSessionsResume:
     """Additional tests for _restart_suspended_sessions edge cases."""
 
     async def test_project_up_resume_suspended_pm(self):
-        """Suspended PM session is detected by name and resumed with pm_profile=True."""
+        """Suspended PM session is resumed with pm_profile=True from DB flag."""
         manager, _, _ = _make_manager()
         manager._project_up_in_flight = True
 
@@ -2729,14 +2758,15 @@ class TestRestartSuspendedSessionsResume:
 
         pm_session = {
             "session_id": "pm-old",
-            "session_name": "myproj-pm-abc123",  # contains -pm- → is_pm=True
+            "session_name": "pm-abc123",
             "cwd": "/tmp/myproj",
             "model": "claude-opus-4-6",
             "status": "suspended",
             "slack_channel_id": "C_PM",
-            "slack_channel_name": "zzz-myproj-pm",
+            "slack_channel_name": "zzz-myproj-0-pm",
             "claude_session_id": "claude-pm-sid",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
 
         captured_options: list = []
@@ -2782,6 +2812,51 @@ class TestRestartSuspendedSessionsResume:
         await asyncio.gather(
             *manager._tasks.values(), *manager._background_tasks, return_exceptions=True
         )
+
+    async def test_non_pm_with_pm_like_name_not_treated_as_pm(self):
+        """Suspended session named 'fix-pm-bug' with pm_profile=0 is NOT resumed as PM."""
+        manager, _, _ = _make_manager()
+        manager._project_up_in_flight = True
+
+        non_pm_session = {
+            "session_id": "child-old",
+            "session_name": "fix-pm-bug",
+            "cwd": "/tmp/myproj",
+            "model": "claude-opus-4-6",
+            "status": "suspended",
+            "slack_channel_id": "C_CHILD",
+            "slack_channel_name": "zzz-myproj-fix-pm-bug-abc123",
+            "claude_session_id": "claude-child-sid",
+            "authenticated_user_id": "U001",
+            "pm_profile": 0,
+        }
+
+        captured_options: list = []
+
+        async def fake_create(opts, **kwargs):
+            captured_options.append(opts)
+
+        manager.create_resumed_session = fake_create
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project_sessions = AsyncMock(return_value=[non_pm_session])
+        mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-child-sid"})
+        mock_reg.update_status = AsyncMock()
+
+        with (
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch("summon_claude.sessions.manager.SessionRegistry") as mock_registry_cls,
+        ):
+            mock_registry_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_registry_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            await manager._restart_suspended_sessions(
+                [{"project_id": "p1", "directory": "/tmp/myproj", "name": "myproj"}],
+                "U001",
+            )
+
+        assert len(captured_options) == 1
+        opts = captured_options[0]
+        assert opts.pm_profile is not True
 
     async def test_project_up_resume_missing_claude_sid(self):
         """Session with no claude_session_id falls back to channel-reuse-only (resume=None)."""
@@ -2885,7 +2960,7 @@ class TestCreateResumedSessionPmTopic:
         ):
             options = SessionOptions(
                 cwd="/tmp/test",
-                name="proj-pm-abc",
+                name="pm-abc",
                 project_id="p1",
                 pm_profile=True,
                 channel_id="C1",
@@ -2908,25 +2983,27 @@ class TestMultiProjectPmResume:
 
         pm1 = {
             "session_id": "pm-old-1",
-            "session_name": "proj1-pm-aaa",
+            "session_name": "pm-aaa",
             "cwd": "/tmp/proj1",
             "model": "claude-opus-4-6",
             "status": "suspended",
             "slack_channel_id": "C_PM1",
-            "slack_channel_name": "zzz-proj1-pm",
+            "slack_channel_name": "zzz-proj1-0-pm",
             "claude_session_id": "cl-pm1",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
         pm2 = {
             "session_id": "pm-old-2",
-            "session_name": "proj2-pm-bbb",
+            "session_name": "pm-bbb",
             "cwd": "/tmp/proj2",
             "model": "claude-opus-4-6",
             "status": "suspended",
             "slack_channel_id": "C_PM2",
-            "slack_channel_name": "zzz-proj2-pm",
+            "slack_channel_name": "zzz-proj2-0-pm",
             "claude_session_id": "cl-pm2",
             "authenticated_user_id": "U001",
+            "pm_profile": 1,
         }
 
         captured_options: list = []

@@ -585,12 +585,12 @@ class TestCreateChannel:
 
         mock_client = AsyncMock()
         mock_client.conversations_create = AsyncMock(
-            return_value={"channel": {"id": "C123", "name": "summon-test-0303-abcd1234"}}
+            return_value={"channel": {"id": "C123", "name": "summon-test-abcd12"}}
         )
 
         cid, cname = await session._create_channel(mock_client)
         assert cid == "C123"
-        assert cname == "summon-test-0303-abcd1234"
+        assert cname == "summon-test-abcd12"
         mock_client.conversations_create.assert_awaited_once()
 
     async def test_retries_on_name_taken(self):
@@ -600,7 +600,7 @@ class TestCreateChannel:
         mock_client.conversations_create = AsyncMock(
             side_effect=[
                 Exception("name_taken"),
-                {"channel": {"id": "C456", "name": "summon-test-0303-ffff0000"}},
+                {"channel": {"id": "C456", "name": "summon-test-ffff00"}},
             ]
         )
 
@@ -631,6 +631,119 @@ class TestCreateChannel:
         with pytest.raises(Exception, match="invalid_auth"):
             await session._create_channel(mock_client)
         mock_client.conversations_create.assert_awaited_once()
+
+    async def test_create_channel_uses_project_prefix(self):
+        """_create_channel uses _effective_prefix and _effective_hex_bytes when set."""
+        session = make_session()
+        session._effective_prefix = "my-api"
+        session._effective_hex_bytes = 2
+
+        created_names: list[str] = []
+
+        async def fake_create(name, is_private):
+            created_names.append(name)
+            return {"channel": {"id": "C789", "name": name}}
+
+        mock_client = AsyncMock()
+        mock_client.conversations_create = fake_create
+
+        cid, cname = await session._create_channel(mock_client)
+        assert cid == "C789"
+        expected_prefix = f"my-api-{session._name}-"
+        assert cname.startswith(expected_prefix)
+        # 4-char hex (hex_bytes=2)
+        hex_part = cname[len(expected_prefix) :]
+        assert len(hex_part) == 4, f"Expected 4-char hex suffix, got {hex_part!r}"
+
+
+class TestPmChannelRaisesWhenProjectMissing:
+    """_get_or_create_pm_channel raises RuntimeError when project is not in DB."""
+
+    async def test_pm_channel_raises_when_project_missing(self, tmp_path):
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session()
+        web = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            with pytest.raises(RuntimeError, match="project not found"):
+                await session._get_or_create_pm_channel(web, registry, "nonexistent-project-id")
+
+
+class TestPmWithoutProjectIdRaises:
+    """PM session with no project_id hits the early guard in _run_session."""
+
+    async def test_pm_without_project_id_raises(self):
+        """_run_session raises RuntimeError when pm_profile=True but project_id is None."""
+        session = make_session(pm_profile=True)
+        session._web_client = AsyncMock()
+        session._bot_user_id = "U_BOT"
+        assert session._project_id is None
+
+        mock_registry = AsyncMock()
+        with pytest.raises(RuntimeError, match="PM session requires a project_id"):
+            await session._run_session(mock_registry)
+
+
+class TestPrefixResolution:
+    """Prefix and hex_bytes resolution from project registry in _run_session else branch."""
+
+    async def test_prefix_resolution_project_child(self):
+        """_run_session resolves prefix from project registry for child sessions."""
+        session = make_session()
+        session._project_id = "proj-123"
+        session._web_client = AsyncMock()
+        session._bot_user_id = "U_BOT"
+
+        project = {"channel_prefix": "myapi", "name": "myapi-project"}
+        mock_reg = AsyncMock()
+        mock_reg.get_project = AsyncMock(return_value=project)
+        # _create_channel will be called — mock it to avoid Slack API
+        mock_reg.register_channel = AsyncMock()
+        session._create_channel = AsyncMock(return_value=("C_TEST", "myapi-test-abc"))
+
+        # _run_session will resolve prefix, then call _create_channel, then
+        # proceed to SlackClient setup — stop early by raising after channel creation
+        with contextlib.suppress(Exception):
+            await session._run_session(mock_reg)
+
+        assert session._effective_prefix == "myapi"
+        assert session._effective_hex_bytes == 2
+
+    async def test_prefix_resolution_adhoc(self):
+        """Without _project_id, _run_session keeps default prefix and hex_bytes."""
+        session = make_session()
+        session._web_client = AsyncMock()
+        session._bot_user_id = "U_BOT"
+        assert session._project_id is None
+
+        mock_reg = AsyncMock()
+        session._create_channel = AsyncMock(return_value=("C_AD", "summon-test-abc"))
+        mock_reg.register_channel = AsyncMock()
+
+        with contextlib.suppress(Exception):
+            await session._run_session(mock_reg)
+
+        assert session._effective_prefix == "summon"
+        assert session._effective_hex_bytes == 3
+
+    async def test_prefix_resolution_db_error(self):
+        """When get_project raises, _run_session falls back to default prefix."""
+        session = make_session()
+        session._project_id = "proj-error"
+        session._web_client = AsyncMock()
+        session._bot_user_id = "U_BOT"
+
+        mock_reg = AsyncMock()
+        mock_reg.get_project = AsyncMock(side_effect=Exception("DB connection lost"))
+        session._create_channel = AsyncMock(return_value=("C_ERR", "summon-test-abc"))
+
+        with contextlib.suppress(Exception):
+            await session._run_session(mock_reg)
+
+        mock_reg.get_project.assert_awaited_once_with("proj-error")
+        assert session._effective_prefix == "summon"
+        assert session._effective_hex_bytes == 3
 
 
 class TestSlashCommandHandler:
@@ -2556,6 +2669,9 @@ class TestHandleSpawn:
             # Verify project_id was propagated to child options
             child_opts = mock_ipc_spawn.call_args[0][0]
             assert child_opts.project_id == "proj-42"
+            # Verify spawn name uses short format (no parent name prefix)
+            assert child_opts.name.startswith("spawn-")
+            assert len(child_opts.name) == len("spawn-") + 6  # 3 hex bytes
 
     async def test_spawn_blocked_missing_ipc_spawn(self):
         """_handle_spawn posts error when _ipc_spawn callback is not registered."""
@@ -4289,6 +4405,94 @@ class TestZzzGetOrCreatePmChannel:
 
         assert channel_name == "myproj-pm"
         web.conversations_rename.assert_not_awaited()
+
+    async def test_pm_channel_creation_when_no_pm_channel_id(self, tmp_path):
+        """Creates new channel named {prefix}-0-pm and persists pm_channel_id."""
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        web = AsyncMock()
+        web.conversations_create = AsyncMock(
+            return_value={"channel": {"id": "C_NEW", "name": "newproj-0-pm"}}
+        )
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("newproj", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_NEW"
+        assert channel_name == "newproj-0-pm"
+        web.conversations_create.assert_awaited_once()
+        call_kwargs = web.conversations_create.await_args
+        assert call_kwargs.kwargs.get("name") == "newproj-0-pm"
+        assert call_kwargs.kwargs.get("is_private") is True
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_NEW")
+
+    async def test_pm_channel_creation_name_taken_fallback(self, tmp_path):
+        """name_taken error triggers pagination to find the existing channel."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [{"id": "C_TAKEN", "name": "newproj2-0-pm", "creator": "U_BOT"}],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+        web.conversations_join = AsyncMock()
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("newproj2", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_TAKEN"
+        assert channel_name == "newproj2-0-pm"
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_TAKEN")
+
+    async def test_pm_channel_name_taken_uses_existing_channel(self, tmp_path):
+        """name_taken fallback uses the existing channel regardless of creator."""
+        from slack_sdk.errors import SlackApiError
+
+        from summon_claude.sessions.registry import SessionRegistry
+
+        session = make_session(pm_profile=True)
+        session._bot_user_id = "U_BOT"
+        web = AsyncMock()
+
+        slack_error = SlackApiError("name_taken", {"error": "name_taken"})
+        web.conversations_create = AsyncMock(side_effect=slack_error)
+        web.conversations_list = AsyncMock(
+            return_value={
+                "channels": [{"id": "C_OTHER", "name": "proj3-0-pm", "creator": "U_OTHER"}],
+                "response_metadata": {"next_cursor": ""},
+            }
+        )
+        update_project_mock = AsyncMock()
+
+        async with SessionRegistry(db_path=tmp_path / "test.db") as registry:
+            project_id = await registry.add_project("proj3", str(tmp_path))
+            registry.update_project = update_project_mock
+            channel_id, channel_name = await session._get_or_create_pm_channel(
+                web, registry, project_id
+            )
+
+        assert channel_id == "C_OTHER"
+        update_project_mock.assert_awaited_once_with(project_id, pm_channel_id="C_OTHER")
 
 
 # ---------------------------------------------------------------------------

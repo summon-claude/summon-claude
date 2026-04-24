@@ -32,6 +32,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 # recv_msg/send_msg imported lazily in handle_client to avoid circular import
 # (daemon.py imports SessionManager; SessionManager uses IPC from daemon.py)
 from summon_claude.config import get_data_dir
+from summon_claude.security import mark_untrusted
 from summon_claude.sessions.auth import (
     SessionAuth,
     SpawnAuth,
@@ -493,6 +494,21 @@ class SessionManager:
     # Unix socket control API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _validate_session_options(options: SessionOptions) -> dict | None:
+        """Validate session options at the IPC boundary. Returns error dict or None."""
+        if options.system_prompt_append and len(options.system_prompt_append) > MAX_PROMPT_CHARS:
+            return {
+                "type": "error",
+                "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
+            }
+        if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
+            return {
+                "type": "error",
+                "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
+            }
+        return None
+
     async def handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -522,19 +538,8 @@ class SessionManager:
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid session options: {e}"}
                 # Defense-in-depth: validate free-text fields at daemon boundary
-                if (
-                    options.system_prompt_append
-                    and len(options.system_prompt_append) > MAX_PROMPT_CHARS
-                ):
-                    return {
-                        "type": "error",
-                        "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
-                    return {
-                        "type": "error",
-                        "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
-                    }
+                if err := self._validate_session_options(options):
+                    return err
                 try:
                     short_code = await self.create_session(options)
                 except ValueError as e:
@@ -566,6 +571,7 @@ class SessionManager:
                             "channel_id": s.channel_id,
                             "session_name": s.name,
                             "project_id": s.project_id,
+                            "pm_profile": s.is_pm,
                             "status": "active",
                         }
                         for sid, s in self._sessions.items()
@@ -582,20 +588,8 @@ class SessionManager:
                     spawn_token = msg["spawn_token"]
                 except (TypeError, KeyError) as e:
                     return {"type": "error", "message": f"Invalid request: {e}"}
-                # Defense-in-depth: re-validate free-text fields at the daemon boundary
-                if (
-                    options.system_prompt_append
-                    and len(options.system_prompt_append) > MAX_PROMPT_CHARS
-                ):
-                    return {
-                        "type": "error",
-                        "message": f"system_prompt_append exceeds {MAX_PROMPT_CHARS} chars",
-                    }
-                if options.initial_prompt and len(options.initial_prompt) > MAX_PROMPT_CHARS:
-                    return {
-                        "type": "error",
-                        "message": f"initial_prompt exceeds {MAX_PROMPT_CHARS} chars",
-                    }
+                if err := self._validate_session_options(options):
+                    return err
                 try:
                     session_id = await self.create_session_with_spawn_token(options, spawn_token)
                 except ValueError as e:
@@ -738,6 +732,19 @@ class SessionManager:
                         session,
                         f":x: *Session terminated unexpectedly*: `{e}`{recovery_hint}",
                     )
+                    # Best-effort: notify global PM of project PM failure
+                    if session.is_pm and not session.is_global_pm:
+                        for s in self._sessions.values():
+                            if s.is_global_pm:
+                                with contextlib.suppress(Exception):
+                                    await s.inject_message(
+                                        mark_untrusted(
+                                            f"Project PM session failed: {type(e).__name__}",
+                                            source="session-manager-error",
+                                        ),
+                                        sender_info="session-manager",
+                                    )
+                                break
                     break
 
     # ------------------------------------------------------------------
@@ -944,7 +951,7 @@ class SessionManager:
             auth = await self._generate_auth(session_id)
             options = SessionOptions(
                 cwd=cwd,
-                name=f"pm-auth-{secrets.token_hex(3)}",
+                name=f"project-auth-{secrets.token_hex(3)}",
                 auth_only=True,
             )
             options = self._inject_proxy_options(options)
@@ -1073,7 +1080,7 @@ class SessionManager:
                 for sess in suspended:
                     sess_id = sess["session_id"]
                     sess_name = sess.get("session_name", "")
-                    is_pm = "-pm-" in sess_name
+                    is_pm = bool(sess.get("pm_profile"))
                     try:
                         channel_id = sess.get("slack_channel_id")
                         if not channel_id:
@@ -1143,62 +1150,6 @@ class SessionManager:
                             )
         return pm_resumed
 
-    def _start_child_session(
-        self,
-        project: dict[str, Any],
-        user_id: str,
-        cwd: str,
-        model: str | None = None,
-        resume_from_session_id: str | None = None,
-    ) -> None:
-        """Create and start a regular (non-PM) child session for *project*."""
-        if not pathlib.Path(cwd).is_dir():
-            raise FileNotFoundError(f"Directory not found: {cwd}")
-
-        new_session_id = str(uuid.uuid4())
-        options = SessionOptions(
-            cwd=cwd,
-            name=f"{project['channel_prefix']}-{secrets.token_hex(3)}",
-            model=model,
-            project_id=project["project_id"],
-            resume_from_session_id=resume_from_session_id,
-        )
-        options = self._inject_proxy_options(options)
-        new_session = SummonSession(
-            config=self._config,
-            options=options,
-            auth=None,
-            session_id=new_session_id,
-            web_client=self._web_client,
-            dispatcher=self._dispatcher,
-            bot_user_id=self._bot_user_id,
-            ipc_spawn=self.create_session_with_spawn_token,
-            ipc_resume=self._ipc_resume,
-            ipc_queue=self.queue_session,
-        )
-        new_session.authenticate(user_id)
-
-        self._cancel_grace_timer()
-        self._sessions[new_session_id] = new_session
-        task = asyncio.create_task(
-            self._supervised_session(new_session, new_session_id),
-            name=f"session-child-{new_session_id}",
-        )
-        task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
-        self._tasks[new_session_id] = task
-
-        logger.info(
-            "SessionManager: started child session %s for project %s (cwd=%s)",
-            new_session_id,
-            project["name"],
-            cwd,
-        )
-
-        # Update PM topic now that a new child is tracked
-        t = asyncio.create_task(self._update_pm_topic(project["project_id"]))
-        t.add_done_callback(self._on_background_task_done)
-        self._background_tasks.add(t)
-
     def _start_pm_for_project(self, project: dict[str, Any], user_id: str) -> None:
         """Create and start a single PM session for *project*."""
         project_dir = project["directory"]
@@ -1208,7 +1159,7 @@ class SessionManager:
         new_session_id = str(uuid.uuid4())
         pm_options = SessionOptions(
             cwd=project_dir,
-            name=f"{project['channel_prefix']}-pm-{secrets.token_hex(3)}",
+            name=f"pm-{secrets.token_hex(3)}",
             pm_profile=True,
             project_id=project["project_id"],
         )

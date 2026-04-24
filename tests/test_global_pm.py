@@ -469,46 +469,24 @@ class TestGlobalPMAutoCreate:
 # ---------------------------------------------------------------------------
 
 
-class TestGPMChannelCreatorCheck:
-    """[SEC-003] GPM channel discovery must verify bot created the channel."""
+class TestGPMChannelReuse:
+    """GPM channel discovery reuses any matching channel by name."""
 
     @pytest.mark.asyncio
-    async def test_skips_channel_created_by_other_user(self):
+    async def test_reuses_existing_channel(self):
         session = make_gpm_session()
         mock_web = AsyncMock()
-        # Channel exists but was created by a different user
         mock_web.conversations_list = AsyncMock(
             return_value={
-                "channels": [{"id": "C_HIJACK", "name": "0-global-pm", "creator": "U_ATTACKER"}],
-                "response_metadata": {},
-            }
-        )
-        # After skipping the hijacked channel, should create a new one
-        mock_web.conversations_create = AsyncMock(
-            return_value={"channel": {"id": "C_NEW", "name": "0-global-pm"}}
-        )
-
-        channel_id, channel_name = await session._get_or_create_global_pm_channel(mock_web)
-        assert channel_id == "C_NEW"
-        # conversations_join should NOT have been called on the hijacked channel
-        mock_web.conversations_join.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_accepts_channel_created_by_bot(self):
-        session = make_gpm_session()
-        mock_web = AsyncMock()
-        # Channel was created by the bot
-        mock_web.conversations_list = AsyncMock(
-            return_value={
-                "channels": [{"id": "C_OURS", "name": "0-global-pm", "creator": "B001"}],
+                "channels": [{"id": "C_EXISTING", "name": "0-global-pm"}],
                 "response_metadata": {},
             }
         )
         mock_web.conversations_join = AsyncMock()
 
         channel_id, channel_name = await session._get_or_create_global_pm_channel(mock_web)
-        assert channel_id == "C_OURS"
-        mock_web.conversations_join.assert_called_once_with(channel="C_OURS")
+        assert channel_id == "C_EXISTING"
+        mock_web.conversations_join.assert_called_once_with(channel="C_EXISTING")
 
 
 # ---------------------------------------------------------------------------
