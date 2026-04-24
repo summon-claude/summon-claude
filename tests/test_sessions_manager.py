@@ -2843,7 +2843,10 @@ class TestRestartSuspendedSessionsResume:
         mock_reg.get_channel = AsyncMock(return_value={"claude_session_id": "claude-child-sid"})
         mock_reg.update_status = AsyncMock()
 
-        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_registry_cls:
+        with (
+            patch("pathlib.Path.is_dir", return_value=True),
+            patch("summon_claude.sessions.manager.SessionRegistry") as mock_registry_cls,
+        ):
             mock_registry_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
             mock_registry_cls.return_value.__aexit__ = AsyncMock(return_value=False)
             await manager._restart_suspended_sessions(
