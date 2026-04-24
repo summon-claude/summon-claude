@@ -1626,6 +1626,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#session_clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_clear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#session_resume" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2625,6 +2636,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#session_clear" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        session_clear
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#session_resume" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2804,8 +2826,8 @@
 </tr>
 <tr>
 <td><code>summon-cli</code></td>
-<td>All sessions (8 tools) + PM sessions (7 additional)</td>
-<td>15 tools — Session lifecycle, scheduling, tasks</td>
+<td>All sessions (8 tools) + PM sessions (8 additional)</td>
+<td>16 tools — Session lifecycle, scheduling, tasks</td>
 </tr>
 <tr>
 <td><code>summon-canvas</code></td>
@@ -3356,7 +3378,7 @@
 <p><strong>Returns:</strong> A markdown table of tasks with ID, status, priority, content, and last-updated time. Cross-session results are grouped by session.</p>
 <hr />
 <h3 id="additional-tools-for-pm-sessions-only">Additional tools for PM sessions only<a class="headerlink" href="#additional-tools-for-pm-sessions-only" title="Permanent link">&para;</a></h3>
-<p>PM (project manager) sessions are started with <code>--pm-profile</code> or via <code>summon project up</code>. They receive 5 additional tools, plus a 6th (<code>session_status_update</code>) when a pinned status message exists.</p>
+<p>PM (project manager) sessions are started via <code>summon project up</code>. They receive 6 additional tools, plus a 7th (<code>session_status_update</code>) when a pinned status message exists.</p>
 <h4 id="session_start"><code>session_start</code><a class="headerlink" href="#session_start" title="Permanent link">&para;</a></h4>
 <p>Start a new summon-claude session. Generates a spawn token and creates a pre-authenticated session via daemon IPC.</p>
 <table>
@@ -3503,6 +3525,29 @@
 </table>
 <p><strong>Returns:</strong> Confirmation with the target session name and Slack channel.</p>
 <p><strong>Notes:</strong> Can only message sessions that the calling session spawned (parent-child scope guard). Target must be <code>active</code>.</p>
+<hr />
+<h4 id="session_clear"><code>session_clear</code><a class="headerlink" href="#session_clear" title="Permanent link">&para;</a></h4>
+<p>Clear a child session's conversation context. The session stays active but starts fresh — no prior messages or tool history.</p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_id</code></td>
+<td>string</td>
+<td>Yes</td>
+<td>The session ID to clear</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> Confirmation that context was cleared.</p>
+<p><strong>Notes:</strong> Can only clear sessions that the calling session spawned (parent-child scope guard). Target must be <code>active</code> and have a triage session name (<code>gh-triage</code> or <code>jira-triage</code>). Not available to Global PM sessions.</p>
 <hr />
 <h4 id="session_resume"><code>session_resume</code><a class="headerlink" href="#session_resume" title="Permanent link">&para;</a></h4>
 <p>Resume a completed or errored session. Creates a new summon session connected to the same Slack channel with Claude SDK transcript continuity.</p>
