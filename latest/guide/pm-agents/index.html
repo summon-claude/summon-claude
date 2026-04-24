@@ -2514,7 +2514,7 @@
 <p>Once bound to a channel, the PM is ready to receive instructions from you. Send it a message describing the task and it will plan and coordinate the work.</p>
 <div class="admonition tip">
 <p class="admonition-title">Naming</p>
-<p>PM sessions are named with <code>-pm-</code> in the middle (e.g., <code>my-api-pm-a1b2c3</code>) so summon-claude can identify them for special handling like cascade restart and PM-awareness checks in <code>summon stop</code>.</p>
+<p>PM channels use the <code>{prefix}-0-pm</code> format (e.g., <code>myapi-0-pm</code>). Child session channels use <code>{prefix}-{name}-{hex}</code> (e.g., <code>myapi-fix-auth-a1b2c3</code>).</p>
 </div>
 <hr />
 <h2 id="pm-only-mcp-tools">PM-only MCP tools<a class="headerlink" href="#pm-only-mcp-tools" title="Permanent link">&para;</a></h2>
