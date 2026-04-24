@@ -94,9 +94,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Generate bot token
+        id: bot-token
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # renovate: datasource=github-tags depName=actions/create-github-app-token
+        with:
+          app-id: ${{ vars.SUMMON_BOT_APP_ID }}
+          private-key: ${{ secrets.SUMMON_BOT_PRIVATE_KEY }}
+
       - name: Trigger tap update
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          GH_TOKEN: ${{ steps.bot-token.outputs.token }}
         run: |
           gh api repos/summon-claude/homebrew-summon/dispatches \
             --method POST \
