@@ -175,7 +175,7 @@ def find_local_daemon_hint() -> str | None:
     if tmp_sock.exists():
         location = str(tmp_sock)
     elif legacy_sock.exists():
-        location = str(root / ".summon")
+        location = str(legacy_sock)
     else:
         return None
     return (

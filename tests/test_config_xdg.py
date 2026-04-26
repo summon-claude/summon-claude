@@ -734,6 +734,7 @@ class TestFindLocalDaemonHintNewPath:
         hint = find_local_daemon_hint()
         assert hint is not None
         assert "SUMMON_LOCAL=1" in hint
+        assert "daemon.sock" in hint
 
     def test_returns_none_when_neither_socket_exists(self, tmp_path, monkeypatch):
         """Global mode + no socket at either path -> no hint."""

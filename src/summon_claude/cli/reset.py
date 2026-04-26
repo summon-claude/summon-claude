@@ -123,15 +123,6 @@ async def _reset_directory(  # noqa: PLR0913
     click.echo(warning.format(path=resolved))
     click.confirm("Are you SURE?" if force else "Continue?", default=False, abort=True)
 
-    # In local mode the socket lives in /tmp (outside the data dir) — remove it
-    # before the rmtree so no orphaned socket is left behind after the reset.
-    if is_local_install():
-        _sock = get_socket_path()
-        _sock.unlink(missing_ok=True)
-        for d in (_sock.parent, _sock.parent.parent):
-            with contextlib.suppress(OSError):
-                d.rmdir()
-
     try:
         shutil.rmtree(resolved)
     except OSError as exc:
@@ -151,6 +142,14 @@ async def async_reset_data(ctx: click.Context, *, force: bool = False) -> None:
         "Data cleared. Run 'summon start' to begin a new session.",
         force=force,
     )
+    # In local mode the socket lives in /tmp (outside the data dir) — remove it
+    # so no orphaned socket is left behind after a data reset.
+    if is_local_install():
+        _sock = get_socket_path()
+        _sock.unlink(missing_ok=True)
+        for d in (_sock.parent, _sock.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
 
 
 async def async_reset_config(ctx: click.Context, *, force: bool = False) -> None:

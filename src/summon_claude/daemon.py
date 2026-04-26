@@ -728,8 +728,9 @@ def start_daemon(config: SummonConfig) -> None:
     if sys.platform == "win32":
         raise RuntimeError("Daemon mode is not supported on Windows")
 
+    socket_path = _daemon_socket()
     # Validate socket path length before attempting anything
-    _validate_socket_path(_daemon_socket())
+    _validate_socket_path(socket_path)
 
     if is_daemon_running():
         logger.debug("Daemon already running — skipping fork")
@@ -739,8 +740,9 @@ def start_daemon(config: SummonConfig) -> None:
         logger.warning(
             "Running as root (uid 0) — /tmp socket dir is shared with all root processes"
         )
+    # Remove stale artefacts from a previous (dead) daemon
+    _clear_stale_daemon_files()
 
-    socket_path = _daemon_socket()
     if is_local_install():
         # _socket_dir() returns /tmp/summon-<uid>/sockets — verify each level individually.
         # parent.parent = /tmp/summon-<uid>/, parent = /tmp/summon-<uid>/sockets/
@@ -748,9 +750,6 @@ def start_daemon(config: SummonConfig) -> None:
         _secure_mkdir(socket_path.parent, 0o700)
     else:
         socket_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Remove stale artefacts from a previous (dead) daemon
-    _clear_stale_daemon_files()
 
     pid = os.fork()
     if pid > 0:

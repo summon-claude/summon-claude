@@ -1011,62 +1011,6 @@ class TestClearStaleDaemonFilesNewPath:
             _clear_stale_daemon_files()  # must not raise
 
 
-class TestSocketDirPermissions:
-    def test_socket_dir_created_with_0o700(self, tmp_path, monkeypatch):
-        """start_daemon() in local mode creates socket dir with mode 0o700."""
-        import stat
-
-        from summon_claude.config import _detect_install_mode
-
-        # Simulate local mode
-        (tmp_path / "pyproject.toml").touch()
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("SUMMON_LOCAL", "1")
-        _detect_install_mode.cache_clear()
-
-        sock_dir = tmp_path / "sockets"
-        sock_path = sock_dir / "abcdef012345.sock"
-
-        with (
-            _patch_data_dir(tmp_path),
-            patch("summon_claude.daemon._daemon_socket", return_value=sock_path),
-            patch("summon_claude.daemon.is_daemon_running", return_value=True),
-        ):
-            # Just test directory creation logic by calling mkdir with the right mode
-            sock_dir.mkdir(mode=0o700, exist_ok=True)
-            dir_stat = sock_dir.stat()
-            assert stat.S_IMODE(dir_stat.st_mode) == 0o700
-
-    def test_symlink_at_socket_dir_causes_refusal(self, tmp_path):
-        """Symlink at socket dir path should be detected and refused."""
-        import stat as stat_mod
-
-        # Simulate: the parent tmp dir is where we'd create /tmp/summon-<uid>/
-        target = tmp_path / "other_dir"
-        target.mkdir()
-        link_path = tmp_path / "summon_uid_dir"
-        link_path.symlink_to(target)
-
-        # lstat should detect this as a symlink
-        lstat_result = link_path.lstat()
-        assert stat_mod.S_ISLNK(lstat_result.st_mode)
-
-    def test_ownership_check_catches_wrong_owner(self, tmp_path):
-        """Directory with wrong st_uid should be detectable via lstat."""
-        import stat as stat_mod
-
-        real_dir = tmp_path / "socket_dir"
-        real_dir.mkdir(mode=0o700)
-
-        lstat_result = real_dir.lstat()
-        # Should be owned by current user
-        assert lstat_result.st_uid == os.getuid()
-        # Simulated wrong owner check: not lstat_result.st_uid == os.getuid()
-        fake_uid = os.getuid() + 9999
-        assert not stat_mod.S_ISLNK(lstat_result.st_mode)
-        assert lstat_result.st_uid != fake_uid
-
-
 # ---------------------------------------------------------------------------
 # TestJiraProxyLifecycle — proxy startup and shutdown in daemon_main
 # ---------------------------------------------------------------------------
@@ -1431,6 +1375,19 @@ class TestSecureMkdir:
         target.chmod(0o755)
 
         with pytest.raises(RuntimeError, match="unexpected permissions"):
+            _secure_mkdir(target, 0o700)
+
+    def test_lstat_oserror_raises_cannot_verify(self, tmp_path):
+        """OSError from os.lstat raises RuntimeError with 'Cannot verify' message."""
+        from summon_claude.daemon import _secure_mkdir
+
+        target = tmp_path / "existing_dir"
+        target.mkdir(mode=0o700)
+
+        with (
+            patch("os.lstat", side_effect=OSError("permission denied")),
+            pytest.raises(RuntimeError, match="Cannot verify"),
+        ):
             _secure_mkdir(target, 0o700)
 
 
