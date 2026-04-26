@@ -371,7 +371,8 @@ class TestResetData:
         data_dir.mkdir()
         (data_dir / "registry.db").touch()
 
-        sock_parent = tmp_path / "sockets" / "summon-1234"
+        sock_grandparent = tmp_path / "sockets"
+        sock_parent = sock_grandparent / "summon-1234"
         sock_parent.mkdir(parents=True)
         sock_file = sock_parent / "abc123.sock"
         sock_file.touch()
@@ -391,6 +392,7 @@ class TestResetData:
         assert not data_dir.exists()
         assert not sock_file.exists(), "socket file should have been unlinked"
         assert not sock_parent.exists(), "empty socket parent dir should have been removed"
+        assert not sock_grandparent.exists(), "empty grandparent dir should have been removed"
 
     def test_reset_data_local_mode_socket_missing_is_noop(self, tmp_path):
         """'reset data' in local mode does not fail if the socket file is already gone."""

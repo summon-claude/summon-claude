@@ -13,7 +13,7 @@ import click
 
 from summon_claude.cli import daemon_client
 from summon_claude.cli.helpers import print_local_daemon_hint
-from summon_claude.config import socket_path_for_project
+from summon_claude.config import is_local_install, socket_path_for_project
 from summon_claude.daemon import is_daemon_running
 from summon_claude.sessions.hook_types import INCLUDE_GLOBAL_TOKEN
 from summon_claude.sessions.hooks import run_lifecycle_hooks
@@ -106,9 +106,10 @@ async def async_project_remove(name_or_id: str) -> None:
     if project_dir:
         sock_path = socket_path_for_project(pathlib.Path(project_dir))
         sock_path.unlink(missing_ok=True)
-        for d in (sock_path.parent, sock_path.parent.parent):
-            with contextlib.suppress(OSError):
-                d.rmdir()
+        if is_local_install():
+            for d in (sock_path.parent, sock_path.parent.parent):
+                with contextlib.suppress(OSError):
+                    d.rmdir()
         logger.debug("Cleaned up socket %s", sock_path)
 
 
