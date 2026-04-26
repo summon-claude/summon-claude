@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import pathlib
@@ -105,6 +106,9 @@ async def async_project_remove(name_or_id: str) -> None:
     if project_dir:
         sock_path = socket_path_for_project(pathlib.Path(project_dir))
         sock_path.unlink(missing_ok=True)
+        for d in (sock_path.parent, sock_path.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
         logger.debug("Cleaned up socket %s", sock_path)
 
 

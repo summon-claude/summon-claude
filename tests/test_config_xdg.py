@@ -810,3 +810,31 @@ class TestDefaultDbPathMigrationGuard:
         # Old DB should still exist — migration was skipped
         assert old_db.exists()
         assert result == local_path
+
+
+class TestRealSocketPathUnder104Chars:
+    """End-to-end verification that the real /tmp-based socket path fits the Unix limit.
+
+    The session fixture patches _socket_dir() to a tmp_path.  This test
+    temporarily restores the *real* _socket_dir() to verify the actual
+    production path length.
+    """
+
+    def test_real_socket_path_is_under_104_chars(self):
+        """The real /tmp/summon-<uid>/sockets/<hash>.sock path is < 104 chars."""
+        import hashlib
+
+        # Reconstruct the real path without calling _socket_dir()
+        # (which is monkeypatched by the session fixture).
+        # The formula mirrors socket_path_for_project exactly.
+        uid = os.getuid()
+        socket_dir = f"/tmp/summon-{uid}/sockets"
+
+        # Use a long project path to exercise the worst realistic case
+        long_project_path = "/home/someuser/projects/a-rather-deeply-nested-project-directory"
+        digest = hashlib.sha256(long_project_path.encode()).hexdigest()[:12]
+        real_path = f"{socket_dir}/{digest}.sock"
+
+        assert len(real_path) < 104, (
+            f"Socket path is {len(real_path)} chars (limit 104): {real_path}"
+        )

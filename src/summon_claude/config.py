@@ -170,13 +170,18 @@ def find_local_daemon_hint() -> str | None:
     if root is None:
         return None
     tmp_sock = socket_path_for_project(root)
+    # Legacy path — remove after one release cycle post-migration to /tmp sockets
     legacy_sock = root / ".summon" / "daemon.sock"
-    if tmp_sock.exists() or legacy_sock.exists():
-        return (
-            f"A local-mode daemon may be running at {root / '.summon'}.\n"
-            "Activate your project's virtualenv or set SUMMON_LOCAL=1 to reach it."
-        )
-    return None
+    if tmp_sock.exists():
+        location = str(tmp_sock)
+    elif legacy_sock.exists():
+        location = str(root / ".summon")
+    else:
+        return None
+    return (
+        f"A local-mode daemon may be running at {location}.\n"
+        "Activate your project's virtualenv or set SUMMON_LOCAL=1 to reach it."
+    )
 
 
 def get_claude_config_dir() -> Path:

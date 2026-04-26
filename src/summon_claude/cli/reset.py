@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -125,7 +126,11 @@ async def _reset_directory(  # noqa: PLR0913
     # In local mode the socket lives in /tmp (outside the data dir) — remove it
     # before the rmtree so no orphaned socket is left behind after the reset.
     if is_local_install():
-        get_socket_path().unlink(missing_ok=True)
+        _sock = get_socket_path()
+        _sock.unlink(missing_ok=True)
+        for d in (_sock.parent, _sock.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
 
     try:
         shutil.rmtree(resolved)

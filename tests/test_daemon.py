@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import socket
+import stat
 import struct
 import time
 from pathlib import Path
@@ -1359,6 +1360,82 @@ class TestJiraProxyLifecycle:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# _secure_mkdir — error branch coverage
+# ---------------------------------------------------------------------------
+
+
+class TestSecureMkdir:
+    def test_creates_directory_with_correct_permissions(self, tmp_path):
+        """New directory is created with the requested mode."""
+        from summon_claude.daemon import _secure_mkdir
+
+        target = tmp_path / "new_socket_dir"
+        _secure_mkdir(target, 0o700)
+        assert target.is_dir()
+        assert stat.S_IMODE(target.stat().st_mode) == 0o700
+
+    def test_existing_correct_dir_is_accepted(self, tmp_path):
+        """Existing directory owned by current user with correct permissions raises nothing."""
+        from summon_claude.daemon import _secure_mkdir
+
+        target = tmp_path / "ok_dir"
+        target.mkdir(mode=0o700)
+        _secure_mkdir(target, 0o700)  # must not raise
+
+    def test_symlink_at_path_raises_runtime_error(self, tmp_path):
+        """Symlink at the target path is rejected with a descriptive RuntimeError."""
+        from summon_claude.daemon import _secure_mkdir
+
+        real_dir = tmp_path / "real"
+        real_dir.mkdir()
+        link = tmp_path / "link_dir"
+        link.symlink_to(real_dir)
+
+        with pytest.raises(RuntimeError, match="symlink"):
+            _secure_mkdir(link, 0o700)
+
+    def test_wrong_owner_raises_runtime_error(self, tmp_path):
+        """Directory owned by another user raises RuntimeError."""
+        from summon_claude.daemon import _secure_mkdir
+
+        target = tmp_path / "other_owner"
+        target.mkdir(mode=0o700)
+
+        fake_st = os.stat_result(
+            (
+                stat.S_IFDIR | 0o700,  # st_mode
+                0,
+                0,
+                1,  # st_ino, st_dev, st_nlink
+                os.getuid() + 9999,  # st_uid — wrong owner
+                0,
+                0,
+                0,
+                0,
+                0,  # st_gid, st_size, st_atime, st_mtime, st_ctime
+            )
+        )
+        with (
+            patch("os.lstat", return_value=fake_st),
+            pytest.raises(RuntimeError, match="owned by another user"),
+        ):
+            _secure_mkdir(target, 0o700)
+
+    def test_wrong_permissions_raises_runtime_error(self, tmp_path):
+        """Directory with looser permissions (0o755) raises RuntimeError when 0o700 expected."""
+        from summon_claude.daemon import _secure_mkdir
+
+        target = tmp_path / "loose_perms"
+        target.mkdir(mode=0o755)
+        # chmod to ensure the mode is exactly 0o755 regardless of umask
+        target.chmod(0o755)
+
+        with pytest.raises(RuntimeError, match="unexpected permissions"):
+            _secure_mkdir(target, 0o700)
+
+
+# ---------------------------------------------------------------------------
 class TestSetupDaemonLogging:
     def test_creates_queue_handler(self, tmp_path):
         import logging

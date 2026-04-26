@@ -15,6 +15,7 @@ Public API
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import fcntl
 import json
 import logging
@@ -443,6 +444,9 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         # Cleanup filesystem artefacts
         pid_path.unlink(missing_ok=True)
         socket_path.unlink(missing_ok=True)
+        for d in (socket_path.parent, socket_path.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
 
         logger.info("Daemon stopped cleanly")
     finally:
@@ -623,7 +627,11 @@ def run_daemon(config: SummonConfig) -> None:
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
         os.close(lock_fd)
         pid_path.unlink(missing_ok=True)
-        _daemon_socket().unlink(missing_ok=True)
+        _sock = _daemon_socket()
+        _sock.unlink(missing_ok=True)
+        for d in (_sock.parent, _sock.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
 
 
 # ---------------------------------------------------------------------------
@@ -654,10 +662,15 @@ def _clear_stale_daemon_files() -> None:
     advisory and tied to the file descriptor, not the file path, so there
     is no risk of a stale lock persisting across daemon restarts.
     """
-    for path in (_daemon_pid(), _daemon_socket(), _startup_error_path()):
+    _sock = _daemon_socket()
+    for path in (_daemon_pid(), _sock, _startup_error_path()):
         path.unlink(missing_ok=True)
-    # Remove legacy socket location in case the daemon was started before the
-    # /tmp-based socket path was introduced.
+    for d in (_sock.parent, _sock.parent.parent):
+        with contextlib.suppress(OSError):
+            d.rmdir()
+    # Also remove .summon/daemon.sock — in global mode this is the current socket
+    # (redundant with the loop above); in local mode it's the pre-migration location.
+    # Legacy path — remove after one release cycle post-migration to /tmp sockets
     (_data_dir() / "daemon.sock").unlink(missing_ok=True)
 
 
@@ -668,6 +681,8 @@ def _secure_mkdir(path: Path, mode: int = 0o700) -> None:
     1. Not a symlink — symlink pre-creation is a DoS attack vector.
     2. Owned by the current user — prevents another user's directory being used.
     3. Permissions are exactly *mode* — no looser modes accepted.
+
+    The parent directory must already exist; FileNotFoundError propagates if it does not.
 
     Raises ``RuntimeError`` with an actionable message on any security violation.
     A residual TOCTOU window exists between mkdir failure and lstat, which is
@@ -719,10 +734,15 @@ def start_daemon(config: SummonConfig) -> None:
         logger.debug("Daemon already running — skipping fork")
         return
 
+    if os.getuid() == 0:
+        logger.warning(
+            "Running as root (uid 0) — /tmp socket dir is shared with all root processes"
+        )
+
     socket_path = _daemon_socket()
     if is_local_install():
-        # Two separate mkdir calls, each individually verified (SC1/SC2).
-        # /tmp/summon-<uid>/ first, then /tmp/summon-<uid>/sockets/.
+        # _socket_dir() returns /tmp/summon-<uid>/sockets — verify each level individually.
+        # parent.parent = /tmp/summon-<uid>/, parent = /tmp/summon-<uid>/sockets/
         _secure_mkdir(socket_path.parent.parent, 0o700)
         _secure_mkdir(socket_path.parent, 0o700)
     else:
