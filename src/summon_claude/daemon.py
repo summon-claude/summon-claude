@@ -444,9 +444,10 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         # Cleanup filesystem artefacts
         pid_path.unlink(missing_ok=True)
         socket_path.unlink(missing_ok=True)
-        for d in (socket_path.parent, socket_path.parent.parent):
-            with contextlib.suppress(OSError):
-                d.rmdir()
+        if is_local_install():
+            for d in (socket_path.parent, socket_path.parent.parent):
+                with contextlib.suppress(OSError):
+                    d.rmdir()
 
         logger.info("Daemon stopped cleanly")
     finally:
@@ -629,9 +630,10 @@ def run_daemon(config: SummonConfig) -> None:
         pid_path.unlink(missing_ok=True)
         _sock = _daemon_socket()
         _sock.unlink(missing_ok=True)
-        for d in (_sock.parent, _sock.parent.parent):
-            with contextlib.suppress(OSError):
-                d.rmdir()
+        if is_local_install():
+            for d in (_sock.parent, _sock.parent.parent):
+                with contextlib.suppress(OSError):
+                    d.rmdir()
 
 
 # ---------------------------------------------------------------------------
@@ -665,13 +667,12 @@ def _clear_stale_daemon_files() -> None:
     _sock = _daemon_socket()
     for path in (_daemon_pid(), _sock, _startup_error_path()):
         path.unlink(missing_ok=True)
-    for d in (_sock.parent, _sock.parent.parent):
-        with contextlib.suppress(OSError):
-            d.rmdir()
-    # Also remove .summon/daemon.sock — in global mode this is the current socket
-    # (redundant with the loop above); in local mode it's the pre-migration location.
-    # Legacy path — remove after one release cycle post-migration to /tmp sockets
-    (_data_dir() / "daemon.sock").unlink(missing_ok=True)
+    if is_local_install():
+        for d in (_sock.parent, _sock.parent.parent):
+            with contextlib.suppress(OSError):
+                d.rmdir()
+        # Legacy path — remove after one release cycle post-migration to /tmp sockets
+        (_data_dir() / "daemon.sock").unlink(missing_ok=True)
 
 
 def _secure_mkdir(path: Path, mode: int = 0o700) -> None:

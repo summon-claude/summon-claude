@@ -990,8 +990,7 @@ class TestClearStaleDaemonFilesNewPath:
         with (
             _patch_data_dir(tmp_path),
             patch("summon_claude.daemon._daemon_socket", return_value=new_sock_path),
-            # Patch get_data_dir in daemon's namespace so the legacy cleanup finds tmp_path
-            patch("summon_claude.daemon.get_data_dir", return_value=tmp_path),
+            patch("summon_claude.daemon.is_local_install", return_value=True),
         ):
             from summon_claude.daemon import _clear_stale_daemon_files
 
