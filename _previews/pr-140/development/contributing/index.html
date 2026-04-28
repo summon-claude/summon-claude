@@ -1,0 +1,3463 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://summon-claude.github.io/summon-claude/development/contributing/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../testing/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Contributing - summon-claude</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="summon-claude" class="md-header__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            summon-claude
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Contributing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guide/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../concepts/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../troubleshooting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="summon-claude" class="md-nav__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    summon-claude
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/slack-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../guide/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/projects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/pm-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PM Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/github-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe-integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe Integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/cron-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cron & Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/canvas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Canvas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lifecycle Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-Session Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../concepts/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/threading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threading & Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/slack-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-message-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit Message Guidelines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commit Message Guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#writing-commit-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing commit messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commit Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commit-cleanup-with-git-branchless" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit cleanup with git-branchless
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pull-request-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull Request Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code Style
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Code Style">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#linting-and-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linting and formatting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import organization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database-migrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database Migrations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Database Migrations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a migration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-schema-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checking schema version
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostic-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic Checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostic Checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkresult-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CheckResult fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Screenshots
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Screenshots">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#getting-started" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Getting Started
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#common-commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Common Commands
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-message-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit Message Guidelines
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commit Message Guidelines">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Format
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#types" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Types
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scopes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scopes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Examples
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#writing-commit-messages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Writing commit messages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#breaking-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Breaking Changes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#git-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Git Workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#commit-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit Workflow
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Commit Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commit-cleanup-with-git-branchless" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Commit cleanup with git-branchless
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pull-request-guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pull Request Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-style" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Code Style
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Code Style">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#linting-and-formatting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Linting and formatting
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#import-organization" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Import organization
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#database-migrations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Database Migrations
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Database Migrations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-migration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a migration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration rules
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checking-schema-version" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Checking schema version
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#diagnostic-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Diagnostic Checks
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Diagnostic Checks">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adding-a-check" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adding a check
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#checkresult-fields" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CheckResult fields
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#guidelines" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Guidelines
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#documentation-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Documentation Screenshots
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Documentation Screenshots">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#worktree-considerations" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree considerations
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sections" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Sections
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#project-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project Architecture
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Development
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="contributing">Contributing<a class="headerlink" href="#contributing" title="Permanent link">&para;</a></h1>
+<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Python 3.12+</strong> — required; summon-claude uses modern Python features</li>
+<li><strong><a href="https://docs.astral.sh/uv/">uv</a></strong> — dependency management and toolchain</li>
+<li><strong>git</strong> — standard version control</li>
+<li><strong><a href="https://github.com/arxanas/git-branchless">git-branchless</a></strong> (optional) — commit history cleanup tools (<code>git sl</code>, <code>git reword</code>, <code>git branchless move</code>)</li>
+</ul>
+<p>Install git-branchless:
+<div class="notest highlight"><pre><span></span><code>brew<span class="w"> </span>install<span class="w"> </span>git-branchless<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>git<span class="w"> </span>branchless<span class="w"> </span>init
+</code></pre></div></p>
+<hr />
+<h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Clone and install</span>
+git<span class="w"> </span>clone<span class="w"> </span>git@github.com:summon-claude/summon-claude.git
+<span class="nb">cd</span><span class="w"> </span>summon-claude
+uv<span class="w"> </span>sync
+
+<span class="c1"># Verify setup</span>
+make<span class="w"> </span>all<span class="w">  </span><span class="c1"># install → lint → test</span>
+</code></pre></div>
+<hr />
+<h2 id="common-commands">Common Commands<a class="headerlink" href="#common-commands" title="Permanent link">&para;</a></h2>
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>install<span class="w">         </span><span class="c1"># Install all dependencies (uv sync + git hooks)</span>
+make<span class="w"> </span>lint<span class="w">            </span><span class="c1"># Run ruff check + format (auto-fix, fails if files changed)</span>
+make<span class="w"> </span><span class="nb">test</span><span class="w">            </span><span class="c1"># Run full pytest suite</span>
+make<span class="w"> </span>all<span class="w">             </span><span class="c1"># Complete workflow: install → lint → test</span>
+make<span class="w"> </span>build<span class="w">           </span><span class="c1"># Build sdist and wheel</span>
+
+make<span class="w"> </span>py-lint<span class="w">         </span><span class="c1"># Python lint only</span>
+make<span class="w"> </span>py-typecheck<span class="w">    </span><span class="c1"># Run pyright type checking</span>
+make<span class="w"> </span>py-test<span class="w">         </span><span class="c1"># Run full Python test suite</span>
+make<span class="w"> </span>py-test-quick<span class="w">   </span><span class="c1"># Quick tests only (skips Slack + LLM integration, fail-fast)</span>
+make<span class="w"> </span>py-test-slack<span class="w">   </span><span class="c1"># Slack integration tests (requires real credentials)</span>
+
+make<span class="w"> </span>docs-serve<span class="w">      </span><span class="c1"># Serve docs locally with live reload</span>
+make<span class="w"> </span>docs-build<span class="w">      </span><span class="c1"># Build docs in strict mode</span>
+make<span class="w"> </span>docs-screenshots<span class="w">  </span><span class="c1"># Regenerate all documentation screenshots</span>
+</code></pre></div>
+<p>Full reference:
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span><span class="nb">help</span><span class="w">  </span><span class="c1"># Lists all targets with descriptions</span>
+</code></pre></div></p>
+<hr />
+<h2 id="commit-message-guidelines">Commit Message Guidelines<a class="headerlink" href="#commit-message-guidelines" title="Permanent link">&para;</a></h2>
+<p>summon-claude follows <a href="https://www.conventionalcommits.org/">Conventional Commits</a>.</p>
+<h3 id="format">Format<a class="headerlink" href="#format" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>&lt;type&gt;(&lt;scope&gt;): &lt;description&gt;
+
+[optional body]
+
+[optional footer]
+</code></pre></div>
+<h3 id="types">Types<a class="headerlink" href="#types" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>feat</code></td>
+<td>Adds new feature</td>
+</tr>
+<tr>
+<td><code>fix</code></td>
+<td>Fixes a bug</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td>Updates documentation</td>
+</tr>
+<tr>
+<td><code>chore</code></td>
+<td>Maintenance (dependencies, configs)</td>
+</tr>
+<tr>
+<td><code>refactor</code></td>
+<td>Refactors code (no behavior change)</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>Adds or modifies tests</td>
+</tr>
+<tr>
+<td><code>perf</code></td>
+<td>Improves performance</td>
+</tr>
+<tr>
+<td><code>style</code></td>
+<td>Formatting, whitespace (no code change)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="scopes">Scopes<a class="headerlink" href="#scopes" title="Permanent link">&para;</a></h3>
+<p><strong>Scope rules:</strong>
+- One scope per commit — no commas (e.g., <code>fix(auth):</code> not <code>fix(auth,session):</code>)
+- Lowercase letters, numbers, hyphens, underscores only
+- If a change spans multiple components, use the primary one or omit scope</p>
+<p><strong>Component scopes:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Area</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sessions</code></td>
+<td>Session lifecycle and management (<code>sessions/</code> package)</td>
+</tr>
+<tr>
+<td><code>slack</code></td>
+<td>Slack integration (<code>slack/</code> package)</td>
+</tr>
+<tr>
+<td><code>daemon</code></td>
+<td>Daemon process and IPC (<code>daemon.py</code>, <code>event_dispatcher.py</code>)</td>
+</tr>
+<tr>
+<td><code>cli</code></td>
+<td>CLI entry point and subcommands (<code>cli/</code> package)</td>
+</tr>
+<tr>
+<td><code>config</code></td>
+<td>Configuration and settings (<code>config.py</code>)</td>
+</tr>
+<tr>
+<td><code>auth</code></td>
+<td>Authentication tokens and short codes (<code>sessions/auth.py</code>)</td>
+</tr>
+<tr>
+<td><code>permissions</code></td>
+<td>Permission handling and approval flow (<code>sessions/permissions.py</code>)</td>
+</tr>
+<tr>
+<td><code>mcp</code></td>
+<td>MCP server and tools (<code>slack/mcp.py</code>)</td>
+</tr>
+<tr>
+<td><code>registry</code></td>
+<td>Session storage and SQLite operations (<code>sessions/registry.py</code>)</td>
+</tr>
+<tr>
+<td><code>db</code></td>
+<td>Database maintenance CLI (<code>summon db</code> group: status, vacuum, purge)</td>
+</tr>
+<tr>
+<td><code>reset</code></td>
+<td>Reset commands for data and config clearing (<code>cli/reset.py</code>)</td>
+</tr>
+<tr>
+<td><code>hooks</code></td>
+<td>Lifecycle hooks and Claude Code hook bridge (<code>sessions/hooks.py</code>, <code>cli/hooks.py</code>)</td>
+</tr>
+<tr>
+<td><code>project</code></td>
+<td>Project lifecycle and management (<code>cli/project.py</code>)</td>
+</tr>
+<tr>
+<td><code>scribe</code></td>
+<td>Scribe monitoring agent</td>
+</tr>
+<tr>
+<td><code>canvas</code></td>
+<td>Canvas storage and MCP tools (<code>canvas_mcp.py</code>, <code>slack/canvas_store.py</code>)</td>
+</tr>
+<tr>
+<td><code>diagnostics</code></td>
+<td>Diagnostic checks and doctor command (<code>diagnostics.py</code>, <code>cli/doctor.py</code>)</td>
+</tr>
+<tr>
+<td><code>plugin</code></td>
+<td>Claude Code plugin skill and manifest (<code>.claude-plugin/</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Infrastructure scopes:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Scope</th>
+<th>Area</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ci</code></td>
+<td>CI/CD pipelines and GitHub Actions</td>
+</tr>
+<tr>
+<td><code>deps</code></td>
+<td>Dependency updates</td>
+</tr>
+<tr>
+<td><code>build</code></td>
+<td>Build system, pyproject.toml, Makefile</td>
+</tr>
+<tr>
+<td><code>repo</code></td>
+<td>Repository structure, gitignore, misc files</td>
+</tr>
+</tbody>
+</table>
+<h3 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h3>
+<p><strong>Good:</strong>
+<div class="highlight"><pre><span></span><code>feat(mcp): adds slack_create_thread tool
+
+Enables Claude to start new threads for organizing long conversations.
+</code></pre></div></p>
+<div class="highlight"><pre><span></span><code>fix(permissions): respects settings.json auto-approve rules
+
+Permission handler was ignoring ToolPermissionContext.suggestions
+from the Claude SDK, falling back to hardcoded allowlist only.
+</code></pre></div>
+<p><div class="highlight"><pre><span></span><code>chore(deps): updates slack-bolt to v2.0
+</code></pre></div>
+<em>No body needed — change is obvious.</em></p>
+<p><strong>Bad:</strong>
+<div class="highlight"><pre><span></span><code>updated stuff
+</code></pre></div>
+<em>No type/scope, vague description.</em></p>
+<p><div class="highlight"><pre><span></span><code>fix(permissions,session): updates handlers and tokens
+</code></pre></div>
+<em>Multiple scopes — use one scope or omit if cross-cutting.</em></p>
+<p><div class="highlight"><pre><span></span><code>feat(cli): adds new commands
+
+Added three new commands: init, build, and deploy. Each command
+has its own handler and validation logic. Updated help text to
+include all new commands and their options.
+</code></pre></div>
+<em>Body describes "what" changed — the diff shows that. Explain "why" instead.</em></p>
+<h3 id="writing-commit-messages">Writing commit messages<a class="headerlink" href="#writing-commit-messages" title="Permanent link">&para;</a></h3>
+<p><strong>DO:</strong>
+- Use present indicative tense ("adds" not "add" or "added")
+- Keep subject line ≤50 characters
+- Explain WHY in body, not WHAT (the diff shows what)
+- Keep body to 2-3 lines maximum, each ≤72 characters
+- Reference issues: <code>Closes #123</code></p>
+<p><strong>Body structure:</strong>
+1. <strong>First line:</strong> Why this change was needed (problem/motivation)
+2. <strong>Second line (optional):</strong> Essential technical context if non-obvious
+3. That's it.</p>
+<p>No body needed if the change is obvious from the subject line.</p>
+<p><strong>DON'T:</strong>
+- Use emojis or ALL CAPS
+- List changed files (git shows this)
+- Include statistics (lines changed)
+- Add meta-commentary ("Generated with...", "Co-Authored-By...")
+- Write verbose explanations or "benefits"
+- Describe what changed (the diff shows that)</p>
+<h3 id="breaking-changes">Breaking Changes<a class="headerlink" href="#breaking-changes" title="Permanent link">&para;</a></h3>
+<p>Add <code>!</code> after type/scope:</p>
+<div class="highlight"><pre><span></span><code>feat(sessions)!: changes SessionManager API
+
+BREAKING CHANGE: create_session now requires EventDispatcher reference.
+</code></pre></div>
+<hr />
+<h2 id="git-workflow">Git Workflow<a class="headerlink" href="#git-workflow" title="Permanent link">&para;</a></h2>
+<p>Use feature branches for all work. Don't commit directly to main.</p>
+<p><strong>One-time setup:</strong>
+<div class="notest highlight"><pre><span></span><code>git<span class="w"> </span>config<span class="w"> </span>--global<span class="w"> </span>push.autoSetupRemote<span class="w"> </span><span class="nb">true</span>
+</code></pre></div></p>
+<p><strong>Feature workflow:</strong>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Create feature branch from latest upstream</span>
+git<span class="w"> </span>fetch<span class="w"> </span>upstream
+git<span class="w"> </span>switch<span class="w"> </span>-c<span class="w"> </span>feature/your-feature<span class="w"> </span>upstream/main
+
+<span class="c1"># Work and commit</span>
+git<span class="w"> </span>commit<span class="w"> </span>-am<span class="w"> </span><span class="s2">&quot;feat(scope): description&quot;</span>
+git<span class="w"> </span>push<span class="w">  </span><span class="c1"># Auto-sets up tracking</span>
+
+<span class="c1"># Rebase before PR</span>
+git<span class="w"> </span>fetch<span class="w"> </span>upstream
+git<span class="w"> </span>rebase<span class="w"> </span>upstream/main
+
+<span class="c1"># Create PR</span>
+gh<span class="w"> </span>pr<span class="w"> </span>create
+</code></pre></div></p>
+<p>After PR merges, delete the branch and sync main.</p>
+<hr />
+<h2 id="commit-workflow">Commit Workflow<a class="headerlink" href="#commit-workflow" title="Permanent link">&para;</a></h2>
+<p><strong>During development:</strong>
+- Commit freely and often — don't worry about perfection
+- WIP commits, debugging attempts, and iterations are all fine
+- Focus on making progress, not perfect history</p>
+<p><strong>Before PR/merge:</strong>
+- Review your commits — look at the full diff and commit history
+- Group related changes — combine commits that belong together logically
+- Use interactive rebase to reorganize, squash, and reword</p>
+<p><strong>Decision criteria for squashing:</strong>
+- Do these commits represent one logical change?
+- Would a reviewer want to see these as separate steps?
+- Does each commit add value independently?</p>
+<p>If commits are just iterations toward a solution, squash them. If commits represent distinct logical changes, keep them separate.</p>
+<h3 id="commit-cleanup-with-git-branchless">Commit cleanup with git-branchless<a class="headerlink" href="#commit-cleanup-with-git-branchless" title="Permanent link">&para;</a></h3>
+<div class="notest highlight"><pre><span></span><code><span class="c1"># Review your commits</span>
+git<span class="w"> </span>log<span class="w"> </span>--oneline<span class="w"> </span>-10
+git<span class="w"> </span>sl<span class="w">  </span><span class="c1"># Visual commit graph</span>
+
+<span class="c1"># Reword a commit message</span>
+git<span class="w"> </span>reword<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;fix(ci): configures node 20 and disables cache&quot;</span><span class="w"> </span>jkl3456
+
+<span class="c1"># Squash commits together</span>
+git<span class="w"> </span>branchless<span class="w"> </span>move<span class="w"> </span>--fixup<span class="w"> </span>-x<span class="w"> </span>def5678<span class="w"> </span>-d<span class="w"> </span>abc1234
+git<span class="w"> </span>branchless<span class="w"> </span>move<span class="w"> </span>--fixup<span class="w"> </span>-x<span class="w"> </span>ghi9012<span class="w"> </span>-d<span class="w"> </span>abc1234
+
+<span class="c1"># View the result</span>
+git<span class="w"> </span>sl
+</code></pre></div>
+<p>You decide what makes sense for your change — there's no formula.</p>
+<hr />
+<h2 id="pull-request-guidelines">Pull Request Guidelines<a class="headerlink" href="#pull-request-guidelines" title="Permanent link">&para;</a></h2>
+<p><strong>Keep PR descriptions brief:</strong>
+- State what changed and why
+- Use bullet points for multiple changes
+- Reference related issues/PRs if applicable
+- <strong>No verification sections, file lists, or test result summaries</strong></p>
+<p>The diff shows what changed. CI shows test results. Don't repeat information that's already visible.</p>
+<p><strong>Good example:</strong>
+<div class="highlight"><pre><span></span><code>## Summary
+
+- Migrates CLI from argparse to click for proper output handling and shell completion
+- Resolves print() usage by replacing with click.echo()
+</code></pre></div></p>
+<p><strong>Bad example:</strong>
+<div class="highlight"><pre><span></span><code>## Summary
+Migrated CLI framework
+
+## Changes Made
+- Updated cli.py to use click decorators
+- Modified cli_config.py for click groups
+- Added click to dependencies
+
+## Test Results
+✅ 332 tests passing
+
+## Files Changed
+- src/summon_claude/cli.py
+- src/summon_claude/cli_config.py
+- pyproject.toml
+</code></pre></div></p>
+<hr />
+<h2 id="code-style">Code Style<a class="headerlink" href="#code-style" title="Permanent link">&para;</a></h2>
+<h3 id="linting-and-formatting">Linting and formatting<a class="headerlink" href="#linting-and-formatting" title="Permanent link">&para;</a></h3>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>check<span class="w"> </span>.<span class="w"> </span>--fix<span class="w">     </span><span class="c1"># Auto-fix lint issues</span>
+uv<span class="w"> </span>run<span class="w"> </span>ruff<span class="w"> </span>format<span class="w"> </span>.<span class="w">          </span><span class="c1"># Auto-format</span>
+uv<span class="w"> </span>run<span class="w"> </span>pyright<span class="w">                </span><span class="c1"># Type checking</span>
+</code></pre></div>
+<p>Or via make:
+<div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>lint<span class="w">       </span><span class="c1"># ruff check + format</span>
+make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1"># pyright only</span>
+</code></pre></div></p>
+<p><strong>Ruff configuration</strong> (from <code>pyproject.toml</code>):
+- Line length: 100 characters
+- Target: Python 3.12
+- Enabled rule sets: pycodestyle, pyflakes, isort, pep8-naming, flake8-bugbear, comprehensions, pyupgrade, bandit, datetimez, pathlib, pylint, and more
+- All relative imports are banned — use absolute imports (<code>from summon_claude.sessions.auth import ...</code>)</p>
+<p><strong>Pyright configuration:</strong>
+- Mode: <code>standard</code>
+- Checks <code>src/</code> only; excludes <code>tests/</code>
+- <code>reportMissingImports = false</code> (claude-agent-sdk lacks py.typed marker)
+- <code>reportMissingTypeStubs = false</code> (slack-sdk, slack-bolt don't ship stubs)</p>
+<h3 id="import-organization">Import organization<a class="headerlink" href="#import-organization" title="Permanent link">&para;</a></h3>
+<p>isort is configured via ruff with <code>known-first-party = ["summon_claude", "helpers"]</code>. Imports are grouped: stdlib → third-party → first-party. All imports must be absolute.</p>
+<hr />
+<h2 id="database-migrations">Database Migrations<a class="headerlink" href="#database-migrations" title="Permanent link">&para;</a></h2>
+<p>Schema migrations run automatically when <code>SessionRegistry</code> connects — users never run a manual step. The migration system lives in <code>sessions/migrations.py</code>.</p>
+<h3 id="adding-a-migration">Adding a migration<a class="headerlink" href="#adding-a-migration" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Bump <code>CURRENT_SCHEMA_VERSION</code> in <code>sessions/migrations.py</code></li>
+<li>Write an async migration function that takes <code>db: aiosqlite.Connection</code></li>
+<li>Add it to <code>_MIGRATIONS</code> keyed by the version it migrates <em>from</em></li>
+</ol>
+<div class="notest highlight"><pre><span></span><code><span class="n">CURRENT_SCHEMA_VERSION</span> <span class="o">=</span> <span class="mi">15</span>  <span class="c1"># was 14</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_migrate_14_to_15</span><span class="p">(</span><span class="n">db</span><span class="p">:</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">Connection</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;ALTER TABLE sessions ADD COLUMN tags TEXT&quot;</span><span class="p">)</span>
+
+<span class="n">_MIGRATIONS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="mi">14</span><span class="p">:</span> <span class="n">_migrate_14_to_15</span><span class="p">,</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="migration-rules">Migration rules<a class="headerlink" href="#migration-rules" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Idempotent</strong> — if the process crashes mid-migration, the same migration reruns on next connect; it must not fail or corrupt data</li>
+<li>All pending migrations run within a single <code>BEGIN IMMEDIATE</code> / <code>COMMIT</code> transaction, with <code>ROLLBACK</code> on any error</li>
+<li><code>None</code> means no-op (used for the 0→1 baseline where DDL already matches)</li>
+<li><strong>Migrations are the single source of truth</strong> — fresh DBs create v1 baseline tables and run all migrations from v1 to current; do not add schema changes to the DDL constants in <code>registry.py</code></li>
+<li>SQLite lacks <code>IF NOT EXISTS</code> for <code>ALTER TABLE</code> — wrap <code>ALTER TABLE</code> statements in <code>try/except</code> to handle the "duplicate column name" error on re-run</li>
+<li><code>PRAGMA foreign_keys = ON</code> is set in <code>_connect()</code> but cannot be changed inside a transaction — set it before any <code>BEGIN</code>; future migrations needing temporary FK violations must use a separate connection</li>
+</ul>
+<h3 id="checking-schema-version">Checking schema version<a class="headerlink" href="#checking-schema-version" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>summon<span class="w"> </span>db<span class="w"> </span>status<span class="w">   </span><span class="c1"># Shows current schema version and migration state</span>
+</code></pre></div>
+<hr />
+<h2 id="diagnostic-checks">Diagnostic Checks<a class="headerlink" href="#diagnostic-checks" title="Permanent link">&para;</a></h2>
+<p>The <code>summon doctor</code> command uses a registry pattern in <code>diagnostics.py</code>. Each check is a class that implements the <code>DiagnosticCheck</code> protocol and is registered in <code>DIAGNOSTIC_REGISTRY</code>.</p>
+<h3 id="adding-a-check">Adding a check<a class="headerlink" href="#adding-a-check" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p>Create a class implementing <code>DiagnosticCheck</code> in <code>diagnostics.py</code>:</p>
+<div class="notest highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySubsystemCheck</span><span class="p">:</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my_subsystem&quot;</span>
+    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;Checks something important&quot;</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">SummonConfig</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CheckResult</span><span class="p">:</span>
+        <span class="c1"># Return early with &quot;skip&quot; if prerequisites are missing</span>
+        <span class="k">if</span> <span class="n">config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
+                <span class="n">status</span><span class="o">=</span><span class="s2">&quot;skip&quot;</span><span class="p">,</span>
+                <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Config not available&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+
+        <span class="n">details</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># ... perform checks, append to details ...</span>
+
+        <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
+            <span class="n">status</span><span class="o">=</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span>
+            <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Everything looks good&quot;</span><span class="p">,</span>
+            <span class="n">details</span><span class="o">=</span><span class="n">details</span><span class="p">,</span>
+        <span class="p">)</span>
+</code></pre></div>
+</li>
+<li>
+<p>Register it and add the subsystem name:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
+</code></pre></div>
+<p>Add <code>"my_subsystem"</code> to the <code>KNOWN_SUBSYSTEMS</code> frozenset at the top of the file.</p>
+</li>
+<li>
+<p>Add guard test mappings in <code>tests/test_diagnostics_guard.py</code>:</p>
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_diagnostics_guard.py<span class="w"> </span>-v
+</code></pre></div>
+<p>The guard tests verify that every registered check is in <code>KNOWN_SUBSYSTEMS</code> and vice versa. Add MCP server names, binary paths, or credential references to the appropriate mapping dicts if your check validates external integrations.</p>
+</li>
+</ol>
+<h3 id="checkresult-fields">CheckResult fields<a class="headerlink" href="#checkresult-fields" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>status</code></td>
+<td><code>"pass"</code> / <code>"fail"</code> / <code>"warn"</code> / <code>"info"</code> / <code>"skip"</code></td>
+<td>Overall result</td>
+</tr>
+<tr>
+<td><code>subsystem</code></td>
+<td><code>str</code></td>
+<td>Identifier (must match <code>KNOWN_SUBSYSTEMS</code> entry)</td>
+</tr>
+<tr>
+<td><code>message</code></td>
+<td><code>str</code></td>
+<td>One-line summary shown in default output</td>
+</tr>
+<tr>
+<td><code>details</code></td>
+<td><code>list[str]</code></td>
+<td>Itemized findings (shown with <code>-v</code>)</td>
+</tr>
+<tr>
+<td><code>suggestion</code></td>
+<td><code>str \| None</code></td>
+<td>Actionable next step (shown with <code>-v</code>)</td>
+</tr>
+<tr>
+<td><code>collected_logs</code></td>
+<td><code>dict[str, list[str]]</code></td>
+<td>Log tails keyed by filename (shown with <code>-v</code>, included in exports)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="guidelines">Guidelines<a class="headerlink" href="#guidelines" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>All checks run in parallel</strong> — do not depend on results from other checks</li>
+<li><strong>Use <code>config: SummonConfig | None</code></strong> — config may be <code>None</code> if it failed to load; return <code>skip</code> in that case</li>
+<li><strong>Return <code>skip</code> when prerequisites are missing</strong> — not <code>fail</code> (e.g., scribe not enabled, no GitHub token)</li>
+<li><strong>Keep checks fast</strong> — use timeouts for network calls (10s for API calls, 5s for CLI version checks)</li>
+<li><strong>Never log secrets</strong> — use the <code>redactor</code> singleton to sanitize any user-specific data in details or messages</li>
+<li><strong>Match SEC-003</strong> — don't include workspace names, usernames, or Slack team names in results</li>
+</ul>
+<hr />
+<h2 id="documentation-screenshots">Documentation Screenshots<a class="headerlink" href="#documentation-screenshots" title="Permanent link">&para;</a></h2>
+<p>Screenshots in <code>docs/assets/screenshots/</code> are <strong>generated automatically</strong> — never edit them manually. When you change UI-facing behavior (permission buttons, channel messages, canvas layout), regenerate them:</p>
+<div class="highlight"><pre><span></span><code>make<span class="w"> </span>docs-screenshots
+</code></pre></div>
+<h3 id="prerequisites_1">Prerequisites<a class="headerlink" href="#prerequisites_1" title="Permanent link">&para;</a></h3>
+<p>The screenshot script starts a real summon session, authenticates via Slack, and captures Playwright screenshots. It requires:</p>
+<ol>
+<li><strong>summon configured</strong> — <code>summon init</code> completed with valid Slack credentials</li>
+<li><strong>Slack browser auth</strong> — run <code>summon auth slack login &lt;workspace-url&gt;</code> once to save Playwright browser state</li>
+<li><strong>Playwright installed</strong> — <code>uv sync --extra slack-browser</code></li>
+<li><strong><code>.env</code> file</strong> — the script loads <code>SUMMON_TEST_SLACK_BOT_TOKEN</code> from <code>.env</code> via <code>python-dotenv</code></li>
+</ol>
+<h3 id="worktree-considerations">Worktree considerations<a class="headerlink" href="#worktree-considerations" title="Permanent link">&para;</a></h3>
+<p>In a worktree (<code>.claude/worktrees/*/</code>), the local-install detection may resolve config paths to the worktree's <code>.summon/</code> directory instead of the global config. Two options:</p>
+<ul>
+<li><strong>Copy config</strong>: <code>cp ~/.config/summon/config.env .summon/config.env</code> and <code>cp ~/.local/share/summon/slack_workspace.json .summon/</code></li>
+<li><strong>Force global</strong>: <code>SUMMON_LOCAL=0 make docs-screenshots</code> bypasses local-install detection</li>
+</ul>
+<p>If the worktree path is too long for Unix sockets (&gt;104 chars), use <code>SUMMON_LOCAL=0</code>.</p>
+<h3 id="sections">Sections<a class="headerlink" href="#sections" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># All sections (recommended)</span>
+make<span class="w"> </span>docs-screenshots
+
+<span class="c1"># Individual sections</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>session-ux<span class="w">    </span><span class="c1"># Real session screenshots</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>terminal<span class="w">      </span><span class="c1"># CLI terminal captures</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--section<span class="w"> </span>slack-setup<span class="w">   </span><span class="c1"># Validates setup screenshots</span>
+uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </span>scripts/docs-screenshots.py<span class="w"> </span>--dry-run<span class="w">               </span><span class="c1"># List planned screenshots</span>
+</code></pre></div>
+<hr />
+<h2 id="project-architecture">Project Architecture<a class="headerlink" href="#project-architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code>src/summon_claude/
+├── canvas_mcp.py          # Canvas MCP server (read, write, update_section tools)
+├── config.py              # SummonConfig (pydantic-settings) with validation
+├── daemon.py              # Unix daemon with PID/lock, IPC framing
+├── diagnostics.py         # DiagnosticCheck protocol, CheckResult, Redactor, all check implementations
+├── event_dispatcher.py    # Routes Slack events to sessions by channel
+├── github_auth.py         # GitHub OAuth App device flow authentication
+├── mcp_untrusted_proxy.py # MCP stdio proxy that marks tool results as untrusted
+├── security.py            # Prompt injection defense utilities
+├── slack_browser.py       # Playwright-based Slack WebSocket monitor for external workspaces
+├── summon_cli_mcp.py      # MCP tools for session lifecycle (session_list, _info, _start, _stop)
+├── cli/
+│   ├── __init__.py        # Click wiring, root group, setup_logging
+│   ├── auth.py            # Auth group: unified auth commands for GitHub, Google, Slack
+│   ├── config.py          # Config subcommands (show, set, path, edit, check)
+│   ├── daemon_client.py   # Typed async client for daemon Unix socket API
+│   ├── db.py              # DB subcommand implementations (status, vacuum, purge)
+│   ├── doctor.py          # Doctor command logic (check runner, output formatting, export, submit)
+│   ├── formatting.py      # Output formatting (echo, format_json, print_session_table)
+│   ├── helpers.py         # Session resolution (resolve_session, pick_session)
+│   ├── hooks.py           # Lifecycle hooks CLI (install/uninstall bridge, show/set/clear)
+│   ├── interactive.py     # Interactive terminal selection with TTY-aware fallback
+│   ├── preflight.py       # Claude CLI preflight check (version, path)
+│   ├── project.py         # Project lifecycle (add, remove, up, down, workflow)
+│   ├── reset.py           # Reset commands (data, config)
+│   ├── session.py         # Session subcommand implementations (list, info, logs, cleanup)
+│   ├── slack_auth.py      # Slack browser auth CLI helpers
+│   ├── start.py           # async_start() implementation
+│   ├── stop.py            # async_stop() implementation
+│   └── update_check.py    # PyPI update checker with 24h cache
+├── sessions/
+│   ├── auth.py            # Session auth tokens and short codes
+│   ├── commands.py        # !-prefixed command dispatch, aliasing, plugin skill registration
+│   ├── context.py         # Context window usage tracking via JSONL transcript parsing
+│   ├── hook_types.py      # Hook constants (VALID_HOOK_TYPES, INCLUDE_GLOBAL_TOKEN)
+│   ├── hooks.py           # Lifecycle hooks runner (worktree_create, project_up, project_down)
+│   ├── manager.py         # Session lifecycle, IPC control plane
+│   ├── migrations.py      # Schema versioning and migration functions
+│   ├── permissions.py     # Tool permission handling + Slack buttons
+│   ├── registry.py        # SQLite session storage (WAL mode)
+│   ├── response.py        # Response streaming, turn threads, emoji lifecycle, turn summaries
+│   ├── scheduler.py       # Session scheduling (cron tasks, timer injection)
+│   ├── session.py         # Session orchestrator (Claude SDK + Slack + pre-send architecture)
+│   └── types.py           # Shared session types and dataclasses
+└── slack/
+    ├── bolt.py            # Bolt app, rate limiter, health monitor
+    ├── canvas_store.py    # SQLite-backed canvas markdown state with background Slack sync
+    ├── canvas_templates.py # Canvas markdown templates for different agent profiles
+    ├── client.py          # Channel-bound Slack output client (post, update, react, canvas)
+    ├── formatting.py      # Markdown-to-Slack-mrkdwn conversion
+    ├── markdown_split.py  # Markdown-aware message splitting for Slack&#39;s length limits
+    ├── mcp.py             # MCP tools for Claude to read and interact with Slack
+    └── router.py          # Thread-aware message routing (main, turn threads, subagent threads)
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../" class="md-footer__link md-footer__link--prev" aria-label="Previous: Development">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Development
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../testing/" class="md-footer__link md-footer__link--next" aria-label="Next: Testing">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Testing
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
