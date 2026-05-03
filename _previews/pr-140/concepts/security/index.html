@@ -1,0 +1,2963 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://summon-claude.github.io/summon-claude/concepts/security/">
+      
+      
+        <link rel="prev" href="../context/">
+      
+      
+        <link rel="next" href="../../troubleshooting/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+    
+    
+      
+        <title>Security - summon-claude</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+      <link rel="stylesheet" href="../../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#security-architecture" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow md-header--lifted" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="summon-claude" class="md-header__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            summon-claude
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Security
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+    
+      
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../guide/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Concepts
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../troubleshooting/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Troubleshooting
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../../changelog/" class="md-tabs__link">
+        
+  
+  
+    
+  
+  Changelog
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../development/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+    
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="summon-claude" class="md-nav__button md-logo" aria-label="summon-claude" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    summon-claude
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/summon-claude/summon-claude" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    summon-claude/summon-claude
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../getting-started/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting Started
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_2" id="__nav_2_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Getting Started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/slack-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Setup
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quick Start
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/upgrading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../guide/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_3" id="__nav_3_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/projects/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Projects
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/pm-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    PM Agents
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/github-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    GitHub Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/jira-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Jira Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/scribe-integrations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scribe Integrations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/cron-tasks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Cron & Tasks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/canvas/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Canvas
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/hooks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Lifecycle Hooks
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/sessions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sessions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../guide/doctor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Diagnostics
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/environment-variables/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/mcp-tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    MCP Tools
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/commands/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    In-Session Commands
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/prompts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Prompts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../reference/permissions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Agent Permissions
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_5" id="__nav_5_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concepts
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../threading/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threading & Streaming
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../daemon/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Daemon
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../slack-integration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Slack Integration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../database/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Database
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../context/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Context Management
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session-short-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Short Codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spawn-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spawn Tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Permission Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-askuserquestion-intercept-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. AskUserQuestion (intercept first)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-write-gate-read-only-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Write Gate (read-only default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sdk-deny-suggestions-always-honored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. SDK Deny Suggestions (always honored)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-static-auto-approve-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Static Auto-Approve List
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. GitHub MCP Require-Approval List (checked before prefix auto-approve)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-auto-mode-classifier-post-worktree-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Auto-mode Classifier (post-worktree only)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Auto-mode Classifier (post-worktree only)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#content-classification-warn-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content classification (warn-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-sdk-allow-suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. SDK Allow Suggestions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-slack-approval-buttons-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Slack Approval Buttons (fallback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secret-redaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret Redaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-isolation-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Isolation Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session Isolation Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#private-channel-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private channel boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-identity-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is identity-checked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-relies-on-channel-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What relies on channel membership
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#infrastructure-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Infrastructure isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cwd-constraints-for-spawn-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CWD Constraints for Spawn Sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree-lockdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree Lockdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-injection-defenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Injection Defenses
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../troubleshooting/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Changelog
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../development/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_8" id="__nav_8_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_8">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Contributing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Testing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../development/releasing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#authentication" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Authentication">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session-short-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Short Codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#spawn-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Spawn Tokens
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#permission-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Permission Handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Permission Handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-askuserquestion-intercept-first" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. AskUserQuestion (intercept first)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-write-gate-read-only-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Write Gate (read-only default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-sdk-deny-suggestions-always-honored" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. SDK Deny Suggestions (always honored)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-static-auto-approve-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Static Auto-Approve List
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. GitHub MCP Require-Approval List (checked before prefix auto-approve)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-auto-mode-classifier-post-worktree-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Auto-mode Classifier (post-worktree only)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="6. Auto-mode Classifier (post-worktree only)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#content-classification-warn-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Content classification (warn-only)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7-sdk-allow-suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. SDK Allow Suggestions
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#8-slack-approval-buttons-fallback" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Slack Approval Buttons (fallback)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#audit-logging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Audit Logging
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secret-redaction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secret Redaction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#session-isolation-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session Isolation Model
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Session Isolation Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#private-channel-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Private channel boundary
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-is-identity-checked" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What is identity-checked
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-relies-on-channel-membership" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What relies on channel membership
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#infrastructure-isolation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Infrastructure isolation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cwd-constraints-for-spawn-sessions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CWD Constraints for Spawn Sessions
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worktree-lockdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worktree Lockdown
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#prompt-injection-defenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prompt Injection Defenses
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+                
+
+
+
+  
+
+
+  <nav class="md-path" aria-label="Navigation" >
+    <ol class="md-path__list">
+      
+        
+  
+  
+    <li class="md-path__item">
+      <a href="../.." class="md-path__link">
+        
+  <span class="md-ellipsis">
+    Home
+  </span>
+
+      </a>
+    </li>
+  
+
+      
+      
+        
+  
+  
+    
+    
+      <li class="md-path__item">
+        <a href="../" class="md-path__link">
+          
+  <span class="md-ellipsis">
+    Concepts
+  </span>
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ol>
+  </nav>
+
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="security-architecture">Security Architecture<a class="headerlink" href="#security-architecture" title="Permanent link">&para;</a></h1>
+<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
+<h3 id="session-short-codes">Session Short Codes<a class="headerlink" href="#session-short-codes" title="Permanent link">&para;</a></h3>
+<p>When you run <code>summon start</code>, the daemon generates an 8-character hex short code using <code>secrets.token_hex(4)</code> (4 bytes = 32 bits of entropy). This code is:</p>
+<ul>
+<li>Printed to your terminal only — never sent to Slack automatically.</li>
+<li>Valid for 5 minutes (<code>_TOKEN_TTL_MINUTES = 5</code>).</li>
+<li>Locked after 5 failed <code>/summon &lt;code&gt;</code> attempts (<code>_MAX_FAILED_ATTEMPTS = 5</code>).</li>
+</ul>
+<p>When you type <code>/summon &lt;code&gt;</code> in Slack, the bot runs <code>verify_short_code()</code>:</p>
+<ol>
+<li>All pending tokens are fetched from SQLite.</li>
+<li>The submitted code is compared against <strong>all</strong> tokens using <code>hmac.compare_digest</code> — no early exit — to prevent timing side-channel attacks that could reveal which entry matched.</li>
+<li>Expired tokens are cleaned up. Locked tokens are skipped (neither matching nor incrementing).</li>
+<li>If a valid match is found, <code>atomic_consume_pending_token()</code> atomically deletes the token using <code>DELETE ... RETURNING</code>. Concurrent callers cannot both succeed for the same code (no TOCTOU race).</li>
+</ol>
+<p>The <code>/summon</code> slash command has a 2-second per-user rate limit enforced in <code>BoltRouter._on_summon_command()</code> before any database operation.</p>
+<h3 id="spawn-tokens">Spawn Tokens<a class="headerlink" href="#spawn-tokens" title="Permanent link">&para;</a></h3>
+<p>Spawn tokens enable programmatic session creation from within a running Claude session (e.g., a PM agent spawning child sessions). They use 32-character hex tokens (<code>secrets.token_hex(16)</code>, 128 bits of entropy) with a 30-second TTL (<code>_SPAWN_TOKEN_TTL_SECONDS = 30</code>).</p>
+<p>Generation constraints (<code>generate_spawn_token()</code>):
+- <code>target_user_id</code> must be non-empty.
+- <code>cwd</code> must be an absolute path.
+- <code>spawn_source</code> must be <code>"session"</code> or <code>"cli"</code> (pinned set <code>_VALID_SPAWN_SOURCES</code>).
+- For <code>spawn_source="session"</code>: <code>parent_cwd</code> is required, and the child <code>cwd</code> must be at or beneath it (validated with <code>Path.resolve().is_relative_to()</code>). This blocks directory traversal and symlink escapes.</p>
+<p>Spawn token verification uses the same constant-time comparison pattern as short codes.</p>
+<p>When a spawn token is consumed, the daemon logs a <code>spawn_token_consumed</code> audit event on success or <code>spawn_token_rejected</code> on failure.</p>
+<h2 id="permission-handling">Permission Handling<a class="headerlink" href="#permission-handling" title="Permanent link">&para;</a></h2>
+<p>Every tool call from Claude goes through <code>PermissionHandler.handle()</code> before execution. The decision logic has seven layers, evaluated in order:</p>
+<h3 id="1-askuserquestion-intercept-first">1. AskUserQuestion (intercept first)<a class="headerlink" href="#1-askuserquestion-intercept-first" title="Permanent link">&para;</a></h3>
+<p><code>AskUserQuestion</code> is intercepted before any other logic and routed to Slack interactive buttons for user input. This is not a permission check — it is a structured Q&amp;A mechanism.</p>
+<h3 id="2-write-gate-read-only-default">2. Write Gate (read-only default)<a class="headerlink" href="#2-write-gate-read-only-default" title="Permanent link">&para;</a></h3>
+<p>Write-capable tools (<code>Write</code>, <code>Edit</code>, <code>MultiEdit</code>, <code>NotebookEdit</code>, <code>Bash</code>) are <strong>denied by default</strong> until containment is active (worktree or CWD). This prevents accidental writes to the main working directory.</p>
+<ul>
+<li><strong>Git repositories:</strong> the agent enters a worktree via <code>EnterWorktree</code>; the containment root is the worktree directory. Two entry modes are supported: <code>EnterWorktree(name="...")</code> creates a new worktree under <code>.claude/worktrees/{name}/</code>; <code>EnterWorktree(path="...")</code> re-enters an existing worktree using its absolute path, validated against <code>git worktree list --porcelain</code> and confirmed to be within the project root before being accepted as the containment root.</li>
+<li><strong>Non-git directories:</strong> containment is activated automatically at session start using the session CWD as the containment root.</li>
+</ul>
+<p>Before the first write-gated tool is approved, if the session is not in a git repository, a warning is shown that changes cannot be automatically rolled back.</p>
+<p>Safe-dir exceptions (<code>SUMMON_SAFE_WRITE_DIRS</code>) allow configured directories to bypass the containment requirement. Path validation uses <code>Path.resolve()</code> on both sides to prevent symlink escapes.</p>
+<h3 id="3-sdk-deny-suggestions-always-honored">3. SDK Deny Suggestions (always honored)<a class="headerlink" href="#3-sdk-deny-suggestions-always-honored" title="Permanent link">&para;</a></h3>
+<p>If the Claude SDK provides a <code>deny</code> suggestion for a tool, it is denied immediately and unconditionally. SDK deny suggestions represent the user's own <code>settings.json</code> rules and are always respected.</p>
+<h3 id="4-static-auto-approve-list">4. Static Auto-Approve List<a class="headerlink" href="#4-static-auto-approve-list" title="Permanent link">&para;</a></h3>
+<p>The following tools are auto-approved without any Slack prompt:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">_AUTO_APPROVE_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
+    <span class="s2">&quot;Read&quot;</span><span class="p">,</span> <span class="s2">&quot;Cat&quot;</span><span class="p">,</span> <span class="s2">&quot;Grep&quot;</span><span class="p">,</span> <span class="s2">&quot;Glob&quot;</span><span class="p">,</span> <span class="s2">&quot;WebSearch&quot;</span><span class="p">,</span> <span class="s2">&quot;WebFetch&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;LSP&quot;</span><span class="p">,</span> <span class="s2">&quot;ListFiles&quot;</span><span class="p">,</span> <span class="s2">&quot;GetSymbolsOverview&quot;</span><span class="p">,</span> <span class="s2">&quot;FindSymbol&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;FindReferencingSymbols&quot;</span><span class="p">,</span>
+<span class="p">])</span>
+</code></pre></div>
+<p>GitHub MCP read operations are also auto-approved by exact name or prefix:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_AUTO_APPROVE_PREFIXES</span> <span class="o">=</span> <span class="p">(</span>
+    <span class="s2">&quot;mcp__github__get_&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__list_&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__search_&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<h3 id="5-github-mcp-require-approval-list-checked-before-prefix-auto-approve">5. GitHub MCP Require-Approval List (checked before prefix auto-approve)<a class="headerlink" href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" title="Permanent link">&para;</a></h3>
+<p>Destructive and externally-visible GitHub operations <strong>always</strong> require Slack approval, even if the SDK suggests allow or they match a read prefix:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_REQUIRE_APPROVAL</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
+    <span class="s2">&quot;mcp__github__merge_pull_request&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__delete_branch&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__close_pull_request&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__close_issue&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__update_pull_request_branch&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__push_files&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__create_or_update_file&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__pull_request_review_write&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__create_pull_request&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__create_issue&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;mcp__github__add_issue_comment&quot;</span><span class="p">,</span>
+<span class="p">])</span>
+</code></pre></div>
+<p>This is defense-in-depth — deny-list precedence over prefix matching prevents a broadly-scoped <code>allowedTools</code> pattern in <code>settings.json</code> from silently bypassing human-in-the-loop review for externally-visible actions.</p>
+<h3 id="6-auto-mode-classifier-post-worktree-only">6. Auto-mode Classifier (post-worktree only)<a class="headerlink" href="#6-auto-mode-classifier-post-worktree-only" title="Permanent link">&para;</a></h3>
+<p>After the agent enters a worktree, a secondary Sonnet classifier can automatically approve or block tool calls based on configurable prose rules. This sits between the session caches and SDK allow suggestions — it only evaluates tools that weren't already handled by static lists or caches.</p>
+<p>Security mitigations:</p>
+<ul>
+<li><strong>Prompt-level defenses</strong>: The classifier's system prompt follows the same safety framework as other agents — principal hierarchy (system prompt &gt; rules &gt; evaluated content), permitted action enumeration, and bookend reminders. See <a href="../../reference/prompts/#safety-classifier-system-prompt">Prompts Reference</a> for the full prompt.</li>
+<li><strong>XML escaping</strong>: User messages and tool inputs in the classifier prompt are HTML-escaped to prevent structural injection that could close <code>&lt;conversation_context&gt;</code> or <code>&lt;pending_action&gt;</code> tags early.</li>
+<li><strong>Reason redaction</strong>: The classifier's block reason is never returned to the outer Claude agent — only a generic "Blocked by auto-mode policy" message. This prevents the agent from learning to craft bypass attempts.</li>
+<li><strong>Fail-open to HITL</strong>: On any classifier error (timeout, parse failure, unknown decision), the tool falls through to Slack HITL rather than being auto-approved or silently blocked.</li>
+<li><strong>Fallback threshold</strong>: After 3 consecutive blocks or 20 total blocks, the classifier automatically pauses and all decisions revert to manual Slack approval. This prevents a misconfigured classifier from permanently blocking the agent.</li>
+<li><strong>Tool-use denied in classifier</strong>: The classifier subprocess is configured with <code>can_use_tool</code> that denies all tool calls, preventing the classifier itself from taking actions.</li>
+</ul>
+<p>The intended security layering is: <strong>read-only</strong> (pre-containment) → <strong>write gate</strong> (containment entry + one-time approval) → <strong>auto-classifier</strong> (post-worktree, configurable rules) → <strong>Slack HITL</strong> (fallback).</p>
+<h4 id="content-classification-warn-only">Content classification (warn-only)<a class="headerlink" href="#content-classification-warn-only" title="Permanent link">&para;</a></h4>
+<p>The classifier also evaluates subagent output via <code>classify_content()</code>, but in <strong>warn-only mode</strong>: a "block" posts a Slack notice without suppressing the result. By the time the result arrives, the subagent has already acted; blocking the text would hide information without undoing anything. Content evaluations do not update fallback counters, so flagged output cannot shut down the tool classifier.</p>
+<h3 id="7-sdk-allow-suggestions">7. SDK Allow Suggestions<a class="headerlink" href="#7-sdk-allow-suggestions" title="Permanent link">&para;</a></h3>
+<p>If the SDK provides an <code>allow</code> suggestion (from <code>settings.json</code> <code>allowedTools</code>), the tool is approved. Write-gated tools that fell through CWD containment checks (paths outside the containment root, or <code>Bash</code>) are excluded — <code>allowedTools</code> cannot override CWD containment.</p>
+<h3 id="8-slack-approval-buttons-fallback">8. Slack Approval Buttons (fallback)<a class="headerlink" href="#8-slack-approval-buttons-fallback" title="Permanent link">&para;</a></h3>
+<p>All other tools — and write-gated tools after containment entry — go through the Slack approval flow:</p>
+<ol>
+<li>Requests within the same 2-second debounce window are batched into a single Slack message (<code>SUMMON_PERMISSION_DEBOUNCE_MS</code>, default 2000).</li>
+<li>The message posts as a normal message with <strong>Approve</strong>, <strong>Approve for session</strong>, and <strong>Deny</strong> buttons.</li>
+<li>After the user clicks, the interactive message is deleted and a persistent confirmation is posted in the turn thread.</li>
+<li>If no response arrives within the permission timeout (<code>SUMMON_PERMISSION_TIMEOUT_S</code>, default 15 minutes), the request is automatically denied and the message is deleted. Set to <code>0</code> to disable the timeout (wait indefinitely).</li>
+</ol>
+<p>"Approve for session" caches the approval for the session lifetime. Two tiers apply: write-gated tools (Edit, Write, Bash, etc.) cache the specific argument — the file path for file tools, or the exact command string for Bash — so blanket approval is not possible. All other tools cache the tool name, auto-approving all subsequent uses. GitHub require-approval tools are never session-cached regardless of tier (defense-in-depth).</p>
+<p>Only the authenticated session owner (<code>authenticated_user_id</code>) can approve or deny — clicks from other users are logged and ignored.</p>
+<h2 id="audit-logging">Audit Logging<a class="headerlink" href="#audit-logging" title="Permanent link">&para;</a></h2>
+<p>All significant session events are written to the <code>audit_log</code> table in SQLite with a timestamp, event type, session ID, user ID, and details:</p>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>session_created</code></td>
+<td>New session registered</td>
+</tr>
+<tr>
+<td><code>auth_attempted</code></td>
+<td><code>/summon &lt;code&gt;</code> received</td>
+</tr>
+<tr>
+<td><code>auth_succeeded</code></td>
+<td>Short code verified successfully</td>
+</tr>
+<tr>
+<td><code>auth_failed</code></td>
+<td>Invalid, expired, or locked short code</td>
+</tr>
+<tr>
+<td><code>session_active</code></td>
+<td>Session authenticated and running</td>
+</tr>
+<tr>
+<td><code>session_ended</code></td>
+<td>Session completed normally</td>
+</tr>
+<tr>
+<td><code>session_errored</code></td>
+<td>Session terminated with an error</td>
+</tr>
+<tr>
+<td><code>session_stopped</code></td>
+<td>Session stopped by CLI or <code>!end</code> command</td>
+</tr>
+<tr>
+<td><code>spawn_token_consumed</code></td>
+<td>Spawn token verified and consumed</td>
+</tr>
+<tr>
+<td><code>spawn_token_rejected</code></td>
+<td>Spawn token invalid or expired</td>
+</tr>
+</tbody>
+</table>
+<p>Audit logs can be purged with <code>summon db purge</code>.</p>
+<h2 id="secret-redaction">Secret Redaction<a class="headerlink" href="#secret-redaction" title="Permanent link">&para;</a></h2>
+<p><code>redact_secrets()</code> in <code>slack/client.py</code> replaces secret token patterns with <code>[REDACTED]</code> before any content is posted to Slack or written to logs. The pattern covers:</p>
+<table>
+<thead>
+<tr>
+<th>Token type</th>
+<th>Pattern</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Slack bot tokens</td>
+<td><code>xox[a-z]-...</code></td>
+</tr>
+<tr>
+<td>Slack app tokens</td>
+<td><code>xapp-...</code></td>
+</tr>
+<tr>
+<td>Anthropic API keys</td>
+<td><code>sk-ant-...</code></td>
+</tr>
+<tr>
+<td>GitHub classic PATs</td>
+<td><code>ghp_...</code></td>
+</tr>
+<tr>
+<td>GitHub fine-grained PATs</td>
+<td><code>github_pat_...</code></td>
+</tr>
+<tr>
+<td>GitHub OAuth tokens</td>
+<td><code>gho_...</code></td>
+</tr>
+<tr>
+<td>GitHub user-to-server</td>
+<td><code>ghu_...</code></td>
+</tr>
+<tr>
+<td>GitHub server-to-server</td>
+<td><code>ghs_...</code></td>
+</tr>
+<tr>
+<td>GitHub refresh tokens</td>
+<td><code>ghr_...</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>RedactingFormatter</code> wraps all log formatters as an additional safety net — log records are redacted before writing even if the application code forgets to call <code>redact_secrets()</code> explicitly.</p>
+<p>All <code>SlackClient</code> output methods (post, update, upload, post_interactive, canvas) call <code>redact_secrets()</code> at the Slack API boundary.</p>
+<h2 id="session-isolation-model">Session Isolation Model<a class="headerlink" href="#session-isolation-model" title="Permanent link">&para;</a></h2>
+<div class="admonition info">
+<p class="admonition-title">Single-tenant design</p>
+<p>summon-claude is a <strong>single-tenant tool</strong> — one user, one daemon, one machine. It is not designed for shared or multi-user deployments. The security model assumes the person running the daemon is the only person interacting with sessions.</p>
+</div>
+<h3 id="private-channel-boundary">Private channel boundary<a class="headerlink" href="#private-channel-boundary" title="Permanent link">&para;</a></h3>
+<p>Each session is bound to a private Slack channel created during authentication. The channel is the primary isolation mechanism:</p>
+<ul>
+<li>Channels are created with <code>is_private=True</code> — only invited members can see or post in them.</li>
+<li>Only the bot and the authenticated user are invited at creation time.</li>
+<li>The <code>EventDispatcher</code> routes events by channel ID — messages from other channels are silently dropped.</li>
+</ul>
+<p>Under normal single-tenant operation, this means only the session owner can interact with Claude. However, Slack workspace admins can join any private channel, and the owner could manually invite others.</p>
+<h3 id="what-is-identity-checked">What is identity-checked<a class="headerlink" href="#what-is-identity-checked" title="Permanent link">&para;</a></h3>
+<p>These operations verify that the acting user matches the session's <code>authenticated_user_id</code>:</p>
+<ul>
+<li><strong>Permission approvals</strong> — Approve/Deny/Approve-for-session button clicks are checked in <code>PermissionHandler.handle_action</code>. Clicks from non-owners are logged and ignored. Permission messages are posted as normal messages in the private session channel and deleted after interaction.</li>
+<li><strong>Reaction-based abort</strong> — Only the owner's <code>:octagonal_sign:</code> reaction triggers a turn abort.</li>
+<li><strong><code>!summon start</code> / <code>!summon resume</code></strong> — Spawn and resume commands verify the requesting user.</li>
+<li><strong>MCP tools</strong> — <code>session_message</code>, <code>session_start</code>, <code>session_stop</code>, <code>session_info</code>, <code>session_list</code>, and <code>session_resume</code> all scope-guard by <code>authenticated_user_id</code>. Cross-channel canvas reads also verify ownership.</li>
+</ul>
+<h3 id="what-relies-on-channel-membership">What relies on channel membership<a class="headerlink" href="#what-relies-on-channel-membership" title="Permanent link">&para;</a></h3>
+<p>These operations do <strong>not</strong> perform application-level identity checks — they rely on the private channel boundary:</p>
+<ul>
+<li><strong>Regular messages</strong> — Any message posted to the session channel is forwarded to Claude regardless of sender.</li>
+<li><strong>Most !commands</strong> — <code>!end</code>, <code>!stop</code>, <code>!model</code>, <code>!effort</code>, <code>!compact</code>, <code>!clear</code> execute for any channel member. Read-only commands (<code>!help</code>, <code>!status</code>) are intentionally open.</li>
+</ul>
+<p>This is acceptable for single-tenant use. If you need multi-user access to the same workspace, do not invite additional users to session channels.</p>
+<h3 id="infrastructure-isolation">Infrastructure isolation<a class="headerlink" href="#infrastructure-isolation" title="Permanent link">&para;</a></h3>
+<p>The daemon socket is restricted to mode <code>0600</code> (owner-only) so other OS users on the same machine cannot issue IPC commands. The SQLite database file is also <code>0600</code>.</p>
+<h2 id="cwd-constraints-for-spawn-sessions">CWD Constraints for Spawn Sessions<a class="headerlink" href="#cwd-constraints-for-spawn-sessions" title="Permanent link">&para;</a></h2>
+<p>When a session spawns a child via the MCP <code>session_start</code> tool, the child's <code>cwd</code> must be at or beneath the parent's <code>cwd</code>:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">resolved_parent</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">parent_cwd</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+<span class="n">resolved_child</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">cwd</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span>
+<span class="k">if</span> <span class="ow">not</span> <span class="n">resolved_child</span><span class="o">.</span><span class="n">is_relative_to</span><span class="p">(</span><span class="n">resolved_parent</span><span class="p">):</span>
+    <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</code></pre></div>
+<p><code>Path.resolve()</code> follows symlinks before comparison, blocking both directory traversal (<code>../</code>) and symlink escapes. CLI-originated spawns (<code>spawn_source="cli"</code>) skip this constraint since they originate from a trusted human-controlled terminal.</p>
+<p>The <code>MAX_SPAWN_DEPTH = 2</code> constant caps session nesting at three levels deep (root → child → grandchild). Spawn attempts beyond this depth are rejected.</p>
+<h2 id="worktree-lockdown">Worktree Lockdown<a class="headerlink" href="#worktree-lockdown" title="Permanent link">&para;</a></h2>
+<p>All sessions pass a <code>disallowed_tools</code> list to the Claude SDK subprocess that blocks raw git worktree commands:</p>
+<div class="notest highlight"><pre><span></span><code><span class="n">_WORKTREE_DISALLOWED_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
+    <span class="s2">&quot;Bash(git worktree add*)&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;Bash(git worktree move*)&quot;</span><span class="p">,</span>
+<span class="p">})</span>
+</code></pre></div>
+<p>This forces agents to use Claude's built-in <code>EnterWorktree</code> tool instead of raw <code>git worktree add</code> or <code>git worktree move</code>. The built-in tool provides better isolation and tracking — it creates worktrees under <code>.claude/worktrees/{name}/</code>, automatically names the branch <code>worktree-{name}</code>, and fires <code>PreToolUse</code>/<code>PostToolUse</code> hooks that summon can observe for lifecycle management.</p>
+<p>Agents can also re-enter an existing worktree using <code>EnterWorktree(path="&lt;absolute-path&gt;")</code>. This is used when a new child session takes over work that was started in a previous session's worktree. The path must appear in <code>git worktree list</code> output and be within the project root — paths from user messages or untrusted sources must never be used directly.</p>
+<h2 id="prompt-injection-defenses">Prompt Injection Defenses<a class="headerlink" href="#prompt-injection-defenses" title="Permanent link">&para;</a></h2>
+<p>The Scribe agent processes untrusted external content (emails, Slack messages, calendar events, documents) that may contain adversarial text. Its system prompt includes explicit prompt injection defenses:</p>
+<ul>
+<li><strong>Attack pattern recognition</strong>: The agent is instructed to recognize and ignore text starting with <code>SYSTEM:</code>, <code>IMPORTANT OVERRIDE:</code>, <code>New instructions:</code>, text claiming to update its behavior, text asking it to suppress items, text claiming to be from summon-claude or Anthropic, and text containing <code>[CHECKPOINT]</code> state markers.</li>
+<li><strong>Canary rule</strong>: If the agent is about to take an action not listed in its scan protocol, it stops and posts a warning instead: <code>:warning: Suspected prompt injection attempt detected in [source].</code></li>
+<li><strong>Scan trigger nonce</strong>: Each Scribe session generates a unique <code>secrets.token_hex(8)</code> nonce that prefixes all internal scan trigger messages (<code>[SUMMON-INTERNAL-{nonce}]</code>). External content cannot spoof the scan trigger because the nonce is never exposed outside the system prompt.</li>
+<li><strong>Restricted tool set</strong>: Scribe sessions receive only cron and task tools (<code>is_pm=False</code>), blocking access to <code>session_start</code>, <code>session_stop</code>, <code>session_message</code>, and <code>session_resume</code>. This limits the blast radius if a prompt injection attempt succeeds.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../context/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Context Management">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Context Management
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../../troubleshooting/" class="md-footer__link md-footer__link--next" aria-label="Next: Troubleshooting">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Troubleshooting
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+      <div class="md-progress" data-md-component="progress" role="progressbar"></div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+    
+  </body>
+</html>
