@@ -47,6 +47,30 @@ VIEWPORT_HEIGHT = 900
 TOP_NAV_HEIGHT = 44  # Slack workspace-level toolbar (search bar)
 SANDBOX_BANNER_HEIGHT = 44  # developer sandbox banner at bottom
 _SESSION_BASE = "docs-screenshots"
+_SCROLL_TO_BOTTOM_JS = "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
+
+
+def _redact_paths(page) -> None:
+    """Replace filesystem paths in the visible DOM with sanitized versions.
+
+    Replaces the full CWD first (catches worktree paths like
+    ``/Users/.../worktrees/branch-name``), then replaces any remaining
+    ``$HOME`` fragments so no absolute paths leak into screenshots.
+    """
+    cwd = str(Path.cwd())
+    home = str(Path.home())
+    page.evaluate(
+        """([cwd, home]) => {
+        const sel = 'td, span, div, a, code, pre';
+        document.querySelectorAll(sel).forEach(el => {
+            const t = el.textContent;
+            if (el.children.length === 0 && (t.includes(cwd) || t.includes(home))) {
+                el.textContent = t.replaceAll(cwd, '~/project').replaceAll(home, '~');
+            }
+        });
+    }""",
+        [cwd, home],
+    )
 
 
 def _unique_suffix() -> str:
@@ -163,6 +187,24 @@ def start_project_session() -> tuple[subprocess.Popen | None, str]:
     return proc, short_code
 
 
+def _kill_straggler_processes() -> None:
+    """Kill any orphaned summon/claude processes from this worktree."""
+    venv_path = str(Path.cwd() / ".cache" / "venv")
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", venv_path],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        pids = result.stdout.strip().split("\n") if result.stdout.strip() else []
+        if pids:
+            subprocess.run(["kill", *pids], capture_output=True, timeout=5)
+            click.echo(f"  Killed {len(pids)} straggler process(es)")
+    except Exception:
+        pass
+
+
 def stop_project_session(proc: subprocess.Popen | None) -> None:
     """Stop the project and clean up."""
     env = _make_env()
@@ -180,7 +222,7 @@ def stop_project_session(proc: subprocess.Popen | None) -> None:
     click.echo("  Removing screenshot project...")
     try:
         subprocess.run(
-            ["summon", "project", "remove", PROJECT_NAME, "--yes"],
+            ["summon", "project", "remove", PROJECT_NAME],
             capture_output=True,
             timeout=15,
             env=env,
@@ -194,6 +236,8 @@ def stop_project_session(proc: subprocess.Popen | None) -> None:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+    _kill_straggler_processes()
 
 
 def _slack_api_call_with_retry(fn, *, max_retries: int = 5):  # type: ignore[no-untyped-def]
@@ -295,19 +339,22 @@ def archive_channel(bot_token: str, channel_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _crop_to_last_messages(page, dest: Path, *, padding: int = 16) -> None:
+def _crop_to_last_messages(
+    page, dest: Path, *, padding: int = 16, extra_selectors: list[str] | None = None
+) -> None:
     """Screenshot only the last few visible messages in the channel.
 
     Uses JS to find the bounding rect of the last message containers,
     then clips the screenshot to that region.  Falls back to a bottom-
     of-viewport crop if the selectors don't match.
+
+    *extra_selectors* extends the bounding box to include portal elements
+    (e.g. popup menus) that render outside the message DOM tree.
     """
     bbox = page.evaluate(
-        """(padding) => {
-        // Slack wraps each message in a [data-qa="virtual-list-item"] element
+        """([padding, extraSelectors]) => {
         const items = document.querySelectorAll('[data-qa="virtual-list-item"]');
         if (items.length === 0) return null;
-        // Take the last 3 items (or fewer if less exist)
         const last = Array.from(items).slice(-3);
         let top = Infinity, bottom = 0, left = Infinity, right = 0;
         for (const el of last) {
@@ -317,6 +364,16 @@ def _crop_to_last_messages(page, dest: Path, *, padding: int = 16) -> None:
             if (r.left < left) left = r.left;
             if (r.right > right) right = r.right;
         }
+        for (const sel of extraSelectors) {
+            for (const el of document.querySelectorAll(sel)) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                if (r.top < top) top = r.top;
+                if (r.bottom > bottom) bottom = r.bottom;
+                if (r.left < left) left = r.left;
+                if (r.right > right) right = r.right;
+            }
+        }
         return {
             x: Math.max(0, left - padding),
             y: Math.max(0, top - padding),
@@ -324,7 +381,7 @@ def _crop_to_last_messages(page, dest: Path, *, padding: int = 16) -> None:
             height: bottom - top + padding * 2,
         };
     }""",
-        padding,
+        [padding, extra_selectors or []],
     )
     if bbox:
         page.screenshot(path=str(dest), clip=bbox)
@@ -609,6 +666,55 @@ def _post_mock_permission(bot_token: str, channel_id: str) -> str | None:
     return ts
 
 
+def _post_mock_overflow_turn(bot_token: str, channel_id: str) -> str | None:
+    """Post a mock turn header with overflow menu for screenshot purposes."""
+    from slack_sdk import WebClient
+
+    from summon_claude.sessions.response import _build_turn_header_blocks
+
+    client = WebClient(token=bot_token)
+    text = "\U0001f527 Turn 3: re: _Review the auth module_..."
+    blocks = _build_turn_header_blocks(text)
+
+    resp = client.chat_postMessage(channel=channel_id, text=text, blocks=blocks)
+    ts = resp.get("ts")
+    click.echo(f"  Posted mock overflow turn: ts={ts}")
+    return ts
+
+
+def _post_mock_select_menu(bot_token: str, channel_id: str) -> str | None:
+    """Post a mock AskUserQuestion with >4 options (select menu) for screenshots."""
+    from slack_sdk import WebClient
+
+    from summon_claude.sessions.permissions import _build_ask_user_blocks
+
+    client = WebClient(token=bot_token)
+    questions = [
+        {
+            "question": "Which testing framework should I use for the new integration tests?",
+            "header": "Testing Framework",
+            "options": [
+                {"label": "pytest", "description": "Standard Python test framework"},
+                {"label": "unittest", "description": "Built-in Python testing"},
+                {"label": "hypothesis", "description": "Property-based testing"},
+                {"label": "ward", "description": "Modern test framework"},
+                {"label": "nox", "description": "Flexible test automation"},
+                {"label": "tox", "description": "Virtualenv-based test automation"},
+            ],
+        }
+    ]
+    blocks = _build_ask_user_blocks("mock-req-001", questions)
+
+    resp = client.chat_postMessage(
+        channel=channel_id,
+        text="Claude has a question for you",
+        blocks=blocks,
+    )
+    ts = resp.get("ts")
+    click.echo(f"  Posted mock select menu: ts={ts}")
+    return ts
+
+
 def wait_for_help_response(bot_token: str, channel_id: str, timeout: int = 30) -> str | None:
     """Poll for the !help thread reply using conversations_replies.
 
@@ -875,7 +981,7 @@ def _capture_project_up_banner() -> str:
                 env=env,
             )
             subprocess.run(
-                ["uv", "run", "summon", "project", "remove", TERMINAL_SESSION_NAME, "--yes"],
+                ["uv", "run", "summon", "project", "remove", TERMINAL_SESSION_NAME],
                 capture_output=True,
                 timeout=15,
                 env=env,
@@ -1366,6 +1472,18 @@ def main(
                         "description": "Permission buttons",
                     },
                     {"name": "permissions-approval.png", "description": "Permission approval"},
+                    {
+                        "name": "canvas-channel-tab.png",
+                        "description": "Canvas tab with session status",
+                    },
+                    {
+                        "name": "interactivity-overflow-menu.png",
+                        "description": "Turn header with overflow menu (stop/copy/cost)",
+                    },
+                    {
+                        "name": "interactivity-select-menu.png",
+                        "description": "AskUserQuestion with select dropdown (>4 options)",
+                    },
                 ]
             )
             tag = "manual" if sec == "slack-setup" else "e2e (real session)"
@@ -1465,9 +1583,7 @@ def main(
             _dismiss_overlays(page)
             _inject_screenshot_css(page, _CHANNEL_VIEW_CSS)
             # Scroll to bottom so the auth response is visible
-            page.evaluate(
-                "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
-            )
+            page.evaluate(_SCROLL_TO_BOTTOM_JS)
             page.wait_for_timeout(2_000)
             # Find the last few messages and crop to their bounding box
             auth_dest = output_dir / "quickstart-slack-auth.png"
@@ -1497,9 +1613,8 @@ def main(
             # --- Milestone 2: First message screenshot (welcome + task + response)
             click.echo("  Capturing first message exchange...")
             nav(channel_url, wait_ms=3_000)
-            page.evaluate(
-                "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
-            )
+            _redact_paths(page)
+            page.evaluate(_SCROLL_TO_BOTTOM_JS)
             page.wait_for_timeout(2_000)
             snap("quickstart-first-message.png")
 
@@ -1513,9 +1628,8 @@ def main(
                 click.echo("  Capturing permission request screenshot...")
                 page.wait_for_timeout(3_000)
                 nav(channel_url, wait_ms=3_000)
-                page.evaluate(
-                    "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
-                )
+                _redact_paths(page)
+                page.evaluate(_SCROLL_TO_BOTTOM_JS)
                 page.wait_for_timeout(1_000)
                 snap("quickstart-permission-request.png")
                 # permissions-approval.png shows the same view — copy instead of re-capturing
@@ -1536,15 +1650,22 @@ def main(
             if help_ts:
                 help_thread_url = f"{channel_url}/thread/{channel_id}-{help_ts}"
                 click.echo(f"  Capturing !help thread: {help_thread_url}")
-                nav(help_thread_url, wait_ms=5_000)
-                snap("quickstart-help.png", thread_view=True)
+                try:
+                    nav(help_thread_url, wait_ms=5_000)
+                    _redact_paths(page)
+                    snap("quickstart-help.png", thread_view=True)
+                except Exception as exc:
+                    click.echo(f"  WARNING: thread nav failed ({exc}), falling back", err=True)
+                    nav(channel_url, wait_ms=3_000)
+                    _redact_paths(page)
+                    page.evaluate(_SCROLL_TO_BOTTOM_JS)
+                    page.wait_for_timeout(2_000)
+                    snap("quickstart-help.png")
             else:
-                # Fallback: channel view scrolled to bottom (won't show help response)
                 click.echo("  No !help thread ts — falling back to channel view")
                 nav(channel_url, wait_ms=3_000)
-                page.evaluate(
-                    "document.querySelector('[data-qa=\"slack_kit_list\"]')?.scrollTo(0, 999999)"
-                )
+                _redact_paths(page)
+                page.evaluate(_SCROLL_TO_BOTTOM_JS)
                 page.wait_for_timeout(2_000)
                 snap("quickstart-help.png")
 
@@ -1556,24 +1677,65 @@ def main(
                 canvas_tab.wait_for(state="visible", timeout=15_000)
                 canvas_tab.click(timeout=5_000)
                 page.wait_for_timeout(3_000)
-                # Redact filesystem paths in canvas content before capturing
-                page.evaluate(
-                    """(home) => {
-                    document.querySelectorAll('td, span, div, a').forEach(el => {
-                        if (el.children.length === 0 && el.textContent.includes(home)) {
-                            el.textContent = el.textContent.replaceAll(home, '~/project');
-                        }
-                    });
-                }""",
-                    str(Path.home()),
-                )
+                _redact_paths(page)
                 snap("canvas-channel-tab.png")
-
-                # Second capture after content fully renders
-                page.wait_for_timeout(2_000)
-                snap("canvas-pm-active-work.png")
             except Exception as exc:
                 click.echo(f"  Canvas capture failed ({type(exc).__name__}): {exc}", err=True)
+
+            # --- Milestone 6: Overflow menu on turn header (expanded)
+            #     Click the "..." button to show the popup menu with options.
+            click.echo("  Capturing overflow menu screenshot...")
+            overflow_ts = _post_mock_overflow_turn(bot_token, channel_id)
+            if overflow_ts:
+                page.wait_for_timeout(2_000)
+                nav(channel_url, wait_ms=3_000)
+                _redact_paths(page)
+                page.evaluate(_SCROLL_TO_BOTTOM_JS)
+                page.wait_for_timeout(1_000)
+                # _CHANNEL_VIEW_CSS repositions with position:fixed which shifts
+                # the overflow button's anchor and breaks the popover.
+                _inject_screenshot_css(page, _THREAD_VIEW_CSS)
+                page.wait_for_timeout(500)
+                try:
+                    btn = page.locator('[data-qa="block_kit_overflow_element_button"]').last
+                    if btn.count() > 0:
+                        btn.click(timeout=5_000)
+                        page.wait_for_timeout(1_500)
+                        click.echo("    Opened overflow menu")
+                    else:
+                        click.echo("  WARNING: could not find overflow button", err=True)
+                except Exception as exc:
+                    click.echo(f"  WARNING: could not click overflow button: {exc}", err=True)
+                overflow_dest = output_dir / "interactivity-overflow-menu.png"
+                _crop_to_last_messages(
+                    page,
+                    overflow_dest,
+                    padding=24,
+                    extra_selectors=['[role="menu"]'],
+                )
+                click.echo(f"  captured: {overflow_dest}")
+                captured.append("interactivity-overflow-menu.png")
+                # Dismiss the menu
+                page.keyboard.press("Escape")
+                page.wait_for_timeout(500)
+
+            # --- Milestone 7: AskUserQuestion with select menu (>4 options)
+            click.echo("  Capturing select menu screenshot...")
+            select_ts = _post_mock_select_menu(bot_token, channel_id)
+            if select_ts:
+                page.wait_for_timeout(2_000)
+                try:
+                    nav(channel_url, wait_ms=3_000)
+                except Exception as exc:
+                    click.echo(f"  WARNING: select menu nav failed ({exc})", err=True)
+                _redact_paths(page)
+                page.evaluate(_SCROLL_TO_BOTTOM_JS)
+                page.wait_for_timeout(1_000)
+                _inject_screenshot_css(page, _CHANNEL_VIEW_CSS)
+                select_dest = output_dir / "interactivity-select-menu.png"
+                _crop_to_last_messages(page, select_dest, padding=24)
+                click.echo(f"  captured: {select_dest}")
+                captured.append("interactivity-select-menu.png")
 
             # Clean up debug screenshots from previous runs
             for debug_file in output_dir.glob("_debug_*.png"):

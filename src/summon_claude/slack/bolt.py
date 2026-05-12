@@ -150,7 +150,7 @@ class EventProbe:
         )
         self._anchor_channel_id = channel_id
         self._anchor_ts = resp["ts"]
-        self._save_channel_cache(channel_id)
+        EventProbe._save_channel_cache(channel_id)
         logger.debug("EventProbe: anchor posted in %s at ts=%s", channel_id, self._anchor_ts)
 
     async def _resolve_probe_channel(self) -> str | None:
@@ -158,7 +158,7 @@ class EventProbe:
         import secrets  # noqa: PLC0415
 
         # 1. Try cached channel ID (1 API call to validate)
-        cached_id = self._load_channel_cache()
+        cached_id = EventProbe._load_channel_cache()
         if cached_id is not None:
             try:
                 resp = await self._web_client.conversations_info(channel=cached_id)
@@ -170,7 +170,7 @@ class EventProbe:
                 return cached_id
             except Exception:
                 logger.debug("EventProbe: cached channel %s is stale, creating new", cached_id)
-                self._clear_channel_cache()
+                EventProbe._clear_channel_cache()
 
         # 2. Try to create the channel (canonical name first, then random suffix)
         for name in (_PROBE_CHANNEL_NAME, f"{_PROBE_CHANNEL_NAME}-{secrets.token_hex(3)}"):
@@ -562,6 +562,7 @@ class BoltRouter:
         self._app: AsyncApp | None = None
         self._socket_handler: AsyncSocketModeHandler | None = None
         self.bot_user_id: str | None = None
+        self.bot_team_id: str | None = None
         self._event_probe: EventProbe | None = None
 
         # Health monitor — created by start_health_monitor()
@@ -586,7 +587,10 @@ class BoltRouter:
         if self.bot_user_id is None:
             resp = await self.web_client.auth_test()
             self.bot_user_id = resp["user_id"]
-            logger.debug("BoltRouter: bot_user_id cached as %s", self.bot_user_id)
+            self.bot_team_id = resp["team_id"]
+            logger.debug(
+                "BoltRouter: bot_user_id=%s, bot_team_id=%s", self.bot_user_id, self.bot_team_id
+            )
 
             # Create EventProbe — degrade gracefully if setup fails
             probe = EventProbe(web_client=self.web_client, config=self._config)
@@ -780,6 +784,10 @@ class BoltRouter:
         app.action("permission_approve_session")(self._on_dispatch_action)
         app.action("permission_deny")(self._on_dispatch_action)
         app.action(_ASK_USER_PATTERN)(self._on_dispatch_action)
+        app.action("turn_overflow")(self._on_dispatch_action)
+        app.view(re.compile(r"ask_user_other"))(self._on_view_submission)
+        app.event("app_home_opened")(self._on_app_home_opened)
+        app.event("file_shared")(self._on_file_shared)
 
     # ------------------------------------------------------------------
     # Bolt handler bound methods
@@ -813,3 +821,15 @@ class BoltRouter:
     async def _on_dispatch_action(self, ack, action, body) -> None:
         await ack()
         await self._dispatcher.dispatch_action(action, body)
+
+    async def _on_view_submission(self, ack, view, body) -> None:
+        await ack()
+        await self._dispatcher.dispatch_view_submission(view, body)
+
+    async def _on_app_home_opened(self, event) -> None:
+        user_id: str = event.get("user", "")
+        if user_id:
+            await self._dispatcher.dispatch_app_home(user_id)
+
+    async def _on_file_shared(self, event) -> None:
+        await self._dispatcher.dispatch_file_shared(event)
