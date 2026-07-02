@@ -1032,26 +1032,8 @@ class TestDispatchTurnOverflow:
 
         abort.assert_called_once()
 
-    async def test_turn_copy_sid_posts_ephemeral_with_session_id(self):
-        """turn_copy_sid posts ephemeral message containing the session ID."""
-        mock_web = AsyncMock()
-        dispatcher = EventDispatcher(web_client=mock_web)
-        dispatcher.register(
-            "C001",
-            _make_handle(channel_id="C001", session_id="sess-xyz"),
-        )
-
-        action = self._make_overflow_action("turn_copy_sid")
-        await dispatcher.dispatch_action(action, self._make_body())
-
-        mock_web.chat_postEphemeral.assert_awaited_once()
-        call_kwargs = mock_web.chat_postEphemeral.call_args.kwargs
-        assert "sess-xyz" in call_kwargs.get("text", "")
-        assert call_kwargs.get("user") == "U001"
-        assert call_kwargs.get("channel") == "C001"
-
-    async def test_turn_view_cost_posts_ephemeral(self):
-        """turn_view_cost posts an ephemeral message to the user."""
+    async def test_turn_view_cost_posts_ephemeral_with_real_data(self):
+        """turn_view_cost queries registry and posts cost/model/turns."""
         mock_web = AsyncMock()
         dispatcher = EventDispatcher(web_client=mock_web)
         dispatcher.register(
@@ -1059,13 +1041,57 @@ class TestDispatchTurnOverflow:
             _make_handle(channel_id="C001", session_id="sess-cost"),
         )
 
-        action = self._make_overflow_action("turn_view_cost")
-        await dispatcher.dispatch_action(action, self._make_body())
+        mock_session = {
+            "total_cost_usd": 0.1234,
+            "total_turns": 5,
+            "model": "claude-sonnet-4-20250514",
+            "context_pct": 42.5,
+        }
+        mock_registry = AsyncMock()
+        mock_registry.get_session = AsyncMock(return_value=mock_session)
+        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
+        mock_registry.__aexit__ = AsyncMock(return_value=False)
+
+        from unittest.mock import patch
+
+        with patch(
+            "summon_claude.sessions.registry.SessionRegistry",
+            return_value=mock_registry,
+        ):
+            action = self._make_overflow_action("turn_view_cost")
+            await dispatcher.dispatch_action(action, self._make_body())
 
         mock_web.chat_postEphemeral.assert_awaited_once()
         call_kwargs = mock_web.chat_postEphemeral.call_args.kwargs
+        text = call_kwargs.get("text", "")
+        assert "claude-sonnet-4-20250514" in text
+        assert "5 turns" in text
+        assert "$0.1234" in text
+        assert "42%" in text
         assert call_kwargs.get("user") == "U001"
         assert call_kwargs.get("channel") == "C001"
+
+    async def test_turn_view_cost_fallback_on_registry_error(self):
+        """turn_view_cost posts fallback text when registry query fails."""
+        mock_web = AsyncMock()
+        dispatcher = EventDispatcher(web_client=mock_web)
+        dispatcher.register(
+            "C001",
+            _make_handle(channel_id="C001", session_id="sess-cost"),
+        )
+
+        from unittest.mock import patch
+
+        with patch(
+            "summon_claude.sessions.registry.SessionRegistry",
+            side_effect=RuntimeError("db unavailable"),
+        ):
+            action = self._make_overflow_action("turn_view_cost")
+            await dispatcher.dispatch_action(action, self._make_body())
+
+        mock_web.chat_postEphemeral.assert_awaited_once()
+        text = mock_web.chat_postEphemeral.call_args.kwargs.get("text", "")
+        assert "unavailable" in text
 
     async def test_unauthorized_user_rejected(self):
         """turn_overflow from a non-owner user is silently dropped."""
@@ -1108,9 +1134,9 @@ class TestDispatchTurnOverflow:
         mock_web.chat_postEphemeral.assert_not_awaited()
 
     async def test_ephemeral_no_web_client_is_safe(self):
-        """turn_copy_sid with no web_client logs and returns without crash."""
+        """turn_view_cost with no web_client logs and returns without crash."""
         dispatcher = EventDispatcher()  # no web_client
         dispatcher.register("C001", _make_handle(channel_id="C001", session_id="sess-1"))
 
-        action = self._make_overflow_action("turn_copy_sid")
+        action = self._make_overflow_action("turn_view_cost")
         await dispatcher.dispatch_action(action, self._make_body())  # must not raise

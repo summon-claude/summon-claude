@@ -479,20 +479,44 @@ class EventDispatcher:
 
         if value == "turn_stop":
             handle.abort_callback()
-        elif value == "turn_copy_sid":
-            await self._post_ephemeral(
-                channel_id=channel_id,
-                user_id=user_id,
-                text=f"Session ID: `{handle.session_id}`",
-            )
         elif value == "turn_view_cost":
-            await self._post_ephemeral(
+            await self._post_cost_ephemeral(
                 channel_id=channel_id,
                 user_id=user_id,
-                text=f"Session ID: `{handle.session_id}` — use `!cost` for details.",
+                session_id=handle.session_id,
             )
         else:
             logger.warning("EventDispatcher: unknown turn_overflow value %r", value)
+
+    async def _post_cost_ephemeral(
+        self,
+        channel_id: str,
+        user_id: str,
+        session_id: str,
+    ) -> None:
+        """Query the registry for session cost data and post it as an ephemeral."""
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        text = f"Session `{session_id[:8]}` — cost data unavailable."
+        session: dict | None = None
+        try:
+            async with SessionRegistry() as registry:
+                session = await registry.get_session(session_id)
+        except Exception:
+            logger.warning("Failed to query registry for cost ephemeral", exc_info=True)
+        if session:
+            cost = session.get("total_cost_usd", 0.0) or 0.0
+            turns = session.get("total_turns", 0) or 0
+            model = session.get("model", "unknown") or "unknown"
+            context_pct = session.get("context_pct")
+            ctx = f" | context: {context_pct:.0f}%" if context_pct else ""
+            text = f"*{model}* | {turns} turns | ${cost:.4f}{ctx}"
+
+        await self._post_ephemeral(
+            channel_id=channel_id,
+            user_id=user_id,
+            text=text,
+        )
 
     async def _post_ephemeral(self, channel_id: str, user_id: str, text: str) -> None:
         """Post an ephemeral message to a user in a channel (best-effort)."""
