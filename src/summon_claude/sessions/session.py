@@ -1851,7 +1851,11 @@ class SummonSession:
         else:
             profile = "agent"
         template = get_canvas_template(profile, jira_enabled=self._config.jira_enabled)
-        markdown = template.replace("{model}", self._model or "unknown").replace("{cwd}", self._cwd)
+        markdown = (
+            template.replace("{model}", self._model or "unknown")
+            .replace("{cwd}", self._cwd)
+            .replace("{session_id}", self._session_id)
+        )
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
         if not canvas_id:
@@ -2185,9 +2189,6 @@ class SummonSession:
             on_worktree_entered=rt.permission_handler.notify_entered_worktree,
             mcp_health=mcp_health_tracker,
             bridge=rt.bridge,
-            bridge_timeout_s=(self._config.permission_timeout_s + 60)
-            if self._config.permission_timeout_s
-            else 0,
             on_subagent_return=_verify_subagent_return,
         )
 

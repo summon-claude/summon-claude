@@ -1753,15 +1753,14 @@ class TestApprovalVisibility:
     async def test_tool_use_with_auto_allowed_label(self):
         """Pre-resolved bridge with 'auto-allowed' renders label on tool use."""
         bridge = ApprovalBridge()
-        bridge.resolve("Read", ApprovalInfo(label="auto-allowed"))
+        bridge.resolve("Bash", ApprovalInfo(label="auto-allowed"))
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
-        block = make_tool_use_block("Read", {"file_path": "/tmp/test.py"})
+        block = make_tool_use_block("Bash", {"command": "echo hello"})
 
         await streamer._handle_tool_use_block(block, None)
 
         posted_blocks = client.post.call_args
-        # Find the context block with the tool use text
         call_kwargs = posted_blocks[1] if len(posted_blocks) > 1 else {}
         blocks = call_kwargs.get("blocks", [])
         text = blocks[0]["elements"][0]["text"] if blocks else ""
@@ -1816,27 +1815,21 @@ class TestApprovalVisibility:
         assert ":hammer_and_wrench:" in text
         assert "_(" not in text  # No label suffix
 
-    async def test_bridge_timeout_posts_without_label(self):
-        """On bridge timeout, tool use posts without label (graceful degradation)."""
+    async def test_unresolved_bridge_posts_without_label(self):
+        """When bridge Future is not pre-resolved, tool card posts without label."""
         bridge = ApprovalBridge()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = make_tool_use_block("Read", {"file_path": "/tmp/test.py"})
 
-        # Patch asyncio.wait_for to raise TimeoutError immediately
-        timeout_patch = patch(
-            "summon_claude.sessions.response.asyncio.wait_for",
-            side_effect=asyncio.TimeoutError,
-        )
-        with timeout_patch:
-            await streamer._handle_tool_use_block(block, None)
+        await streamer._handle_tool_use_block(block, None)
 
         posted_blocks = client.post.call_args
         call_kwargs = posted_blocks[1] if len(posted_blocks) > 1 else {}
         blocks = call_kwargs.get("blocks", [])
         text = blocks[0]["elements"][0]["text"] if blocks else ""
         assert ":hammer_and_wrench:" in text
-        assert "_(" not in text  # No label
+        assert "_(" not in text  # No label — async update pending
 
     async def test_subagent_tool_skips_bridge(self):
         """Subagent tool calls (parent_id != None) skip bridge, post immediately."""
@@ -1852,29 +1845,27 @@ class TestApprovalVisibility:
 
         bridge.create_future.assert_not_called()
 
-    async def test_enter_worktree_skips_bridge(self):
-        """EnterWorktree bypasses can_use_tool — must skip bridge to prevent timeout hang."""
+    async def test_enter_worktree_non_blocking(self):
+        """EnterWorktree goes through bridge non-blockingly (no hang)."""
         bridge = ApprovalBridge()
-        bridge.create_future = MagicMock()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = ToolUseBlock(id="tu_wt", name="EnterWorktree", input={"name": "test"})
 
         await streamer._handle_tool_use_block(block, None)
 
-        bridge.create_future.assert_not_called()
+        client.post.assert_called()
 
-    async def test_exit_worktree_skips_bridge(self):
-        """ExitWorktree bypasses can_use_tool — must skip bridge to prevent timeout hang."""
+    async def test_exit_worktree_non_blocking(self):
+        """ExitWorktree goes through bridge non-blockingly (no hang)."""
         bridge = ApprovalBridge()
-        bridge.create_future = MagicMock()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = ToolUseBlock(id="tu_exit_wt", name="ExitWorktree", input={})
 
         await streamer._handle_tool_use_block(block, None)
 
-        bridge.create_future.assert_not_called()
+        client.post.assert_called()
 
     async def test_denied_tool_result_suppressed(self):
         """Denied tool results (is_error=True) are suppressed — no :x: Tool error."""
@@ -1951,12 +1942,11 @@ class TestBridgeTimeoutGuard:
         config = make_test_config()
         assert config.permission_timeout_s == 900
 
-    def test_bridge_skip_tools_contains_builtin_bypass_tools(self):
-        """Guard: _BRIDGE_SKIP_TOOLS must include tools that bypass can_use_tool."""
-        from summon_claude.sessions.response import _BRIDGE_SKIP_TOOLS
-
-        assert "EnterWorktree" in _BRIDGE_SKIP_TOOLS
-        assert "ExitWorktree" in _BRIDGE_SKIP_TOOLS
+    async def test_bridge_non_blocking_for_all_tools(self):
+        """Bridge never blocks — all tools use non-blocking async updates."""
+        bridge = ApprovalBridge()
+        fut = bridge.create_future("AnyTool")
+        assert not fut.done()
 
 
 class TestBridgeClearOnNewTurn:
@@ -2005,18 +1995,8 @@ class TestSanitizeApprovalReason:
         assert "`" not in result
 
 
-class TestBridgeTimeoutRelationship:
-    """Guard: bridge_timeout_s must exceed permission_timeout_s."""
-
-    def test_bridge_timeout_exceeds_permission_timeout(self):
-        """session.py wires bridge_timeout_s = permission_timeout_s + 60."""
-        from conftest import make_test_config
-
-        config = make_test_config()
-        expected = config.permission_timeout_s + 60
-        # Default matches the formula: permission_timeout_s (900) + 60 = 960
-        streamer, _, _ = make_streamer()
-        assert streamer._bridge_timeout_s == expected
+class TestPermissionTimeoutConfig:
+    """Guard: permission timeout config is correctly wired."""
 
     def test_permission_timeout_env_var_binding(self):
         """SUMMON_PERMISSION_TIMEOUT_S env var changes config value."""
@@ -2313,13 +2293,13 @@ class TestBuildTurnHeaderBlocks:
         assert accessory["type"] == "overflow"
         assert accessory["action_id"] == "turn_overflow"
 
-    def test_overflow_has_three_options(self):
-        """The overflow menu has exactly 3 options."""
+    def test_overflow_has_two_options(self):
+        """The overflow menu has exactly 2 options."""
         from summon_claude.sessions.response import _build_turn_header_blocks
 
         blocks = _build_turn_header_blocks("header")
         options = blocks[0]["accessory"]["options"]
-        assert len(options) == 3
+        assert len(options) == 2
 
     def test_overflow_option_values(self):
         """The overflow options have the expected value strings."""
@@ -2327,7 +2307,7 @@ class TestBuildTurnHeaderBlocks:
 
         blocks = _build_turn_header_blocks("header")
         values = {opt["value"] for opt in blocks[0]["accessory"]["options"]}
-        assert values == {"turn_stop", "turn_copy_sid", "turn_view_cost"}
+        assert values == {"turn_stop", "turn_view_cost"}
 
     async def test_start_turn_posts_blocks_with_overflow(self):
         """start_turn posts Block Kit with an overflow accessory."""

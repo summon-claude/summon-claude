@@ -51,12 +51,6 @@ _TaskStatus = Literal["in_progress", "complete", "error"]
 _MAX_MESSAGE_CHARS = 3000
 _FLUSH_HEADROOM_CHARS = 100
 _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
-# Built-in tools that bypass can_use_tool — the SDK never fires the callback
-# for these, so a bridge Future would never resolve (bridge_timeout_s hang). Skip the
-# bridge entirely for these tools. Spike-confirmed 2026-03-20 on SDK 0.1.48.
-# If SDK is upgraded, re-run the spike (hack/spikes/spike_enter_worktree.py)
-# to verify no new built-ins bypass can_use_tool; add them here if found.
-_BRIDGE_SKIP_TOOLS = frozenset(["EnterWorktree", "ExitWorktree"])
 
 
 def _sanitize_approval_reason(text: str) -> str:
@@ -191,8 +185,9 @@ class _TurnState:
     tool_names: dict[str, str] = field(default_factory=dict)
     # tool_use_id → (tool_name, filepath, old_str, new_str); consumed by _handle_tool_result_block
     pending_file_changes: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
-    # Denied by approval bridge — suppresses :x: error posts and blocks file change tracking
     denied_tool_use_ids: set[str] = field(default_factory=set)
+    # tool_use_id → (message_ts, tool_name, summary) for async approval label updates
+    tool_card_refs: dict[str, tuple[str, str, str]] = field(default_factory=dict)
     # Hybrid streaming — thread-based chat_stream for tool progress
     active_stream: AsyncChatStream | None = None
     stream_failed: bool = False  # once True, fall back to chat_postMessage for rest of turn
@@ -231,7 +226,6 @@ class ResponseStreamer:
         on_worktree_entered: Callable[[str, str], Awaitable[None]] | None = None,
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
-        bridge_timeout_s: float = 960.0,
         on_subagent_return: Callable[[dict, str], Awaitable[None]] | None = None,
     ) -> None:
         self._router = router
@@ -243,7 +237,6 @@ class ResponseStreamer:
         self._on_worktree_entered = on_worktree_entered
         self._mcp_health = mcp_health
         self._bridge = bridge
-        self._bridge_timeout_s = bridge_timeout_s
         self._on_subagent_return = on_subagent_return
 
         # Cross-turn tracking of pending agent verifications (keyed by tool_use_id)
@@ -560,30 +553,25 @@ class ResponseStreamer:
                 wt_path = ""
             self._turn.pending_worktree_names[block.id] = (wt_name, wt_path)
 
-        # Await approval before posting — skip bridge for subagent tool calls.
-        # The SDK may not invoke can_use_tool for tools in Task subagent messages
-        # (parent_id != None). If the callback is never called, the Future would
-        # never resolve, causing a bridge_timeout_s hang.
+        # Non-blocking approval: check if can_use_tool already resolved (pre-queued
+        # in the bridge). If not, post the card immediately and update it
+        # asynchronously when the approval decision arrives. This decouples the
+        # message stream (Path A) from the can_use_tool callback (Path B) — the SDK
+        # may auto-approve tools internally without ever calling can_use_tool.
         approval: ApprovalInfo | None = None
-        if self._bridge is not None and parent_id is None and block.name not in _BRIDGE_SKIP_TOOLS:
-            try:
-                fut = self._bridge.create_future(block.name)
-                approval = await asyncio.wait_for(fut, timeout=self._bridge_timeout_s or None)
-            except (TimeoutError, asyncio.CancelledError):
-                logger.warning(
-                    "Approval bridge timeout for %s — posting without label",
-                    block.name,
-                )
+        if self._bridge is not None and parent_id is None:
+            fut = self._bridge.create_future(block.name)
+            if fut.done():
+                approval = fut.result()
+            else:
+                self._spawn_background(self._apply_approval_async(block.id, block.name, fut))
 
         if approval is not None and approval.is_denial:
             self._turn.denied_tool_use_ids.add(block.id)
 
         await self._post_tool_use(block, parent_id, approval=approval)
-        # Set status AFTER posting — thread post auto-clears any previous status,
-        # so this persists during actual tool execution until the result arrives.
         await self._set_status(f"Running {block.name}...")
 
-        # Hybrid streaming: emit TaskUpdateChunk(in_progress) for non-subagent, non-denied tools
         if (
             parent_id is None
             and block.id not in self._turn.denied_tool_use_ids
@@ -826,7 +814,8 @@ class ResponseStreamer:
                 parent_id, f"Tool: {tool_name}", blocks=blocks
             )
         else:
-            await self._router.post_to_active_thread(f"Tool: {tool_name}", blocks=blocks)
+            ref = await self._router.post_to_active_thread(f"Tool: {tool_name}", blocks=blocks)
+            self._turn.tool_card_refs[block.id] = (ref.ts, tool_name, summary)
             self._turn.thread_ts = None
 
         # Defer diff/content upload for Edit tools until ToolResultBlock confirms success
@@ -910,6 +899,31 @@ class ResponseStreamer:
                 ],
             }
         ]
+
+    async def _apply_approval_async(
+        self, tool_use_id: str, tool_name: str, fut: asyncio.Future[ApprovalInfo]
+    ) -> None:
+        """Update a tool card with approval info when the bridge Future resolves.
+
+        Runs as a background task — cancelled by bridge.clear() on turn end.
+        """
+        try:
+            approval = await fut
+        except asyncio.CancelledError:
+            return
+
+        if approval.is_denial:
+            self._turn.denied_tool_use_ids.add(tool_use_id)
+
+        ref = self._turn.tool_card_refs.get(tool_use_id)
+        if ref is None:
+            return
+        ts, card_tool_name, summary = ref
+        blocks = self._make_tool_use_blocks(card_tool_name, summary, approval=approval)
+        try:
+            await self._router.update(ts, f"Tool: {card_tool_name}", blocks=blocks)
+        except Exception:
+            logger.debug("Failed to update tool card label for %s", tool_name, exc_info=True)
 
     def _spawn_background(self, coro: Awaitable[None]) -> None:
         """Schedule a fire-and-forget task with a strong reference to prevent GC."""
@@ -1115,10 +1129,6 @@ def _build_turn_header_blocks(text: str) -> list[dict[str, Any]]:
                     {
                         "text": {"type": "plain_text", "text": "Stop Turn"},
                         "value": "turn_stop",
-                    },
-                    {
-                        "text": {"type": "plain_text", "text": "Copy Session ID"},
-                        "value": "turn_copy_sid",
                     },
                     {
                         "text": {"type": "plain_text", "text": "View Cost"},
