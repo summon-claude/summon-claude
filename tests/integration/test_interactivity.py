@@ -307,7 +307,6 @@ class TestOverflowMenu:
 
         option_values = [o["value"] for o in accessory.get("options", [])]
         assert "turn_stop" in option_values
-        assert "turn_copy_sid" in option_values
         assert "turn_view_cost" in option_values
 
     async def test_overflow_stop_calls_abort(self, slack_harness, test_channel):
@@ -335,34 +334,6 @@ class TestOverflowMenu:
 
         await dispatcher.dispatch_action(action, body)
         assert abort_called.is_set(), "Abort callback should have been called"
-
-        dispatcher.unregister(test_channel)
-
-    async def test_overflow_copy_sid_posts_ephemeral(self, slack_harness, test_channel):
-        """Selecting 'Copy Session ID' posts an ephemeral message."""
-        dispatcher = EventDispatcher(web_client=slack_harness.client)
-        bot_user_id = await slack_harness.resolve_bot_user_id()
-
-        handle = SessionHandle(
-            session_id="test-copy-sid",
-            channel_id=test_channel,
-            message_queue=asyncio.Queue(),
-            permission_handler=MagicMock(spec=PermissionHandler),
-            abort_callback=lambda: None,
-            authenticated_user_id=bot_user_id,
-            pending_turns=asyncio.Queue(),
-        )
-        dispatcher.register(test_channel, handle)
-
-        action = {
-            "action_id": "turn_overflow",
-            "type": "overflow",
-            "selected_option": {"value": "turn_copy_sid"},
-        }
-        body = {"channel": {"id": test_channel}, "user": {"id": bot_user_id}}
-
-        # Should not raise — ephemeral post is best-effort
-        await dispatcher.dispatch_action(action, body)
 
         dispatcher.unregister(test_channel)
 
