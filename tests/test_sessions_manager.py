@@ -246,13 +246,13 @@ class TestStopSession:
         _patch_session(manager, stub)
         await manager.create_session(make_options())
 
-        result = manager.stop_session("s1")
+        result = await manager.stop_session("s1")
         assert result is True
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
 
     async def test_stop_unknown_session_returns_false(self):
         manager, _, _ = _make_manager()
-        result = manager.stop_session("nonexistent")
+        result = await manager.stop_session("nonexistent")
         assert result is False
 
     async def test_stop_calls_request_shutdown(self):
@@ -262,7 +262,7 @@ class TestStopSession:
         await manager.create_session(make_options())
 
         # Stop before task runs
-        manager.stop_session("s1")
+        await manager.stop_session("s1")
         assert stub._shutdown_requested is True
 
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)

@@ -17,6 +17,7 @@ import queue
 import re
 import secrets
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -738,6 +739,7 @@ class SummonSession:
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
         self._external_shutdown = False  # True when stopped via request_shutdown()
+        self._shutdown_requested_at: float = 0.0  # monotonic time of shutdown request
         self._authenticated_event = asyncio.Event()
         self._authenticated_user_id: str | None = None
         self._parent_session_id: str | None = parent_session_id
@@ -821,7 +823,15 @@ class SummonSession:
         running tool calls (e.g. ``session_stop``) until the turn finishes.
         """
         if not self._shutdown_event.is_set():
-            logger.info("Session %s: shutdown requested", self._session_id)
+            self._shutdown_requested_at = time.monotonic()
+            has_turn = self._current_turn_task is not None and not self._current_turn_task.done()
+            pending_count = self._pending_turns.qsize()
+            logger.info(
+                "Session %s: shutdown requested (in_flight_turn=%s, pending_turns=%d)",
+                self._session_id,
+                has_turn,
+                pending_count,
+            )
             self._external_shutdown = True
             self._shutdown_event.set()
             self._abort_current_turn()
@@ -830,6 +840,11 @@ class SummonSession:
                 self._raw_event_queue.put_nowait(None)
             except asyncio.QueueFull:
                 logger.debug("Shutdown sentinel dropped (queue full); shutdown_event is set")
+        else:
+            logger.info(
+                "Session %s: duplicate shutdown request ignored (already stopping)",
+                self._session_id,
+            )
 
     def authenticate(self, user_id: str) -> None:
         """Authenticate the session for *user_id* (called by SessionManager).
@@ -999,10 +1014,15 @@ class SummonSession:
                 self._remove_session_log_handler(session_log_handler)
                 if not self._shutdown_completed:
                     try:
-                        # Don't overwrite "suspended" (set by project down)
+                        # Don't overwrite "suspended" (set by project down) or
+                        # "stopping" → "completed" (clean stop in progress)
                         current = await registry.get_session(self._session_id)
-                        if current and current.get("status") == "suspended":
+                        current_status = current.get("status") if current else None
+                        if current_status == "suspended":
                             final = "suspended"
+                            err_msg = None
+                        elif current_status == "stopping":
+                            final = "completed"
                             err_msg = None
                         else:
                             final = "errored"
@@ -2432,6 +2452,9 @@ class SummonSession:
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(self._run_preprocessor(rt, claude))
                             tg.create_task(self._run_response_consumer(rt, claude, streamer))
+                        logger.info(
+                            "Session %s: session TaskGroup exited cleanly", self._session_id
+                        )
                     except ExceptionGroup as eg:
                         restart_exc = next(
                             (e for e in eg.exceptions if isinstance(e, _SessionRestartError)),
@@ -2571,6 +2594,8 @@ class SummonSession:
                 )
                 await self._pending_turns.put(pending)
         finally:
+            reason = "shutdown" if self._shutdown_event.is_set() else "event loop exit"
+            logger.info("Session %s: preprocessor exiting (%s)", self._session_id, reason)
             # Always unblock consumer — even on crash
             with contextlib.suppress(Exception):
                 self._pending_turns.put_nowait(None)
@@ -2594,6 +2619,12 @@ class SummonSession:
             if pending is None:
                 return
 
+            # Drain queued turns when shutdown is in progress — don't start
+            # new work that will just hit the 15-min approval bridge timeout.
+            if self._shutdown_event.is_set():
+                self._drain_pending_turns()
+                return
+
             if pending.compact:
                 instructions = pending.message if pending.message else None
                 await self._execute_compact(
@@ -2603,6 +2634,25 @@ class SummonSession:
                 await self._execute_clear(rt, pending.clear_done, pending.clear_ok)
             else:
                 await self._handle_user_message(rt, claude, streamer, pending)
+
+    def _drain_pending_turns(self) -> None:
+        """Discard all queued turns on shutdown, cleaning up emoji state."""
+        drained = 0
+        while not self._pending_turns.empty():
+            try:
+                item = self._pending_turns.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item is None:
+                continue
+            drained += 1
+        if drained:
+            logger.info(
+                "Session %s: drained %d pending turn(s) on shutdown",
+                self._session_id,
+                drained,
+            )
+        logger.info("Session %s: response consumer exiting (shutdown)", self._session_id)
 
     async def _handle_user_message(  # noqa: PLR0912, PLR0915
         self,
@@ -2926,8 +2976,16 @@ class SummonSession:
 
     async def _shutdown(self, rt: _SessionRuntime) -> None:
         """Gracefully shut down the session."""
+        elapsed = ""
+        if self._shutdown_requested_at:
+            dt = time.monotonic() - self._shutdown_requested_at
+            elapsed = f", shutdown latency: {dt:.1f}s"
         logger.info(
-            "Session ended. Turns: %d, Total cost: $%.4f", self._total_turns, self._total_cost
+            "Session %s: _shutdown started (turns=%d, cost=$%.4f%s)",
+            self._session_id,
+            self._total_turns,
+            self._total_cost,
+            elapsed,
         )
 
         # Post change summary before disconnect (Task 6)
@@ -2960,9 +3018,8 @@ class SummonSession:
         # Update registry — don't overwrite "suspended" (set by project down)
         try:
             current = await rt.registry.get_session(self._session_id)
-            final_status = (
-                "suspended" if current and current.get("status") == "suspended" else "completed"
-            )
+            current_status = current.get("status") if current else None
+            final_status = "suspended" if current_status == "suspended" else "completed"
             await asyncio.wait_for(
                 rt.registry.update_status(
                     self._session_id,
@@ -2986,6 +3043,7 @@ class SummonSession:
             )
         except Exception as e:
             logger.warning("Failed to update registry on shutdown: %s", redact_secrets(str(e)))
+        logger.info("Session %s: _shutdown completed", self._session_id)
         # Socket Mode is now managed by BoltRouter — no per-session cleanup needed
 
     async def _post_disconnect_message(self, rt: _SessionRuntime) -> None:
@@ -4186,7 +4244,10 @@ class SummonSession:
         """Signal the current Claude turn to abort."""
         self._abort_event.set()
         if self._current_turn_task and not self._current_turn_task.done():
+            logger.info("Session %s: cancelling in-flight turn task", self._session_id)
             self._current_turn_task.cancel()
+        else:
+            logger.debug("Session %s: no in-flight turn to cancel", self._session_id)
 
     # ------------------------------------------------------------------
     # Per-session logging

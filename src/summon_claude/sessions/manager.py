@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 _GRACE_SECONDS = 60.0
 _SHUTDOWN_WAIT_TIMEOUT = 30.0
+_STOP_FORCE_TIMEOUT_S = 300.0  # 5 minutes: force-cancel a session that won't stop
 _MAX_QUEUED_SESSIONS = 50
 
 
@@ -296,15 +297,44 @@ class SessionManager:
 
         return session_id
 
-    def stop_session(self, session_id: str) -> bool:
+    async def stop_session(self, session_id: str) -> bool:
         """Signal a specific session to shut down.  Returns ``True`` if found."""
         session = self._sessions.get(session_id)
         if session is not None:
             session.request_shutdown()
             logger.info("SessionManager: stop requested for %s", session_id)
+            # Set DB status so CLI shows "stopping" immediately
+            try:
+                async with SessionRegistry() as registry:
+                    await registry.update_status(session_id, "stopping")
+            except Exception:
+                logger.debug("SessionManager: failed to set stopping status for %s", session_id)
+            # Schedule forced cancellation if session doesn't exit in time
+            self._schedule_force_stop(session_id)
             return True
         logger.debug("SessionManager: stop_session — session %s not found", session_id)
         return False
+
+    def _schedule_force_stop(self, session_id: str) -> None:
+        """Schedule a forced task cancellation after ``_STOP_FORCE_TIMEOUT_S``."""
+        task = self._tasks.get(session_id)
+        if task is None or task.done():
+            return
+        loop = asyncio.get_running_loop()
+
+        def _force_cancel() -> None:
+            t = self._tasks.get(session_id)
+            if t is not None and not t.done():
+                logger.warning(
+                    "SessionManager: force-cancelling session %s after %.0fs",
+                    session_id,
+                    _STOP_FORCE_TIMEOUT_S,
+                )
+                t.cancel()
+
+        handle = loop.call_later(_STOP_FORCE_TIMEOUT_S, _force_cancel)
+        # If the task finishes before the timer, cancel the timer
+        task.add_done_callback(lambda _t: handle.cancel())
 
     def authenticate_session(self, session_id: str, user_id: str) -> bool:
         """Authenticate the session with *user_id*.  Returns ``True`` if found."""
@@ -588,14 +618,14 @@ class SessionManager:
                 session_id = msg.get("session_id")
                 if not session_id:
                     return {"type": "error", "message": "Missing session_id"}
-                found = self.stop_session(session_id)
+                found = await self.stop_session(session_id)
                 return {"type": "session_stopped", "found": found}
 
             case "stop_all":
-                results = [
-                    {"session_id": sid, "found": self.stop_session(sid)}
-                    for sid in list(self._sessions)
-                ]
+                results = []
+                for sid in list(self._sessions):
+                    found = await self.stop_session(sid)
+                    results.append({"session_id": sid, "found": found})
                 return {"type": "all_stopped", "results": results}
 
             case "status":
@@ -1560,6 +1590,9 @@ class SessionManager:
 
     def _on_task_done(self, task: asyncio.Task, session_id: str) -> None:  # type: ignore[type-arg]
         """Cleanup callback fired when a session task finishes (any outcome)."""
+        exc = task.exception() if not task.cancelled() else None
+        outcome = "cancelled" if task.cancelled() else ("error" if exc else "clean")
+        logger.info("SessionManager: session %s task done (%s)", session_id, outcome)
         session = self._sessions.pop(session_id, None)
         self._tasks.pop(session_id, None)
 
