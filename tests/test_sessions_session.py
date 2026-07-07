@@ -2207,6 +2207,52 @@ class TestWorktreeDisallowedTools:
             )
 
 
+class TestPermissionModeForced:
+    """Guard: permission_mode must always be forced to "default" on ClaudeAgentOptions.
+
+    An unset permission_mode inherits the operator's own personal
+    ~/.claude/settings.json defaultMode (setting_sources always includes
+    "user"). A permissive default there (acceptEdits, bypassPermissions,
+    dontAsk, auto) resolves tool approval internally and skips can_use_tool
+    entirely, silently defeating the write-gate/containment checks in
+    permissions.py for every autonomous, headless session.
+    """
+
+    async def _capture_permission_mode(self, *, pm_profile: bool = False) -> str | None:
+        session = make_session(pm_profile=pm_profile)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["permission_mode"] = options.permission_mode
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured["permission_mode"]
+
+    async def test_regular_session_forces_default_permission_mode(self):
+        assert await self._capture_permission_mode(pm_profile=False) == "default"
+
+    async def test_pm_session_forces_default_permission_mode(self):
+        """The forced permission_mode applies to PM sessions too, not just regular ones."""
+        assert await self._capture_permission_mode(pm_profile=True) == "default"
+
+
 class TestHeadlessBoilerplate:
     """Guard: shared headless boilerplate appears in all agent prompts."""
 

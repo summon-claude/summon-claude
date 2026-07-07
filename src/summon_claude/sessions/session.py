@@ -2374,6 +2374,15 @@ class SummonSession:
                 system_prompt=system_prompt,
                 include_partial_messages=True,
                 setting_sources=setting_sources,
+                # Force the CLI's own permission resolution to "default" regardless
+                # of the operator's personal ~/.claude/settings.json defaultMode.
+                # An unset permission_mode inherits that global setting (since
+                # "user" is always in setting_sources above) — a permissive mode
+                # there (acceptEdits, bypassPermissions, dontAsk, auto) resolves
+                # tool approval internally and skips can_use_tool entirely,
+                # silently defeating summon's own write-gate/containment checks
+                # for every autonomous, headless session.
+                permission_mode="default",
                 plugins=discover_installed_plugins(),
                 can_use_tool=rt.permission_handler.handle,
                 mcp_servers=mcp_servers,

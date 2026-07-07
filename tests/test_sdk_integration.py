@@ -187,6 +187,56 @@ async def test_ask_user_question_callback():
     assert "options" in first["questions"][0]
 
 
+async def test_permission_mode_default_forces_can_use_tool_for_write():
+    """permission_mode="default" (as forced by session.py) must route Write through can_use_tool.
+
+    Regression test for the write-gate bypass: an unset permission_mode inherits
+    whatever defaultMode is configured in the operator's own ~/.claude/settings.json
+    (since setting_sources always includes "user") — a permissive mode there
+    (acceptEdits, bypassPermissions, dontAsk, auto) resolves Write internally and
+    skips can_use_tool entirely, silently defeating summon's write-gate. Explicitly
+    forcing permission_mode="default" — exactly what session.py now does
+    unconditionally — must make the callback fire regardless of that setting.
+
+    Known confound: this only closes the permission-mode-level bypass. A
+    PreToolUse hook loaded from the operator's ~/.claude/settings.json (e.g.
+    via a personal plugin) resolves the tool call at an earlier step than
+    permission mode and independently skips can_use_tool — no value of
+    permission_mode can prevent that. If this test fails locally, check for
+    hooks matching Write in your own global/plugin settings before assuming
+    a regression.
+    """
+    invoked_tools: list[str] = []
+
+    async def _handle_tools(tool_name: str, input_data: dict, context):
+        from claude_agent_sdk import PermissionResultAllow
+
+        invoked_tools.append(tool_name)
+        return PermissionResultAllow()
+
+    with tempfile.TemporaryDirectory() as cwd:
+        options = ClaudeAgentOptions(
+            cwd=cwd,
+            max_turns=3,
+            permission_mode="default",
+            can_use_tool=_handle_tools,
+            **_COMMON_OPTS,
+        )
+        async with ClaudeSDKClient(options) as client:
+            await client.query(
+                "Use the Write tool to create a file named summon_test.txt "
+                "in the current directory with the content 'hello'."
+            )
+            async for msg in client.receive_response():
+                if isinstance(msg, ResultMessage):
+                    break
+
+    assert "Write" in invoked_tools, (
+        f"Expected can_use_tool to be invoked for Write under permission_mode='default', "
+        f"got: {invoked_tools}"
+    )
+
+
 async def test_passthrough_command_populates_result():
     """Passthrough slash commands like /cost should complete and produce a ResultMessage."""
     with tempfile.TemporaryDirectory() as cwd:
