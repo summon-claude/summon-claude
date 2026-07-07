@@ -204,16 +204,18 @@ class TestDispatchAction:
         ph.handle_ask_user_action.assert_awaited_once()
         ph.handle_action.assert_not_called()
 
-    async def test_static_select_extracts_selected_option_value(self):
-        """dispatch_action with type=static_select extracts value from selected_option."""
+    async def test_ask_user_action_ignores_stray_type_field(self):
+        """AskUserQuestion always renders buttons, so dispatch_action ignores any
+        stray `type` field on the action payload and always routes to
+        handle_ask_user_action with the raw button value."""
         dispatcher = EventDispatcher()
         ph = AsyncMock()
         dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
 
         action = {
-            "action_id": "ask_user_0_select",
-            "type": "static_select",
-            "selected_option": {"value": "req-1|0|2"},
+            "action_id": "ask_user_0_0",
+            "type": "button",
+            "value": "req-1|0|2",
         }
         body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
         await dispatcher.dispatch_action(action, body)
@@ -222,91 +224,6 @@ class TestDispatchAction:
             value="req-1|0|2",
             user_id="U001",
             trigger_id=None,
-        )
-        ph.handle_ask_user_multiselect_action.assert_not_awaited()
-
-    async def test_static_select_missing_selected_option_sends_empty_value(self):
-        """dispatch_action with type=static_select and no selected_option sends empty value."""
-        dispatcher = EventDispatcher()
-        ph = AsyncMock()
-        dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
-
-        action = {
-            "action_id": "ask_user_0_select",
-            "type": "static_select",
-            # No selected_option key
-        }
-        body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
-        await dispatcher.dispatch_action(action, body)
-
-        ph.handle_ask_user_action.assert_awaited_once_with(
-            value="",
-            user_id="U001",
-            trigger_id=None,
-        )
-
-    async def test_multi_static_select_routes_to_multiselect_action(self):
-        """dispatch_action with multi_static_select routes to handle_ask_user_multiselect_action."""
-        dispatcher = EventDispatcher()
-        ph = AsyncMock()
-        dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
-
-        action = {
-            "action_id": "ask_user_0_multiselect",
-            "type": "multi_static_select",
-            "selected_options": [
-                {"value": "req-1|0|0"},
-                {"value": "req-1|0|2"},
-            ],
-        }
-        body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
-        await dispatcher.dispatch_action(action, body)
-
-        ph.handle_ask_user_multiselect_action.assert_awaited_once_with(
-            action_id="ask_user_0_multiselect",
-            selected_values=["req-1|0|0", "req-1|0|2"],
-            user_id="U001",
-        )
-        ph.handle_ask_user_action.assert_not_awaited()
-
-    async def test_multi_static_select_empty_selection_passes_empty_list(self):
-        """dispatch_action with multi_static_select and no selection passes empty list."""
-        dispatcher = EventDispatcher()
-        ph = AsyncMock()
-        dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
-
-        action = {
-            "action_id": "ask_user_0_multiselect",
-            "type": "multi_static_select",
-            "selected_options": [],
-        }
-        body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
-        await dispatcher.dispatch_action(action, body)
-
-        ph.handle_ask_user_multiselect_action.assert_awaited_once_with(
-            action_id="ask_user_0_multiselect",
-            selected_values=[],
-            user_id="U001",
-        )
-
-    async def test_multi_static_select_missing_selected_options_passes_empty_list(self):
-        """dispatch_action with multi_static_select and no selected_options key passes empty."""
-        dispatcher = EventDispatcher()
-        ph = AsyncMock()
-        dispatcher.register("C001", _make_handle(channel_id="C001", permission_handler=ph))
-
-        action = {
-            "action_id": "ask_user_0_multiselect",
-            "type": "multi_static_select",
-            # No selected_options key
-        }
-        body = {"channel": {"id": "C001"}, "user": {"id": "U001"}, "response_url": ""}
-        await dispatcher.dispatch_action(action, body)
-
-        ph.handle_ask_user_multiselect_action.assert_awaited_once_with(
-            action_id="ask_user_0_multiselect",
-            selected_values=[],
-            user_id="U001",
         )
 
     async def test_unknown_channel_silently_ignored(self):

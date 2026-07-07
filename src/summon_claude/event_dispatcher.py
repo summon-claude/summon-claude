@@ -421,33 +421,14 @@ class EventDispatcher:
         if action_id == "turn_overflow":
             await self._dispatch_turn_overflow(action, handle, channel_id, user_id)
         elif _ASK_USER_RE.fullmatch(action_id):
-            action_type: str = action.get("type", "")
-            if action_type == "static_select":
-                # Single select menu: value is in selected_option.value
-                value = (action.get("selected_option") or {}).get("value", "")
-                await handle.permission_handler.handle_ask_user_action(
-                    value=value,
-                    user_id=user_id,
-                    trigger_id=trigger_id,
-                )
-            elif action_type == "multi_static_select":
-                # Multi select menu: full current selection list in selected_options
-                selected_values = [
-                    opt.get("value", "") for opt in (action.get("selected_options") or [])
-                ]
-                await handle.permission_handler.handle_ask_user_multiselect_action(
-                    action_id=action_id,
-                    selected_values=selected_values,
-                    user_id=user_id,
-                )
-            else:
-                # Button actions (existing behaviour)
-                value = action.get("value", "")
-                await handle.permission_handler.handle_ask_user_action(
-                    value=value,
-                    user_id=user_id,
-                    trigger_id=trigger_id,
-                )
+            # AskUserQuestion always renders as buttons — its own tool schema caps
+            # options at 4, so select-menu payloads never occur.
+            value = action.get("value", "")
+            await handle.permission_handler.handle_ask_user_action(
+                value=value,
+                user_id=user_id,
+                trigger_id=trigger_id,
+            )
         else:
             # permission_approve / permission_approve_session / permission_deny
             value = action.get("value", "")

@@ -1,7 +1,7 @@
 """Integration tests for Slack interactivity features (PR #139).
 
 Tests cover the new user-facing interaction patterns:
-- AskUserQuestion with select menus (>4 options → static_select)
+- AskUserQuestion rendered as buttons (the tool's own schema caps options at 4)
 - AskUserQuestion with multi-select menus
 - AskUserQuestion "Other" modal submission
 - AskUserQuestion message deletion after completion
@@ -80,14 +80,6 @@ async def _extract_request_id_from_channel(web_client, channel_id, retries=5):
                         parts = val.split("|")
                         if len(parts) == 3:
                             return parts[0]
-                # Also check section accessory (static_select case)
-                acc = block.get("accessory", {})
-                if acc.get("type") == "static_select":
-                    options = acc.get("options", [])
-                    if options:
-                        parts = options[0].get("value", "").split("|")
-                        if len(parts) == 3:
-                            return parts[0]
         if attempt < retries - 1:
             await asyncio.sleep(0.5)
     raise ValueError(f"Could not extract request_id from channel {channel_id}")
@@ -99,47 +91,10 @@ async def _extract_request_id_from_channel(web_client, channel_id, retries=5):
 
 
 class TestSelectMenus:
-    """AskUserQuestion with >4 options uses static_select instead of buttons."""
-
-    async def test_many_options_renders_static_select(self, slack_harness, test_channel):
-        """5+ options → Block Kit renders a static_select element, not buttons."""
-        slack_client = SlackClient(slack_harness.client, test_channel)
-        handler = _make_permission_handler(slack_client, debounce_ms=50)
-
-        questions = [
-            {
-                "question": "Pick a language?",
-                "header": "Language",
-                "options": [{"label": f"Language {i}", "value": f"lang_{i}"} for i in range(6)],
-            }
-        ]
-        task = asyncio.create_task(
-            handler.handle("AskUserQuestion", {"questions": questions}, None),
-        )
-        await asyncio.sleep(0.5)
-
-        msg = await _get_latest_message(slack_harness.client, test_channel)
-        assert msg is not None
-        blocks = msg.get("blocks") or []
-
-        # Find the section with static_select accessory
-        select_blocks = [b for b in blocks if b.get("accessory", {}).get("type") == "static_select"]
-        assert select_blocks, "Expected static_select accessory for 6 options"
-
-        accessory = select_blocks[0]["accessory"]
-        assert len(accessory["options"]) == 6
-
-        # Resolve via static_select value to unblock
-        request_id = await _extract_request_id_from_channel(slack_harness.client, test_channel)
-        await handler.handle_ask_user_action(
-            value=f"{request_id}|0|0",
-            user_id="U_OWNER",
-        )
-        result = await task
-        assert isinstance(result, PermissionResultAllow)
+    """AskUserQuestion always renders buttons — its own tool schema caps options at 4."""
 
     async def test_few_options_renders_buttons(self, slack_harness, test_channel):
-        """<=4 options → Block Kit renders buttons, not a select menu."""
+        """<=4 options → Block Kit renders buttons."""
         slack_client = SlackClient(slack_harness.client, test_channel)
         handler = _make_permission_handler(slack_client, debounce_ms=50)
 
@@ -163,7 +118,6 @@ class TestSelectMenus:
         assert msg is not None
         blocks = msg.get("blocks") or []
 
-        # Should have buttons, not static_select
         action_blocks = [b for b in blocks if b.get("type") == "actions"]
         assert action_blocks, "Expected actions block with buttons"
         elements = action_blocks[0]["elements"]
@@ -171,17 +125,13 @@ class TestSelectMenus:
         # 3 options + Other = 4 buttons
         assert button_count == 4
 
-        # No static_select anywhere
-        select_blocks = [b for b in blocks if b.get("accessory", {}).get("type") == "static_select"]
-        assert not select_blocks, "Should not have static_select for 3 options"
-
         # Resolve
         request_id = await _extract_request_id_from_channel(slack_harness.client, test_channel)
         await handler.handle_ask_user_action(value=f"{request_id}|0|0", user_id="U_OWNER")
         await task
 
-    async def test_multiselect_renders_multi_static_select(self, slack_harness, test_channel):
-        """Multi-select with >4 options uses multi_static_select element."""
+    async def test_multiselect_uses_buttons_with_done(self, slack_harness, test_channel):
+        """Multi-select renders per-option buttons plus a Done button to finalize."""
         slack_client = SlackClient(slack_harness.client, test_channel)
         handler = _make_permission_handler(slack_client, debounce_ms=50)
 
@@ -189,7 +139,7 @@ class TestSelectMenus:
             {
                 "question": "Select frameworks?",
                 "header": "Frameworks",
-                "options": [{"label": f"Framework {i}"} for i in range(5)],
+                "options": [{"label": f"Framework {i}"} for i in range(4)],
                 "multiSelect": True,
             }
         ]
@@ -202,20 +152,17 @@ class TestSelectMenus:
         assert msg is not None
         blocks = msg.get("blocks") or []
 
-        # Find multi_static_select in section accessory
-        multiselect_blocks = [
-            b for b in blocks if b.get("accessory", {}).get("type") == "multi_static_select"
-        ]
-        assert multiselect_blocks, "Expected multi_static_select accessory for multiSelect"
-        assert len(multiselect_blocks[0]["accessory"]["options"]) == 5
+        action_blocks = [b for b in blocks if b.get("type") == "actions"]
+        assert action_blocks, "Expected actions block with buttons"
+        elements = action_blocks[0]["elements"]
+        btn_labels = [el["text"]["text"] for el in elements if el.get("type") == "button"]
+        assert "Done" in btn_labels
+        assert "Other" in btn_labels
 
-        # Simulate multi-select + Done to resolve
+        # Click Framework 0 and Framework 2, then Done
         request_id = await _extract_request_id_from_channel(slack_harness.client, test_channel)
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{request_id}|0|0", f"{request_id}|0|2"],
-            user_id="U_OWNER",
-        )
+        await handler.handle_ask_user_action(value=f"{request_id}|0|0", user_id="U_OWNER")
+        await handler.handle_ask_user_action(value=f"{request_id}|0|2", user_id="U_OWNER")
         await handler.handle_ask_user_action(value=f"{request_id}|0|done", user_id="U_OWNER")
         result = await task
         assert isinstance(result, PermissionResultAllow)

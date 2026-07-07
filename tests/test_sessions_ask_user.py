@@ -227,141 +227,16 @@ class TestBuildAskUserBlocks:
         assert first_btn["value"].startswith("abc-def-123|")
 
     # ------------------------------------------------------------------
-    # Select-menu paths (>4 options)
+    # Option count is always rendered as buttons.
+    #
+    # AskUserQuestion's own tool schema caps `options` at 4, so a real tool
+    # call can never carry more. This test exists as a defensive check that
+    # the renderer degrades gracefully (buttons, not a crash) if it's ever
+    # called directly with more options than the schema allows.
     # ------------------------------------------------------------------
 
-    def test_five_options_single_select_uses_static_select(self):
-        """5 single-select options produce a static_select accessory, not buttons."""
-        questions = [
-            {
-                "question": "Pick one",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": False,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-sel", questions)
-        # Must have a section block with a static_select accessory
-        sel_sections = [
-            b
-            for b in blocks
-            if b["type"] == "section" and b.get("accessory", {}).get("type") == "static_select"
-        ]
-        assert len(sel_sections) == 1, "Expected static_select accessory section"
-
-    def test_five_options_single_select_no_buttons(self):
-        """With >4 single-select options, no per-option buttons should appear."""
-        questions = [
-            {
-                "question": "Pick one",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": False,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-sel2", questions)
-        # Should not have any button elements for individual options in actions blocks
-        for b in blocks:
-            if b["type"] == "actions":
-                btn_labels = [e["text"]["text"] for e in b["elements"] if e["type"] == "button"]
-                # Only the Other button should be in the actions block
-                assert btn_labels == ["Other"], f"Unexpected buttons: {btn_labels}"
-
-    def test_five_options_single_select_has_other_button(self):
-        """With >4 single-select options, Other button still present."""
-        questions = [
-            {
-                "question": "Pick one",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": False,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-sel3", questions)
-        actions_blocks = [b for b in blocks if b["type"] == "actions"]
-        other_buttons = [
-            e
-            for b in actions_blocks
-            for e in b["elements"]
-            if e.get("type") == "button" and e["text"]["text"] == "Other"
-        ]
-        assert len(other_buttons) == 1
-
-    def test_five_options_single_select_option_values(self):
-        """static_select option values follow {request_id}|{q_idx}|{opt_idx} format."""
-        questions = [
-            {
-                "question": "Pick one",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": False,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-val", questions)
-        sel_section = next(
-            b
-            for b in blocks
-            if b["type"] == "section" and b.get("accessory", {}).get("type") == "static_select"
-        )
-        opts = sel_section["accessory"]["options"]
-        assert len(opts) == 5
-        for j, opt in enumerate(opts):
-            assert opt["value"] == f"req-val|0|{j}"
-
-    def test_five_options_multi_select_uses_multi_static_select(self):
-        """5 multi-select options produce a multi_static_select as section accessory."""
-        questions = [
-            {
-                "question": "Pick many",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": True,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-msel", questions)
-        msel_sections = [
-            b for b in blocks if b.get("accessory", {}).get("type") == "multi_static_select"
-        ]
-        assert len(msel_sections) == 1, "Expected multi_static_select section accessory"
-
-    def test_five_options_multi_select_has_done_and_other(self):
-        """With >4 multi-select options, Done and Other buttons are in the actions block."""
-        questions = [
-            {
-                "question": "Pick many",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": True,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-msel2", questions)
-        actions_blocks = [b for b in blocks if b["type"] == "actions"]
-        all_elements = [e for b in actions_blocks for e in b["elements"]]
-        btn_labels = [e["text"]["text"] for e in all_elements if e.get("type") == "button"]
-        assert "Done" in btn_labels
-        assert "Other" in btn_labels
-
-    def test_five_options_multi_select_option_values(self):
-        """multi_static_select option values follow {request_id}|{q_idx}|{opt_idx} format."""
-        questions = [
-            {
-                "question": "Pick many",
-                "header": "H",
-                "options": _make_many_options(5),
-                "multiSelect": True,
-            }
-        ]
-        blocks = _build_ask_user_blocks("req-mval", questions)
-        msel_section = next(
-            b for b in blocks if b.get("accessory", {}).get("type") == "multi_static_select"
-        )
-        opts = msel_section["accessory"]["options"]
-        assert len(opts) == 5
-        for j, opt in enumerate(opts):
-            assert opt["value"] == f"req-mval|0|{j}"
-
-    def test_exactly_four_options_still_uses_buttons(self):
-        """Boundary: exactly 4 options still use the button layout."""
+    def test_exactly_four_options_uses_buttons(self):
+        """Boundary: exactly 4 options use the button layout."""
         questions = [
             {
                 "question": "Pick one",
@@ -371,16 +246,24 @@ class TestBuildAskUserBlocks:
             }
         ]
         blocks = _build_ask_user_blocks("req-4", questions)
-        # Should have an actions block (button layout), not static_select
-        sel_sections = [
-            b
-            for b in blocks
-            if b["type"] == "section" and b.get("accessory", {}).get("type") == "static_select"
-        ]
-        assert len(sel_sections) == 0, "4 options should use button layout, not static_select"
         actions = _get_actions_block(blocks)
         # 4 option buttons + Other button
         assert len(actions["elements"]) == 5
+
+    def test_more_than_four_options_still_uses_buttons(self):
+        """Defensive: even a malformed call with 5 options still renders buttons."""
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "H",
+                "options": _make_many_options(5),
+                "multiSelect": False,
+            }
+        ]
+        blocks = _build_ask_user_blocks("req-5", questions)
+        actions = _get_actions_block(blocks)
+        # 5 option buttons + Other button
+        assert len(actions["elements"]) == 6
 
 
 # ------------------------------------------------------------------
@@ -738,183 +621,6 @@ class TestEdgeCases:
         # Clean up
         await _click(handler, req_id, 0, 0)
         await asyncio.wait_for(task, timeout=2.0)
-
-
-# ------------------------------------------------------------------
-# handle_ask_user_multiselect_action (multi_static_select replacement)
-# ------------------------------------------------------------------
-
-
-class TestMultiselectAction:
-    async def test_replaces_full_selection_state(self):
-        """handle_ask_user_multiselect_action replaces selections, not toggles."""
-        handler, provider, _ = _make_handler()
-        questions = [
-            {
-                "question": "Select many",
-                "header": "H",
-                "options": [
-                    {"label": "Alpha", "description": ""},
-                    {"label": "Beta", "description": ""},
-                    {"label": "Gamma", "description": ""},
-                ],
-                "multiSelect": True,
-            }
-        ]
-        task, req_id = await _start_ask(handler, provider, questions)
-
-        # First call: select Alpha and Gamma
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|0", f"{req_id}|0|2"],
-            user_id="U1",
-        )
-        assert handler._ask_user.multi_selections.get((req_id, 0)) == ["Alpha", "Gamma"]
-
-        # Second call: Slack sends full current state — only Beta selected now
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|1"],
-            user_id="U1",
-        )
-        assert handler._ask_user.multi_selections.get((req_id, 0)) == ["Beta"]
-
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def test_empty_selection_clears_state(self):
-        """Empty selected_values clears the multi_selections for that question."""
-        handler, provider, _ = _make_handler()
-        questions = [
-            {
-                "question": "Q?",
-                "header": "H",
-                "options": [
-                    {"label": "A", "description": ""},
-                    {"label": "B", "description": ""},
-                ],
-                "multiSelect": True,
-            }
-        ]
-        task, req_id = await _start_ask(handler, provider, questions)
-
-        # Select A first
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|0"],
-            user_id="U1",
-        )
-        assert handler._ask_user.multi_selections.get((req_id, 0)) == ["A"]
-
-        # Deselect everything (empty list from Slack) — early return, state unchanged
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[],
-            user_id="U1",
-        )
-        # CR-002 fix: empty selection returns early, preserving previous state
-        assert handler._ask_user.multi_selections.get((req_id, 0)) == ["A"]
-
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def test_unauthorized_user_rejected(self):
-        """handle_ask_user_multiselect_action ignores actions from non-owner users."""
-        handler, provider, _ = _make_handler()
-        questions = [
-            {
-                "question": "Q?",
-                "header": "H",
-                "options": [{"label": "A", "description": ""}, {"label": "B", "description": ""}],
-                "multiSelect": True,
-            }
-        ]
-        task, req_id = await _start_ask(handler, provider, questions)
-
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|0"],
-            user_id="U_INTRUDER",
-        )
-        # State must NOT be updated
-        assert (req_id, 0) not in handler._ask_user.multi_selections
-
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def test_out_of_bounds_opt_idx_ignored(self):
-        """Option indices beyond the option list length are silently skipped."""
-        handler, provider, _ = _make_handler()
-        questions = [
-            {
-                "question": "Q?",
-                "header": "H",
-                "options": [{"label": "A", "description": ""}],  # only index 0 valid
-                "multiSelect": True,
-            }
-        ]
-        task, req_id = await _start_ask(handler, provider, questions)
-
-        # Index 99 is out of bounds — should not crash, should not add to labels
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|99"],
-            user_id="U1",
-        )
-        # request_id found and processed, but no valid label added → empty list
-        assert handler._ask_user.multi_selections.get((req_id, 0), []) == []
-
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def test_bad_action_id_is_noop(self):
-        """A malformed action_id is silently ignored."""
-        handler, _, _ = _make_handler()
-        # No active ask-user request needed — should just log and return
-        await handler.handle_ask_user_multiselect_action(
-            action_id="bad_action_id",
-            selected_values=["req|0|0"],
-            user_id="U1",
-        )
-        # No crash
-
-    async def test_multiselect_replaces_then_done_completes(self):
-        """Full flow: multiselect replace then Done finalises the correct answer.
-
-        Uses 3 options (<=4) so _extract_request_id works with button elements,
-        then simulates Slack multi_static_select state replacement via the handler.
-        """
-        handler, provider, _ = _make_handler()
-        questions = [
-            {
-                "question": "Pick features",
-                "header": "Features",
-                "options": [
-                    {"label": "Auth", "description": ""},
-                    {"label": "Logging", "description": ""},
-                    {"label": "Tracing", "description": ""},
-                ],
-                "multiSelect": True,
-            }
-        ]
-        task, req_id = await _start_ask(handler, provider, questions)
-
-        # Simulate Slack sending full selection state (Auth + Tracing)
-        await handler.handle_ask_user_multiselect_action(
-            action_id="ask_user_0_multiselect",
-            selected_values=[f"{req_id}|0|0", f"{req_id}|0|2"],
-            user_id="U1",
-        )
-        # Now click Done to finalize
-        await _click(handler, req_id, 0, "done")
-
-        result = await asyncio.wait_for(task, timeout=2.0)
-        assert isinstance(result, PermissionResultAllow)
-        assert result.updated_input["answers"]["Pick features"] == "Auth, Tracing"
 
 
 # ------------------------------------------------------------------

@@ -1370,82 +1370,6 @@ class PermissionHandler:
         else:
             await self._handle_ask_option(request_id, q_idx, question, opt_val)
 
-    async def handle_ask_user_multiselect_action(
-        self,
-        action_id: str,
-        selected_values: list[str],
-        user_id: str,
-    ) -> None:
-        """Handle a multi_static_select change event.
-
-        Slack sends the FULL current selection list on every change (not deltas).
-        This replaces the multi_selections state for the question with the current list.
-        The user still needs to click Done to finalise.
-        """
-        if user_id != self._authenticated_user_id:
-            logger.warning(
-                "Multiselect action from unauthorized user %s (expected %s)",
-                user_id,
-                self._authenticated_user_id,
-            )
-            return
-
-        # Extract q_idx from action_id (format: ask_user_{q_idx}_multiselect)
-        parts = action_id.split("_")
-        # action_id = "ask_user_{i}_multiselect" → parts = ["ask", "user", "{i}", "multiselect"]
-        try:
-            q_idx = int(parts[2])
-        except (IndexError, ValueError):
-            logger.warning("handle_ask_user_multiselect_action: bad action_id %r", action_id)
-            return
-
-        request_id, labels = self._resolve_multiselect_labels(selected_values, q_idx)
-
-        if request_id is None:
-            # Empty selection — state will be cleaned up by _cleanup_ask_user
-            # when the request completes. Skip now to avoid touching unrelated requests.
-            return
-
-        if request_id not in self._ask_user.events:
-            return
-
-        # Replace the multi_selections state with the current full selection
-        self._ask_user.multi_selections[(request_id, q_idx)] = labels
-
-    def _resolve_multiselect_labels(
-        self, selected_values: list[str], q_idx: int
-    ) -> tuple[str | None, list[str]]:
-        """Resolve selected option values to labels for a multi_static_select.
-
-        Returns (request_id, labels). request_id is None when selected_values is empty
-        or all values are invalid.
-        """
-        request_id: str | None = None
-        labels: list[str] = []
-        for val in selected_values:
-            parsed = _parse_ask_user_value(val)
-            if parsed is None:
-                continue
-            rid, vid_q_idx, opt_val = parsed
-            if vid_q_idx != q_idx:
-                continue
-            if request_id is None:
-                request_id = rid
-            elif request_id != rid:
-                logger.warning("handle_ask_user_multiselect_action: mismatched request_ids")
-                continue
-            questions = self._ask_user.questions.get(rid, [])
-            if q_idx >= len(questions):
-                continue
-            options = questions[q_idx].get("options", [])
-            try:
-                opt_idx = int(opt_val)
-            except ValueError:
-                continue
-            if opt_idx < len(options):
-                labels.append(options[opt_idx].get("label", ""))
-        return request_id, labels
-
     async def _handle_ask_other(
         self,
         request_id: str,
@@ -1722,7 +1646,8 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
     for i, q in enumerate(questions):
         header = q.get("header", "")
         question_text = q.get("question", "")
-        options = q.get("options", [])[:100]  # Slack static_select cap
+        # AskUserQuestion's own schema caps options at 4 — always rendered as buttons.
+        options = q.get("options", [])
         multi_select = q.get("multiSelect", False)
 
         # Question text (with multi-select hint)
@@ -1766,111 +1691,35 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
             "value": f"{request_id}|{i}|other",
         }
 
-        if len(options) <= 4:
-            # Button layout (unchanged behaviour for small option sets)
-            elements = []
-            for j, opt in enumerate(options):
-                label = opt.get("label", f"Option {j + 1}")
-                elements.append(
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": label[:75]},
-                        "action_id": f"ask_user_{i}_{j}",
-                        "value": f"{request_id}|{i}|{j}",
-                    }
-                )
-            elements.append(other_button)
-            if multi_select:
-                elements.append(
-                    {
-                        "type": "button",
-                        "text": {"type": "plain_text", "text": "Done"},
-                        "style": "primary",
-                        "action_id": f"ask_user_{i}_done",
-                        "value": f"{request_id}|{i}|done",
-                    }
-                )
-            blocks.append(
+        elements = []
+        for j, opt in enumerate(options):
+            label = opt.get("label", f"Option {j + 1}")
+            elements.append(
                 {
-                    "type": "actions",
-                    "block_id": f"ask_user_{request_id[:8]}_{i}",
-                    "elements": elements,
-                }
-            )
-        elif not multi_select:
-            # Single-select: static_select as section accessory + Other button below
-            select_options = [
-                {
-                    "text": {
-                        "type": "plain_text",
-                        "text": opt.get("label", f"Option {j + 1}")[:75],
-                    },
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": label[:75]},
+                    "action_id": f"ask_user_{i}_{j}",
                     "value": f"{request_id}|{i}|{j}",
                 }
-                for j, opt in enumerate(options)
-            ]
-            blocks.append(
+            )
+        elements.append(other_button)
+        if multi_select:
+            elements.append(
                 {
-                    "type": "section",
-                    "block_id": f"ask_user_{request_id[:8]}_{i}_sel",
-                    "text": {"type": "mrkdwn", "text": "Select an option:"},
-                    "accessory": {
-                        "type": "static_select",
-                        "action_id": f"ask_user_{i}_select",
-                        "placeholder": {"type": "plain_text", "text": "Choose..."},
-                        "options": select_options,
-                    },
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Done"},
+                    "style": "primary",
+                    "action_id": f"ask_user_{i}_done",
+                    "value": f"{request_id}|{i}|done",
                 }
             )
-            blocks.append(
-                {
-                    "type": "actions",
-                    "block_id": f"ask_user_{request_id[:8]}_{i}_other",
-                    "elements": [other_button],
-                }
-            )
-        else:
-            # Multi-select: multi_static_select as section accessory
-            # (Slack rejects multi_static_select in actions blocks)
-            select_options = [
-                {
-                    "text": {
-                        "type": "plain_text",
-                        "text": opt.get("label", f"Option {j + 1}")[:75],
-                    },
-                    "value": f"{request_id}|{i}|{j}",
-                }
-                for j, opt in enumerate(options)
-            ]
-            blocks.append(
-                {
-                    "type": "section",
-                    "block_id": f"ask_user_{request_id[:8]}_{i}_msel",
-                    "text": {"type": "mrkdwn", "text": "Select options:"},
-                    "accessory": {
-                        "type": "multi_static_select",
-                        "action_id": f"ask_user_{i}_multiselect",
-                        "placeholder": {"type": "plain_text", "text": "Choose options..."},
-                        "options": select_options,
-                    },
-                }
-            )
-            blocks.append(
-                {
-                    "type": "actions",
-                    "block_id": f"ask_user_{request_id[:8]}_{i}_msel_btns",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {"type": "plain_text", "text": "Done"},
-                            "style": "primary",
-                            "action_id": f"ask_user_{i}_done",
-                            "value": f"{request_id}|{i}|done",
-                        },
-                        other_button,
-                    ],
-                }
-            )
+        blocks.append(
+            {
+                "type": "actions",
+                "block_id": f"ask_user_{request_id[:8]}_{i}",
+                "elements": elements,
+            }
+        )
 
     return blocks
 
