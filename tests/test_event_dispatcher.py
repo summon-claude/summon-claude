@@ -728,6 +728,13 @@ class TestDispatchFileShared:
             await dispatcher.dispatch_file_shared(self._make_file_event())
             mock_dl.assert_not_called()
 
+        mock_web.chat_postEphemeral.assert_awaited_once()
+        call_kwargs = mock_web.chat_postEphemeral.call_args.kwargs
+        assert call_kwargs["channel"] == "C001"
+        assert call_kwargs["user"] == "U001"
+        assert "big.py" in call_kwargs["text"]
+        assert "MB" in call_kwargs["text"]
+
     async def test_unsupported_file_type_dropped(self):
         """Unsupported file types are silently dropped after classification."""
         from unittest.mock import patch
@@ -745,6 +752,72 @@ class TestDispatchFileShared:
         with patch("summon_claude.event_dispatcher.download_file") as mock_dl:
             await dispatcher.dispatch_file_shared(self._make_file_event())
             mock_dl.assert_not_called()
+
+        mock_web.chat_postEphemeral.assert_awaited_once()
+        call_kwargs = mock_web.chat_postEphemeral.call_args.kwargs
+        assert call_kwargs["channel"] == "C001"
+        assert call_kwargs["user"] == "U001"
+        assert "binary.exe" in call_kwargs["text"]
+        assert ".py" in call_kwargs["text"]  # supported-extensions list present
+
+    async def test_duplicate_file_shared_event_deduped(self):
+        """A file_shared event delivered twice for the same file_id only processes once."""
+        from summon_claude.file_handler import MAX_FILE_SIZE
+
+        mock_web = AsyncMock()
+        mock_web.files_info = AsyncMock(
+            return_value=self._make_files_info_response(name="big.py", size=MAX_FILE_SIZE + 1)
+        )
+        dispatcher = EventDispatcher(web_client=mock_web)
+        dispatcher.register("C001", _make_handle(channel_id="C001"))
+
+        event = self._make_file_event()
+        await dispatcher.dispatch_file_shared(event)
+        await dispatcher.dispatch_file_shared(event)  # simulated re-delivery
+
+        assert mock_web.files_info.await_count == 1
+        mock_web.chat_postEphemeral.assert_awaited_once()
+
+    async def test_duplicate_file_shared_valid_file_enqueued_once(self):
+        """Re-delivery of the same valid file_shared event only enqueues one pending turn."""
+        from unittest.mock import patch
+
+        mock_web = AsyncMock()
+        mock_web.files_info = AsyncMock(return_value=self._make_files_info_response(name="s.py"))
+        mock_web.token = "xoxb-test"
+        pending_q: asyncio.Queue = asyncio.Queue()
+        handle = _make_handle(channel_id="C001")
+        handle.pending_turns = pending_q
+        dispatcher = EventDispatcher(web_client=mock_web)
+        dispatcher.register("C001", handle)
+
+        with patch(
+            "summon_claude.event_dispatcher.download_file",
+            new_callable=AsyncMock,
+            return_value=b"print('hi')",
+        ):
+            event = self._make_file_event()
+            await dispatcher.dispatch_file_shared(event)
+            await dispatcher.dispatch_file_shared(event)
+
+        assert pending_q.qsize() == 1
+
+    async def test_different_file_ids_both_processed(self):
+        """Two distinct file_ids in quick succession are both processed (dedup key is per-file)."""
+        mock_web = AsyncMock()
+        mock_web.files_info = AsyncMock(
+            return_value=self._make_files_info_response(
+                name="binary.exe", mimetype="application/octet-stream"
+            )
+        )
+        dispatcher = EventDispatcher(web_client=mock_web)
+        dispatcher.register("C001", _make_handle(channel_id="C001"))
+
+        await dispatcher.dispatch_file_shared(self._make_file_event(file_id="F001"))
+        await dispatcher.dispatch_file_shared(self._make_file_event(file_id="F002"))
+
+        assert mock_web.files_info.await_count == 2
+        assert mock_web.chat_postEphemeral.await_count == 2
 
     async def test_text_file_enqueued_on_pending_turns(self):
         """A valid text file is downloaded and put on pending_turns queue."""

@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -22,7 +23,9 @@ import aiohttp
 from slack_sdk.web.async_client import AsyncWebClient
 
 from summon_claude.file_handler import (
+    IMAGE_EXTENSIONS,
     MAX_FILE_SIZE,
+    TEXT_EXTENSIONS,
     WARN_FILE_SIZE,
     classify_file,
     download_file,
@@ -55,6 +58,13 @@ HomeStopSessionHandler = Callable[[str, str], Awaitable[None]]
 
 # action_id pattern used to recognise AskUserQuestion button clicks
 _ASK_USER_RE = re.compile(r"ask_user_\d+_.+")
+
+_SUPPORTED_TEXT_DISPLAY = ", ".join(sorted(TEXT_EXTENSIONS))
+_SUPPORTED_IMAGE_DISPLAY = ", ".join(sorted(IMAGE_EXTENSIONS))
+
+# How long a file_id is remembered to dedupe Slack's occasional double
+# file_shared delivery for a single upload.
+_FILE_DEDUP_TTL_S = 60.0
 
 
 @dataclass
@@ -97,6 +107,7 @@ class EventDispatcher:
         self._resume_handler: ResumeHandler | None = None
         self._app_home_handler: AppHomeHandler | None = None
         self._home_stop_session_handler: HomeStopSessionHandler | None = None
+        self._recent_file_ids: dict[str, float] = {}  # file_id → monotonic timestamp
         self._web_client = web_client
         self._bot_user_id: str | None = None
         self._http_session: aiohttp.ClientSession | None = None
@@ -224,7 +235,27 @@ class EventDispatcher:
             )
             return
 
+        if self._is_duplicate_file_event(file_id):
+            logger.debug("dispatch_file_shared: duplicate delivery for file %s — ignoring", file_id)
+            return
+
         await self._process_file_shared(file_id, handle)
+
+    def _is_duplicate_file_event(self, file_id: str) -> bool:
+        """Return True if file_id was already processed within the dedup window.
+
+        Slack occasionally delivers file_shared twice for a single upload;
+        without this, a rejected file would double-post its ephemeral notice
+        and an accepted file would be enqueued (and processed) twice.
+        """
+        now = time.monotonic()
+        self._recent_file_ids = {
+            fid: ts for fid, ts in self._recent_file_ids.items() if now - ts < _FILE_DEDUP_TTL_S
+        }
+        if file_id in self._recent_file_ids:
+            return True
+        self._recent_file_ids[file_id] = now
+        return False
 
     async def _process_file_shared(self, file_id: str, handle: SessionHandle) -> None:  # noqa: PLR0911
         """Fetch, classify, download, and enqueue a file for the session.
@@ -264,6 +295,15 @@ class EventDispatcher:
                 file_size,
                 MAX_FILE_SIZE,
             )
+            await self._post_ephemeral(
+                channel_id=handle.channel_id,
+                user_id=handle.authenticated_user_id,
+                text=(
+                    f":warning: *{filename}* is {file_size / (1024 * 1024):.1f} MB — "
+                    f"the upload limit is {MAX_FILE_SIZE // (1024 * 1024)} MB, "
+                    f"so it was not processed."
+                ),
+            )
             return
         if file_size > WARN_FILE_SIZE:
             logger.warning(
@@ -275,6 +315,16 @@ class EventDispatcher:
         kind = classify_file(filename, mimetype)
         if kind == "unsupported":
             logger.debug("dispatch_file_shared: unsupported file type %s (%s)", filename, mimetype)
+            await self._post_ephemeral(
+                channel_id=handle.channel_id,
+                user_id=handle.authenticated_user_id,
+                text=(
+                    f":warning: *{filename}* has an unsupported file type and was not "
+                    f"processed.\n"
+                    f"Supported text/code: {_SUPPORTED_TEXT_DISPLAY}\n"
+                    f"Supported images: {_SUPPORTED_IMAGE_DISPLAY}"
+                ),
+            )
             return
 
         # Download file content (token from web_client, never logged)
