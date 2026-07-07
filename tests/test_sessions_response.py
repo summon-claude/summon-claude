@@ -2422,6 +2422,80 @@ class TestHybridStreaming:
         error_chunk = chunk_calls[-1].kwargs["chunks"][0]
         assert error_chunk.status == "error"
 
+    async def test_append_failure_logs_warning(self, caplog):
+        """A failed TaskUpdateChunk append is logged at WARNING, not silently at DEBUG.
+
+        Regression test: a swallowed chat_appendStream failure previously
+        looked identical to success in production logs — indistinguishable
+        from a stuck task pill caused by something else entirely.
+        """
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        mock_stream.append = AsyncMock(side_effect=RuntimeError("rate limited"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert any("TaskUpdateChunk append failed" in r.message for r in caplog.records)
+
+    async def test_real_chat_stream_task_update_id_matches_across_start_and_append(self):
+        """Exercises the real AsyncChatStream buffering/flush logic, not a full mock.
+
+        Every other test in this class mocks open_chat_stream to return a
+        fully-mocked AsyncChatStream, so none of them exercise the real
+        chat_startStream/chat_appendStream low-level calls or confirm the
+        same chunk id survives from the in_progress chunk (sent via
+        chat_startStream) to the complete chunk (sent via chat_appendStream
+        against the ts chat_startStream returned).
+        """
+        from slack_sdk.models.messages.chunk import TaskUpdateChunk
+        from slack_sdk.web.async_chat_stream import AsyncChatStream
+
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_startStream = AsyncMock(return_value={"ok": True, "ts": "stream.123"})
+        mock_web_client.chat_appendStream = AsyncMock(return_value={"ok": True})
+
+        real_stream = AsyncChatStream(
+            mock_web_client,
+            channel="C123",
+            logger=logging.getLogger("test.chat_stream"),
+            thread_ts="turn.0",
+            buffer_size=64,
+            recipient_team_id="T123",
+            recipient_user_id="U456",
+        )
+
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        client.open_chat_stream = AsyncMock(return_value=real_stream)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file content", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        mock_web_client.chat_startStream.assert_awaited_once()
+        start_chunks = mock_web_client.chat_startStream.call_args.kwargs["chunks"]
+        start_task_chunks = [c for c in start_chunks if isinstance(c, TaskUpdateChunk)]
+        assert len(start_task_chunks) == 1
+        assert start_task_chunks[0].id == "tu_1"
+        assert start_task_chunks[0].status == "in_progress"
+
+        mock_web_client.chat_appendStream.assert_awaited_once()
+        append_kwargs = mock_web_client.chat_appendStream.call_args.kwargs
+        assert append_kwargs["ts"] == "stream.123"
+        append_task_chunks = [c for c in append_kwargs["chunks"] if isinstance(c, TaskUpdateChunk)]
+        assert len(append_task_chunks) == 1
+        assert append_task_chunks[0].id == "tu_1"
+        assert append_task_chunks[0].status == "complete"
+
     async def test_stream_stopped_with_summary_blocks(self):
         """Stream stop includes summary blocks with tool count and files."""
         streamer, router, client, mock_stream = self._make_stream_streamer()

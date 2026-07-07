@@ -362,6 +362,9 @@ class SlackClient:
             recipient_team_id=team_id,
             recipient_user_id=user_id,
             buffer_size=buffer_size,
+            # Explicit rather than relying on the server-side default, so this
+            # isn't a variable to second-guess when debugging task pill rendering.
+            task_display_mode="timeline",
         )
 
     # --- Canvas methods ---

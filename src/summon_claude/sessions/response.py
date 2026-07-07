@@ -386,8 +386,20 @@ class ResponseStreamer:
         chunk = TaskUpdateChunk(id=tool_use_id, title=tool_name, status=status)
         try:
             await self._turn.active_stream.append(chunks=[chunk])
+            logger.info(
+                "Sent TaskUpdateChunk id=%s title=%s status=%s", tool_use_id, tool_name, status
+            )
         except Exception as e:
-            logger.debug("TaskUpdateChunk append failed: %s", e)
+            # Was logger.debug — a swallowed append failure looked identical to
+            # success in production logs, indistinguishable from a stuck pill
+            # caused by something else entirely.
+            logger.warning(
+                "TaskUpdateChunk append failed id=%s title=%s status=%s: %s",
+                tool_use_id,
+                tool_name,
+                status,
+                e,
+            )
             await self._close_stream_on_error()
 
     async def _stop_stream(self, blocks: list[dict[str, Any]] | None = None) -> None:
