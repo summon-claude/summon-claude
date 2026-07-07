@@ -1589,6 +1589,248 @@ class TestPendingTurn:
         assert envelope["message"]["content"] == [image_block, text_block]
 
 
+class TestTryPreSend:
+    """Tests for _try_pre_send() — the shared pre-send-with-lock helper (bug #4).
+
+    receive_response() has no correlation to which query() call triggered it —
+    it just drains the shared message stream until the next ResultMessage. A
+    query() sent while a prior turn's receive_response() is still in flight
+    can get folded into that turn's response instead of starting an
+    independent one. _turn_lock prevents a second query() from ever being
+    sent while an earlier one's response hasn't been fully consumed yet.
+    """
+
+    async def test_succeeds_and_holds_lock_when_unlocked(self):
+        session = make_session()
+        claude = AsyncMock()
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is True
+        claude.query.assert_awaited_once_with("hello")
+        assert session._turn_lock.locked()
+
+    async def test_returns_false_without_sending_when_locked(self):
+        session = make_session()
+        claude = AsyncMock()
+        await session._turn_lock.acquire()  # simulate an in-flight turn
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is False
+        claude.query.assert_not_awaited()
+
+    async def test_releases_lock_and_returns_false_on_query_failure(self):
+        session = make_session()
+        claude = AsyncMock()
+        claude.query = AsyncMock(side_effect=RuntimeError("disconnected"))
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is False
+        assert not session._turn_lock.locked()
+
+
+class TestTurnLockSerialization:
+    """Tests for _turn_lock protecting _do_turn's query()/receive_response() pairing (bug #4)."""
+
+    def _make_rt(self):
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        return rt
+
+    def _make_streamer(self, stream_result=None):
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = AsyncMock(return_value=stream_result)
+        return streamer
+
+    async def test_pre_sent_false_acquires_sends_and_releases(self):
+        """When pre_sent=False, _do_turn acquires the lock, sends, and releases when done."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        claude.query.assert_awaited_once_with("hello")
+        assert not session._turn_lock.locked()
+
+    async def test_pre_sent_true_does_not_resend_and_releases_lock(self):
+        """When pre_sent=True, the lock is already held by the pre-sender — _do_turn
+        must not call query() again, and must release the lock it inherited."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        pending = _PendingTurn(message="hello", pre_sent=True)
+
+        await session._turn_lock.acquire()  # simulate the pre-sender's acquire
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        claude.query.assert_not_awaited()
+        assert not session._turn_lock.locked()
+
+    async def test_lock_released_even_when_stream_raises(self):
+        """A failure inside stream_with_flush must still release the lock."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        streamer.stream_with_flush = AsyncMock(side_effect=RuntimeError("boom"))
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        assert not session._turn_lock.locked()
+
+    async def test_second_message_cannot_presend_while_first_turn_in_flight(self):
+        """End-to-end: a message arriving while a turn is mid-flight must not be
+        able to pre-send — it gets enqueued with pre_sent=False instead, closing
+        the exact race that caused bug #4's phantom turn (a query() sent while
+        an earlier turn's receive_response() was still draining the shared
+        stream, getting folded into that turn's response)."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+
+        turn_started = asyncio.Event()
+        release_turn = asyncio.Event()
+
+        async def slow_stream_with_flush(*_a, **_kw):
+            turn_started.set()
+            await release_turn.wait()
+
+        streamer = self._make_streamer()
+        streamer.stream_with_flush = slow_stream_with_flush
+
+        pending_a = _PendingTurn(message="first", pre_sent=False)
+        turn_a_task = asyncio.create_task(
+            session._handle_user_message(rt, claude, streamer, pending_a)
+        )
+        await asyncio.wait_for(turn_started.wait(), timeout=1.0)
+
+        # Second message arrives while turn A is still mid-flight
+        pre_sent_b = await session._try_pre_send(claude, "second", "query()")
+        assert pre_sent_b is False  # must not fold into turn A's response
+
+        release_turn.set()
+        await turn_a_task
+        assert not session._turn_lock.locked()
+
+
+class TestAbortCurrentTurnInterrupt:
+    """Tests for _abort_current_turn()'s interrupt() call (bug #5).
+
+    Cancelling our own asyncio task only stops us from consuming
+    receive_response() — the CLI subprocess itself keeps running until a real
+    interrupt request reaches it, otherwise its output keeps flowing into the
+    shared reader stream and gets misattributed to the next turn.
+    """
+
+    async def _await_background_tasks(self, session):
+        await asyncio.sleep(0)
+        for task in list(session._background_tasks):
+            await task
+
+    async def test_interrupt_called_when_turn_in_flight(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()
+        await self._await_background_tasks(session)
+
+        session._claude.interrupt.assert_awaited_once()
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+    async def test_interrupt_not_called_when_no_turn_in_flight(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._current_turn_task = None
+
+        session._abort_current_turn()
+        await self._await_background_tasks(session)
+
+        session._claude.interrupt.assert_not_called()
+
+    async def test_interrupt_failure_is_swallowed(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._claude.interrupt = AsyncMock(side_effect=RuntimeError("subprocess gone"))
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()  # must not raise
+        await self._await_background_tasks(session)  # must not raise
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+    async def test_no_interrupt_task_when_claude_is_none(self):
+        session = make_session()
+        session._claude = None
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()  # must not raise
+        await asyncio.sleep(0)
+        assert len(session._background_tasks) == 0
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+
+class TestAbortUpdatesTurnCard:
+    """Tests for the turn card reflecting a cancelled state on abort (bug #5).
+
+    Before this fix, only _finalize_turn_result (success path) ever touched
+    the turn's starter card — an aborted turn left it frozen on "Processing..."
+    forever, with no octagonal-sign/"Cancelled" text anywhere on the card
+    itself, and the native thread status indicator kept cycling.
+    """
+
+    async def test_abort_updates_turn_summary_and_clears_status(self):
+        session = make_session()
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        claude = AsyncMock()
+
+        turn_started = asyncio.Event()
+        hang_event = asyncio.Event()
+
+        async def hanging_stream_with_flush(*_a, **_kw):
+            turn_started.set()
+            await hang_event.wait()
+
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = hanging_stream_with_flush
+
+        pending = _PendingTurn(message="hello", message_ts="1234.5", pre_sent=False)
+
+        async def trigger_abort():
+            await turn_started.wait()
+            session._abort_event.set()
+
+        await asyncio.gather(
+            session._handle_user_message(rt, claude, streamer, pending),
+            trigger_abort(),
+        )
+
+        streamer.update_turn_summary.assert_awaited_once_with(":octagonal_sign: Cancelled")
+        streamer.clear_status.assert_awaited_once()
+        rt.client.react.assert_any_call("1234.5", "octagonal_sign")
+        assert not session._turn_lock.locked()
+
+
 class TestClearContext:
     """QA-003: Tests for clear_context() method on SummonSession."""
 
@@ -3504,10 +3746,14 @@ class TestExecuteCompact:
         rt = make_rt(registry)
         session._claude = self._make_mock_claude_with_summary("summary")
 
+        # pre_sent=True means the pre-sender already holds _turn_lock —
+        # _execute_compact is responsible for releasing it, not acquiring it.
+        await session._turn_lock.acquire()
         with pytest.raises(_SessionRestartError):
             await session._execute_compact(rt, instructions=None, thread_ts=None, pre_sent=True)
 
         session._claude.query.assert_not_awaited()
+        assert not session._turn_lock.locked()
 
     async def test_summary_truncated_when_too_long(self, registry):
         """Summaries exceeding _MAX_COMPACT_SUMMARY_CHARS are truncated."""

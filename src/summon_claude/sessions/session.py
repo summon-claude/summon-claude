@@ -764,6 +764,17 @@ class SummonSession:
         self._abort_event = asyncio.Event()
         self._context_warned_threshold: float = 0.0
 
+        # Serializes query()/receive_response() pairs on the shared SDK client.
+        # receive_response() has no correlation to which query() call triggered
+        # it — it just drains the shared message stream until the next
+        # ResultMessage. Without this, a query() sent while a prior turn's
+        # receive_response() is still in flight can get folded into that
+        # turn's response instead of starting an independent one, producing a
+        # phantom turn whose label and content refer to different messages.
+        self._turn_lock: asyncio.Lock = asyncio.Lock()
+        # Strong references to fire-and-forget tasks (prevent GC mid-flight)
+        self._background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
         # Session state
         self._last_heartbeat_time: float = 0.0
         self._last_pm_topic: str | None = None
@@ -2523,9 +2534,30 @@ class SummonSession:
 
             break  # Normal exit
 
-    async def _run_preprocessor(  # noqa: PLR0912
-        self, rt: _SessionRuntime, claude: ClaudeSDKClient
-    ) -> None:
+    async def _try_pre_send(self, claude: ClaudeSDKClient, prompt: str, label: str) -> bool:
+        """Attempt to send *prompt* now via ``query()`` if no turn is in flight.
+
+        On success, ``_turn_lock`` is acquired and stays held — the eventual
+        consumer-side processing of the resulting ``_PendingTurn(pre_sent=True)``
+        is responsible for releasing it once its ``receive_response()`` cycle
+        completes. Returns False (lock left untouched) if another turn's
+        response is still being consumed; the caller should enqueue with
+        ``pre_sent=False`` and let the consumer send + hold the lock itself.
+        """
+        if self._turn_lock.locked():
+            return False
+        await self._turn_lock.acquire()
+        try:
+            await claude.query(prompt)
+            return True
+        except Exception as e:
+            logger.warning(
+                "Pre-send %s failed: %s — consumer will retry", label, redact_secrets(str(e))
+            )
+            self._turn_lock.release()
+            return False
+
+    async def _run_preprocessor(self, rt: _SessionRuntime, claude: ClaudeSDKClient) -> None:
         """Dequeue raw Slack events, preprocess, call query(), enqueue _PendingTurn.
 
         Runs concurrently with ``_run_response_consumer``. Calling ``query()``
@@ -2585,15 +2617,7 @@ class SummonSession:
                     if any(t in text_lower for t in _THINKING_TRIGGERS):
                         await rt.client.react(message_ts, "brain")
 
-                pre_sent = False
-                try:
-                    await claude.query(user_message)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning(
-                        "Pre-send query() failed: %s — consumer will retry",
-                        redact_secrets(str(e)),
-                    )
+                pre_sent = await self._try_pre_send(claude, user_message, "query()")
 
                 pending = _PendingTurn(
                     message=user_message,
@@ -2700,25 +2724,32 @@ class SummonSession:
                 await rt.client.react(pending.message_ts, "gear")
 
             await streamer.start_turn(self._total_turns, user_snippet=pending.message)
-            # If preprocessor couldn't pre-send, call query() now
+            # If preprocessor couldn't pre-send (another turn's receive_response()
+            # was still draining the shared stream), acquire the lock and send now.
+            # If it did pre-send, the lock is already held from that point.
             if not pending.pre_sent:
-                if pending.content_blocks:
-                    # Multimodal content: send via AsyncIterable message envelope
-                    async def _multimodal_iter() -> AsyncIterator[dict]:  # type: ignore[type-arg]
-                        yield {
-                            "type": "user",
-                            "message": {
-                                "role": "user",
-                                "content": list(pending.content_blocks),
-                            },
-                        }
+                await self._turn_lock.acquire()
+            try:
+                if not pending.pre_sent:
+                    if pending.content_blocks:
+                        # Multimodal content: send via AsyncIterable message envelope
+                        async def _multimodal_iter() -> AsyncIterator[dict]:  # type: ignore[type-arg]
+                            yield {
+                                "type": "user",
+                                "message": {
+                                    "role": "user",
+                                    "content": list(pending.content_blocks),
+                                },
+                            }
 
-                    await claude.query(_multimodal_iter())
-                else:
-                    await claude.query(pending.message)
-            stream_result = await streamer.stream_with_flush(claude.receive_response())
-            if stream_result:
-                await self._finalize_turn_result(rt, streamer, stream_result)
+                        await claude.query(_multimodal_iter())
+                    else:
+                        await claude.query(pending.message)
+                stream_result = await streamer.stream_with_flush(claude.receive_response())
+                if stream_result:
+                    await self._finalize_turn_result(rt, streamer, stream_result)
+            finally:
+                self._turn_lock.release()
 
             # Emoji lifecycle: gear -> white_check_mark (success)
             if pending.message_ts:
@@ -2751,6 +2782,12 @@ class SummonSession:
                     await rt.client.unreact(pending.message_ts, "gear")
                     await rt.client.react(pending.message_ts, "octagonal_sign")
                     emoji_finalized = True
+                # The turn card itself never reflected a terminal state before —
+                # only success (_finalize_turn_result) touched it.
+                with contextlib.suppress(Exception):
+                    await streamer.update_turn_summary(":octagonal_sign: Cancelled")
+                with contextlib.suppress(Exception):
+                    await streamer.clear_status()
         except asyncio.CancelledError:
             if self._current_turn_task and not self._current_turn_task.done():
                 self._current_turn_task.cancel()
@@ -3708,6 +3745,10 @@ class SummonSession:
             if clear_done:
                 clear_done.set()
             return
+        # No pre-send variant for /clear — always acquire, since a concurrent
+        # pre-sent query() from the preprocessor would otherwise be able to
+        # fold into this receive_response() drain (or vice versa).
+        await self._turn_lock.acquire()
         try:
             await self._claude.query("/clear")
             async for _ in self._claude.receive_response():
@@ -3717,6 +3758,7 @@ class SummonSession:
         except Exception:
             logger.warning("clear drain failed for session %s", self._session_id)
         finally:
+            self._turn_lock.release()
             if clear_done:
                 clear_done.set()
 
@@ -3738,6 +3780,9 @@ class SummonSession:
         ``_SessionRestartError(recovery_mode=True)`` to restart with instructions for
         the fresh agent to use ``slack_read_history`` MCP tools.
         """
+        # If pre-sent, _turn_lock is already held from that point — this call
+        # owns releasing it once the receive_response() drain below completes.
+        lock_acquired = pre_sent
         try:
             if not self._claude:
                 await rt.client.post(
@@ -3752,6 +3797,8 @@ class SummonSession:
                 compact_prompt += f"\n\nAdditional focus: {instructions}"
 
             if not pre_sent:
+                await self._turn_lock.acquire()
+                lock_acquired = True
                 await self._claude.query(compact_prompt)
 
             # Capture summary text from Claude's response
@@ -3810,14 +3857,26 @@ class SummonSession:
                 await rt.client.post(msg, thread_ts=thread_ts)
             except Exception:
                 logger.debug("Failed to post compact error", exc_info=True)
+        finally:
+            if lock_acquired:
+                self._turn_lock.release()
 
     async def _execute_effort(self, rt: _SessionRuntime, level: str, thread_ts: str | None) -> None:
-        """Execute /effort via SDK to change effort mid-session."""
+        """Execute /effort via SDK to change effort mid-session.
+
+        Called synchronously from the preprocessor (not routed through
+        _pending_turns), so it needs its own _turn_lock protection against
+        the concurrently-running consumer's in-flight receive_response().
+        """
         try:
             if self._claude:
-                await self._claude.query(f"/effort {level}")
-                async for _ in self._claude.receive_response():
-                    pass  # drain silent command response
+                await self._turn_lock.acquire()
+                try:
+                    await self._claude.query(f"/effort {level}")
+                    async for _ in self._claude.receive_response():
+                        pass  # drain silent command response
+                finally:
+                    self._turn_lock.release()
                 self._effort = level
                 await rt.client.post(
                     f":zap: Effort set to `{level}`.",
@@ -3956,13 +4015,11 @@ class SummonSession:
             compact_prompt = _COMPACT_PROMPT
             if instructions:
                 compact_prompt += f"\n\nAdditional focus: {instructions}"
-            pre_sent = False
-            if claude:
-                try:
-                    await claude.query(compact_prompt)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning("Pre-send compact prompt failed: %s", redact_secrets(str(e)))
+            pre_sent = (
+                await self._try_pre_send(claude, compact_prompt, "compact prompt")
+                if claude
+                else False
+            )
             await self._pending_turns.put(
                 _PendingTurn(
                     message=instructions,
@@ -4022,16 +4079,11 @@ class SummonSession:
             except Exception as e:
                 logger.warning("Failed to post passthrough ack: %s", redact_secrets(str(e)))
             # Pre-send: call query() and enqueue as _PendingTurn
-            pre_sent = False
-            if claude:
-                try:
-                    await claude.query(slash_message)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning(
-                        "Pre-send query() for passthrough failed: %s",
-                        redact_secrets(str(e)),
-                    )
+            pre_sent = (
+                await self._try_pre_send(claude, slash_message, "passthrough query()")
+                if claude
+                else False
+            )
             await self._pending_turns.put(_PendingTurn(message=slash_message, pre_sent=pre_sent))
             return
 
@@ -4255,8 +4307,25 @@ class SummonSession:
         if self._current_turn_task and not self._current_turn_task.done():
             logger.info("Session %s: cancelling in-flight turn task", self._session_id)
             self._current_turn_task.cancel()
+            if self._claude is not None:
+                # Cancelling our own task only stops us from consuming
+                # receive_response() — the CLI subprocess keeps running until
+                # this reaches it, otherwise its output keeps flowing into the
+                # SDK's shared reader stream and gets misattributed to the
+                # next turn. Fire-and-forget since this is a sync callback.
+                task = asyncio.create_task(self._interrupt_claude_best_effort())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
         else:
             logger.debug("Session %s: no in-flight turn to cancel", self._session_id)
+
+    async def _interrupt_claude_best_effort(self) -> None:
+        """Best-effort interrupt of the CLI subprocess."""
+        try:
+            if self._claude is not None:
+                await self._claude.interrupt()
+        except Exception as e:
+            logger.debug("Session %s: interrupt() failed: %s", self._session_id, e)
 
     # ------------------------------------------------------------------
     # Per-session logging

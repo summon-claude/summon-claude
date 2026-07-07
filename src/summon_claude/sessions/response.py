@@ -341,6 +341,17 @@ class ResponseStreamer:
         if self._turn.turn_thread_ts:
             await self._router.client.set_thread_status(self._turn.turn_thread_ts, status)
 
+    async def clear_status(self) -> None:
+        """Clear the thread status indicator (best-effort).
+
+        Public wrapper so callers outside this module (e.g. the abort path
+        in session.py) can clear it without reaching into a private method —
+        stream_with_flush already does this itself on normal completion, but
+        never on abort, since the async generator is cancelled before
+        reaching that branch.
+        """
+        await self._set_status("")
+
     # --- Chat stream (hybrid streaming for thread-based tool progress) ---
 
     def _can_stream(self) -> bool:
