@@ -49,6 +49,10 @@ CommandHandler = Callable[..., Awaitable[None]]
 # Arguments: (user_id: str)
 AppHomeHandler = Callable[[str], Awaitable[None]]
 
+# Callback for the App Home "Stop Session" overflow action.
+# Arguments: (session_id: str, user_id: str)
+HomeStopSessionHandler = Callable[[str, str], Awaitable[None]]
+
 # action_id pattern used to recognise AskUserQuestion button clicks
 _ASK_USER_RE = re.compile(r"ask_user_\d+_.+")
 
@@ -92,6 +96,7 @@ class EventDispatcher:
         self._command_handler: CommandHandler | None = None
         self._resume_handler: ResumeHandler | None = None
         self._app_home_handler: AppHomeHandler | None = None
+        self._home_stop_session_handler: HomeStopSessionHandler | None = None
         self._web_client = web_client
         self._bot_user_id: str | None = None
         self._http_session: aiohttp.ClientSession | None = None
@@ -161,6 +166,10 @@ class EventDispatcher:
     def set_app_home_handler(self, handler: AppHomeHandler) -> None:
         """Register a callback for ``app_home_opened`` events."""
         self._app_home_handler = handler
+
+    def set_home_stop_session_handler(self, handler: HomeStopSessionHandler) -> None:
+        """Register a callback for the App Home "Stop Session" overflow action."""
+        self._home_stop_session_handler = handler
 
     async def dispatch_app_home(self, user_id: str) -> None:
         """Route an app_home_opened event to the registered handler."""
@@ -401,6 +410,7 @@ class EventDispatcher:
         """Route a Slack interactive action to the session's permission handler.
 
         Distinguishes between:
+        - ``home_stop_session`` → App Home dashboard action (no channel context)
         - ``turn_overflow`` → turn-level actions (stop, copy session ID, view cost)
         - ``permission_approve`` / ``permission_deny`` → ``handle_action``
         - ``ask_user_*`` → ``handle_ask_user_action``
@@ -408,14 +418,21 @@ class EventDispatcher:
         The channel is extracted from ``body["channel"]["id"]``.  Actions for
         unknown channels are silently ignored.
         """
+        action_id: str = action.get("action_id", "")
+        user_id: str = body.get("user", {}).get("id", "")
+
+        if action_id == "home_stop_session":
+            # Home tab interactions carry no channel — this is the one action
+            # that can't be routed through the channel-keyed _sessions map.
+            await self._dispatch_home_stop_session(action, user_id)
+            return
+
         channel_id = body.get("channel", {}).get("id", "")
         handle = self._sessions.get(channel_id)
         if handle is None:
             logger.debug("EventDispatcher: no session for channel %s — action dropped", channel_id)
             return
 
-        action_id: str = action.get("action_id", "")
-        user_id: str = body.get("user", {}).get("id", "")
         trigger_id: str | None = body.get("trigger_id")
 
         if action_id == "turn_overflow":
@@ -468,6 +485,53 @@ class EventDispatcher:
             )
         else:
             logger.warning("EventDispatcher: unknown turn_overflow value %r", value)
+
+    async def _dispatch_home_stop_session(self, action: dict, user_id: str) -> None:
+        """Handle the App Home "Stop Session" overflow action.
+
+        Home tab interactions carry no channel, so there's no per-channel
+        SessionHandle to check ownership against — the target session_id is
+        parsed from the action value and ownership is verified directly
+        against the registry instead.
+        """
+        value: str = action.get("selected_option", {}).get("value", "")
+        prefix, _, session_id = value.partition(":")
+        if prefix != "stop" or not session_id:
+            logger.warning("EventDispatcher: malformed home_stop_session value %r", value)
+            return
+
+        if self._home_stop_session_handler is None:
+            logger.debug("EventDispatcher: home_stop_session received but no handler set")
+            return
+
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        session: dict | None = None
+        try:
+            async with SessionRegistry() as registry:
+                session = await registry.get_session(session_id)
+        except Exception:
+            logger.warning(
+                "EventDispatcher: registry query failed for home_stop_session %s",
+                session_id,
+                exc_info=True,
+            )
+            return
+
+        if session is None:
+            logger.debug("EventDispatcher: home_stop_session for unknown session %s", session_id)
+            return
+
+        if session.get("authenticated_user_id") != user_id:
+            logger.warning(
+                "EventDispatcher: home_stop_session from %s rejected — session %s owned by %s",
+                user_id,
+                session_id,
+                session.get("authenticated_user_id"),
+            )
+            return
+
+        await self._home_stop_session_handler(session_id, user_id)
 
     async def _post_cost_ephemeral(
         self,

@@ -785,6 +785,7 @@ class BoltRouter:
         app.action("permission_deny")(self._on_dispatch_action)
         app.action(_ASK_USER_PATTERN)(self._on_dispatch_action)
         app.action("turn_overflow")(self._on_dispatch_action)
+        app.action("home_stop_session")(self._on_dispatch_action)
         app.view(re.compile(r"ask_user_other"))(self._on_view_submission)
         app.event("app_home_opened")(self._on_app_home_opened)
         app.event("file_shared")(self._on_file_shared)

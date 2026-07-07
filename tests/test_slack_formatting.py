@@ -243,3 +243,56 @@ class TestBuildHomeView:
             for elem in b.get("elements", [])
         )
         assert "Last updated:" in context_texts
+
+    def test_session_card_contains_turns_and_cost(self):
+        from summon_claude.slack.formatting import build_home_view
+
+        session = self._make_session(total_turns=5, total_cost_usd=0.1234)
+        result = build_home_view([session])
+        field_sections = [b for b in result["blocks"] if b.get("fields")]
+        all_fields = " ".join(f["text"] for b in field_sections for f in b["fields"])
+        assert "Turns:* 5" in all_fields
+        assert "Cost:* $0.1234" in all_fields
+
+    def test_turns_cost_default_when_absent(self):
+        from summon_claude.slack.formatting import build_home_view
+
+        session = self._make_session()
+        session.pop("total_turns", None)
+        session.pop("total_cost_usd", None)
+        result = build_home_view([session])  # must not raise
+        field_sections = [b for b in result["blocks"] if b.get("fields")]
+        all_fields = " ".join(f["text"] for b in field_sections for f in b["fields"])
+        assert "Turns:* 0" in all_fields
+        assert "Cost:* $0.0000" in all_fields
+
+    def test_channel_uses_real_mention_link_syntax(self):
+        from summon_claude.slack.formatting import build_home_view
+
+        session = self._make_session(slack_channel_id="C001", slack_channel_name="my-channel")
+        result = build_home_view([session])
+        field_sections = [b for b in result["blocks"] if b.get("fields")]
+        all_fields = " ".join(f["text"] for b in field_sections for f in b["fields"])
+        assert "<#C001|my-channel>" in all_fields
+
+    def test_session_card_has_stop_session_overflow_accessory(self):
+        from summon_claude.slack.formatting import build_home_view
+
+        session = self._make_session(session_id="sess-abc-1234")
+        result = build_home_view([session])
+        field_sections = [b for b in result["blocks"] if b.get("fields")]
+        assert len(field_sections) == 1
+        accessory = field_sections[0]["accessory"]
+        assert accessory["type"] == "overflow"
+        assert accessory["action_id"] == "home_stop_session"
+        assert accessory["options"][0]["value"] == "stop:sess-abc-1234"
+
+    def test_multiple_sessions_have_distinct_stop_session_values(self):
+        from summon_claude.slack.formatting import build_home_view
+
+        sessions = [self._make_session(session_id=f"sess-{i}") for i in range(3)]
+        result = build_home_view(sessions)
+        field_sections = [b for b in result["blocks"] if b.get("fields")]
+        values = [b["accessory"]["options"][0]["value"] for b in field_sections]
+        assert values == ["stop:sess-0", "stop:sess-1", "stop:sess-2"]
+        assert len(set(values)) == 3

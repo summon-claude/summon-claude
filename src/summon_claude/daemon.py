@@ -344,6 +344,7 @@ async def daemon_main(config: SummonConfig) -> None:  # noqa: PLR0912, PLR0915
         dispatcher.set_command_handler(session_manager.handle_summon_command)
         dispatcher.set_resume_handler(session_manager.resume_from_channel)
         dispatcher.set_app_home_handler(session_manager.handle_app_home)
+        dispatcher.set_home_stop_session_handler(session_manager.handle_stop_session_action)
         if bolt_router.bot_user_id:
             dispatcher.set_bot_user_id(bolt_router.bot_user_id)
 

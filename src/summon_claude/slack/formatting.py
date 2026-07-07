@@ -89,25 +89,45 @@ def build_home_view(sessions: list[dict[str, Any]]) -> dict[str, Any]:
         )
     else:
         for s in capped:
-            name = sanitize_for_mrkdwn(s.get("session_name") or s.get("session_id", "")[:8])
+            session_id = s.get("session_id", "")
+            name = sanitize_for_mrkdwn(s.get("session_name") or session_id[:8])
             model = sanitize_for_mrkdwn(s.get("model") or "default")
-            channel = sanitize_for_mrkdwn(
-                s.get("slack_channel_name") or s.get("slack_channel_id") or "—"
+            channel_id = s.get("slack_channel_id")
+            channel_display = sanitize_for_mrkdwn(s.get("slack_channel_name") or channel_id or "—")
+            # Real channel-mention syntax so this is a guaranteed clickable link
+            # rather than relying on Slack's client-side auto-linking of "#name".
+            channel_text = (
+                f"<#{channel_id}|{channel_display}>" if channel_id else f"#{channel_display}"
             )
             status = sanitize_for_mrkdwn(s.get("status", "unknown"))
             context_pct = s.get("context_pct")
             ctx_text = f"{context_pct:.0f}%" if context_pct is not None else "—"
+            turns = s.get("total_turns", 0) or 0
+            cost = s.get("total_cost_usd", 0.0) or 0.0
 
             blocks.append(
                 {
                     "type": "section",
+                    "block_id": f"home_session_{session_id}",
                     "fields": [
                         {"type": "mrkdwn", "text": f"*Name:* {name}"},
                         {"type": "mrkdwn", "text": f"*Model:* {model}"},
-                        {"type": "mrkdwn", "text": f"*Channel:* #{channel}"},
+                        {"type": "mrkdwn", "text": f"*Channel:* {channel_text}"},
                         {"type": "mrkdwn", "text": f"*Status:* {status}"},
                         {"type": "mrkdwn", "text": f"*Context:* {ctx_text}"},
+                        {"type": "mrkdwn", "text": f"*Turns:* {turns}"},
+                        {"type": "mrkdwn", "text": f"*Cost:* ${cost:.4f}"},
                     ],
+                    "accessory": {
+                        "type": "overflow",
+                        "action_id": "home_stop_session",
+                        "options": [
+                            {
+                                "text": {"type": "plain_text", "text": "Stop Session"},
+                                "value": f"stop:{session_id}",
+                            },
+                        ],
+                    },
                 }
             )
             blocks.append({"type": "divider"})

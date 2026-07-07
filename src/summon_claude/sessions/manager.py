@@ -558,6 +558,17 @@ class SessionManager:
         except Exception as e:
             logger.warning("SessionManager: views_publish failed for user %s: %s", user_id, e)
 
+    async def handle_stop_session_action(self, session_id: str, user_id: str) -> None:
+        """Stop *session_id* via the App Home "Stop Session" action.
+
+        Ownership is already verified by the dispatcher before this is called.
+        Forces an immediate dashboard refresh so *user_id* sees the "stopping"
+        status without waiting out the debounce window.
+        """
+        await self.stop_session(session_id)
+        self._app_home_last_publish.pop(user_id, None)
+        await self.handle_app_home(user_id)
+
     # ------------------------------------------------------------------
     # Unix socket control API
     # ------------------------------------------------------------------

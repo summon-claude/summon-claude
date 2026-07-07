@@ -1057,3 +1057,116 @@ class TestDispatchTurnOverflow:
 
         action = self._make_overflow_action("turn_view_cost")
         await dispatcher.dispatch_action(action, self._make_body())  # must not raise
+
+
+class TestDispatchHomeStopSession:
+    """Tests for _dispatch_home_stop_session() — App Home 'Stop Session' action."""
+
+    def _make_home_action(self, value: str) -> dict:
+        return {
+            "action_id": "home_stop_session",
+            "selected_option": {"value": value},
+        }
+
+    def _make_home_body(self, user_id: str = "U001") -> dict:
+        # Home tab block_actions payloads have no "channel" key.
+        return {"view": {"type": "home"}, "user": {"id": user_id}}
+
+    def _patch_registry(self, session: dict | None):
+        from unittest.mock import patch
+
+        mock_registry = AsyncMock()
+        mock_registry.get_session = AsyncMock(return_value=session)
+        mock_registry.__aenter__ = AsyncMock(return_value=mock_registry)
+        mock_registry.__aexit__ = AsyncMock(return_value=False)
+        return patch(
+            "summon_claude.sessions.registry.SessionRegistry",
+            return_value=mock_registry,
+        )
+
+    async def test_calls_handler_for_owned_session(self):
+        """A stop request for a session owned by the requesting user is dispatched."""
+        dispatcher = EventDispatcher()
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        with self._patch_registry({"authenticated_user_id": "U001"}):
+            action = self._make_home_action("stop:sess-abc")
+            await dispatcher.dispatch_action(action, self._make_home_body(user_id="U001"))
+
+        handler.assert_awaited_once_with("sess-abc", "U001")
+
+    async def test_wrong_owner_rejected(self):
+        """A stop request from a non-owner is dropped without calling the handler."""
+        dispatcher = EventDispatcher()
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        with self._patch_registry({"authenticated_user_id": "U_OWNER"}):
+            action = self._make_home_action("stop:sess-abc")
+            await dispatcher.dispatch_action(action, self._make_home_body(user_id="U_INTRUDER"))
+
+        handler.assert_not_awaited()
+
+    async def test_unknown_session_is_noop(self):
+        """A stop request for a session_id absent from the registry does not crash."""
+        dispatcher = EventDispatcher()
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        with self._patch_registry(None):
+            action = self._make_home_action("stop:sess-missing")
+            await dispatcher.dispatch_action(action, self._make_home_body())  # must not raise
+
+        handler.assert_not_awaited()
+
+    async def test_malformed_value_is_noop(self):
+        """A malformed action value (no 'stop:' prefix) is dropped without crashing."""
+        dispatcher = EventDispatcher()
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        action = self._make_home_action("garbage")
+        await dispatcher.dispatch_action(action, self._make_home_body())  # must not raise
+
+        handler.assert_not_awaited()
+
+    async def test_no_handler_registered_is_noop(self):
+        """dispatch_action must not crash if no home_stop_session handler was set."""
+        dispatcher = EventDispatcher()
+
+        with self._patch_registry({"authenticated_user_id": "U001"}):
+            action = self._make_home_action("stop:sess-abc")
+            await dispatcher.dispatch_action(action, self._make_home_body())  # must not raise
+
+    async def test_registry_error_is_noop(self):
+        """A registry failure while resolving ownership must not crash or call the handler."""
+        from unittest.mock import patch
+
+        dispatcher = EventDispatcher()
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        with patch(
+            "summon_claude.sessions.registry.SessionRegistry",
+            side_effect=RuntimeError("db unavailable"),
+        ):
+            action = self._make_home_action("stop:sess-abc")
+            await dispatcher.dispatch_action(action, self._make_home_body())  # must not raise
+
+        handler.assert_not_awaited()
+
+    async def test_does_not_require_channel_in_body(self):
+        """Home tab bodies without a 'channel' key must not be dropped as unknown-channel."""
+        dispatcher = EventDispatcher()
+        # No session registered by channel_id at all — proves routing never
+        # falls through to the channel-keyed _sessions lookup for this action.
+        handler = AsyncMock()
+        dispatcher.set_home_stop_session_handler(handler)
+
+        with self._patch_registry({"authenticated_user_id": "U001"}):
+            action = self._make_home_action("stop:sess-abc")
+            body = {"user": {"id": "U001"}}  # no "view" or "channel" key at all
+            await dispatcher.dispatch_action(action, body)
+
+        handler.assert_awaited_once_with("sess-abc", "U001")

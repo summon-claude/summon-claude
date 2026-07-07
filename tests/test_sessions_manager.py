@@ -851,6 +851,70 @@ class TestHandleAppHome:
         assert len(manager._app_home_last_publish) == 500
 
 
+class TestHandleStopSessionAction:
+    """handle_stop_session_action stops the session and force-refreshes App Home."""
+
+    def _patched_registry(self):
+        mock_reg_cls_patch = patch("summon_claude.sessions.manager.SessionRegistry")
+        return mock_reg_cls_patch
+
+    async def test_stops_session_and_refreshes_dashboard(self):
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+        stub = _StubSession()
+        _patch_session(manager, stub)
+        await manager.create_session(make_options())
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await manager.handle_stop_session_action("s1", "U001")
+
+        assert stub._shutdown_requested is True
+        mock_provider.views_publish.assert_awaited_once()
+
+        await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+
+    async def test_bypasses_debounce_window(self):
+        """A stop action forces a republish even inside the normal debounce window."""
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+        stub = _StubSession()
+        _patch_session(manager, stub)
+        await manager.create_session(make_options())
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("time.monotonic", return_value=1000.0):
+                await manager.handle_app_home("U001")  # normal publish sets debounce entry
+                await manager.handle_stop_session_action("s1", "U001")  # must not be debounced
+
+        assert mock_provider.views_publish.call_count == 2
+
+        await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+
+    async def test_unknown_session_id_does_not_crash(self):
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await manager.handle_stop_session_action("nonexistent", "U001")  # must not raise
+
+        mock_provider.views_publish.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # Tests: create_session_with_spawn_token
 # ---------------------------------------------------------------------------
