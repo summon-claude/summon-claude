@@ -191,6 +191,15 @@ class _TurnState:
     # Hybrid streaming — thread-based chat_stream for tool progress
     active_stream: AsyncChatStream | None = None
     stream_failed: bool = False  # once True, fall back to chat_postMessage for rest of turn
+    # Bug #1 (stuck task pill) diagnostics: tool_use_ids that sent an "in_progress"
+    # TaskUpdateChunk (pill_started_ids) vs. ones whose _handle_tool_result_block
+    # completion logic was actually reached, whether it succeeded or was skipped
+    # (pill_settled_ids). A pill in started-but-not-settled at turn end means its
+    # ToolResultBlock never arrived in the message stream at all — distinct from
+    # (and undetectable by) the active_stream-is-None diagnostic, which requires
+    # _handle_tool_result_block to have run in the first place.
+    pill_started_ids: set[str] = field(default_factory=set)
+    pill_settled_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -503,6 +512,18 @@ class ResponseStreamer:
         if self._turn.buffer:
             await self._flush_buffer()
         if result:
+            unsettled = self._turn.pill_started_ids - self._turn.pill_settled_ids
+            if unsettled:
+                # Bug #1 (stuck task pill): these tool_use_ids sent an "in_progress"
+                # chunk but _handle_tool_result_block's completion logic never ran
+                # for them at all — distinct from (and not caught by) the
+                # active_stream-is-None diagnostic above, which requires that
+                # function to have run in the first place. Means the ToolResultBlock
+                # never arrived in the message stream for these tool calls.
+                logger.warning(
+                    "Task pill(s) started but ToolResultBlock never arrived: %s",
+                    {tid: self._turn.tool_names.get(tid, "tool") for tid in unsettled},
+                )
             await self._stop_stream(blocks=self._build_stream_summary_blocks())
             await self._post_result_summary(result)
             # Clear thread status at turn end
@@ -601,6 +622,7 @@ class ResponseStreamer:
             and self._can_stream()
             and await self._ensure_stream()
         ):
+            self._turn.pill_started_ids.add(block.id)
             await self._stream_task_update(block.id, block.name, "in_progress")
 
     async def _handle_tool_result_block(  # noqa: PLR0912
@@ -626,6 +648,7 @@ class ResponseStreamer:
 
         # Hybrid streaming: emit TaskUpdateChunk(complete/error) for non-subagent, non-denied
         if parent_id is None and not denied:
+            self._turn.pill_settled_ids.add(block.tool_use_id)
             if self._turn.active_stream is not None:
                 tool_name = self._turn.tool_names.get(block.tool_use_id, "tool")
                 status = "error" if block.is_error else "complete"

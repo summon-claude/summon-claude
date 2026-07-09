@@ -2442,6 +2442,49 @@ class TestHybridStreaming:
 
         assert any("TaskUpdateChunk append failed" in r.message for r in caplog.records)
 
+    async def test_missing_tool_result_block_logs_unsettled_warning(self, caplog):
+        """Bug #1 diagnostic: a pill that starts but whose ToolResultBlock never
+        arrives at all must be flagged — this is the blind spot the
+        active_stream-is-None diagnostic (test_append_failure_logs_warning and
+        the "Skipped TaskUpdateChunk completion" log) cannot catch, since
+        _handle_tool_result_block never runs for it in the first place.
+        """
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # ToolUseBlock fires (in_progress sent) but no matching ToolResultBlock
+        # ever arrives before the turn's ResultMessage — simulates the tool
+        # result never surfacing in the SDK message stream at all.
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("AskUserQuestion", {"questions": []}, tool_use_id="tu_1")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        matches = [r for r in caplog.records if "never arrived" in r.message]
+        assert len(matches) == 1
+        assert "tu_1" in matches[0].getMessage()
+        assert "AskUserQuestion" in matches[0].getMessage()
+
+    async def test_settled_tool_result_does_not_log_unsettled_warning(self, caplog):
+        """No false positive: a normally-completed pill must not be flagged."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert not any("never arrived" in r.message for r in caplog.records)
+
     async def test_real_chat_stream_task_update_id_matches_across_start_and_append(self):
         """Exercises the real AsyncChatStream buffering/flush logic, not a full mock.
 
