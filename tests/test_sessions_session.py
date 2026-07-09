@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from claude_agent_sdk import AssistantMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 from conftest import make_test_config
 
 from summon_claude.config import SummonConfig
@@ -27,11 +27,13 @@ from summon_claude.sessions.registry import (
     MAX_SPAWN_CHILDREN_PM,
     MAX_SPAWN_DEPTH,
 )
+from summon_claude.sessions.response import StreamResult
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
     _format_file_references,
     _format_topic,
+    _is_thinking_type_unsupported_error,
     _PendingTurn,
     _SessionRestartError,
     _SessionRuntime,
@@ -1725,6 +1727,182 @@ class TestTurnLockSerialization:
         release_turn.set()
         await turn_a_task
         assert not session._turn_lock.locked()
+
+
+def _make_result_message(
+    *, is_error: bool = False, errors: list[str] | None = None, result: str | None = None
+) -> ResultMessage:
+    return ResultMessage(
+        subtype="success",
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=is_error,
+        num_turns=1,
+        session_id="sid",
+        errors=errors,
+        result=result,
+    )
+
+
+_THINKING_TYPE_ERROR_TEXT = (
+    'API Error: 400 {"type":"invalid_request_error","message":"'
+    '\\"thinking.type.enabled\\" is not supported for this model. '
+    'Use \\"thinking.type.adaptive\\" and \\"output_config.effort\\" '
+    'to control thinking behavior."}'
+)
+
+
+class TestThinkingTypeUnsupportedDetection:
+    """Unit tests for _is_thinking_type_unsupported_error (bug #9)."""
+
+    def test_detects_marker_in_errors(self):
+        result = _make_result_message(is_error=True, errors=[_THINKING_TYPE_ERROR_TEXT])
+        assert _is_thinking_type_unsupported_error(result) is True
+
+    def test_detects_marker_in_result_text(self):
+        """Some CLI versions may surface the error via `result` instead of `errors`."""
+        result = _make_result_message(is_error=True, result=_THINKING_TYPE_ERROR_TEXT)
+        assert _is_thinking_type_unsupported_error(result) is True
+
+    def test_ignores_successful_result(self):
+        result = _make_result_message(is_error=False, result="42")
+        assert _is_thinking_type_unsupported_error(result) is False
+
+    def test_ignores_unrelated_error(self):
+        result = _make_result_message(is_error=True, errors=["some other API error"])
+        assert _is_thinking_type_unsupported_error(result) is False
+
+    def test_ignores_error_with_no_errors_or_result(self):
+        result = _make_result_message(is_error=True)
+        assert _is_thinking_type_unsupported_error(result) is False
+
+
+class TestThinkingUnsupportedRetry:
+    """Tests for the bug #9 graceful-retry path — a turn must never surface the
+    raw Sonnet-5 adaptive-thinking mistranslation error as the assistant's response.
+    """
+
+    def _make_rt(self):
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        return rt
+
+    def _make_streamer(self, stream_result=None):
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = AsyncMock(return_value=stream_result)
+        streamer.update_turn_summary = AsyncMock()
+        return streamer
+
+    async def test_thinking_unsupported_error_raises_restart_with_retry(self):
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        result = _make_result_message(is_error=True, errors=[_THINKING_TYPE_ERROR_TEXT])
+        streamer = self._make_streamer(StreamResult(result=result, model="claude-sonnet-5"))
+        pending = _PendingTurn(message="hello", pre_sent=False, message_ts="123.456")
+
+        with pytest.raises(_SessionRestartError) as exc_info:
+            await session._handle_user_message(rt, claude, streamer, pending)
+
+        exc = exc_info.value
+        assert exc.disable_thinking is True
+        assert exc.retry_pending is not None
+        assert exc.retry_pending.message == "hello"
+        assert exc.retry_pending.message_ts == "123.456"
+        assert exc.retry_pending.pre_sent is False
+        assert not session._turn_lock.locked()  # lock released despite the raise
+        streamer.update_turn_summary.assert_awaited_once()
+
+    async def test_normal_result_does_not_trigger_restart(self):
+        """A successful turn must not be mistaken for the thinking-unsupported case."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        result = _make_result_message(is_error=False, result="42")
+        streamer = self._make_streamer(StreamResult(result=result, model="claude-sonnet-5"))
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)  # must not raise
+
+        assert not session._turn_lock.locked()
+
+    async def test_restart_loop_sets_thinking_unsupported_and_reenqueues(self, registry):
+        """End-to-end: _run_session_tasks sets _thinking_unsupported and re-delivers
+        the failed message on the fresh queue after the restart."""
+        consumer_call = 0
+        retry_pending = _PendingTurn(message="original message", pre_sent=False)
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(disable_thinking=True, retry_pending=retry_pending)
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session()
+        assert session._thinking_unsupported is False
+        rt = make_rt(registry)
+        router = AsyncMock()
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, router)
+
+        assert session._thinking_unsupported is True
+        requeued = session._pending_turns.get_nowait()
+        assert requeued is retry_pending
+
+    async def test_thinking_disabled_once_unsupported_flag_set(self, registry):
+        """Once _thinking_unsupported is set, ClaudeAgentOptions must request
+        ThinkingConfigDisabled even though enable_thinking defaults to True."""
+        from claude_agent_sdk import ThinkingConfigDisabled
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["thinking"] = options.thinking
+            raise _CaptureError("captured")
+
+        session = make_session()
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+        session._thinking_unsupported = True
+        rt = make_rt(registry)
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert captured["thinking"] == ThinkingConfigDisabled(type="disabled")
 
 
 class TestAbortCurrentTurnInterrupt:

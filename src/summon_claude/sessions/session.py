@@ -28,6 +28,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    ResultMessage,
     TextBlock,
     ThinkingConfigAdaptive,
     ThinkingConfigDisabled,
@@ -552,16 +553,56 @@ class _PendingTurn:
     content_blocks: tuple[dict, ...] | None = None
 
 
+# CLI (2.1.201 at the time of writing) mistranslates ThinkingConfigAdaptive into
+# the legacy thinking.type="enabled" wire format specifically for Sonnet 5, which
+# has dropped support for it. See hack/BUGS.md bug #9 for the full repro.
+# Not anchored on quote characters — the API's raw JSON error text may reach us
+# with escaped ("\"thinking.type.enabled\"") or unescaped quotes depending on
+# how many layers of string-encoding the CLI applies before surfacing it.
+_THINKING_TYPE_UNSUPPORTED_MARKER = "thinking.type.enabled"
+_THINKING_TYPE_UNSUPPORTED_SUFFIX = "is not supported"
+
+
+def _is_thinking_type_unsupported_error(result: ResultMessage) -> bool:
+    """Detect the Sonnet-5 adaptive-thinking mistranslation 400 error.
+
+    The CLI doesn't raise a Python exception for this — it surfaces as a
+    successful-looking turn with ``is_error=True`` and the API's error text
+    standing in for the assistant's response (in ``errors`` and/or ``result``,
+    depending on CLI version).
+    """
+    if not result.is_error:
+        return False
+    haystack = list(result.errors or [])
+    if result.result:
+        haystack.append(result.result)
+    return any(
+        _THINKING_TYPE_UNSUPPORTED_MARKER in part and _THINKING_TYPE_UNSUPPORTED_SUFFIX in part
+        for part in haystack
+    )
+
+
 class _SessionRestartError(Exception):
     """Signal to restart the SDK client with a new system prompt.
 
     Raised by ``_execute_compact`` when compaction succeeds (summary captured)
     or when context overflow requires a fresh client with history recovery.
+    Also raised by ``_do_turn`` when the resolved model rejects
+    ``ThinkingConfigAdaptive`` (see ``disable_thinking`` and hack/BUGS.md bug #9).
     """
 
-    def __init__(self, *, summary: str | None = None, recovery_mode: bool = False):
+    def __init__(
+        self,
+        *,
+        summary: str | None = None,
+        recovery_mode: bool = False,
+        disable_thinking: bool = False,
+        retry_pending: _PendingTurn | None = None,
+    ):
         self.summary = summary
         self.recovery_mode = recovery_mode
+        self.disable_thinking = disable_thinking
+        self.retry_pending = retry_pending
         super().__init__("session restart requested")
 
 
@@ -707,6 +748,10 @@ class SummonSession:
         self._effort = options.effort
         self._resume = options.resume
         self._resume_from_session_id = options.resume_from_session_id
+        # Set on a thinking-config restart (see _SessionRestartError.disable_thinking) —
+        # sticky for the session's lifetime once the resolved model has proven it
+        # mistranslates ThinkingConfigAdaptive. See hack/BUGS.md bug #9.
+        self._thinking_unsupported = False
         self._channel_id_option = options.channel_id
         self._jira_proxy_port = options.jira_proxy_port
         self._jira_proxy_token = options.jira_proxy_token
@@ -2409,9 +2454,9 @@ class SummonSession:
                 # ThinkingConfigEnabled(budget_tokens=N) when enable_thinking
                 # is True + budget set; adaptive remains the default.
                 thinking=(
-                    ThinkingConfigAdaptive(type="adaptive")
-                    if self._config.enable_thinking
-                    else ThinkingConfigDisabled(type="disabled")
+                    ThinkingConfigDisabled(type="disabled")
+                    if not self._config.enable_thinking or self._thinking_unsupported
+                    else ThinkingConfigAdaptive(type="adaptive")
                 ),
                 effort=self._effort,
                 disallowed_tools=list(self._compute_disallowed_tools(is_scribe)),
@@ -2518,6 +2563,8 @@ class SummonSession:
                     system_prompt_append = base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
+                if restart.disable_thinking:
+                    self._thinking_unsupported = True
                 restart_count += 1
                 if restart_count > _MAX_SESSION_RESTARTS:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
@@ -2531,11 +2578,21 @@ class SummonSession:
                 self._last_context = None
                 self._claude_session_id = None
                 self._resume = None
+                if restart.retry_pending is not None:
+                    try:
+                        self._pending_turns.put_nowait(restart.retry_pending)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Session %s: could not re-enqueue turn after "
+                            "thinking-config restart — queue full",
+                            self._session_id,
+                        )
                 logger.info(
-                    "Session restarting (%d/%d, recovery_mode=%s)",
+                    "Session restarting (%d/%d, recovery_mode=%s, disable_thinking=%s)",
                     restart_count,
                     _MAX_SESSION_RESTARTS,
                     restart.recovery_mode,
+                    restart.disable_thinking,
                 )
                 continue
 
@@ -2753,6 +2810,19 @@ class SummonSession:
                     else:
                         await claude.query(pending.message)
                 stream_result = await streamer.stream_with_flush(claude.receive_response())
+                if stream_result and _is_thinking_type_unsupported_error(stream_result.result):
+                    logger.warning(
+                        "Session %s: resolved model rejects adaptive thinking — "
+                        "restarting with thinking disabled and retrying turn",
+                        self._session_id,
+                    )
+                    with contextlib.suppress(Exception):
+                        await streamer.update_turn_summary(
+                            ":gear: Extended thinking isn't supported for this model — "
+                            "retrying without it..."
+                        )
+                    retry_pending = dataclasses.replace(pending, pre_sent=False)
+                    raise _SessionRestartError(disable_thinking=True, retry_pending=retry_pending)
                 if stream_result:
                     await self._finalize_turn_result(rt, streamer, stream_result)
             finally:
