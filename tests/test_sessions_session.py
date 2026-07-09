@@ -113,10 +113,15 @@ def make_rt(
     """Create a minimal _SessionRuntime with mocked client."""
     if client is None:
         client = make_mock_client(channel_id)
+    permission_handler = AsyncMock()
+    # build_pretooluse_hooks() is synchronous on the real PermissionHandler —
+    # override the AsyncMock's auto-propagated async child so ClaudeAgentOptions
+    # construction gets a plain list, not an unawaited coroutine.
+    permission_handler.build_pretooluse_hooks = MagicMock(return_value=[])
     return _SessionRuntime(
         registry=registry,
         client=client,
-        permission_handler=AsyncMock(),
+        permission_handler=permission_handler,
         bridge=ApprovalBridge(),
     )
 
@@ -2009,7 +2014,6 @@ class TestMCPRegistration:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -2035,7 +2039,6 @@ class TestMCPRegistration:
         rt = make_rt(mock_registry)
 
         with (
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(RuntimeError, match="authenticated_user_id"),
         ):
@@ -2077,7 +2080,6 @@ class TestMCPRegistration:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -2258,7 +2260,6 @@ class TestMCPRegistration:
                 "summon_claude.sessions.session.ClaudeSDKClient",
                 return_value=mock_client,
             ),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(Exception, match="Control request timeout"),
         ):
@@ -2286,10 +2287,6 @@ class TestMCPRegistration:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch(
-                "summon_claude.sessions.session.discover_installed_plugins",
-                return_value=[],
-            ),
             patch(
                 "summon_claude.sessions.session.discover_plugin_skills",
                 return_value=[],
@@ -2356,7 +2353,6 @@ class TestWorktreeDisallowedTools:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -2386,7 +2382,6 @@ class TestWorktreeDisallowedTools:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -2452,12 +2447,11 @@ class TestWorktreeDisallowedTools:
 class TestPermissionModeForced:
     """Guard: permission_mode must always be forced to "default" on ClaudeAgentOptions.
 
-    An unset permission_mode inherits the operator's own personal
-    ~/.claude/settings.json defaultMode (setting_sources always includes
-    "user"). A permissive default there (acceptEdits, bypassPermissions,
-    dontAsk, auto) resolves tool approval internally and skips can_use_tool
-    entirely, silently defeating the write-gate/containment checks in
-    permissions.py for every autonomous, headless session.
+    Belt-and-suspenders alongside setting_sources=[] (TestWriteGateHookWiring)
+    and the native PreToolUse hook: an unset permission_mode would otherwise
+    resolve tool approval internally and skip can_use_tool entirely, silently
+    defeating the write-gate/containment checks in permissions.py for every
+    autonomous, headless session.
     """
 
     async def _capture_permission_mode(self, *, pm_profile: bool = False) -> str | None:
@@ -2479,7 +2473,6 @@ class TestPermissionModeForced:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -2493,6 +2486,70 @@ class TestPermissionModeForced:
     async def test_pm_session_forces_default_permission_mode(self):
         """The forced permission_mode applies to PM sessions too, not just regular ones."""
         assert await self._capture_permission_mode(pm_profile=True) == "default"
+
+
+class TestWriteGateHookWiring:
+    """Guard: setting_sources=[], no plugins=discover_installed_plugins(), and the
+    native PreToolUse write-gate hook are all wired into ClaudeAgentOptions.
+
+    Together these close the bypass mechanisms in hack/BUGS.md bug #2's "Known
+    residual risk" section: plugin-loaded PreToolUse hooks (loaded independent
+    of setting_sources via the old plugins= call), the operator's personal
+    permissions.allow rules and defaultMode (loaded via "user" in
+    setting_sources), and the built-in read-only-Bash fast path — a hook denial
+    wins unconditionally regardless of which of those would otherwise resolve
+    the call first. See hack/research/roadmap-phase-1-slack-interactivity-
+    1783450456-canusetool-bypass-sdk-config.md for the full investigation.
+    """
+
+    async def _capture_options(self, *, pm_profile: bool = False):
+        session = make_session(pm_profile=pm_profile)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+        sentinel_hooks = [MagicMock()]
+        rt.permission_handler.build_pretooluse_hooks = MagicMock(return_value=sentinel_hooks)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["options"] = options
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured["options"], sentinel_hooks
+
+    async def test_setting_sources_empty_for_regular_session(self):
+        options, _ = await self._capture_options(pm_profile=False)
+        assert options.setting_sources == []
+
+    async def test_setting_sources_empty_for_pm_session(self):
+        """setting_sources=[] applies unconditionally — not just to regular sessions."""
+        options, _ = await self._capture_options(pm_profile=True)
+        assert options.setting_sources == []
+
+    async def test_plugins_not_loaded(self):
+        """discover_installed_plugins() must no longer be called — options.plugins
+        stays at the SDK default rather than loading every installed plugin
+        (and every plugin's PreToolUse hooks) independent of setting_sources."""
+        options, _ = await self._capture_options(pm_profile=False)
+        assert options.plugins == []
+
+    async def test_pretooluse_hook_wired_from_permission_handler(self):
+        """The hooks= dict is populated from PermissionHandler.build_pretooluse_hooks()."""
+        options, sentinel_hooks = await self._capture_options(pm_profile=False)
+        assert options.hooks == {"PreToolUse": sentinel_hooks}
 
 
 class TestHeadlessBoilerplate:
@@ -2689,7 +2746,6 @@ class TestSystemPromptAppendRestart:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2738,7 +2794,6 @@ class TestSystemPromptAppendRestart:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2791,7 +2846,6 @@ class TestSystemPromptAppendRestart:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch(
                 "summon_claude.sessions.session.discover_plugin_skills",
                 return_value=[],
@@ -2848,7 +2902,6 @@ class TestSystemPromptAppendRestart:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2888,7 +2941,6 @@ class TestThinkingConfig:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
             pytest.raises(_CaptureError),
         ):
@@ -3523,7 +3575,6 @@ class TestAutoCompactionDisabled:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
         ):
             try:
                 await session._run_session_tasks(rt, router)
@@ -3820,7 +3871,6 @@ class TestSessionRestartLoop:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3869,7 +3919,6 @@ class TestSessionRestartLoop:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3925,7 +3974,6 @@ class TestSessionRestartLoop:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3973,7 +4021,6 @@ class TestSessionRestartLoop:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
         ):
@@ -5507,7 +5554,6 @@ class TestServerInfoModelCacheWiring:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
             patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
-            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             patch("summon_claude.cli.model_cache.cache_sdk_models") as mock_cache,

@@ -39,7 +39,7 @@ pytestmark = [
 
 # Common options applied to all SDK sessions.
 # Must match session.py's ClaudeAgentOptions configuration.
-_COMMON_OPTS = {"setting_sources": ["user", "project"]}
+_COMMON_OPTS = {"setting_sources": []}
 
 
 async def test_basic_query_and_response():
@@ -190,21 +190,28 @@ async def test_ask_user_question_callback():
 async def test_permission_mode_default_forces_can_use_tool_for_write():
     """permission_mode="default" (as forced by session.py) must route Write through can_use_tool.
 
-    Regression test for the write-gate bypass: an unset permission_mode inherits
-    whatever defaultMode is configured in the operator's own ~/.claude/settings.json
-    (since setting_sources always includes "user") — a permissive mode there
-    (acceptEdits, bypassPermissions, dontAsk, auto) resolves Write internally and
-    skips can_use_tool entirely, silently defeating summon's write-gate. Explicitly
-    forcing permission_mode="default" — exactly what session.py now does
-    unconditionally — must make the callback fire regardless of that setting.
+    Regression test for the write-gate bypass: when setting_sources includes
+    "user" and permission_mode is left unset, it inherits whatever defaultMode
+    is configured in the operator's own ~/.claude/settings.json — a permissive
+    mode there (acceptEdits, bypassPermissions, dontAsk, auto) resolves Write
+    internally and skips can_use_tool entirely, silently defeating summon's
+    write-gate. Explicitly forcing permission_mode="default" — exactly what
+    session.py now does unconditionally — must make the callback fire
+    regardless of that setting.
 
-    Known confound: this only closes the permission-mode-level bypass. A
+    session.py additionally sets setting_sources=[] and wires a native
+    PreToolUse hook (see hack/BUGS.md bug #2) so this no longer depends on
+    permission_mode alone, but this test isolates that one property in
+    isolation from the others.
+
+    Known confound: this only exercises the permission-mode-level bypass. A
     PreToolUse hook loaded from the operator's ~/.claude/settings.json (e.g.
     via a personal plugin) resolves the tool call at an earlier step than
     permission mode and independently skips can_use_tool — no value of
-    permission_mode can prevent that. If this test fails locally, check for
-    hooks matching Write in your own global/plugin settings before assuming
-    a regression.
+    permission_mode can prevent that; only a competing PreToolUse hook (or
+    setting_sources=[] to stop it from loading) can. If this test fails
+    locally, check for hooks matching Write in your own global/plugin
+    settings before assuming a regression.
     """
     invoked_tools: list[str] = []
 

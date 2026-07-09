@@ -44,7 +44,6 @@ from summon_claude.config import (
     SummonConfig,
     detect_account_services,
     discover_google_accounts,
-    discover_installed_plugins,
     discover_plugin_skills,
     find_workspace_mcp_bin,
     get_data_dir,
@@ -2191,8 +2190,6 @@ class SummonSession:
             ext_slack_mcp = self._create_external_slack_mcp()
             mcp_servers["external-slack"] = ext_slack_mcp
 
-        setting_sources = ["user"] if (is_pm or is_scribe) else ["user", "project"]
-
         # MCP health tracker — detects auth failures and notifies via inject_message
         bg_tasks: set[asyncio.Task[None]] = set()
 
@@ -2384,17 +2381,27 @@ class SummonSession:
                 resume=self._resume,
                 system_prompt=system_prompt,
                 include_partial_messages=True,
-                setting_sources=setting_sources,
-                # Force the CLI's own permission resolution to "default" regardless
-                # of the operator's personal ~/.claude/settings.json defaultMode.
-                # An unset permission_mode inherits that global setting (since
-                # "user" is always in setting_sources above) — a permissive mode
-                # there (acceptEdits, bypassPermissions, dontAsk, auto) resolves
-                # tool approval internally and skips can_use_tool entirely,
-                # silently defeating summon's own write-gate/containment checks
-                # for every autonomous, headless session.
+                # Empty: nothing summon needs (MCP servers, plugin skills for
+                # !help passthrough, system prompt, model config) is a genuine
+                # functional dependency on "user"/"project" settings — both
+                # are explicitly constructed in Python above. Loading them
+                # would also load the operator's personal permissions.allow
+                # rules and defaultMode, which resolve before can_use_tool
+                # ever runs. See hack/research/roadmap-phase-1-slack-
+                # interactivity-1783450456-canusetool-bypass-sdk-config.md.
+                setting_sources=[],
+                # Force the CLI's own permission resolution to "default" —
+                # belt-and-suspenders alongside setting_sources=[] and the
+                # native PreToolUse hook below, which is the layer that
+                # actually can't be bypassed by permission mode/allow rules.
                 permission_mode="default",
-                plugins=discover_installed_plugins(),
+                # Deliberately not passing plugins=discover_installed_plugins():
+                # it loaded every plugin the operator has ever installed
+                # (including their PreToolUse hooks) independent of
+                # setting_sources entirely. discover_plugin_skills() below is
+                # unaffected — summon's own !help/passthrough reads plugin
+                # directories directly rather than going through the CLI.
+                hooks={"PreToolUse": rt.permission_handler.build_pretooluse_hooks()},
                 can_use_tool=rt.permission_handler.handle,
                 mcp_servers=mcp_servers,
                 model=self._model,

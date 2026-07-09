@@ -34,7 +34,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
+from claude_agent_sdk import (
+    HookContext,
+    HookJSONOutput,
+    HookMatcher,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    PreToolUseHookInput,
+    ToolPermissionContext,
+)
 
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.classifier import extract_classifier_context
@@ -1010,6 +1018,69 @@ class PermissionHandler:
 
         # 6. Outside CWD or Bash → fall through to arg cache (step 2f) or HITL (step 4)
         return None
+
+    def build_pretooluse_hooks(self) -> list[HookMatcher]:
+        """Build the native ``PreToolUse`` hook that backstops the write gate.
+
+        Hooks run before every other permission-resolution step (deny/ask
+        rules, permission mode, allow rules, ``canUseTool``) per the Agent
+        SDK's documented evaluation order, and a hook ``deny`` wins
+        unconditionally even when another hook/plugin or the operator's own
+        personal settings would otherwise resolve the call first. Wiring
+        this in closes the bypass mechanisms documented in
+        ``hack/research/roadmap-phase-1-slack-interactivity-1783450456-canusetool-bypass-sdk-config.md``
+        (plugin-loaded hooks, the built-in read-only-Bash fast path, and
+        personal ``permissions.allow`` rules) — everything except OS
+        environment inheritance, which is a deployment-level concern.
+        """
+        return [
+            HookMatcher(
+                matcher="|".join(sorted(_WRITE_GATED_TOOLS)),
+                hooks=[self._pretooluse_write_gate_hook],
+            )
+        ]
+
+    async def _pretooluse_write_gate_hook(
+        self,
+        input_data: PreToolUseHookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> HookJSONOutput:
+        """Native PreToolUse hook — fail-closed backstop for the write gate.
+
+        Only re-asserts ``_check_write_gate``'s hard-deny case (no active
+        containment and no safe-dir match). When containment is active this
+        intentionally returns no decision so the call falls through to the
+        normal ``can_use_tool`` -> ``_check_write_gate`` flow for the
+        nuanced HITL/session-cache logic — this hook is a backstop, not a
+        replacement for it. Deliberately reads only this handler's own
+        containment state — no dependency on ``context``, permission mode,
+        or allow rules, which is exactly what makes it immune to the
+        bypass mechanisms those are vulnerable to.
+        """
+        tool_name = input_data.get("tool_name", "")
+        if tool_name not in _WRITE_GATED_TOOLS or self._in_containment:
+            return {}
+
+        tool_input = input_data.get("tool_input") or {}
+        file_path = _extract_file_path(tool_name, tool_input)
+        if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
+            return {}
+
+        reason = (
+            "Write access requires a worktree. Use EnterWorktree to create an isolated copy first."
+            if self._is_git_repo
+            else "Write access requires a supported working directory. "
+            "Start a session in a project directory."
+        )
+        logger.info("PreToolUse write-gate hook: denying %s (no active containment)", tool_name)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
 
     async def _request_approval(
         self,
