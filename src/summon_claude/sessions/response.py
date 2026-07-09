@@ -603,7 +603,7 @@ class ResponseStreamer:
         ):
             await self._stream_task_update(block.id, block.name, "in_progress")
 
-    async def _handle_tool_result_block(
+    async def _handle_tool_result_block(  # noqa: PLR0912
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
@@ -625,10 +625,23 @@ class ResponseStreamer:
         denied = block.tool_use_id in self._turn.denied_tool_use_ids
 
         # Hybrid streaming: emit TaskUpdateChunk(complete/error) for non-subagent, non-denied
-        if parent_id is None and self._turn.active_stream is not None and not denied:
-            tool_name = self._turn.tool_names.get(block.tool_use_id, "tool")
-            status = "error" if block.is_error else "complete"
-            await self._stream_task_update(block.tool_use_id, tool_name, status)
+        if parent_id is None and not denied:
+            if self._turn.active_stream is not None:
+                tool_name = self._turn.tool_names.get(block.tool_use_id, "tool")
+                status = "error" if block.is_error else "complete"
+                await self._stream_task_update(block.tool_use_id, tool_name, status)
+            else:
+                # Diagnostic for the stuck-pill bug: the "in_progress" chunk for
+                # this tool_use_id may have sent fine earlier in the turn — this
+                # confirms whether active_stream went None in between (stream_failed
+                # tells us if it was a failed append) versus this block simply never
+                # being reached with a live stream at all.
+                logger.info(
+                    "Skipped TaskUpdateChunk completion for id=%s — active_stream is "
+                    "None (stream_failed=%s)",
+                    block.tool_use_id,
+                    self._turn.stream_failed,
+                )
         if denied and block.is_error:
             return
         if pending_fc is not None and not block.is_error and not denied:
