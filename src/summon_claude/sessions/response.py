@@ -33,6 +33,7 @@ from claude_agent_sdk import (
 from summon_claude.security import validate_agent_output
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.mcp_health import McpHealthTracker
+from summon_claude.sessions.transcript import TranscriptReconciler
 from summon_claude.sessions.types import ChangeType, FileChange
 from summon_claude.slack.client import redact_secrets, sanitize_for_mrkdwn
 from summon_claude.slack.formatting import snippet_type_for_extension
@@ -236,6 +237,7 @@ class ResponseStreamer:
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
         on_subagent_return: Callable[[dict, str], Awaitable[None]] | None = None,
+        transcript: TranscriptReconciler | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
@@ -247,6 +249,7 @@ class ResponseStreamer:
         self._mcp_health = mcp_health
         self._bridge = bridge
         self._on_subagent_return = on_subagent_return
+        self._transcript = transcript
 
         # Cross-turn tracking of pending agent verifications (keyed by tool_use_id)
         self._pending_agent_verifications: dict[str, dict] = {}
@@ -512,18 +515,78 @@ class ResponseStreamer:
         if self._turn.buffer:
             await self._flush_buffer()
         if result:
+            # Feed session_id to transcript reconciler on first sight
+            if self._transcript is not None and result.session_id:
+                self._transcript.set_session_id(result.session_id)
+
             unsettled = self._turn.pill_started_ids - self._turn.pill_settled_ids
             if unsettled:
-                # Bug #1 (stuck task pill): these tool_use_ids sent an "in_progress"
-                # chunk but _handle_tool_result_block's completion logic never ran
-                # for them at all — distinct from (and not caught by) the
-                # active_stream-is-None diagnostic above, which requires that
-                # function to have run in the first place. Means the ToolResultBlock
-                # never arrived in the message stream for these tool calls.
                 logger.warning(
                     "Task pill(s) started but ToolResultBlock never arrived: %s",
                     {tid: self._turn.tool_names.get(tid, "tool") for tid in unsettled},
                 )
+            # Bug #1 fix, layer 1: transcript reconciliation — read the CLI's
+            # authoritative JSONL transcript to recover dropped tool results.
+            # Sends pill completions for recovered results and handles
+            # EnterWorktree containment activation.
+            if unsettled and self._transcript is not None:
+                recovered = await self._transcript.reconcile(unsettled)
+                for tr in recovered:
+                    tool_name = self._turn.tool_names.get(tr.tool_use_id, "tool")
+                    # Send pill completion before stream stops
+                    status = "error" if tr.is_error else "complete"
+                    self._turn.pill_settled_ids.add(tr.tool_use_id)
+                    if self._turn.active_stream is not None:
+                        await self._stream_task_update(tr.tool_use_id, tool_name, status)
+                    # Handle EnterWorktree containment from recovered result
+                    wt_entry = self._turn.pending_worktree_names.pop(tr.tool_use_id, None)
+                    if (
+                        wt_entry is not None
+                        and not tr.is_error
+                        and self._on_worktree_entered is not None
+                    ):
+                        wt_name, wt_path = wt_entry
+                        logger.info(
+                            "Transcript reconciler: activating worktree containment "
+                            "for tool_use_id=%s (name=%r, path=%r)",
+                            tr.tool_use_id,
+                            wt_name,
+                            wt_path,
+                        )
+                        try:
+                            await self._on_worktree_entered(wt_name, wt_path)
+                        except Exception:
+                            logger.warning(
+                                "Transcript reconciler: worktree callback raised "
+                                "for tool_use_id=%s",
+                                tr.tool_use_id,
+                                exc_info=True,
+                            )
+
+            # Bug #1 fix, layer 2: arg-based fallback for EnterWorktree entries
+            # that survived both the SDK stream AND transcript reconciliation.
+            # Defense-in-depth: notify_entered_worktree does its own git worktree
+            # list validation, so this doesn't blindly trust an unconfirmed call.
+            if self._turn.pending_worktree_names and self._on_worktree_entered is not None:
+                for tid, (wt_name, wt_path) in list(self._turn.pending_worktree_names.items()):
+                    logger.warning(
+                        "EnterWorktree fallback: neither SDK stream nor transcript "
+                        "delivered ToolResultBlock for tool_use_id=%s (name=%r, "
+                        "path=%r) — invoking worktree callback from captured args",
+                        tid,
+                        wt_name,
+                        wt_path,
+                    )
+                    try:
+                        await self._on_worktree_entered(wt_name, wt_path)
+                    except Exception:
+                        logger.warning(
+                            "EnterWorktree fallback: callback raised for "
+                            "tool_use_id=%s — containment may not be active",
+                            tid,
+                            exc_info=True,
+                        )
+                self._turn.pending_worktree_names.clear()
             await self._stop_stream(blocks=self._build_stream_summary_blocks())
             await self._post_result_summary(result)
             # Clear thread status at turn end

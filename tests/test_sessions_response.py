@@ -2816,3 +2816,366 @@ class TestHybridStreaming:
         client.open_chat_stream.assert_not_awaited()
         mock_stream.stop.assert_not_awaited()
         assert result is not None
+
+
+class TestEnterWorktreeFallback:
+    """Bug #1 regression: when EnterWorktree's ToolResultBlock never arrives
+    in the SDK message stream (upstream CLI/SDK gap), the turn-end fallback
+    must proactively invoke the worktree callback so containment activates.
+
+    notify_entered_worktree does its own independent verification (git worktree
+    list, path validation, anti-widening guard), so the fallback doesn't blindly
+    trust an unconfirmed tool call — it lets the existing safety checks decide.
+    """
+
+    def _make_stream_streamer(self, callback=None):
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        if callback is not None:
+            streamer._on_worktree_entered = callback
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_fallback_activates_when_tool_result_missing(self, caplog):
+        """EnterWorktree ToolUseBlock with no matching ToolResultBlock: callback
+        fires at turn end via the fallback path."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is not None
+        callback.assert_called_once_with("test-wt", "")
+        assert any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+    async def test_fallback_activates_for_path_based_entry(self, caplog):
+        """Path-based EnterWorktree with no ToolResultBlock: callback fires
+        with ('', path) at turn end."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        wt_path = "/project/.claude/worktrees/feat"
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"path": wt_path}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("", wt_path)
+
+    async def test_fallback_catches_callback_exception(self, caplog):
+        """If the callback raises (e.g. worktree doesn't exist), the exception
+        is caught and logged — the turn doesn't crash."""
+        callback = AsyncMock(side_effect=RuntimeError("worktree not found"))
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is not None
+        callback.assert_called_once()
+        assert any("callback raised" in r.message for r in caplog.records)
+
+    async def test_no_double_invocation_when_result_arrives_normally(self):
+        """Normal path: ToolResultBlock arrives → callback fires once from
+        _handle_tool_result_block. Fallback must NOT fire again."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(
+            tool_use_id="tu_wt", content="Worktree created", is_error=False
+        )
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+
+    async def test_no_fallback_on_aborted_turn(self):
+        """Aborted turn (no ResultMessage): callback must NOT fire — we don't
+        know whether the tool call succeeded."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            # No ResultMessage — turn aborted
+        ]
+        result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is None
+        callback.assert_not_called()
+
+    async def test_no_fallback_when_result_was_error(self):
+        """When the ToolResultBlock arrives with is_error=True, the normal path
+        correctly skips the callback. The fallback should not re-invoke it either
+        (the entry is already popped by _handle_tool_result_block)."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(
+            tool_use_id="tu_wt", content="Permission denied", is_error=True
+        )
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+
+    async def test_non_worktree_tools_no_fallback(self, caplog):
+        """Dropped ToolResultBlock for non-EnterWorktree tools must NOT trigger
+        any fallback (only the existing unsettled-pill diagnostic)."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("Bash", {"command": "ls"}, tool_use_id="tu_bash")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+        assert not any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+
+class TestTranscriptReconcilerIntegration:
+    """Tests for the transcript reconciler wired into ResponseStreamer's turn-end flow."""
+
+    def _make_streamer_with_transcript(self, callback=None, transcript=None):
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        if callback is not None:
+            streamer._on_worktree_entered = callback
+        if transcript is not None:
+            streamer._transcript = transcript
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_transcript_recovers_pill_and_sends_completion(self, tmp_path, caplog):
+        """Transcript reconciler recovers a dropped tool result and sends the
+        pill completion TaskUpdateChunk before the stream stops."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        # Write a tool_result to the transcript that the SDK stream dropped
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": "tu_bash", "content": "ok"}
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        # SDK stream: ToolUseBlock arrives, but NO ToolResultBlock
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("Bash", {"command": "ls"}, tool_use_id="tu_bash")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert any("recovered" in r.message for r in caplog.records)
+
+    async def test_transcript_recovers_worktree_containment(self, tmp_path, caplog):
+        """Transcript reconciler recovers a dropped EnterWorktree result and
+        activates containment, preempting the arg-based fallback."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "tu_wt",
+                                    "content": "Worktree created",
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+        # Should use transcript path, not the arg-based fallback
+        assert any("Transcript reconciler" in r.message for r in caplog.records)
+        assert not any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+    async def test_transcript_error_result_does_not_activate_worktree(self, tmp_path):
+        """Transcript shows EnterWorktree returned is_error=True — callback
+        must NOT fire, matching the normal-path behavior."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "tu_wt",
+                                    "content": "Permission denied",
+                                    "is_error": True,
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+
+    async def test_fallback_fires_when_transcript_unavailable(self, tmp_path, caplog):
+        """When the transcript doesn't exist, the arg-based fallback fires."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("nonexistent-sess")
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+        assert any("EnterWorktree fallback" in r.message for r in caplog.records)

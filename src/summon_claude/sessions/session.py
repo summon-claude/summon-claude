@@ -2257,8 +2257,10 @@ class SummonSession:
                 task.add_done_callback(bg_tasks.discard)
 
         from summon_claude.sessions.mcp_health import McpHealthTracker  # noqa: PLC0415
+        from summon_claude.sessions.transcript import TranscriptReconciler  # noqa: PLC0415
 
         mcp_health_tracker = McpHealthTracker(on_degraded=_on_mcp_degraded)
+        transcript_reconciler = TranscriptReconciler(self._cwd)
 
         async def _verify_subagent_return(agent_input: dict, agent_result: str) -> None:
             await verify_subagent_return(agent_input, agent_result, rt.permission_handler, router)
@@ -2274,6 +2276,7 @@ class SummonSession:
             mcp_health=mcp_health_tracker,
             bridge=rt.bridge,
             on_subagent_return=_verify_subagent_return,
+            transcript=transcript_reconciler,
         )
 
         # Disable auto-compaction — we handle compaction via !compact
