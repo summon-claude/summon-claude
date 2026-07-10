@@ -92,13 +92,24 @@ def _read_and_parse_transcript(
 
     Returns ``(recovered_results, new_byte_offset)``.  Memory-safe: reads
     one line at a time, capped at ``_MAX_RECONCILE_BYTES``.
+
+    Opens in binary mode (``'rb'``) with two pre-filters that skip lines
+    without decoding or JSON-parsing:
+
+    1. ``b'"tool_result"' not in raw`` — skips ~90% of lines (assistant
+       messages, system messages, stream events).
+    2. No target ``tool_use_id`` bytes in the raw line — skips tool results
+       for unrelated tool calls.
+
+    Only lines passing both filters are decoded and parsed.
     """
     results: list[RecoveredToolResult] = []
     remaining = set(unsettled_ids)
+    id_needles = {tid.encode("utf-8") for tid in unsettled_ids}
     new_offset = offset
 
     try:
-        with path.open(encoding="utf-8", errors="replace") as fh:
+        with path.open("rb") as fh:
             fh.seek(offset)
             bytes_read = 0
 
@@ -106,26 +117,29 @@ def _read_and_parse_transcript(
             # iterator uses an internal read-ahead buffer that corrupts
             # fh.tell(), breaking offset tracking.
             while True:
-                line = fh.readline()
-                if not line:
+                raw = fh.readline()
+                if not raw:
                     break
 
-                line_bytes = len(line.encode("utf-8"))
-                bytes_read += line_bytes
+                bytes_read += len(raw)
 
                 if bytes_read > _MAX_RECONCILE_BYTES:
                     break
 
-                if line_bytes > _MAX_LINE_BYTES:
+                if len(raw) > _MAX_LINE_BYTES:
                     continue
 
-                stripped = line.strip()
-                if not stripped:
+                # Pre-filter 1: skip lines that can't contain a tool_result
+                if b'"tool_result"' not in raw:
+                    continue
+
+                # Pre-filter 2: skip tool results for unrelated tool calls
+                if not any(needle in raw for needle in id_needles):
                     continue
 
                 try:
-                    data = json.loads(stripped)
-                except json.JSONDecodeError:
+                    data = json.loads(raw)
+                except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
 
                 found = _extract_tool_results(data, remaining)
