@@ -220,19 +220,15 @@ class TestScribeSettingSources:
     Behavioral testing would require mocking the full SDK session lifecycle.
     """
 
-    def test_setting_sources_empty_for_all_session_types(self):
-        """setting_sources is [] unconditionally — not gated by is_scribe/is_pm.
-
-        See hack/BUGS.md bug #2's "Known residual risk": loading "user"/
-        "project" settings pulled in the operator's personal permissions.allow
-        rules and defaultMode, which resolve before can_use_tool ever runs.
-        """
+    def test_scribe_setting_sources_user_only(self):
+        """setting_sources is ['user'] for scribe sessions (not ['user', 'project'])."""
         import inspect
 
         from summon_claude.sessions import session as session_mod
 
         source = inspect.getsource(session_mod.SummonSession._run_session_tasks)
-        assert "setting_sources=[]" in source
+        assert "is_scribe" in source
+        assert '"user", "project"' in source or '["user", "project"]' in source
 
 
 # ---------------------------------------------------------------------------

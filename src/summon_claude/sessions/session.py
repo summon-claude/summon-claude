@@ -45,6 +45,7 @@ from summon_claude.config import (
     SummonConfig,
     detect_account_services,
     discover_google_accounts,
+    discover_installed_plugins,
     discover_plugin_skills,
     find_workspace_mcp_bin,
     get_data_dir,
@@ -2235,6 +2236,16 @@ class SummonSession:
             ext_slack_mcp = self._create_external_slack_mcp()
             mcp_servers["external-slack"] = ext_slack_mcp
 
+        # Intentionally replicates the operator's own Claude Code environment
+        # (personal plugins, ~/.claude/settings.json) rather than sandboxing
+        # summon sessions away from it — that's the product's intended
+        # behavior. The native PreToolUse write-gate hook (below) is the
+        # actual security boundary and wins unconditionally regardless of
+        # what any of this loads, per Anthropic's documented hook precedence
+        # (hooks run before deny/ask rules, permission mode, and allow
+        # rules) — see hack/BUGS.md bug #2.
+        setting_sources = ["user"] if (is_pm or is_scribe) else ["user", "project"]
+
         # MCP health tracker — detects auth failures and notifies via inject_message
         bg_tasks: set[asyncio.Task[None]] = set()
 
@@ -2426,26 +2437,20 @@ class SummonSession:
                 resume=self._resume,
                 system_prompt=system_prompt,
                 include_partial_messages=True,
-                # Empty: nothing summon needs (MCP servers, plugin skills for
-                # !help passthrough, system prompt, model config) is a genuine
-                # functional dependency on "user"/"project" settings — both
-                # are explicitly constructed in Python above. Loading them
-                # would also load the operator's personal permissions.allow
-                # rules and defaultMode, which resolve before can_use_tool
-                # ever runs. See hack/research/roadmap-phase-1-slack-
-                # interactivity-1783450456-canusetool-bypass-sdk-config.md.
-                setting_sources=[],
+                # Replicates the operator's Claude Code environment by design
+                # (personal plugins, ~/.claude/settings.json env/model/proxy
+                # config) — see setting_sources comment above.
+                setting_sources=setting_sources,
                 # Force the CLI's own permission resolution to "default" —
-                # belt-and-suspenders alongside setting_sources=[] and the
-                # native PreToolUse hook below, which is the layer that
-                # actually can't be bypassed by permission mode/allow rules.
+                # belt-and-suspenders alongside the native PreToolUse hook
+                # below, which is the layer that actually can't be bypassed
+                # by permission mode/allow rules.
                 permission_mode="default",
-                # Deliberately not passing plugins=discover_installed_plugins():
-                # it loaded every plugin the operator has ever installed
-                # (including their PreToolUse hooks) independent of
-                # setting_sources entirely. discover_plugin_skills() below is
-                # unaffected — summon's own !help/passthrough reads plugin
-                # directories directly rather than going through the CLI.
+                plugins=discover_installed_plugins(),
+                # Native PreToolUse write-gate hook — see hack/BUGS.md bug #2.
+                # A hook deny wins unconditionally regardless of plugin
+                # hooks, permission mode, or allow rules loaded above, per
+                # Anthropic's documented evaluation order (hooks run first).
                 hooks={"PreToolUse": rt.permission_handler.build_pretooluse_hooks()},
                 can_use_tool=rt.permission_handler.handle,
                 mcp_servers=mcp_servers,
