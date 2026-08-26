@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2603,13 +2603,13 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <h3 id="quick-skip-slack-llm-integration-fail-fast">Quick (skip Slack + LLM integration, fail-fast)<a class="headerlink" href="#quick-skip-slack-llm-integration-fail-fast" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>make<span class="w"> </span>py-test-quick
 <span class="c1"># or</span>
-uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;not slack and not llm and not link_check&quot;</span>
+uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>--maxfail<span class="o">=</span><span class="m">1</span><span class="w"> </span>-q<span class="w"> </span>-m<span class="w"> </span><span class="s2">"not slack and not llm and not link_check"</span>
 </code></pre></div>
 <h3 id="single-module">Single module<a class="headerlink" href="#single-module" title="Permanent link">&para;</a></h3>
 <div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>tests/test_auth.py<span class="w"> </span>-v
 </code></pre></div>
 <h3 id="by-name-pattern">By name pattern<a class="headerlink" href="#by-name-pattern" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;test_session_cleanup&quot;</span><span class="w"> </span>-v
+<div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">"test_session_cleanup"</span><span class="w"> </span>-v
 </code></pre></div>
 <h3 id="serial-mode-disable-parallel">Serial mode (disable parallel)<a class="headerlink" href="#serial-mode-disable-parallel" title="Permanent link">&para;</a></h3>
 <p><div class="notest highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-n0
@@ -2633,28 +2633,28 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <h2 id="pytest-configuration">pytest Configuration<a class="headerlink" href="#pytest-configuration" title="Permanent link">&para;</a></h2>
 <p>From <code>pyproject.toml</code>:</p>
 <div class="highlight"><pre><span></span><code><span class="k">[tool.pytest.ini_options]</span>
-<span class="n">asyncio_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span>
-<span class="n">asyncio_default_fixture_loop_scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;function&quot;</span>
-<span class="n">pythonpath</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;tests&quot;</span><span class="p">]</span>
-<span class="n">testpaths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;tests&quot;</span><span class="p">]</span>
-<span class="n">python_files</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;test_*.py&quot;</span>
-<span class="n">python_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;Test*&quot;</span>
-<span class="n">python_functions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;test_*&quot;</span>
+<span class="n">asyncio_mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"auto"</span>
+<span class="n">asyncio_default_fixture_loop_scope</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"function"</span>
+<span class="n">pythonpath</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"tests"</span><span class="p">]</span>
+<span class="n">testpaths</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">"tests"</span><span class="p">]</span>
+<span class="n">python_files</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"test_*.py"</span>
+<span class="n">python_classes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"Test*"</span>
+<span class="n">python_functions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">"test_*"</span>
 <span class="n">addopts</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;--strict-markers&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;--tb=short&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;-p&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;no:pastebin&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;-p&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;no:junitxml&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;-n4&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;--dist=loadgroup&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"--strict-markers"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"--tb=short"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"-p"</span><span class="p">,</span><span class="w"> </span><span class="s2">"no:pastebin"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"-p"</span><span class="p">,</span><span class="w"> </span><span class="s2">"no:junitxml"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"-n4"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"--dist=loadgroup"</span><span class="p">,</span>
 <span class="p">]</span>
-<span class="n">cache_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;.cache/pytest&quot;</span>
+<span class="n">cache_dir</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">".cache/pytest"</span>
 <span class="n">markers</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span>
-<span class="w">    </span><span class="s2">&quot;slack: marks tests requiring real Slack workspace credentials&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;llm: marks tests that make real LLM API calls&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;xdist_group: groups tests to run on the same worker (pytest-xdist)&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;docs: documentation validation tests&quot;</span><span class="p">,</span>
-<span class="w">    </span><span class="s2">&quot;link_check: External URL link validation tests (network-dependent)&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"slack: marks tests requiring real Slack workspace credentials"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"llm: marks tests that make real LLM API calls"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"xdist_group: groups tests to run on the same worker (pytest-xdist)"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"docs: documentation validation tests"</span><span class="p">,</span>
+<span class="w">    </span><span class="s2">"link_check: External URL link validation tests (network-dependent)"</span><span class="p">,</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>Key settings:
@@ -2678,10 +2678,10 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_session_starts</span><span class="p">():</span>
     <span class="n">registry</span> <span class="o">=</span> <span class="n">AsyncMock</span><span class="p">()</span>
-    <span class="n">registry</span><span class="o">.</span><span class="n">get_session</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;test&quot;</span><span class="p">,</span> <span class="s2">&quot;status&quot;</span><span class="p">:</span> <span class="s2">&quot;active&quot;</span><span class="p">}</span>
+    <span class="n">registry</span><span class="o">.</span><span class="n">get_session</span><span class="o">.</span><span class="n">return_value</span> <span class="o">=</span> <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"test"</span><span class="p">,</span> <span class="s2">"status"</span><span class="p">:</span> <span class="s2">"active"</span><span class="p">}</span>
     <span class="c1"># ... test body</span>
     <span class="n">result</span> <span class="o">=</span> <span class="k">await</span> <span class="n">some_async_function</span><span class="p">(</span><span class="n">registry</span><span class="p">)</span>
-    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="s2">&quot;active&quot;</span>
+    <span class="k">assert</span> <span class="n">result</span><span class="o">.</span><span class="n">status</span> <span class="o">==</span> <span class="s2">"active"</span>
 </code></pre></div>
 <p>No <code>@pytest.mark.asyncio</code> decorator needed — <code>asyncio_mode = "auto"</code> handles it.</p>
 <h3 id="fixture-patterns">Fixture patterns<a class="headerlink" href="#fixture-patterns" title="Permanent link">&para;</a></h3>
@@ -2696,7 +2696,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 
 <span class="nd">@pytest</span><span class="o">.</span><span class="n">fixture</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">fresh_db</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
-    <span class="n">db_path</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;test.db&quot;</span>
+    <span class="n">db_path</span> <span class="o">=</span> <span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">"test.db"</span>
     <span class="k">async</span> <span class="k">with</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span> <span class="k">as</span> <span class="n">db</span><span class="p">:</span>
         <span class="c1"># setup schema</span>
         <span class="k">yield</span> <span class="n">db</span>
@@ -2706,7 +2706,7 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 <h3 id="testing-database-migrations">Testing database migrations<a class="headerlink" href="#testing-database-migrations" title="Permanent link">&para;</a></h3>
 <p>Migration tests use a real SQLite database (not in-memory) to test the migration path:</p>
 <div class="notest highlight"><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_migration_adds_column</span><span class="p">(</span><span class="n">tmp_path</span><span class="p">):</span>
-    <span class="n">db_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">&quot;test.db&quot;</span><span class="p">)</span>
+    <span class="n">db_path</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">tmp_path</span> <span class="o">/</span> <span class="s2">"test.db"</span><span class="p">)</span>
     <span class="n">registry</span> <span class="o">=</span> <span class="n">SessionRegistry</span><span class="p">(</span><span class="n">db_path</span><span class="p">)</span>
     <span class="k">await</span> <span class="n">registry</span><span class="o">.</span><span class="n">_connect</span><span class="p">()</span>
     <span class="c1"># verify schema is at expected version</span>
@@ -2715,10 +2715,10 @@ uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </sp
 </code></pre></div>
 <h3 id="xdist-group-isolation">xdist group isolation<a class="headerlink" href="#xdist-group-isolation" title="Permanent link">&para;</a></h3>
 <p>If multiple tests share a resource (e.g., a named socket), group them so they run serially on the same worker:</p>
-<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
+<div class="notest highlight"><pre><span></span><code><span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">"daemon_socket"</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_daemon_connects</span><span class="p">():</span> <span class="o">...</span>
 
-<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">&quot;daemon_socket&quot;</span><span class="p">)</span>
+<span class="nd">@pytest</span><span class="o">.</span><span class="n">mark</span><span class="o">.</span><span class="n">xdist_group</span><span class="p">(</span><span class="s2">"daemon_socket"</span><span class="p">)</span>
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">test_daemon_disconnects</span><span class="p">():</span> <span class="o">...</span>
 </code></pre></div>
 <h3 id="marking-llm-tests">Marking LLM tests<a class="headerlink" href="#marking-llm-tests" title="Permanent link">&para;</a></h3>
@@ -2924,7 +2924,7 @@ summon start --model opus
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

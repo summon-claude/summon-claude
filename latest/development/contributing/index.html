@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -3046,7 +3046,7 @@ git<span class="w"> </span>fetch<span class="w"> </span>upstream
 git<span class="w"> </span>switch<span class="w"> </span>-c<span class="w"> </span>feature/your-feature<span class="w"> </span>upstream/main
 
 <span class="c1"># Work and commit</span>
-git<span class="w"> </span>commit<span class="w"> </span>-am<span class="w"> </span><span class="s2">&quot;feat(scope): description&quot;</span>
+git<span class="w"> </span>commit<span class="w"> </span>-am<span class="w"> </span><span class="s2">"feat(scope): description"</span>
 git<span class="w"> </span>push<span class="w">  </span><span class="c1"># Auto-sets up tracking</span>
 
 <span class="c1"># Rebase before PR</span>
@@ -3078,7 +3078,7 @@ git<span class="w"> </span>log<span class="w"> </span>--oneline<span class="w"> 
 git<span class="w"> </span>sl<span class="w">  </span><span class="c1"># Visual commit graph</span>
 
 <span class="c1"># Reword a commit message</span>
-git<span class="w"> </span>reword<span class="w"> </span>-m<span class="w"> </span><span class="s2">&quot;fix(ci): configures node 20 and disables cache&quot;</span><span class="w"> </span>jkl3456
+git<span class="w"> </span>reword<span class="w"> </span>-m<span class="w"> </span><span class="s2">"fix(ci): configures node 20 and disables cache"</span><span class="w"> </span>jkl3456
 
 <span class="c1"># Squash commits together</span>
 git<span class="w"> </span>branchless<span class="w"> </span>move<span class="w"> </span>--fixup<span class="w"> </span>-x<span class="w"> </span>def5678<span class="w"> </span>-d<span class="w"> </span>abc1234
@@ -3154,7 +3154,7 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <div class="notest highlight"><pre><span></span><code><span class="n">CURRENT_SCHEMA_VERSION</span> <span class="o">=</span> <span class="mi">15</span>  <span class="c1"># was 14</span>
 
 <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_migrate_14_to_15</span><span class="p">(</span><span class="n">db</span><span class="p">:</span> <span class="n">aiosqlite</span><span class="o">.</span><span class="n">Connection</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-    <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;ALTER TABLE sessions ADD COLUMN tags TEXT&quot;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">db</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">"ALTER TABLE sessions ADD COLUMN tags TEXT"</span><span class="p">)</span>
 
 <span class="n">_MIGRATIONS</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">int</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
     <span class="o">...</span>
@@ -3181,32 +3181,32 @@ make<span class="w"> </span>py-typecheck<span class="w">  </span><span class="c1
 <li>
 <p>Create a class implementing <code>DiagnosticCheck</code> in <code>diagnostics.py</code>:</p>
 <div class="notest highlight"><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">MySubsystemCheck</span><span class="p">:</span>
-    <span class="n">name</span> <span class="o">=</span> <span class="s2">&quot;my_subsystem&quot;</span>
-    <span class="n">description</span> <span class="o">=</span> <span class="s2">&quot;Checks something important&quot;</span>
+    <span class="n">name</span> <span class="o">=</span> <span class="s2">"my_subsystem"</span>
+    <span class="n">description</span> <span class="o">=</span> <span class="s2">"Checks something important"</span>
 
     <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">run</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">config</span><span class="p">:</span> <span class="n">SummonConfig</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CheckResult</span><span class="p">:</span>
-        <span class="c1"># Return early with &quot;skip&quot; if prerequisites are missing</span>
+        <span class="c1"># Return early with "skip" if prerequisites are missing</span>
         <span class="k">if</span> <span class="n">config</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
             <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
-                <span class="n">status</span><span class="o">=</span><span class="s2">&quot;skip&quot;</span><span class="p">,</span>
-                <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
-                <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Config not available&quot;</span><span class="p">,</span>
+                <span class="n">status</span><span class="o">=</span><span class="s2">"skip"</span><span class="p">,</span>
+                <span class="n">subsystem</span><span class="o">=</span><span class="s2">"my_subsystem"</span><span class="p">,</span>
+                <span class="n">message</span><span class="o">=</span><span class="s2">"Config not available"</span><span class="p">,</span>
             <span class="p">)</span>
 
         <span class="n">details</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
         <span class="c1"># ... perform checks, append to details ...</span>
 
         <span class="k">return</span> <span class="n">CheckResult</span><span class="p">(</span>
-            <span class="n">status</span><span class="o">=</span><span class="s2">&quot;pass&quot;</span><span class="p">,</span>
-            <span class="n">subsystem</span><span class="o">=</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">,</span>
-            <span class="n">message</span><span class="o">=</span><span class="s2">&quot;Everything looks good&quot;</span><span class="p">,</span>
+            <span class="n">status</span><span class="o">=</span><span class="s2">"pass"</span><span class="p">,</span>
+            <span class="n">subsystem</span><span class="o">=</span><span class="s2">"my_subsystem"</span><span class="p">,</span>
+            <span class="n">message</span><span class="o">=</span><span class="s2">"Everything looks good"</span><span class="p">,</span>
             <span class="n">details</span><span class="o">=</span><span class="n">details</span><span class="p">,</span>
         <span class="p">)</span>
 </code></pre></div>
 </li>
 <li>
 <p>Register it and add the subsystem name:</p>
-<div class="notest highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">&quot;my_subsystem&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
+<div class="notest highlight"><pre><span></span><code><span class="n">DIAGNOSTIC_REGISTRY</span><span class="p">[</span><span class="s2">"my_subsystem"</span><span class="p">]</span> <span class="o">=</span> <span class="n">MySubsystemCheck</span><span class="p">()</span>
 </code></pre></div>
 <p>Add <code>"my_subsystem"</code> to the <code>KNOWN_SUBSYSTEMS</code> frozenset at the top of the file.</p>
 </li>
@@ -3350,7 +3350,7 @@ uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </sp
     ├── canvas_templates.py # Canvas markdown templates for different agent profiles
     ├── client.py          # Channel-bound Slack output client (post, update, react, canvas)
     ├── formatting.py      # Markdown-to-Slack-mrkdwn conversion
-    ├── markdown_split.py  # Markdown-aware message splitting for Slack&#39;s length limits
+    ├── markdown_split.py  # Markdown-aware message splitting for Slack's length limits
     ├── mcp.py             # MCP tools for Claude to read and interact with Slack
     └── router.py          # Thread-aware message routing (main, turn threads, subagent threads)
 </code></pre></div>
@@ -3456,7 +3456,7 @@ uv<span class="w"> </span>run<span class="w"> </span>python<span class="w"> </sp
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

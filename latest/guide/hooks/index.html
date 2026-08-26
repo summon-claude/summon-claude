@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2396,13 +2396,13 @@
 </code></pre></div>
 <p>Opens <code>$EDITOR</code> with the current hooks as JSON. Save and close to apply.</p>
 <h3 id="inline-json">Inline JSON<a class="headerlink" href="#inline-json" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;uv sync&quot;, &quot;make setup&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span><span class="s1">'{"worktree_create": ["uv sync", "make setup"]}'</span>
 </code></pre></div>
 <h3 id="per-project-hooks">Per-project hooks<a class="headerlink" href="#per-project-hooks" title="Permanent link">&para;</a></h3>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;npm install&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">'{"worktree_create": ["npm install"]}'</span>
 </code></pre></div>
 <p>Per-project hooks override global hooks for that project. To include the global hooks as well, use <code>$INCLUDE_GLOBAL</code>:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">&#39;{&quot;worktree_create&quot;: [&quot;$INCLUDE_GLOBAL&quot;, &quot;npm install&quot;]}&#39;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>hooks<span class="w"> </span><span class="nb">set</span><span class="w"> </span>--project<span class="w"> </span>my-api<span class="w"> </span><span class="s1">'{"worktree_create": ["$INCLUDE_GLOBAL", "npm install"]}'</span>
 </code></pre></div>
 <p>This runs the global <code>worktree_create</code> hooks first, then <code>npm install</code>.</p>
 <hr />
@@ -2560,7 +2560,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

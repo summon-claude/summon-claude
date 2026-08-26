@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2640,32 +2640,32 @@
 <h3 id="4-static-auto-approve-list">4. Static Auto-Approve List<a class="headerlink" href="#4-static-auto-approve-list" title="Permanent link">&para;</a></h3>
 <p>The following tools are auto-approved without any Slack prompt:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_AUTO_APPROVE_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
-    <span class="s2">&quot;Read&quot;</span><span class="p">,</span> <span class="s2">&quot;Cat&quot;</span><span class="p">,</span> <span class="s2">&quot;Grep&quot;</span><span class="p">,</span> <span class="s2">&quot;Glob&quot;</span><span class="p">,</span> <span class="s2">&quot;WebSearch&quot;</span><span class="p">,</span> <span class="s2">&quot;WebFetch&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;LSP&quot;</span><span class="p">,</span> <span class="s2">&quot;ListFiles&quot;</span><span class="p">,</span> <span class="s2">&quot;GetSymbolsOverview&quot;</span><span class="p">,</span> <span class="s2">&quot;FindSymbol&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;FindReferencingSymbols&quot;</span><span class="p">,</span>
+    <span class="s2">"Read"</span><span class="p">,</span> <span class="s2">"Cat"</span><span class="p">,</span> <span class="s2">"Grep"</span><span class="p">,</span> <span class="s2">"Glob"</span><span class="p">,</span> <span class="s2">"WebSearch"</span><span class="p">,</span> <span class="s2">"WebFetch"</span><span class="p">,</span>
+    <span class="s2">"LSP"</span><span class="p">,</span> <span class="s2">"ListFiles"</span><span class="p">,</span> <span class="s2">"GetSymbolsOverview"</span><span class="p">,</span> <span class="s2">"FindSymbol"</span><span class="p">,</span>
+    <span class="s2">"FindReferencingSymbols"</span><span class="p">,</span>
 <span class="p">])</span>
 </code></pre></div>
 <p>GitHub MCP read operations are also auto-approved by exact name or prefix:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_AUTO_APPROVE_PREFIXES</span> <span class="o">=</span> <span class="p">(</span>
-    <span class="s2">&quot;mcp__github__get_&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__list_&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__search_&quot;</span><span class="p">,</span>
+    <span class="s2">"mcp__github__get_"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__list_"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__search_"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="5-github-mcp-require-approval-list-checked-before-prefix-auto-approve">5. GitHub MCP Require-Approval List (checked before prefix auto-approve)<a class="headerlink" href="#5-github-mcp-require-approval-list-checked-before-prefix-auto-approve" title="Permanent link">&para;</a></h3>
 <p>Destructive and externally-visible GitHub operations <strong>always</strong> require Slack approval, even if the SDK suggests allow or they match a read prefix:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_GITHUB_MCP_REQUIRE_APPROVAL</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">([</span>
-    <span class="s2">&quot;mcp__github__merge_pull_request&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__delete_branch&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__close_pull_request&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__close_issue&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__update_pull_request_branch&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__push_files&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__create_or_update_file&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__pull_request_review_write&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__create_pull_request&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__create_issue&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;mcp__github__add_issue_comment&quot;</span><span class="p">,</span>
+    <span class="s2">"mcp__github__merge_pull_request"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__delete_branch"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__close_pull_request"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__close_issue"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__update_pull_request_branch"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__push_files"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__create_or_update_file"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__pull_request_review_write"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__create_pull_request"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__create_issue"</span><span class="p">,</span>
+    <span class="s2">"mcp__github__add_issue_comment"</span><span class="p">,</span>
 <span class="p">])</span>
 </code></pre></div>
 <p>This is defense-in-depth — deny-list precedence over prefix matching prevents a broadly-scoped <code>allowedTools</code> pattern in <code>settings.json</code> from silently bypassing human-in-the-loop review for externally-visible actions.</p>
@@ -2840,8 +2840,8 @@
 <h2 id="worktree-lockdown">Worktree Lockdown<a class="headerlink" href="#worktree-lockdown" title="Permanent link">&para;</a></h2>
 <p>All sessions pass a <code>disallowed_tools</code> list to the Claude SDK subprocess that blocks raw git worktree commands:</p>
 <div class="notest highlight"><pre><span></span><code><span class="n">_WORKTREE_DISALLOWED_TOOLS</span> <span class="o">=</span> <span class="nb">frozenset</span><span class="p">({</span>
-    <span class="s2">&quot;Bash(git worktree add*)&quot;</span><span class="p">,</span>
-    <span class="s2">&quot;Bash(git worktree move*)&quot;</span><span class="p">,</span>
+    <span class="s2">"Bash(git worktree add*)"</span><span class="p">,</span>
+    <span class="s2">"Bash(git worktree move*)"</span><span class="p">,</span>
 <span class="p">})</span>
 </code></pre></div>
 <p>This forces agents to use Claude's built-in <code>EnterWorktree</code> tool instead of raw <code>git worktree add</code> or <code>git worktree move</code>. The built-in tool provides better isolation and tracking — it creates worktrees under <code>.claude/worktrees/{name}/</code>, automatically names the branch <code>worktree-{name}</code>, and fires <code>PreToolUse</code>/<code>PostToolUse</code> hooks that summon can observe for lifecycle management.</p>
@@ -2956,7 +2956,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2303,9 +2303,9 @@ If you install with pip and encounter import or dependency issues, try switching
 <p><strong>Symptom:</strong> <code>ImportError</code> for <code>workspace_mcp</code> or <code>playwright</code>.</p>
 <p><strong>Cause:</strong> Optional extras were not installed.</p>
 <p><strong>Fix:</strong> Install with the appropriate extra:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span><span class="w">        </span><span class="c1"># Google Workspace integration</span>
-uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span><span class="w"> </span><span class="c1"># Slack browser-based auth</span>
-uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[all]&quot;</span><span class="w">           </span><span class="c1"># All extras</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[google]"</span><span class="w">        </span><span class="c1"># Google Workspace integration</span>
+uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[slack-browser]"</span><span class="w"> </span><span class="c1"># Slack browser-based auth</span>
+uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[all]"</span><span class="w">           </span><span class="c1"># All extras</span>
 </code></pre></div></p>
 </details>
 <hr />
@@ -2399,7 +2399,7 @@ uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </
 </code></pre></div>
 If that fails, find and kill the daemon process manually:
 <div class="highlight"><pre><span></span><code><span class="c1"># Find the daemon process</span>
-pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;summon.*start&quot;</span>
+pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">"summon.*start"</span>
 </code></pre></div>
 Then start a fresh session with <code>summon start</code>.</p>
 </details>
@@ -2507,7 +2507,7 @@ Verbose logs include SDK events, Slack API calls, and permission flow details.</
 <p><strong>Symptom:</strong> <code>summon stop --all</code> hangs or the daemon process remains after stopping.</p>
 <p><strong>Cause:</strong> Active sessions may be taking time to shut down gracefully, or the daemon is waiting for in-flight Slack API calls.</p>
 <p><strong>Fix:</strong> Wait a few seconds — the daemon performs a graceful shutdown that stops all active sessions first. If it hangs for more than 30 seconds, kill the daemon process directly:
-<div class="highlight"><pre><span></span><code>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">&quot;summon.*start&quot;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span>
+<div class="highlight"><pre><span></span><code>pgrep<span class="w"> </span>-f<span class="w"> </span><span class="s2">"summon.*start"</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span><span class="nb">kill</span>
 </code></pre></div></p>
 </details>
 <hr />
@@ -2564,7 +2564,7 @@ Look for a scribe session in the output.</p>
 <p><strong>Cause:</strong> The Google collector auto-detects when workspace-mcp is installed and credentials exist. If either is missing, it stays disabled.</p>
 <p><strong>Fix:</strong>
 1. Ensure the <code>workspace-mcp</code> binary is available. If missing, install the Google extra:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[google]&quot;</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[google]"</span>
 </code></pre></div>
 2. Verify Google authentication status:
 <div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w"> </span>status
@@ -2583,7 +2583,7 @@ summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w">
 <p><strong>Cause:</strong> The Slack browser monitor auto-detects when Playwright is installed and browser auth exists. If either is missing, it stays disabled.</p>
 <p><strong>Fix:</strong>
 1. Ensure Playwright is installed:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[slack-browser]"</span>
 </code></pre></div>
 2. Check Slack browser authentication status:
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>status
@@ -2592,7 +2592,7 @@ summon<span class="w"> </span>auth<span class="w"> </span>google<span class="w">
 <div class="highlight"><pre><span></span><code>summon<span class="w"> </span>auth<span class="w"> </span>slack<span class="w"> </span>login<span class="w"> </span>WORKSPACE_NAME
 </code></pre></div>
 4. Ensure Playwright is installed:
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;summon-claude[slack-browser]&quot;</span>
+<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>tool<span class="w"> </span>install<span class="w"> </span><span class="s2">"summon-claude[slack-browser]"</span>
 </code></pre></div>
 5. The browser-authenticated user must be a member of the channels you want to monitor. Invite the user to any missing channels in the external workspace.</p>
 </details>
@@ -2770,7 +2770,7 @@ Sessions must show <code>suspended</code> status to be resumed by <code>project 
       <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

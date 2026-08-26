@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2522,11 +2522,11 @@
 <h3 id="session_start"><code>session_start</code><a class="headerlink" href="#session_start" title="Permanent link">&para;</a></h3>
 <p>Spawn a new child session:</p>
 <div class="highlight"><pre><span></span><code>session_start(
-  name=&quot;worker-1&quot;,
-  cwd=&quot;/path/to/project&quot;,
-  initial_message=&quot;Review PR #42 and post a summary to this channel&quot;,
-  model=&quot;claude-opus-4-5&quot;,           # optional override
-  system_prompt=&quot;Focus on security&quot;  # optional, up to 10K chars
+  name="worker-1",
+  cwd="/path/to/project",
+  initial_message="Review PR #42 and post a summary to this channel",
+  model="claude-opus-4-5",           # optional override
+  system_prompt="Focus on security"  # optional, up to 10K chars
 )
 </code></pre></div>
 <p><strong>Constraints:</strong></p>
@@ -2568,7 +2568,7 @@
 <p>The spawned session starts with an authentication code and must be authenticated in Slack before it can receive messages. The PM receives the auth code and can direct you (or a human) to authenticate it.</p>
 <h3 id="session_stop"><code>session_stop</code><a class="headerlink" href="#session_stop" title="Permanent link">&para;</a></h3>
 <p>Stop a child session:</p>
-<div class="highlight"><pre><span></span><code>session_stop(session_id=&quot;sess-a1b2c3&quot;)
+<div class="highlight"><pre><span></span><code>session_stop(session_id="sess-a1b2c3")
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Cannot stop self</p>
@@ -2577,8 +2577,8 @@
 <h3 id="session_message"><code>session_message</code><a class="headerlink" href="#session_message" title="Permanent link">&para;</a></h3>
 <p>Send a message to a child session as if a human typed it in Slack:</p>
 <div class="highlight"><pre><span></span><code>session_message(
-  session_id=&quot;sess-a1b2c3&quot;,
-  message=&quot;The PR was merged. Switch to the migration task now.&quot;
+  session_id="sess-a1b2c3",
+  message="The PR was merged. Switch to the migration task now."
 )
 </code></pre></div>
 <p><strong>Constraints:</strong></p>
@@ -2588,15 +2588,15 @@
 </ul>
 <h3 id="session_resume"><code>session_resume</code><a class="headerlink" href="#session_resume" title="Permanent link">&para;</a></h3>
 <p>Resume a child session that has completed or errored, binding it to its existing Slack channel:</p>
-<div class="highlight"><pre><span></span><code>session_resume(session_id=&quot;sess-a1b2c3&quot;)
+<div class="highlight"><pre><span></span><code>session_resume(session_id="sess-a1b2c3")
 </code></pre></div>
 <p>This is useful when a child session ends (normally or due to an error) but you want to continue the work in the same channel without losing conversation history.</p>
 <h3 id="session_log_status"><code>session_log_status</code><a class="headerlink" href="#session_log_status" title="Permanent link">&para;</a></h3>
 <p>Write a structured status entry to the audit log (not posted to Slack):</p>
 <div class="highlight"><pre><span></span><code>session_log_status(
-  status=&quot;active&quot;,
-  summary=&quot;Reviewing auth module — found 3 issues&quot;,
-  details=&quot;1. Missing CSRF check in /login\n2. Token expiry too long\n3. No rate limiting&quot;
+  status="active",
+  summary="Reviewing auth module — found 3 issues",
+  details="1. Missing CSRF check in /login\n2. Token expiry too long\n3. No rate limiting"
 )
 </code></pre></div>
 <table>
@@ -2625,8 +2625,8 @@
 <h3 id="session_status_update"><code>session_status_update</code><a class="headerlink" href="#session_status_update" title="Permanent link">&para;</a></h3>
 <p>Update the pinned status message in the PM's Slack channel:</p>
 <div class="highlight"><pre><span></span><code>session_status_update(
-  summary=&quot;3 sessions active — auth refactor 80% complete&quot;,
-  details=&quot;worker-1: JWT middleware (in progress)\nworker-2: OAuth providers (completed)\nworker-3: Rate limiting (starting)&quot;
+  summary="3 sessions active — auth refactor 80% complete",
+  details="worker-1: JWT middleware (in progress)\nworker-2: OAuth providers (completed)\nworker-3: Rate limiting (starting)"
 )
 </code></pre></div>
 <table>
@@ -2717,7 +2717,7 @@ the JWT middleware, another the OAuth provider integrations.
 </div>
 <h3 id="cross-session-task-queries">Cross-session task queries<a class="headerlink" href="#cross-session-task-queries" title="Permanent link">&para;</a></h3>
 <p>The PM can query tasks across its child sessions using <code>TaskList</code> with the <code>session_ids</code> parameter:</p>
-<div class="highlight"><pre><span></span><code>TaskList(session_ids=&quot;sess-worker-1,sess-worker-2,sess-worker-3&quot;)
+<div class="highlight"><pre><span></span><code>TaskList(session_ids="sess-worker-1,sess-worker-2,sess-worker-3")
 </code></pre></div>
 <p>This returns a unified view of tasks from up to 20 child sessions, grouped by session. Regular sessions can only list their own tasks — the cross-session parameter is PM-only.</p>
 <p>During each scan cycle, the PM typically calls <code>TaskList</code> with its active children's IDs to get a progress snapshot, then updates the canvas accordingly. This is the primary mechanism for the PM to track distributed work without requiring children to report status manually.</p>
@@ -2837,7 +2837,7 @@ Project Manager | 0 active sessions | idle
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

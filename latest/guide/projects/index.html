@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2387,7 +2387,7 @@ summon<span class="w"> </span>project<span class="w"> </span>add<span class="w">
 summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>frontend<span class="w"> </span>~/work/acme-frontend
 </code></pre></div>
 <p>To associate a <a href="../jira-integration/#per-project-jql-filters">Jira JQL filter</a> with the project:</p>
-<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>--jql<span class="w"> </span><span class="s2">&quot;project = MYAPI AND status != Done&quot;</span>
+<div class="notest highlight"><pre><span></span><code>summon<span class="w"> </span>project<span class="w"> </span>add<span class="w"> </span>my-api<span class="w"> </span>--jql<span class="w"> </span><span class="s2">"project = MYAPI AND status != Done"</span>
 </code></pre></div>
 <p>After registering, set workflow instructions and other project settings using the <code>summon project workflow</code> subcommands documented <a href="#managing-workflow-instructions">below</a>.</p>
 <h3 id="summon-project-list"><code>summon project list</code><a class="headerlink" href="#summon-project-list" title="Permanent link">&para;</a></h3>
@@ -2439,9 +2439,9 @@ summon<span class="w"> </span>project<span class="w"> </span>remove<span class="
 summon<span class="w"> </span>project<span class="w"> </span>workflow<span class="w"> </span><span class="nb">set</span><span class="w"> </span>my-api
 </code></pre></div>
 <p>This opens <code>$EDITOR</code> where you can write your instructions. For example:</p>
-<div class="highlight"><pre><span></span><code>Always run &#39;uv run pytest&#39; before committing.
+<div class="highlight"><pre><span></span><code>Always run 'uv run pytest' before committing.
 Follow the existing module structure in src/.
-Open PRs to the &#39;main&#39; branch.
+Open PRs to the 'main' branch.
 </code></pre></div>
 <h3 id="example-workflows">Example workflows<a class="headerlink" href="#example-workflows" title="Permanent link">&para;</a></h3>
 <p>The following examples show real-world patterns. Use them as starting points and tailor them to your project.</p>
@@ -2460,7 +2460,7 @@ Format with `uvx ruff format` and lint with `uvx ruff check --fix`.
 - Adherence to the team style guide in docs/STYLE.md
 
 Post findings as individual PR review comments on specific lines.
-Use the &quot;Request changes&quot; status for security issues; &quot;Comment&quot; for style nits.
+Use the "Request changes" status for security issues; "Comment" for style nits.
 Always check that CI is green before approving.
 </code></pre></div>
 <p><strong>Monorepo:</strong></p>
@@ -2624,7 +2624,7 @@ $INCLUDE_GLOBAL
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>

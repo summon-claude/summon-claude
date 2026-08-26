@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
     
     
       
@@ -29,7 +29,7 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.484c7ddc.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
       
         
         <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
@@ -2417,15 +2417,15 @@
 <h3 id="summon_canvas_read"><code>summon_canvas_read</code><a class="headerlink" href="#summon_canvas_read" title="Permanent link">&para;</a></h3>
 <p>Read the current canvas markdown:</p>
 <div class="highlight"><pre><span></span><code>summon_canvas_read()
-# Returns the full canvas markdown for the current session&#39;s channel
+# Returns the full canvas markdown for the current session's channel
 
-summon_canvas_read(channel=&quot;C01234567&quot;)
-# Read another session&#39;s canvas (cross-channel access)
+summon_canvas_read(channel="C01234567")
+# Read another session's canvas (cross-channel access)
 </code></pre></div>
 <p><strong>Cross-channel access:</strong> Claude can read canvases from other sessions in the same workspace, subject to a scope guard. The scope guard verifies that the requesting user authenticated both sessions (via <code>authenticated_user_id</code>) — Claude cannot read canvases belonging to other users' sessions.</p>
 <h3 id="summon_canvas_write"><code>summon_canvas_write</code><a class="headerlink" href="#summon_canvas_write" title="Permanent link">&para;</a></h3>
 <p>Replace the entire canvas with new markdown:</p>
-<div class="highlight"><pre><span></span><code>summon_canvas_write(markdown=&quot;# My Notes\n\nUpdated content here...&quot;)
+<div class="highlight"><pre><span></span><code>summon_canvas_write(markdown="# My Notes\n\nUpdated content here...")
 </code></pre></div>
 <p><strong>Limits:</strong></p>
 <ul>
@@ -2436,8 +2436,8 @@ summon_canvas_read(channel=&quot;C01234567&quot;)
 <h3 id="summon_canvas_update_section"><code>summon_canvas_update_section</code><a class="headerlink" href="#summon_canvas_update_section" title="Permanent link">&para;</a></h3>
 <p>Update a single named section within the canvas:</p>
 <div class="highlight"><pre><span></span><code>summon_canvas_update_section(
-  heading=&quot;Current Task&quot;,
-  content=&quot;Refactoring the auth middleware — see PR #142&quot;
+  heading="Current Task",
+  content="Refactoring the auth middleware — see PR #142"
 )
 </code></pre></div>
 <p>The <code>heading</code> parameter is the section heading text (without <code>#</code> characters). summon-claude finds the section with that heading and replaces its content. If the section does not exist, it is created as a new <code>##</code> section at the end of the canvas.</p>
@@ -2483,7 +2483,7 @@ summon_canvas_read(channel=&quot;C01234567&quot;)
 <hr />
 <h2 id="viewing-the-canvas">Viewing the canvas<a class="headerlink" href="#viewing-the-canvas" title="Permanent link">&para;</a></h2>
 <p>The canvas is always visible as a tab in the Slack channel. You can also ask Claude to read and summarize it at any time:</p>
-<div class="highlight"><pre><span></span><code>What&#39;s on our canvas right now?
+<div class="highlight"><pre><span></span><code>What's on our canvas right now?
 </code></pre></div>
 <p>Or read it directly in Slack by clicking the canvas tab in the channel header.</p>
 <hr />
@@ -2594,7 +2594,7 @@ summon_canvas_read(channel=&quot;C01234567&quot;)
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.tabs.sticky", "navigation.sections", "navigation.top", "navigation.instant", "navigation.instant.progress", "navigation.tracking", "navigation.footer", "navigation.indexes", "navigation.path", "content.code.copy", "content.code.select", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight", "search.share", "header.autohide"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.79ae519e.min.js"></script>
+      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
       
     
   </body>
