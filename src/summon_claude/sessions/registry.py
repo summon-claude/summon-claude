@@ -201,7 +201,7 @@ class SessionRegistry:
         ) as cursor:
             return await cursor.fetchone() is not None
 
-    async def register(
+    async def register(  # noqa: PLR0917
         self,
         session_id: str,
         pid: int,
@@ -689,7 +689,7 @@ class SessionRegistry:
 
     # --- Scheduled job methods ---
 
-    async def save_scheduled_job(
+    async def save_scheduled_job(  # noqa: PLR0917
         self,
         session_id: str,
         job_id: str,
@@ -1162,7 +1162,7 @@ class SessionRegistry:
 
     # --- Spawn token methods ---
 
-    async def store_spawn_token(
+    async def store_spawn_token(  # noqa: PLR0917
         self,
         token: str,
         target_user_id: str,

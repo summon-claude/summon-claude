@@ -400,7 +400,7 @@ class EventProbe:
 class _HealthMonitor:
     """Monitors slack-sdk socket client health and triggers reconnection."""
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         socket_handler: AsyncSocketModeHandler,
         on_reconnect_needed: Callable[[], Awaitable[None]],

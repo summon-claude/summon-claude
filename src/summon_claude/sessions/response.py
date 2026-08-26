@@ -212,7 +212,7 @@ class ResponseStreamer:
     - StreamEvent with parent_tool_use_id -> subagent thread
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         router: ThreadRouter,
         user_id: str | None = None,
