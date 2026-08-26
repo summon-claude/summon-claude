@@ -75,7 +75,7 @@ def make_monitor(
     return monitor
 
 
-def make_frame(  # noqa: PLR0913
+def make_frame(  # noqa: PLR0913, PLR0917
     type_: str = "message",
     subtype: str = "",
     channel: str = "C001",

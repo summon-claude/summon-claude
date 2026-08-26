@@ -149,7 +149,7 @@ class AliasedGroup(click.Group):
 )
 @click.option("--no-interactive", is_flag=True, default=False, help="Disable interactive prompts")
 @click.pass_context
-def cli(
+def cli(  # noqa: PLR0917
     ctx: click.Context,
     verbose: bool,
     quiet: bool,
@@ -227,7 +227,7 @@ def cmd_version(ctx: click.Context, output: str) -> None:
     help="Effort level (default: high, or SUMMON_DEFAULT_EFFORT)",
 )
 @click.pass_context
-def cmd_start(
+def cmd_start(  # noqa: PLR0917
     ctx: click.Context,
     cwd: str | None,
     resume: str | None,
@@ -577,7 +577,7 @@ def workflow_clear(project_name: str | None) -> None:
 @click.option("--auto-allow", default=None, help="Auto-mode allow rules (project-specific)")
 @click.option("--auto-environment", default=None, help="Auto-mode environment description")
 @click.pass_context
-def project_update(
+def project_update(  # noqa: PLR0917
     ctx: click.Context,
     name_or_id: str,
     jql: str | None,

@@ -401,7 +401,7 @@ class PermissionHandler:
     (default 2000ms, configurable) batches rapid requests into one message.
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         router: ThreadRouter,
         config: SummonConfig,

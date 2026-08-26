@@ -157,7 +157,7 @@ def extract_classifier_context(history: deque[dict[str, Any]]) -> str:
     return "\n".join(parts)
 
 
-def build_classifier_prompt(  # noqa: PLR0913
+def build_classifier_prompt(  # noqa: PLR0913, PLR0917
     tool_name: str,
     tool_input: dict[str, Any],
     context: str,

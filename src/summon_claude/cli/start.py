@@ -14,7 +14,7 @@ from summon_claude.sessions.registry import SessionRegistry
 from summon_claude.sessions.session import SessionOptions
 
 
-async def async_start(  # noqa: PLR0913
+async def async_start(  # noqa: PLR0913, PLR0917
     config: SummonConfig,
     cwd: str,
     name: str,

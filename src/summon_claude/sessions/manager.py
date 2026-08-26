@@ -79,7 +79,7 @@ class SessionManager:
 
     MAX_SESSION_RESTARTS = 3
 
-    def __init__(  # noqa: PLR0913
+    def __init__(  # noqa: PLR0913, PLR0917
         self,
         config: SummonConfig,
         web_client: AsyncWebClient,

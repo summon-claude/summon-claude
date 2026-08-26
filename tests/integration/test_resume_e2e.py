@@ -128,7 +128,7 @@ class TestResumeEndToEnd:
         assert info["channel"]["is_archived"] is True
 
     @staticmethod
-    async def _resume_and_verify(  # noqa: PLR0913
+    async def _resume_and_verify(  # noqa: PLR0913, PLR0917
         slack_harness: SlackTestHarness,
         registry: SessionRegistry,
         config: SummonConfig,

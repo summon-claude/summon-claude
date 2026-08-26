@@ -3748,7 +3748,7 @@ class SummonSession:
             except Exception as e2:
                 logger.debug("Failed to post effort error: %s", e2)
 
-    async def _dispatch_command(  # noqa: PLR0911, PLR0912, PLR0915
+    async def _dispatch_command(  # noqa: PLR0911, PLR0912, PLR0915, PLR0917
         self,
         rt: _SessionRuntime,
         name: str,

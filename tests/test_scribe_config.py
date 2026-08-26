@@ -890,21 +890,36 @@ class TestGoogleIntegration:
         )
         assert (fake_dir / "default" / "client_env").exists()
 
-    def test_workspace_mcp_cli_lists_tools(self):
-        """workspace-mcp --cli (no args) lists available tools without error."""
-        import subprocess
+    def test_core_tier_provides_summon_read_tools(self):
+        """workspace-mcp's core tier still exposes the read tools scribe sessions rely on.
 
-        from summon_claude.config import find_workspace_mcp_bin
+        Scribe sessions launch workspace-mcp with ``--tool-tier core`` for the
+        gmail/calendar/drive services (see ``_build_google_workspace_mcp_untrusted``),
+        and ``permissions.py`` auto-approves the read tools by prefix. This guards
+        against an upstream tier reshuffle dropping any of those read tools out of
+        the core tier, which would silently break Scribe's Google Workspace access.
+        """
+        import importlib.util
+        from pathlib import Path
 
-        bin_path = find_workspace_mcp_bin()
-        result = subprocess.run(
-            [str(bin_path), "--single-user", "--cli"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0
-        assert "start_google_auth" in result.stdout
+        import yaml
+
+        spec = importlib.util.find_spec("core")
+        assert spec and spec.origin, "workspace-mcp 'core' module not importable"
+        tiers = yaml.safe_load((Path(spec.origin).parent / "tool_tiers.yaml").read_text())
+
+        core_tools = {tool for service in tiers.values() for tool in (service.get("core") or [])}
+
+        required_read_tools = {
+            "search_gmail_messages",
+            "get_gmail_message_content",
+            "list_calendars",
+            "get_events",
+            "search_drive_files",
+            "get_drive_file_content",
+        }
+        missing = required_read_tools - core_tools
+        assert not missing, f"workspace-mcp core tier missing summon read tools: {sorted(missing)}"
 
     def test_google_services_validation_matches_workspace_mcp(self):
         """Our VALID_GOOGLE_SERVICES matches workspace-mcp's --tools choices."""
