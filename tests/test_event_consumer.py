@@ -30,6 +30,40 @@ class TestSharedEventStore:
         store.put({"type": "message"})
         assert path.read_bytes() == b""
 
+    def test_refcount_fd_stays_open_until_last_close(self, tmp_path):
+        """FD stays open when multiple consumers share the store."""
+        path = tmp_path / "events.jsonl"
+        store = SharedEventStore(path)
+        store.open_writer()
+        store.open_writer()
+        store.close_writer()
+        assert store._write_fd is not None
+        store.put({"type": "message"})
+        store.close_writer()
+        assert store._write_fd is None
+        events = store.drain()
+        assert len(events) == 1
+
+    def test_refcount_put_works_after_first_consumer_stops(self, tmp_path):
+        """put() still writes after one of two consumers disconnects."""
+        path = tmp_path / "events.jsonl"
+        store = SharedEventStore(path)
+        store.open_writer()
+        store.open_writer()
+        store.put({"type": "a"})
+        store.close_writer()
+        store.put({"type": "b"})
+        store.close_writer()
+        events = store.drain()
+        assert [e["type"] for e in events] == ["a", "b"]
+
+    def test_close_without_open_raises(self, tmp_path):
+        """close_writer() without open_writer() raises AssertionError."""
+        path = tmp_path / "events.jsonl"
+        store = SharedEventStore(path)
+        with pytest.raises(AssertionError, match="close_writer called more"):
+            store.close_writer()
+
     def test_reset_reader_skips_preexisting_events(self, tmp_path):
         """reset_reader() causes subsequent drain() to skip events written before the call."""
         path = tmp_path / "events.jsonl"
@@ -314,6 +348,19 @@ class TestLifecycle:
         consumer = _make_consumer(event_store)
         assert consumer._handler is None
         await consumer.stop()  # must not raise
+
+    async def test_double_stop_is_idempotent(self, event_store):
+        """Calling stop() twice does not crash or corrupt refcount."""
+        consumer = _make_consumer(event_store)
+        mock_handler = AsyncMock()
+        mock_handler.close_async = AsyncMock()
+        consumer._handler = mock_handler
+        event_store.open_writer()
+
+        await consumer.stop()
+        await consumer.stop()
+        assert event_store._write_fd is None
+        assert event_store._writer_refcount == 0
 
     async def test_stop_closes_handler(self, event_store):
         """stop() calls close_async() on the handler and closes the writer."""
