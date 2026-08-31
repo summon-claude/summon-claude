@@ -47,7 +47,7 @@ hooks = [
 
 [[repos]]
 repo = "https://github.com/trufflesecurity/trufflehog"
-rev = "v3.96.0"
+rev = "v3.97.0"
 hooks = [
   { id = "trufflehog", entry = "trufflehog filesystem --no-verification --no-update --force-skip-archives --force-skip-binaries --fail", exclude = 'uv\.lock$', pass_filenames = true, priority = 0 },
 ]

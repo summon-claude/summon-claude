@@ -21,7 +21,7 @@ dependencies = [
     "packaging==26.3",
     "aiosqlite==0.22.1",
     "click==8.4.2",
-    "claude-agent-sdk==0.2.136",
+    "claude-agent-sdk==0.2.139",
     "pydantic-settings==2.15.0",
     "python-daemon==3.1.2",
     "slack-bolt==1.30.0",
@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-google = ["workspace-mcp==1.23.1"]
+google = ["workspace-mcp==1.24.1"]
 slack-browser = ["playwright==1.62.0"]
 all = ["summon-claude[google,slack-browser]"]
 
@@ -65,8 +65,8 @@ dev = [
     "pytest-xdist==3.8.0",
     "pyright==1.1.411",
     "pyyaml==6.0.3",
-    "ruff==0.16.2",
-    "workspace-mcp==1.23.1",
+    "ruff==0.16.3",
+    "workspace-mcp==1.24.1",
     "pytest-markdown-docs==0.9.2",
     "python-dotenv==1.2.3",
     "playwright==1.62.0",
