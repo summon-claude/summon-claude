@@ -14,15 +14,15 @@ summon [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name               | Type    | Description                   | Default |
-| ------------------ | ------- | ----------------------------- | ------- |
-| `--version`        | boolean | Show the version and exit.    | `False` |
-| `-v`, `--verbose`  | boolean | Enable verbose logging        | `False` |
-| `-q`, `--quiet`    | boolean | Suppress non-essential output | `False` |
-| `--no-color`       | boolean | Disable colored output        | `False` |
-| `--config`         | file    | Override config file path     | None    |
-| `--no-interactive` | boolean | Disable interactive prompts   | `False` |
-| `--help`, `-h`     | boolean | Show this message and exit.   | `False` |
+| Name               | Type    | Description                   | Default          |
+| ------------------ | ------- | ----------------------------- | ---------------- |
+| `--version`        | boolean | Show the version and exit.    | `Sentinel.UNSET` |
+| `-v`, `--verbose`  | boolean | Enable verbose logging        | `False`          |
+| `-q`, `--quiet`    | boolean | Suppress non-essential output | `False`          |
+| `--no-color`       | boolean | Disable colored output        | `False`          |
+| `--config`         | file    | Override config file path     | None             |
+| `--no-interactive` | boolean | Disable interactive prompts   | `False`          |
+| `-h`, `--help`     | boolean | Show this message and exit.   | `Sentinel.UNSET` |
 
 #### summon auth
 
@@ -36,9 +36,9 @@ summon auth [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon auth github
 
@@ -52,9 +52,9 @@ summon auth github [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth github login
 
@@ -68,9 +68,9 @@ summon auth github login [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth github logout
 
@@ -84,9 +84,9 @@ summon auth github logout [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth github status
 
@@ -100,9 +100,9 @@ summon auth github status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon auth google
 
@@ -116,9 +116,9 @@ summon auth google [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth google login
 
@@ -132,10 +132,10 @@ summon auth google login [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                          | Default |
-| -------------- | ------- | ------------------------------------ | ------- |
-| `--account`    | text    | Account label (e.g., personal, work) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
+| Name           | Type    | Description                          | Default          |
+| -------------- | ------- | ------------------------------------ | ---------------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.          | `Sentinel.UNSET` |
 
 ###### summon auth google logout
 
@@ -149,10 +149,10 @@ summon auth google logout [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                          | Default |
-| -------------- | ------- | ------------------------------------ | ------- |
-| `--account`    | text    | Account label (e.g., personal, work) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
+| Name           | Type    | Description                          | Default          |
+| -------------- | ------- | ------------------------------------ | ---------------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.          | `Sentinel.UNSET` |
 
 ###### summon auth google setup
 
@@ -166,10 +166,10 @@ summon auth google setup [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                          | Default |
-| -------------- | ------- | ------------------------------------ | ------- |
-| `--account`    | text    | Account label (e.g., personal, work) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
+| Name           | Type    | Description                          | Default          |
+| -------------- | ------- | ------------------------------------ | ---------------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.          | `Sentinel.UNSET` |
 
 ###### summon auth google status
 
@@ -183,10 +183,10 @@ summon auth google status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                          | Default |
-| -------------- | ------- | ------------------------------------ | ------- |
-| `--account`    | text    | Account label (e.g., personal, work) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.          | `False` |
+| Name           | Type    | Description                          | Default          |
+| -------------- | ------- | ------------------------------------ | ---------------- |
+| `--account`    | text    | Account label (e.g., personal, work) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.          | `Sentinel.UNSET` |
 
 ##### summon auth jira
 
@@ -200,9 +200,9 @@ summon auth jira [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth jira login
 
@@ -216,10 +216,10 @@ summon auth jira login [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                                                                                       | Default |
-| -------------- | ------- | ----------------------------------------------------------------------------------------------------------------- | ------- |
-| `--site`       | text    | Atlassian site (e.g. 'myorg' or 'myorg.atlassian.net'). Resolves to a cloud UUID via API discovery when possible. | None    |
-| `--help`, `-h` | boolean | Show this message and exit.                                                                                       | `False` |
+| Name           | Type    | Description                                                                                                       | Default          |
+| -------------- | ------- | ----------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `--site`       | text    | Atlassian site (e.g. 'myorg' or 'myorg.atlassian.net'). Resolves to a cloud UUID via API discovery when possible. | None             |
+| `-h`, `--help` | boolean | Show this message and exit.                                                                                       | `Sentinel.UNSET` |
 
 ###### summon auth jira logout
 
@@ -233,9 +233,9 @@ summon auth jira logout [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth jira status
 
@@ -249,9 +249,9 @@ summon auth jira status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon auth slack
 
@@ -265,9 +265,9 @@ summon auth slack [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth slack channels
 
@@ -281,10 +281,10 @@ summon auth slack channels [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                  | Default |
-| -------------- | ------- | ---------------------------- | ------- |
-| `--refresh`    | boolean | Re-fetch channels from Slack | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.  | `False` |
+| Name           | Type    | Description                  | Default          |
+| -------------- | ------- | ---------------------------- | ---------------- |
+| `--refresh`    | boolean | Re-fetch channels from Slack | `Sentinel.UNSET` |
+| `-h`, `--help` | boolean | Show this message and exit.  | `Sentinel.UNSET` |
 
 ###### summon auth slack login
 
@@ -300,9 +300,9 @@ summon auth slack login [OPTIONS] WORKSPACE
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth slack logout
 
@@ -316,9 +316,9 @@ summon auth slack logout [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon auth slack status
 
@@ -332,9 +332,9 @@ summon auth slack status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon auth status
 
@@ -348,10 +348,10 @@ summon auth status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--json`       | boolean | Output as JSON              | `False` |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `--json`       | boolean | Output as JSON              | `Sentinel.UNSET` |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon config
 
@@ -365,9 +365,9 @@ summon config [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon config check
 
@@ -381,9 +381,9 @@ summon config check [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon config edit
 
@@ -397,9 +397,9 @@ summon config edit [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon config path
 
@@ -413,9 +413,9 @@ summon config path [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon config set
 
@@ -429,9 +429,9 @@ summon config set [OPTIONS] KEY VALUE
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon config show
 
@@ -445,9 +445,9 @@ summon config show [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon db
 
@@ -461,9 +461,9 @@ summon db [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon db purge
 
@@ -477,11 +477,11 @@ summon db purge [OPTIONS]
 
 **Options:**
 
-| Name           | Type                          | Description                     | Default |
-| -------------- | ----------------------------- | ------------------------------- | ------- |
-| `--older-than` | integer range (`1` and above) | Purge records older than N days | `30`    |
-| `--yes`, `-y`  | boolean                       | Skip confirmation prompt        | `False` |
-| `--help`, `-h` | boolean                       | Show this message and exit.     | `False` |
+| Name           | Type                          | Description                     | Default          |
+| -------------- | ----------------------------- | ------------------------------- | ---------------- |
+| `--older-than` | integer range (`1` and above) | Purge records older than N days | `30`             |
+| `--yes`, `-y`  | boolean                       | Skip confirmation prompt        | `False`          |
+| `-h`, `--help` | boolean                       | Show this message and exit.     | `Sentinel.UNSET` |
 
 ##### summon db status
 
@@ -495,9 +495,9 @@ summon db status [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon db vacuum
 
@@ -511,9 +511,9 @@ summon db vacuum [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon doctor
 
@@ -527,11 +527,11 @@ summon doctor [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                                  | Default |
-| -------------- | ------- | ------------------------------------------------------------ | ------- |
-| `--export`     | file    | Export results as JSON to this file path                     | None    |
-| `--submit`     | boolean | Submit a redacted report as a GitHub issue (requires gh CLI) | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.                                  | `False` |
+| Name           | Type    | Description                                                  | Default          |
+| -------------- | ------- | ------------------------------------------------------------ | ---------------- |
+| `--export`     | file    | Export results as JSON to this file path                     | None             |
+| `--submit`     | boolean | Submit a redacted report as a GitHub issue (requires gh CLI) | `False`          |
+| `-h`, `--help` | boolean | Show this message and exit.                                  | `Sentinel.UNSET` |
 
 #### summon hooks
 
@@ -545,9 +545,9 @@ summon hooks [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon hooks clear
 
@@ -561,10 +561,10 @@ summon hooks clear [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                     | Default |
-| -------------- | ------- | ----------------------------------------------- | ------- |
-| `--project`    | text    | Project ID to clear hooks for (default: global) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.                     | `False` |
+| Name           | Type    | Description                                     | Default          |
+| -------------- | ------- | ----------------------------------------------- | ---------------- |
+| `--project`    | text    | Project ID to clear hooks for (default: global) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.                     | `Sentinel.UNSET` |
 
 ##### summon hooks install
 
@@ -580,9 +580,9 @@ summon hooks install [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon hooks set
 
@@ -602,10 +602,10 @@ summon hooks set [OPTIONS] [HOOKS_JSON]
 
 **Options:**
 
-| Name           | Type    | Description                                   | Default |
-| -------------- | ------- | --------------------------------------------- | ------- |
-| `--project`    | text    | Project ID to set hooks for (default: global) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.                   | `False` |
+| Name           | Type    | Description                                   | Default          |
+| -------------- | ------- | --------------------------------------------- | ---------------- |
+| `--project`    | text    | Project ID to set hooks for (default: global) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.                   | `Sentinel.UNSET` |
 
 ##### summon hooks show
 
@@ -619,10 +619,10 @@ summon hooks show [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                    | Default |
-| -------------- | ------- | ---------------------------------------------- | ------- |
-| `--project`    | text    | Project ID to show hooks for (default: global) | None    |
-| `--help`, `-h` | boolean | Show this message and exit.                    | `False` |
+| Name           | Type    | Description                                    | Default          |
+| -------------- | ------- | ---------------------------------------------- | ---------------- |
+| `--project`    | text    | Project ID to show hooks for (default: global) | None             |
+| `-h`, `--help` | boolean | Show this message and exit.                    | `Sentinel.UNSET` |
 
 ##### summon hooks uninstall
 
@@ -636,9 +636,9 @@ summon hooks uninstall [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon init
 
@@ -652,9 +652,9 @@ summon init [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon project
 
@@ -668,9 +668,9 @@ summon project [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon project add
 
@@ -684,10 +684,10 @@ summon project add [OPTIONS] NAME [DIRECTORY]
 
 **Options:**
 
-| Name           | Type    | Description                                  | Default |
-| -------------- | ------- | -------------------------------------------- | ------- |
-| `--jql`        | text    | JQL filter for Jira issue triage (optional). | None    |
-| `--help`, `-h` | boolean | Show this message and exit.                  | `False` |
+| Name           | Type    | Description                                  | Default          |
+| -------------- | ------- | -------------------------------------------- | ---------------- |
+| `--jql`        | text    | JQL filter for Jira issue triage (optional). | None             |
+| `-h`, `--help` | boolean | Show this message and exit.                  | `Sentinel.UNSET` |
 
 ##### summon project down
 
@@ -703,9 +703,9 @@ summon project down [OPTIONS] [NAME]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon project list
 
@@ -719,10 +719,10 @@ summon project list [OPTIONS]
 
 **Options:**
 
-| Name             | Type           | Description                 | Default       |
-| ---------------- | -------------- | --------------------------- | ------------- |
-| `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
+| Name             | Type           | Description                 | Default          |
+| ---------------- | -------------- | --------------------------- | ---------------- |
+| `-o`, `--output` | choice (`json` | `table`)                    | Output format    |
+| `-h`, `--help`   | boolean        | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon project remove
 
@@ -736,9 +736,9 @@ summon project remove [OPTIONS] NAME_OR_ID
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon project up
 
@@ -752,9 +752,9 @@ summon project up [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon project update
 
@@ -770,13 +770,13 @@ summon project update [OPTIONS] NAME_OR_ID
 
 **Options:**
 
-| Name                 | Type    | Description                                   | Default |
-| -------------------- | ------- | --------------------------------------------- | ------- |
-| `--jql`              | text    | JQL filter for Jira triage. Pass "" to clear. | None    |
-| `--auto-deny`        | text    | Auto-mode deny rules (project-specific)       | None    |
-| `--auto-allow`       | text    | Auto-mode allow rules (project-specific)      | None    |
-| `--auto-environment` | text    | Auto-mode environment description             | None    |
-| `--help`, `-h`       | boolean | Show this message and exit.                   | `False` |
+| Name                 | Type    | Description                                   | Default          |
+| -------------------- | ------- | --------------------------------------------- | ---------------- |
+| `--jql`              | text    | JQL filter for Jira triage. Pass "" to clear. | None             |
+| `--auto-deny`        | text    | Auto-mode deny rules (project-specific)       | None             |
+| `--auto-allow`       | text    | Auto-mode allow rules (project-specific)      | None             |
+| `--auto-environment` | text    | Auto-mode environment description             | None             |
+| `-h`, `--help`       | boolean | Show this message and exit.                   | `Sentinel.UNSET` |
 
 ##### summon project workflow
 
@@ -790,9 +790,9 @@ summon project workflow [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon project workflow clear
 
@@ -806,9 +806,9 @@ summon project workflow clear [OPTIONS] [PROJECT_NAME]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon project workflow set
 
@@ -822,9 +822,9 @@ summon project workflow set [OPTIONS] [PROJECT_NAME]
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ###### summon project workflow show
 
@@ -838,10 +838,10 @@ summon project workflow show [OPTIONS] [PROJECT_NAME]
 
 **Options:**
 
-| Name           | Type    | Description                                         | Default |
-| -------------- | ------- | --------------------------------------------------- | ------- |
-| `--raw`        | boolean | Show raw template without expanding $INCLUDE_GLOBAL | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.                         | `False` |
+| Name           | Type    | Description                                         | Default          |
+| -------------- | ------- | --------------------------------------------------- | ---------------- |
+| `--raw`        | boolean | Show raw template without expanding $INCLUDE_GLOBAL | `False`          |
+| `-h`, `--help` | boolean | Show this message and exit.                         | `Sentinel.UNSET` |
 
 #### summon reset
 
@@ -855,9 +855,9 @@ summon reset [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon reset config
 
@@ -871,10 +871,10 @@ summon reset config [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                                             | Default |
-| -------------- | ------- | ----------------------------------------------------------------------- | ------- |
-| `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.                                             | `False` |
+| Name           | Type    | Description                                                             | Default          |
+| -------------- | ------- | ----------------------------------------------------------------------- | ---------------- |
+| `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `Sentinel.UNSET` |
+| `-h`, `--help` | boolean | Show this message and exit.                                             | `Sentinel.UNSET` |
 
 ##### summon reset data
 
@@ -888,10 +888,10 @@ summon reset data [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                                             | Default |
-| -------------- | ------- | ----------------------------------------------------------------------- | ------- |
-| `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.                                             | `False` |
+| Name           | Type    | Description                                                             | Default          |
+| -------------- | ------- | ----------------------------------------------------------------------- | ---------------- |
+| `--force`      | boolean | Bypass symlink/outside-home safety checks. Still requires confirmation. | `Sentinel.UNSET` |
+| `-h`, `--help` | boolean | Show this message and exit.                                             | `Sentinel.UNSET` |
 
 #### summon session
 
@@ -905,9 +905,9 @@ summon session [OPTIONS] COMMAND [ARGS]...
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon session cleanup
 
@@ -921,10 +921,10 @@ summon session cleanup [OPTIONS]
 
 **Options:**
 
-| Name           | Type    | Description                                                                  | Default |
-| -------------- | ------- | ---------------------------------------------------------------------------- | ------- |
-| `--archive`    | boolean | Archive Slack channels of stale sessions (channels are preserved by default) | `False` |
-| `--help`, `-h` | boolean | Show this message and exit.                                                  | `False` |
+| Name           | Type    | Description                                                                  | Default          |
+| -------------- | ------- | ---------------------------------------------------------------------------- | ---------------- |
+| `--archive`    | boolean | Archive Slack channels of stale sessions (channels are preserved by default) | `False`          |
+| `-h`, `--help` | boolean | Show this message and exit.                                                  | `Sentinel.UNSET` |
 
 ##### summon session info
 
@@ -938,10 +938,10 @@ summon session info [OPTIONS] SESSION
 
 **Options:**
 
-| Name             | Type           | Description                 | Default       |
-| ---------------- | -------------- | --------------------------- | ------------- |
-| `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
+| Name             | Type           | Description                 | Default          |
+| ---------------- | -------------- | --------------------------- | ---------------- |
+| `-o`, `--output` | choice (`json` | `table`)                    | Output format    |
+| `-h`, `--help`   | boolean        | Show this message and exit. | `Sentinel.UNSET` |
 
 ##### summon session list
 
@@ -955,12 +955,12 @@ summon session list [OPTIONS]
 
 **Options:**
 
-| Name             | Type           | Description                                | Default       |
-| ---------------- | -------------- | ------------------------------------------ | ------------- |
-| `--all`, `-a`    | boolean        | Show all recent sessions (not just active) | `False`       |
-| `--name`         | text           | Filter sessions by name                    | None          |
-| `-o`, `--output` | choice (`json` | `table`)                                   | Output format |
-| `--help`, `-h`   | boolean        | Show this message and exit.                | `False`       |
+| Name             | Type           | Description                                | Default          |
+| ---------------- | -------------- | ------------------------------------------ | ---------------- |
+| `--all`, `-a`    | boolean        | Show all recent sessions (not just active) | `False`          |
+| `--name`         | text           | Filter sessions by name                    | None             |
+| `-o`, `--output` | choice (`json` | `table`)                                   | Output format    |
+| `-h`, `--help`   | boolean        | Show this message and exit.                | `Sentinel.UNSET` |
 
 ##### summon session logs
 
@@ -974,10 +974,10 @@ summon session logs [OPTIONS] SESSION
 
 **Options:**
 
-| Name           | Type    | Description                           | Default |
-| -------------- | ------- | ------------------------------------- | ------- |
-| `--tail`, `-n` | integer | Number of lines to show (default: 50) | `50`    |
-| `--help`, `-h` | boolean | Show this message and exit.           | `False` |
+| Name           | Type    | Description                           | Default          |
+| -------------- | ------- | ------------------------------------- | ---------------- |
+| `--tail`, `-n` | integer | Number of lines to show (default: 50) | `50`             |
+| `-h`, `--help` | boolean | Show this message and exit.           | `Sentinel.UNSET` |
 
 #### summon start
 
@@ -991,14 +991,14 @@ summon start [OPTIONS]
 
 **Options:**
 
-| Name           | Type          | Description                                               | Default |
-| -------------- | ------------- | --------------------------------------------------------- | ------- |
-| `--cwd`        | text          | Working directory for Claude (default: current directory) | None    |
-| `--resume`     | text          | Resume an existing Claude Code session by ID              | None    |
-| `--name`       | text          | Session name (used for Slack channel naming)              | None    |
-| `--model`      | text          | Model override (default: from config)                     | None    |
-| `--effort`     | choice (`low` | `medium`                                                  | `high`  |
-| `--help`, `-h` | boolean       | Show this message and exit.                               | `False` |
+| Name           | Type          | Description                                               | Default          |
+| -------------- | ------------- | --------------------------------------------------------- | ---------------- |
+| `--cwd`        | text          | Working directory for Claude (default: current directory) | None             |
+| `--resume`     | text          | Resume an existing Claude Code session by ID              | None             |
+| `--name`       | text          | Session name (used for Slack channel naming)              | None             |
+| `--model`      | text          | Model override (default: from config)                     | None             |
+| `--effort`     | choice (`low` | `medium`                                                  | `high`           |
+| `-h`, `--help` | boolean       | Show this message and exit.                               | `Sentinel.UNSET` |
 
 #### summon stop
 
@@ -1012,10 +1012,10 @@ summon stop [OPTIONS] SESSION
 
 **Options:**
 
-| Name           | Type    | Description                 | Default |
-| -------------- | ------- | --------------------------- | ------- |
-| `--all`, `-a`  | boolean | Stop all active sessions    | `False` |
-| `--help`, `-h` | boolean | Show this message and exit. | `False` |
+| Name           | Type    | Description                 | Default          |
+| -------------- | ------- | --------------------------- | ---------------- |
+| `--all`, `-a`  | boolean | Stop all active sessions    | `False`          |
+| `-h`, `--help` | boolean | Show this message and exit. | `Sentinel.UNSET` |
 
 #### summon version
 
@@ -1029,10 +1029,10 @@ summon version [OPTIONS]
 
 **Options:**
 
-| Name             | Type           | Description                 | Default       |
-| ---------------- | -------------- | --------------------------- | ------------- |
-| `-o`, `--output` | choice (`json` | `table`)                    | Output format |
-| `--help`, `-h`   | boolean        | Show this message and exit. | `False`       |
+| Name             | Type           | Description                 | Default          |
+| ---------------- | -------------- | --------------------------- | ---------------- |
+| `-o`, `--output` | choice (`json` | `table`)                    | Output format    |
+| `-h`, `--help`   | boolean        | Show this message and exit. | `Sentinel.UNSET` |
 
 Command Aliases
 
