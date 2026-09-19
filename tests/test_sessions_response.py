@@ -34,12 +34,18 @@ def make_streamer(
     *,
     show_thinking: bool = False,
     max_inline_chars: int = 2500,
+    team_id: str | None = None,
+    user_id: str | None = None,
 ) -> tuple[ResponseStreamer, ThreadRouter, AsyncMock]:
     """Create a ResponseStreamer with a mocked SlackClient."""
     client = make_mock_slack_client()
     router = ThreadRouter(client)
     streamer = ResponseStreamer(
-        router, show_thinking=show_thinking, max_inline_chars=max_inline_chars
+        router,
+        show_thinking=show_thinking,
+        max_inline_chars=max_inline_chars,
+        user_id=user_id,
+        team_id=team_id,
     )
     return streamer, router, client
 
@@ -1747,15 +1753,14 @@ class TestApprovalVisibility:
     async def test_tool_use_with_auto_allowed_label(self):
         """Pre-resolved bridge with 'auto-allowed' renders label on tool use."""
         bridge = ApprovalBridge()
-        bridge.resolve("Read", ApprovalInfo(label="auto-allowed"))
+        bridge.resolve("Bash", ApprovalInfo(label="auto-allowed"))
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
-        block = make_tool_use_block("Read", {"file_path": "/tmp/test.py"})
+        block = make_tool_use_block("Bash", {"command": "echo hello"})
 
         await streamer._handle_tool_use_block(block, None)
 
         posted_blocks = client.post.call_args
-        # Find the context block with the tool use text
         call_kwargs = posted_blocks[1] if len(posted_blocks) > 1 else {}
         blocks = call_kwargs.get("blocks", [])
         text = blocks[0]["elements"][0]["text"] if blocks else ""
@@ -1810,27 +1815,21 @@ class TestApprovalVisibility:
         assert ":hammer_and_wrench:" in text
         assert "_(" not in text  # No label suffix
 
-    async def test_bridge_timeout_posts_without_label(self):
-        """On bridge timeout, tool use posts without label (graceful degradation)."""
+    async def test_unresolved_bridge_posts_without_label(self):
+        """When bridge Future is not pre-resolved, tool card posts without label."""
         bridge = ApprovalBridge()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = make_tool_use_block("Read", {"file_path": "/tmp/test.py"})
 
-        # Patch asyncio.wait_for to raise TimeoutError immediately
-        timeout_patch = patch(
-            "summon_claude.sessions.response.asyncio.wait_for",
-            side_effect=asyncio.TimeoutError,
-        )
-        with timeout_patch:
-            await streamer._handle_tool_use_block(block, None)
+        await streamer._handle_tool_use_block(block, None)
 
         posted_blocks = client.post.call_args
         call_kwargs = posted_blocks[1] if len(posted_blocks) > 1 else {}
         blocks = call_kwargs.get("blocks", [])
         text = blocks[0]["elements"][0]["text"] if blocks else ""
         assert ":hammer_and_wrench:" in text
-        assert "_(" not in text  # No label
+        assert "_(" not in text  # No label — async update pending
 
     async def test_subagent_tool_skips_bridge(self):
         """Subagent tool calls (parent_id != None) skip bridge, post immediately."""
@@ -1846,29 +1845,27 @@ class TestApprovalVisibility:
 
         bridge.create_future.assert_not_called()
 
-    async def test_enter_worktree_skips_bridge(self):
-        """EnterWorktree bypasses can_use_tool — must skip bridge to prevent timeout hang."""
+    async def test_enter_worktree_non_blocking(self):
+        """EnterWorktree goes through bridge non-blockingly (no hang)."""
         bridge = ApprovalBridge()
-        bridge.create_future = MagicMock()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = ToolUseBlock(id="tu_wt", name="EnterWorktree", input={"name": "test"})
 
         await streamer._handle_tool_use_block(block, None)
 
-        bridge.create_future.assert_not_called()
+        client.post.assert_called()
 
-    async def test_exit_worktree_skips_bridge(self):
-        """ExitWorktree bypasses can_use_tool — must skip bridge to prevent timeout hang."""
+    async def test_exit_worktree_non_blocking(self):
+        """ExitWorktree goes through bridge non-blockingly (no hang)."""
         bridge = ApprovalBridge()
-        bridge.create_future = MagicMock()
         streamer, router, client = make_streamer()
         streamer._bridge = bridge
         block = ToolUseBlock(id="tu_exit_wt", name="ExitWorktree", input={})
 
         await streamer._handle_tool_use_block(block, None)
 
-        bridge.create_future.assert_not_called()
+        client.post.assert_called()
 
     async def test_denied_tool_result_suppressed(self):
         """Denied tool results (is_error=True) are suppressed — no :x: Tool error."""
@@ -1945,12 +1942,11 @@ class TestBridgeTimeoutGuard:
         config = make_test_config()
         assert config.permission_timeout_s == 900
 
-    def test_bridge_skip_tools_contains_builtin_bypass_tools(self):
-        """Guard: _BRIDGE_SKIP_TOOLS must include tools that bypass can_use_tool."""
-        from summon_claude.sessions.response import _BRIDGE_SKIP_TOOLS
-
-        assert "EnterWorktree" in _BRIDGE_SKIP_TOOLS
-        assert "ExitWorktree" in _BRIDGE_SKIP_TOOLS
+    async def test_bridge_non_blocking_for_all_tools(self):
+        """Bridge never blocks — all tools use non-blocking async updates."""
+        bridge = ApprovalBridge()
+        fut = bridge.create_future("AnyTool")
+        assert not fut.done()
 
 
 class TestBridgeClearOnNewTurn:
@@ -1999,18 +1995,8 @@ class TestSanitizeApprovalReason:
         assert "`" not in result
 
 
-class TestBridgeTimeoutRelationship:
-    """Guard: bridge_timeout_s must exceed permission_timeout_s."""
-
-    def test_bridge_timeout_exceeds_permission_timeout(self):
-        """session.py wires bridge_timeout_s = permission_timeout_s + 60."""
-        from conftest import make_test_config
-
-        config = make_test_config()
-        expected = config.permission_timeout_s + 60
-        # Default matches the formula: permission_timeout_s (900) + 60 = 960
-        streamer, _, _ = make_streamer()
-        assert streamer._bridge_timeout_s == expected
+class TestPermissionTimeoutConfig:
+    """Guard: permission timeout config is correctly wired."""
 
     def test_permission_timeout_env_var_binding(self):
         """SUMMON_PERMISSION_TIMEOUT_S env var changes config value."""
@@ -2271,3 +2257,925 @@ class TestPendingFileChangeLifecycle:
             _, _, _, thread_ts_arg = mock_upload_diff.call_args.args
             assert thread_ts_arg == subagent_ts
             assert thread_ts_arg != "active_ts"
+
+
+# ---------------------------------------------------------------------------
+# comp-5: _build_turn_header_blocks (overflow menu accessory)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildTurnHeaderBlocks:
+    """Tests for the _build_turn_header_blocks helper — comp-5 overflow menus."""
+
+    def test_returns_single_section_block(self):
+        """_build_turn_header_blocks returns exactly one block of type section."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("Turn 1: Processing...")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "section"
+
+    def test_section_contains_text(self):
+        """The section block includes the provided header text."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("Turn 42: some work")
+        text_field = blocks[0]["text"]
+        assert text_field["type"] == "mrkdwn"
+        assert "Turn 42: some work" in text_field["text"]
+
+    def test_accessory_is_overflow(self):
+        """The section block has an overflow accessory."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        accessory = blocks[0]["accessory"]
+        assert accessory["type"] == "overflow"
+        assert accessory["action_id"] == "turn_overflow"
+
+    def test_overflow_has_two_options(self):
+        """The overflow menu has exactly 2 options."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        options = blocks[0]["accessory"]["options"]
+        assert len(options) == 2
+
+    def test_overflow_option_values(self):
+        """The overflow options have the expected value strings."""
+        from summon_claude.sessions.response import _build_turn_header_blocks
+
+        blocks = _build_turn_header_blocks("header")
+        values = {opt["value"] for opt in blocks[0]["accessory"]["options"]}
+        assert values == {"turn_stop", "turn_view_cost"}
+
+    async def test_start_turn_posts_blocks_with_overflow(self):
+        """start_turn posts Block Kit with an overflow accessory."""
+        streamer, router, client = make_streamer()
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="111.0"))
+
+        await streamer.start_turn(turn_number=1)
+
+        client.post.assert_awaited_once()
+        call_kwargs = client.post.call_args.kwargs
+        blocks = call_kwargs.get("blocks")
+        assert blocks is not None, "Expected blocks kwarg in post call"
+        assert len(blocks) == 1
+        assert blocks[0]["accessory"]["type"] == "overflow"
+
+    async def test_update_turn_summary_posts_blocks_with_overflow(self):
+        """update_turn_summary preserves overflow accessory in update call."""
+        streamer, router, client = make_streamer()
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="111.0"))
+        await streamer.start_turn(turn_number=1)
+
+        await streamer.update_turn_summary("3 tool calls")
+
+        client.update.assert_awaited_once()
+        update_kwargs = client.update.call_args.kwargs
+        blocks = update_kwargs.get("blocks")
+        assert blocks is not None, "Expected blocks kwarg in update call"
+        assert blocks[0]["accessory"]["type"] == "overflow"
+
+
+class TestHybridStreaming:
+    """Tests for the chat_stream hybrid streaming integration."""
+
+    def _make_stream_streamer(self):
+        """Create a streamer with streaming enabled and a mock AsyncChatStream."""
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        """Start a turn so turn_thread_ts is set."""
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_stream_opened_on_first_tool_use(self):
+        """A chat stream is opened when the first ToolUseBlock arrives."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_awaited_once_with("turn.0", team_id="T123", user_id="U456")
+
+    async def test_task_update_in_progress_emitted(self):
+        """TaskUpdateChunk(in_progress) is appended to the stream on ToolUseBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Find the append call with chunks (TaskUpdateChunk)
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) >= 1
+        chunk = chunk_calls[0].kwargs["chunks"][0]
+        assert chunk.status == "in_progress"
+        assert chunk.title == "Read"
+
+    async def test_task_update_complete_on_success(self):
+        """TaskUpdateChunk(complete) is emitted on successful ToolResultBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file content", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) >= 2
+        complete_chunk = chunk_calls[1].kwargs["chunks"][0]
+        assert complete_chunk.status == "complete"
+        assert complete_chunk.title == "Read"
+
+    async def test_task_update_error_on_failure(self):
+        """TaskUpdateChunk(error) is emitted on failed ToolResultBlock."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file not found", is_error=True)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        error_chunk = chunk_calls[-1].kwargs["chunks"][0]
+        assert error_chunk.status == "error"
+
+    async def test_append_failure_logs_warning(self, caplog):
+        """A failed TaskUpdateChunk append is logged at WARNING, not silently at DEBUG.
+
+        Regression test: a swallowed chat_appendStream failure previously
+        looked identical to success in production logs — indistinguishable
+        from a stuck task pill caused by something else entirely.
+        """
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        mock_stream.append = AsyncMock(side_effect=RuntimeError("rate limited"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert any("TaskUpdateChunk append failed" in r.message for r in caplog.records)
+
+    async def test_missing_tool_result_block_logs_unsettled_warning(self, caplog):
+        """Bug #1 diagnostic: a pill that starts but whose ToolResultBlock never
+        arrives at all must be flagged — this is the blind spot the
+        active_stream-is-None diagnostic (test_append_failure_logs_warning and
+        the "Skipped TaskUpdateChunk completion" log) cannot catch, since
+        _handle_tool_result_block never runs for it in the first place.
+        """
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # ToolUseBlock fires (in_progress sent) but no matching ToolResultBlock
+        # ever arrives before the turn's ResultMessage — simulates the tool
+        # result never surfacing in the SDK message stream at all.
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("AskUserQuestion", {"questions": []}, tool_use_id="tu_1")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        matches = [r for r in caplog.records if "never arrived" in r.message]
+        assert len(matches) == 1
+        assert "tu_1" in matches[0].getMessage()
+        assert "AskUserQuestion" in matches[0].getMessage()
+
+    async def test_settled_tool_result_does_not_log_unsettled_warning(self, caplog):
+        """No false positive: a normally-completed pill must not be flagged."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert not any("never arrived" in r.message for r in caplog.records)
+
+    async def test_real_chat_stream_task_update_id_matches_across_start_and_append(self):
+        """Exercises the real AsyncChatStream buffering/flush logic, not a full mock.
+
+        Every other test in this class mocks open_chat_stream to return a
+        fully-mocked AsyncChatStream, so none of them exercise the real
+        chat_startStream/chat_appendStream low-level calls or confirm the
+        same chunk id survives from the in_progress chunk (sent via
+        chat_startStream) to the complete chunk (sent via chat_appendStream
+        against the ts chat_startStream returned).
+        """
+        from slack_sdk.models.messages.chunk import TaskUpdateChunk
+        from slack_sdk.web.async_chat_stream import AsyncChatStream
+
+        mock_web_client = AsyncMock()
+        mock_web_client.chat_startStream = AsyncMock(return_value={"ok": True, "ts": "stream.123"})
+        mock_web_client.chat_appendStream = AsyncMock(return_value={"ok": True})
+
+        real_stream = AsyncChatStream(
+            mock_web_client,
+            channel="C123",
+            logger=logging.getLogger("test.chat_stream"),
+            thread_ts="turn.0",
+            buffer_size=64,
+            recipient_team_id="T123",
+            recipient_user_id="U456",
+        )
+
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        client.open_chat_stream = AsyncMock(return_value=real_stream)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="file content", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        mock_web_client.chat_startStream.assert_awaited_once()
+        start_chunks = mock_web_client.chat_startStream.call_args.kwargs["chunks"]
+        start_task_chunks = [c for c in start_chunks if isinstance(c, TaskUpdateChunk)]
+        assert len(start_task_chunks) == 1
+        assert start_task_chunks[0].id == "tu_1"
+        assert start_task_chunks[0].status == "in_progress"
+
+        mock_web_client.chat_appendStream.assert_awaited_once()
+        append_kwargs = mock_web_client.chat_appendStream.call_args.kwargs
+        assert append_kwargs["ts"] == "stream.123"
+        append_task_chunks = [c for c in append_kwargs["chunks"] if isinstance(c, TaskUpdateChunk)]
+        assert len(append_task_chunks) == 1
+        assert append_task_chunks[0].id == "tu_1"
+        assert append_task_chunks[0].status == "complete"
+
+    async def test_stream_stopped_with_summary_blocks(self):
+        """Stream stop includes summary blocks with tool count and files."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/src/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # stop() should have been called with summary blocks
+        mock_stream.stop.assert_awaited()
+        stop_kwargs = mock_stream.stop.call_args.kwargs
+        blocks = stop_kwargs.get("blocks")
+        assert blocks is not None, "stop() should include summary blocks"
+        assert blocks[0]["type"] == "context"
+        summary_text = blocks[0]["elements"][0]["text"]
+        assert "1 tool call" in summary_text
+        assert "a.py" in summary_text
+
+    async def test_stream_stopped_on_result(self):
+        """The stream is stopped when ResultMessage arrives."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        mock_stream.stop.assert_awaited_once()
+
+    async def test_fallback_on_stream_open_failure(self):
+        """Falls back to chat_postMessage when stream open fails."""
+        streamer, router, client, _ = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        client.open_chat_stream = AsyncMock(side_effect=Exception("stream_error"))
+        # Reset post mock to track new calls (start_turn already called post)
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="msg.1"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Tool use context block should still be posted via chat_postMessage
+        tool_post_calls = [
+            c
+            for c in client.post.call_args_list
+            if "blocks" in (c.kwargs or {}) and any("hammer" in str(b) for b in c.kwargs["blocks"])
+        ]
+        assert len(tool_post_calls) >= 1, "Tool use block should be posted via chat_postMessage"
+
+    async def test_fallback_on_stream_append_failure(self):
+        """Falls back after initial success when a later append fails."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # First append (in_progress) succeeds, second (complete) fails
+        call_count = 0
+        original_append = AsyncMock()
+
+        async def _append_side_effect(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count > 1:
+                raise Exception("append_failed")
+            return await original_append(**kwargs)
+
+        mock_stream.append = AsyncMock(side_effect=_append_side_effect)
+
+        tool_result = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Stream should have been stopped after failure
+        mock_stream.stop.assert_awaited()
+        # stream_failed should prevent further stream attempts
+        assert streamer._turn.stream_failed is True
+
+    async def test_flush_to_thread_uses_stream_when_active(self):
+        """_flush_to_thread routes through stream.append when a stream is open."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # Manually open a stream and set up thread flushing state
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "Some thread text"
+
+        await streamer._flush_buffer()
+
+        # Text should have gone to stream.append(markdown_text=...) not client.post
+        md_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("markdown_text")]
+        assert len(md_calls) == 1
+        assert md_calls[0].kwargs["markdown_text"] == "Some thread text"
+
+    async def test_flush_to_thread_stream_redacts_secrets(self):
+        """Secrets are redacted when flushing through the stream path."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "Token is xoxb-secret-token-here"
+
+        await streamer._flush_buffer()
+
+        md_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("markdown_text")]
+        assert len(md_calls) == 1
+        streamed_text = md_calls[0].kwargs["markdown_text"]
+        assert "xoxb-" not in streamed_text
+        assert "[REDACTED]" in streamed_text
+
+    async def test_flush_to_thread_stream_logs_validation_warnings(self, caplog):
+        """validate_agent_output warnings are logged when flushing through the stream path."""
+        import logging
+        from unittest.mock import patch
+
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.posting_to_thread = True
+        streamer._turn.buffer = "some text"
+
+        with (
+            patch(
+                "summon_claude.sessions.response.validate_agent_output",
+                return_value=("some text", ["warning: suspicious pattern detected"]),
+            ),
+            caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"),
+        ):
+            await streamer._flush_buffer()
+
+        assert any("suspicious pattern detected" in record.message for record in caplog.records)
+
+    async def test_no_stream_without_team_id(self):
+        """No stream is opened when team_id is not set."""
+        streamer, router, client = make_streamer(user_id="U456")
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_no_stream_without_user_id(self):
+        """No stream is opened when user_id is not set."""
+        streamer, router, client = make_streamer(team_id="T123")
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_no_stream_for_subagent_tools(self):
+        """TaskUpdateChunks are not emitted for subagent tool calls (parent_id set)."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        # Simulate a subagent tool use (parent_tool_use_id set)
+        subagent_msg = AssistantMessage(
+            content=[make_tool_use_block("Read", {"file_path": "/b.py"}, tool_use_id="tu_sub")],
+            model="claude-opus-4-6",
+            parent_tool_use_id="parent_tu_1",
+        )
+        messages = [
+            subagent_msg,
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # Stream should NOT have been opened for subagent tool
+        client.open_chat_stream.assert_not_awaited()
+
+    async def test_stream_reused_across_tool_calls(self):
+        """The same stream is reused for multiple tool calls in one turn."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        tool_result_1 = ToolResultBlock(tool_use_id="tu_1", content="ok", is_error=False)
+        tool_use_2 = make_tool_use_block("Grep", {"pattern": "foo"}, tool_use_id="tu_2")
+        tool_result_2 = ToolResultBlock(tool_use_id="tu_2", content="found", is_error=False)
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_assistant_message([tool_result_1]),
+            make_assistant_message([tool_use_2]),
+            make_assistant_message([tool_result_2]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        # open_chat_stream should only be called once
+        client.open_chat_stream.assert_awaited_once()
+        # But there should be 4 chunk appends (2 in_progress + 2 complete)
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 4
+
+    async def test_stream_stop_failure_is_silent(self):
+        """stream.stop() failure does not propagate."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        mock_stream.stop = AsyncMock(side_effect=Exception("stop_failed"))
+
+        messages = [
+            make_assistant_message([make_tool_use_block("Read", {"file_path": "/a.py"})]),
+            make_result_message(),
+        ]
+        # Should not raise
+        result = await streamer.stream_with_flush(agen(messages))
+        assert result is not None
+
+    async def test_denied_tool_skips_task_update_chunks(self):
+        """Denied tools do not emit TaskUpdateChunk (in_progress or error)."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+        # Simulate a turn already in progress (reset doesn't wipe these)
+        streamer._turn.active_stream = mock_stream
+        streamer._turn.has_seen_tool_use = True
+
+        # Simulate denial: add tool_use_id to denied set (as bridge would)
+        streamer._turn.denied_tool_use_ids.add("tu_denied")
+        streamer._turn.tool_names["tu_denied"] = "Bash"
+
+        # Directly call _handle_tool_use_block with a denied tool
+        denied_block = make_tool_use_block("Bash", {"command": "rm"}, tool_use_id="tu_denied")
+        await streamer._handle_tool_use_block(denied_block, parent_id=None)
+
+        # in_progress should NOT have been emitted for the denied tool
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 0, (
+            f"Denied tool should not emit in_progress TaskUpdateChunk, got {chunk_calls}"
+        )
+
+        # Now handle the tool result (denied + error)
+        denied_result = ToolResultBlock(tool_use_id="tu_denied", content="denied", is_error=True)
+        await streamer._handle_tool_result_block(denied_result, parent_id=None)
+
+        # complete/error should NOT have been emitted either
+        chunk_calls = [c for c in mock_stream.append.call_args_list if c.kwargs.get("chunks")]
+        assert len(chunk_calls) == 0, (
+            f"Denied tool should not emit any TaskUpdateChunks, got {chunk_calls}"
+        )
+
+    async def test_text_only_no_stream_opened(self):
+        """Text-only content (no ToolUseBlock) never opens a stream — stop() not called."""
+        streamer, router, client, mock_stream = self._make_stream_streamer()
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message([make_text_block("Here is the answer.")]),
+            make_result_message(),
+        ]
+        result = await streamer.stream_with_flush(agen(messages))
+
+        client.open_chat_stream.assert_not_awaited()
+        mock_stream.stop.assert_not_awaited()
+        assert result is not None
+
+
+class TestEnterWorktreeFallback:
+    """Bug #1 regression: when EnterWorktree's ToolResultBlock never arrives
+    in the SDK message stream (upstream CLI/SDK gap), the turn-end fallback
+    must proactively invoke the worktree callback so containment activates.
+
+    notify_entered_worktree does its own independent verification (git worktree
+    list, path validation, anti-widening guard), so the fallback doesn't blindly
+    trust an unconfirmed tool call — it lets the existing safety checks decide.
+    """
+
+    def _make_stream_streamer(self, callback=None):
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        if callback is not None:
+            streamer._on_worktree_entered = callback
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_fallback_activates_when_tool_result_missing(self, caplog):
+        """EnterWorktree ToolUseBlock with no matching ToolResultBlock: callback
+        fires at turn end via the fallback path."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is not None
+        callback.assert_called_once_with("test-wt", "")
+        assert any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+    async def test_fallback_activates_for_path_based_entry(self, caplog):
+        """Path-based EnterWorktree with no ToolResultBlock: callback fires
+        with ('', path) at turn end."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        wt_path = "/project/.claude/worktrees/feat"
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"path": wt_path}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("", wt_path)
+
+    async def test_fallback_catches_callback_exception(self, caplog):
+        """If the callback raises (e.g. worktree doesn't exist), the exception
+        is caught and logged — the turn doesn't crash."""
+        callback = AsyncMock(side_effect=RuntimeError("worktree not found"))
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is not None
+        callback.assert_called_once()
+        assert any("callback raised" in r.message for r in caplog.records)
+
+    async def test_no_double_invocation_when_result_arrives_normally(self):
+        """Normal path: ToolResultBlock arrives → callback fires once from
+        _handle_tool_result_block. Fallback must NOT fire again."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(
+            tool_use_id="tu_wt", content="Worktree created", is_error=False
+        )
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+
+    async def test_no_fallback_on_aborted_turn(self):
+        """Aborted turn (no ResultMessage): callback must NOT fire — we don't
+        know whether the tool call succeeded."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            # No ResultMessage — turn aborted
+        ]
+        result = await streamer.stream_with_flush(agen(messages))
+
+        assert result is None
+        callback.assert_not_called()
+
+    async def test_no_fallback_when_result_was_error(self):
+        """When the ToolResultBlock arrives with is_error=True, the normal path
+        correctly skips the callback. The fallback should not re-invoke it either
+        (the entry is already popped by _handle_tool_result_block)."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        tool_result = ToolResultBlock(
+            tool_use_id="tu_wt", content="Permission denied", is_error=True
+        )
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_assistant_message([tool_result]),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+
+    async def test_non_worktree_tools_no_fallback(self, caplog):
+        """Dropped ToolResultBlock for non-EnterWorktree tools must NOT trigger
+        any fallback (only the existing unsettled-pill diagnostic)."""
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_stream_streamer(callback)
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("Bash", {"command": "ls"}, tool_use_id="tu_bash")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+        assert not any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+
+class TestTranscriptReconcilerIntegration:
+    """Tests for the transcript reconciler wired into ResponseStreamer's turn-end flow."""
+
+    def _make_streamer_with_transcript(self, callback=None, transcript=None):
+        mock_stream = AsyncMock()
+        mock_stream.append = AsyncMock()
+        mock_stream.stop = AsyncMock()
+        streamer, router, client = make_streamer(team_id="T123", user_id="U456")
+        if callback is not None:
+            streamer._on_worktree_entered = callback
+        if transcript is not None:
+            streamer._transcript = transcript
+        client.open_chat_stream = AsyncMock(return_value=mock_stream)
+        return streamer, router, client, mock_stream
+
+    async def _setup_turn(self, streamer, client):
+        client.post = AsyncMock(return_value=MagicMock(channel_id="C123", ts="turn.0"))
+        await streamer.start_turn(turn_number=1)
+
+    async def test_transcript_recovers_pill_and_sends_completion(self, tmp_path, caplog):
+        """Transcript reconciler recovers a dropped tool result and sends the
+        pill completion TaskUpdateChunk before the stream stops."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        # Write a tool_result to the transcript that the SDK stream dropped
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {"type": "tool_result", "tool_use_id": "tu_bash", "content": "ok"}
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        # SDK stream: ToolUseBlock arrives, but NO ToolResultBlock
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("Bash", {"command": "ls"}, tool_use_id="tu_bash")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions"):
+            await streamer.stream_with_flush(agen(messages))
+
+        assert any("recovered" in r.message for r in caplog.records)
+
+    async def test_transcript_recovers_worktree_containment(self, tmp_path, caplog):
+        """Transcript reconciler recovers a dropped EnterWorktree result and
+        activates containment, preempting the arg-based fallback."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "tu_wt",
+                                    "content": "Worktree created",
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.INFO, logger="summon_claude.sessions"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+        # Should use transcript path, not the arg-based fallback
+        assert any("Transcript reconciler" in r.message for r in caplog.records)
+        assert not any("EnterWorktree fallback" in r.message for r in caplog.records)
+
+    async def test_transcript_error_result_does_not_activate_worktree(self, tmp_path):
+        """Transcript shows EnterWorktree returned is_error=True — callback
+        must NOT fire, matching the normal-path behavior."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("test-sess")
+
+        transcript = reconciler.transcript_path
+        assert transcript is not None
+        import json
+
+        transcript.parent.mkdir(parents=True, exist_ok=True)
+        with transcript.open("w") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "type": "user",
+                        "message": {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": "tu_wt",
+                                    "content": "Permission denied",
+                                    "is_error": True,
+                                }
+                            ],
+                        },
+                    }
+                )
+                + "\n"
+            )
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "bad-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_not_called()
+
+    async def test_fallback_fires_when_transcript_unavailable(self, tmp_path, caplog):
+        """When the transcript doesn't exist, the arg-based fallback fires."""
+        from summon_claude.sessions.transcript import TranscriptReconciler
+
+        cwd = str(tmp_path / "project")
+        reconciler = TranscriptReconciler(cwd)
+        reconciler.set_session_id("nonexistent-sess")
+
+        callback = AsyncMock()
+        streamer, router, client, mock_stream = self._make_streamer_with_transcript(
+            callback=callback, transcript=reconciler
+        )
+        await self._setup_turn(streamer, client)
+
+        messages = [
+            make_assistant_message(
+                [make_tool_use_block("EnterWorktree", {"name": "test-wt"}, tool_use_id="tu_wt")]
+            ),
+            make_result_message(),
+        ]
+        with caplog.at_level(logging.WARNING, logger="summon_claude.sessions.response"):
+            await streamer.stream_with_flush(agen(messages))
+
+        callback.assert_called_once_with("test-wt", "")
+        assert any("EnterWorktree fallback" in r.message for r in caplog.records)

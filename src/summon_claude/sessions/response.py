@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -30,8 +30,10 @@ from claude_agent_sdk import (
     ToolUseBlock,
 )
 
+from summon_claude.security import validate_agent_output
 from summon_claude.sessions.context import ContextUsage
 from summon_claude.sessions.mcp_health import McpHealthTracker
+from summon_claude.sessions.transcript import TranscriptReconciler
 from summon_claude.sessions.types import ChangeType, FileChange
 from summon_claude.slack.client import redact_secrets, sanitize_for_mrkdwn
 from summon_claude.slack.formatting import snippet_type_for_extension
@@ -39,19 +41,17 @@ from summon_claude.slack.markdown_split import split_markdown
 from summon_claude.slack.router import ThreadRouter
 
 if TYPE_CHECKING:
+    from slack_sdk.web.async_chat_stream import AsyncChatStream
+
     from summon_claude.sessions.permissions import ApprovalBridge, ApprovalInfo
 
 logger = logging.getLogger(__name__)
 
+_TaskStatus = Literal["in_progress", "complete", "error"]
+
 _MAX_MESSAGE_CHARS = 3000
 _FLUSH_HEADROOM_CHARS = 100
 _FLUSH_INTERVAL_S = 2.0  # 2 seconds to stay under Slack Tier 3 rate limits
-# Built-in tools that bypass can_use_tool — the SDK never fires the callback
-# for these, so a bridge Future would never resolve (bridge_timeout_s hang). Skip the
-# bridge entirely for these tools. Spike-confirmed 2026-03-20 on SDK 0.1.48.
-# If SDK is upgraded, re-run the spike (hack/spikes/spike_enter_worktree.py)
-# to verify no new built-ins bypass can_use_tool; add them here if found.
-_BRIDGE_SKIP_TOOLS = frozenset(["EnterWorktree", "ExitWorktree"])
 
 
 def _sanitize_approval_reason(text: str) -> str:
@@ -186,8 +186,21 @@ class _TurnState:
     tool_names: dict[str, str] = field(default_factory=dict)
     # tool_use_id → (tool_name, filepath, old_str, new_str); consumed by _handle_tool_result_block
     pending_file_changes: dict[str, tuple[str, str, str, str]] = field(default_factory=dict)
-    # Denied by approval bridge — suppresses :x: error posts and blocks file change tracking
     denied_tool_use_ids: set[str] = field(default_factory=set)
+    # tool_use_id → (message_ts, tool_name, summary) for async approval label updates
+    tool_card_refs: dict[str, tuple[str, str, str]] = field(default_factory=dict)
+    # Hybrid streaming — thread-based chat_stream for tool progress
+    active_stream: AsyncChatStream | None = None
+    stream_failed: bool = False  # once True, fall back to chat_postMessage for rest of turn
+    # Bug #1 (stuck task pill) diagnostics: tool_use_ids that sent an "in_progress"
+    # TaskUpdateChunk (pill_started_ids) vs. ones whose _handle_tool_result_block
+    # completion logic was actually reached, whether it succeeded or was skipped
+    # (pill_settled_ids). A pill in started-but-not-settled at turn end means its
+    # ToolResultBlock never arrived in the message stream at all — distinct from
+    # (and undetectable by) the active_stream-is-None diagnostic, which requires
+    # _handle_tool_result_block to have run in the first place.
+    pill_started_ids: set[str] = field(default_factory=set)
+    pill_settled_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -216,25 +229,27 @@ class ResponseStreamer:
         self,
         router: ThreadRouter,
         user_id: str | None = None,
+        team_id: str | None = None,
         show_thinking: bool = False,
         max_inline_chars: int = 2500,
         on_file_change: Callable[[FileChange], Awaitable[None]] | None = None,
         on_worktree_entered: Callable[[str, str], Awaitable[None]] | None = None,
         mcp_health: McpHealthTracker | None = None,
         bridge: ApprovalBridge | None = None,
-        bridge_timeout_s: float = 960.0,
         on_subagent_return: Callable[[dict, str], Awaitable[None]] | None = None,
+        transcript: TranscriptReconciler | None = None,
     ) -> None:
         self._router = router
         self._user_id = user_id
+        self._team_id = team_id
         self._show_thinking = show_thinking
         self._max_inline_chars = max_inline_chars
         self._on_file_change = on_file_change
         self._on_worktree_entered = on_worktree_entered
         self._mcp_health = mcp_health
         self._bridge = bridge
-        self._bridge_timeout_s = bridge_timeout_s
         self._on_subagent_return = on_subagent_return
+        self._transcript = transcript
 
         # Cross-turn tracking of pending agent verifications (keyed by tool_use_id)
         self._pending_agent_verifications: dict[str, dict] = {}
@@ -258,7 +273,8 @@ class ResponseStreamer:
             header = f"\U0001f527 Turn {turn_number}: re: _{snippet}_..."
         else:
             header = f"\U0001f527 Turn {turn_number}: Processing..."
-        ref = await self._router.post_to_main(header)
+        blocks = _build_turn_header_blocks(header)
+        ref = await self._router.post_to_main(header, blocks=blocks)
         self._router.set_active_thread(ref.ts, ref)
         self._turn.turn_thread_ts = ref.ts
 
@@ -281,10 +297,11 @@ class ResponseStreamer:
                 )
             else:
                 text = f"\U0001f527 Turn {self._current_turn_number}: {summary}"
-            await self._router.update(self._router.active_thread_ref.ts, text)
+            blocks = _build_turn_header_blocks(text)
+            await self._router.update(self._router.active_thread_ref.ts, text, blocks=blocks)
 
-    def _generate_turn_summary(self, context: ContextUsage | None = None) -> str:
-        """Build a concise summary string for the turn starter message."""
+    def _tool_file_summary_parts(self) -> list[str]:
+        """Shared tool-call and file-touch summary parts for turn reporting."""
         parts: list[str] = []
         if self._turn.tool_call_count:
             suffix = "s" if self._turn.tool_call_count != 1 else ""
@@ -294,6 +311,28 @@ class ResponseStreamer:
             if len(self._turn.files_touched) > 3:
                 short_names.append(f"+{len(self._turn.files_touched) - 3} more")
             parts.append(", ".join(short_names))
+        return parts
+
+    def _build_stream_summary_blocks(self) -> list[dict[str, Any]] | None:
+        """Build compact summary blocks for the stream's final ``stop()`` message.
+
+        Uses turn state (tool count, files) which is available before context/cost.
+        Returns ``None`` if no tools were called and no files were touched (nothing to summarize).
+        """
+        parts = self._tool_file_summary_parts()
+        if not parts:
+            return None
+        summary = " \u00b7 ".join(parts)
+        return [
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f":white_check_mark: {summary}"}],
+            }
+        ]
+
+    def _generate_turn_summary(self, context: ContextUsage | None = None) -> str:
+        """Build a concise summary string for the turn starter message."""
+        parts = self._tool_file_summary_parts()
         if context is not None:
             ctx_k = context.total_tokens // 1000
             win_k = context.max_tokens // 1000
@@ -313,6 +352,98 @@ class ResponseStreamer:
         """Set the thread status indicator (best-effort)."""
         if self._turn.turn_thread_ts:
             await self._router.client.set_thread_status(self._turn.turn_thread_ts, status)
+
+    async def clear_status(self) -> None:
+        """Clear the thread status indicator (best-effort).
+
+        Public wrapper so callers outside this module (e.g. the abort path
+        in session.py) can clear it without reaching into a private method —
+        stream_with_flush already does this itself on normal completion, but
+        never on abort, since the async generator is cancelled before
+        reaching that branch.
+        """
+        await self._set_status("")
+
+    # --- Chat stream (hybrid streaming for thread-based tool progress) ---
+
+    def _can_stream(self) -> bool:
+        """Return True if chat_stream is usable for this turn."""
+        return (
+            self._team_id is not None and self._user_id is not None and not self._turn.stream_failed
+        )
+
+    async def _ensure_stream(self) -> bool:
+        """Open a chat stream for the active turn thread if not already open.
+
+        Returns True if a stream is available, False if streaming is unavailable
+        or failed (caller should fall back to chat_postMessage).
+        """
+        if self._turn.active_stream is not None:
+            return True
+        if not self._can_stream() or not self._turn.turn_thread_ts:
+            return False
+        try:
+            self._turn.active_stream = await self._router.client.open_chat_stream(
+                self._turn.turn_thread_ts,
+                team_id=self._team_id,  # type: ignore[arg-type]  # guarded by _can_stream
+                user_id=self._user_id,  # type: ignore[arg-type]
+            )
+            return True
+        except Exception as e:
+            logger.warning("Failed to open chat_stream — falling back to messages: %s", e)
+            self._turn.stream_failed = True
+            return False
+
+    async def _stream_task_update(
+        self, tool_use_id: str, tool_name: str, status: _TaskStatus
+    ) -> None:
+        """Emit a TaskUpdateChunk to the active stream (best-effort).
+
+        Falls back silently on error — the tool use/result context blocks
+        posted separately provide redundant visibility.
+        """
+        if self._turn.active_stream is None:
+            return
+        from slack_sdk.models.messages.chunk import TaskUpdateChunk  # noqa: PLC0415
+
+        chunk = TaskUpdateChunk(id=tool_use_id, title=tool_name, status=status)
+        try:
+            await self._turn.active_stream.append(chunks=[chunk])
+            logger.info(
+                "Sent TaskUpdateChunk id=%s title=%s status=%s", tool_use_id, tool_name, status
+            )
+        except Exception as e:
+            # Was logger.debug — a swallowed append failure looked identical to
+            # success in production logs, indistinguishable from a stuck pill
+            # caused by something else entirely.
+            logger.warning(
+                "TaskUpdateChunk append failed id=%s title=%s status=%s: %s",
+                tool_use_id,
+                tool_name,
+                status,
+                e,
+            )
+            await self._close_stream_on_error()
+
+    async def _stop_stream(self, blocks: list[dict[str, Any]] | None = None) -> None:
+        """Stop the active chat stream (best-effort). Clears active_stream."""
+        stream = self._turn.active_stream
+        if stream is None:
+            return
+        self._turn.active_stream = None
+        try:
+            await stream.stop(blocks=blocks)
+        except Exception as e:
+            logger.debug("stream.stop() failed: %s", e)
+
+    async def _close_stream_on_error(self) -> None:
+        """Mark streaming as failed and stop the current stream."""
+        self._turn.stream_failed = True
+        stream = self._turn.active_stream
+        self._turn.active_stream = None
+        if stream is not None:
+            with contextlib.suppress(BaseException):
+                await stream.stop()
 
     # --- Streaming ---
 
@@ -375,13 +506,88 @@ class ResponseStreamer:
                 added_this_turn = set(self._pending_agent_verifications) - keys_before
                 for stale_key in added_this_turn:
                     self._pending_agent_verifications.pop(stale_key, None)
+                with contextlib.suppress(BaseException):
+                    await self._stop_stream()
 
-        # Final flush
+        # Final flush, then stop stream with summary blocks
         if self._turn.thinking_buffer:
             await self._flush_thinking()
         if self._turn.buffer:
             await self._flush_buffer()
         if result:
+            # Feed session_id to transcript reconciler on first sight
+            if self._transcript is not None and result.session_id:
+                self._transcript.set_session_id(result.session_id)
+
+            unsettled = self._turn.pill_started_ids - self._turn.pill_settled_ids
+            if unsettled:
+                logger.warning(
+                    "Task pill(s) started but ToolResultBlock never arrived: %s",
+                    {tid: self._turn.tool_names.get(tid, "tool") for tid in unsettled},
+                )
+            # Bug #1 fix, layer 1: transcript reconciliation — read the CLI's
+            # authoritative JSONL transcript to recover dropped tool results.
+            # Sends pill completions for recovered results and handles
+            # EnterWorktree containment activation.
+            if unsettled and self._transcript is not None:
+                recovered = await self._transcript.reconcile(unsettled)
+                for tr in recovered:
+                    tool_name = self._turn.tool_names.get(tr.tool_use_id, "tool")
+                    # Send pill completion before stream stops
+                    status = "error" if tr.is_error else "complete"
+                    self._turn.pill_settled_ids.add(tr.tool_use_id)
+                    if self._turn.active_stream is not None:
+                        await self._stream_task_update(tr.tool_use_id, tool_name, status)
+                    # Handle EnterWorktree containment from recovered result
+                    wt_entry = self._turn.pending_worktree_names.pop(tr.tool_use_id, None)
+                    if (
+                        wt_entry is not None
+                        and not tr.is_error
+                        and self._on_worktree_entered is not None
+                    ):
+                        wt_name, wt_path = wt_entry
+                        logger.info(
+                            "Transcript reconciler: activating worktree containment "
+                            "for tool_use_id=%s (name=%r, path=%r)",
+                            tr.tool_use_id,
+                            wt_name,
+                            wt_path,
+                        )
+                        try:
+                            await self._on_worktree_entered(wt_name, wt_path)
+                        except Exception:
+                            logger.warning(
+                                "Transcript reconciler: worktree callback raised "
+                                "for tool_use_id=%s",
+                                tr.tool_use_id,
+                                exc_info=True,
+                            )
+
+            # Bug #1 fix, layer 2: arg-based fallback for EnterWorktree entries
+            # that survived both the SDK stream AND transcript reconciliation.
+            # Defense-in-depth: notify_entered_worktree does its own git worktree
+            # list validation, so this doesn't blindly trust an unconfirmed call.
+            if self._turn.pending_worktree_names and self._on_worktree_entered is not None:
+                for tid, (wt_name, wt_path) in list(self._turn.pending_worktree_names.items()):
+                    logger.warning(
+                        "EnterWorktree fallback: neither SDK stream nor transcript "
+                        "delivered ToolResultBlock for tool_use_id=%s (name=%r, "
+                        "path=%r) — invoking worktree callback from captured args",
+                        tid,
+                        wt_name,
+                        wt_path,
+                    )
+                    try:
+                        await self._on_worktree_entered(wt_name, wt_path)
+                    except Exception:
+                        logger.warning(
+                            "EnterWorktree fallback: callback raised for "
+                            "tool_use_id=%s — containment may not be active",
+                            tid,
+                            exc_info=True,
+                        )
+                self._turn.pending_worktree_names.clear()
+            await self._stop_stream(blocks=self._build_stream_summary_blocks())
             await self._post_result_summary(result)
             # Clear thread status at turn end
             await self._set_status("")
@@ -454,30 +660,35 @@ class ResponseStreamer:
                 wt_path = ""
             self._turn.pending_worktree_names[block.id] = (wt_name, wt_path)
 
-        # Await approval before posting — skip bridge for subagent tool calls.
-        # The SDK may not invoke can_use_tool for tools in Task subagent messages
-        # (parent_id != None). If the callback is never called, the Future would
-        # never resolve, causing a bridge_timeout_s hang.
+        # Non-blocking approval: check if can_use_tool already resolved (pre-queued
+        # in the bridge). If not, post the card immediately and update it
+        # asynchronously when the approval decision arrives. This decouples the
+        # message stream (Path A) from the can_use_tool callback (Path B) — the SDK
+        # may auto-approve tools internally without ever calling can_use_tool.
         approval: ApprovalInfo | None = None
-        if self._bridge is not None and parent_id is None and block.name not in _BRIDGE_SKIP_TOOLS:
-            try:
-                fut = self._bridge.create_future(block.name)
-                approval = await asyncio.wait_for(fut, timeout=self._bridge_timeout_s or None)
-            except (TimeoutError, asyncio.CancelledError):
-                logger.warning(
-                    "Approval bridge timeout for %s — posting without label",
-                    block.name,
-                )
+        if self._bridge is not None and parent_id is None:
+            fut = self._bridge.create_future(block.name)
+            if fut.done():
+                approval = fut.result()
+            else:
+                self._spawn_background(self._apply_approval_async(block.id, block.name, fut))
 
         if approval is not None and approval.is_denial:
             self._turn.denied_tool_use_ids.add(block.id)
 
         await self._post_tool_use(block, parent_id, approval=approval)
-        # Set status AFTER posting — thread post auto-clears any previous status,
-        # so this persists during actual tool execution until the result arrives.
         await self._set_status(f"Running {block.name}...")
 
-    async def _handle_tool_result_block(
+        if (
+            parent_id is None
+            and block.id not in self._turn.denied_tool_use_ids
+            and self._can_stream()
+            and await self._ensure_stream()
+        ):
+            self._turn.pill_started_ids.add(block.id)
+            await self._stream_task_update(block.id, block.name, "in_progress")
+
+    async def _handle_tool_result_block(  # noqa: PLR0912
         self, block: ToolResultBlock, parent_id: str | None
     ) -> None:
         """Route a ToolResultBlock to the correct thread."""
@@ -494,9 +705,29 @@ class ResponseStreamer:
                 await self._mcp_health.record_tool_result(
                     tool_name, is_error=block.is_error, error_content=error_text
                 )
-        # Suppress redundant :x: Tool error for denied tools — the denial label
+        # Suppress redundant task cards and :x: for denied tools — the denial label
         # on the tool use block already communicates the outcome.
         denied = block.tool_use_id in self._turn.denied_tool_use_ids
+
+        # Hybrid streaming: emit TaskUpdateChunk(complete/error) for non-subagent, non-denied
+        if parent_id is None and not denied:
+            self._turn.pill_settled_ids.add(block.tool_use_id)
+            if self._turn.active_stream is not None:
+                tool_name = self._turn.tool_names.get(block.tool_use_id, "tool")
+                status = "error" if block.is_error else "complete"
+                await self._stream_task_update(block.tool_use_id, tool_name, status)
+            else:
+                # Diagnostic for the stuck-pill bug: the "in_progress" chunk for
+                # this tool_use_id may have sent fine earlier in the turn — this
+                # confirms whether active_stream went None in between (stream_failed
+                # tells us if it was a failed append) versus this block simply never
+                # being reached with a live stream at all.
+                logger.info(
+                    "Skipped TaskUpdateChunk completion for id=%s — active_stream is "
+                    "None (stream_failed=%s)",
+                    block.tool_use_id,
+                    self._turn.stream_failed,
+                )
         if denied and block.is_error:
             return
         if pending_fc is not None and not block.is_error and not denied:
@@ -656,7 +887,29 @@ class ResponseStreamer:
         )
 
     async def _flush_to_thread(self, text: str) -> None:
-        """Flush text to the current turn thread."""
+        """Flush text to the current turn thread.
+
+        When a chat stream is active, appends text to the stream instead of
+        posting individual messages.  Falls back to chat_postMessage on error.
+
+        Text is sanitized before streaming — the stream path bypasses
+        ``SlackClient.post()`` which normally handles redaction.
+        """
+        if self._turn.active_stream is not None:
+            try:
+                sanitized = redact_secrets(text)
+                sanitized, sec_warnings = validate_agent_output(sanitized)
+                if sec_warnings:
+                    for w in sec_warnings:
+                        logger.warning("Stream output validation: %s", w)
+                await self._turn.active_stream.append(markdown_text=sanitized)
+                return
+            except Exception as e:
+                logger.warning("stream.append failed — falling back to messages: %s", e)
+                await self._close_stream_on_error()
+                # Text already appended to the stream before the failure remains
+                # visible as an orphan message. The fallback below posts this chunk
+                # as a new message — partial duplication is preferred over data loss.
         await self._flush_to_destination(
             text, self._turn.thread_ts, self._router.post_to_active_thread, "thread_ts"
         )
@@ -683,7 +936,8 @@ class ResponseStreamer:
                 parent_id, f"Tool: {tool_name}", blocks=blocks
             )
         else:
-            await self._router.post_to_active_thread(f"Tool: {tool_name}", blocks=blocks)
+            ref = await self._router.post_to_active_thread(f"Tool: {tool_name}", blocks=blocks)
+            self._turn.tool_card_refs[block.id] = (ref.ts, tool_name, summary)
             self._turn.thread_ts = None
 
         # Defer diff/content upload for Edit tools until ToolResultBlock confirms success
@@ -767,6 +1021,31 @@ class ResponseStreamer:
                 ],
             }
         ]
+
+    async def _apply_approval_async(
+        self, tool_use_id: str, tool_name: str, fut: asyncio.Future[ApprovalInfo]
+    ) -> None:
+        """Update a tool card with approval info when the bridge Future resolves.
+
+        Runs as a background task — cancelled by bridge.clear() on turn end.
+        """
+        try:
+            approval = await fut
+        except asyncio.CancelledError:
+            return
+
+        if approval.is_denial:
+            self._turn.denied_tool_use_ids.add(tool_use_id)
+
+        ref = self._turn.tool_card_refs.get(tool_use_id)
+        if ref is None:
+            return
+        ts, card_tool_name, summary = ref
+        blocks = self._make_tool_use_blocks(card_tool_name, summary, approval=approval)
+        try:
+            await self._router.update(ts, f"Tool: {card_tool_name}", blocks=blocks)
+        except Exception:
+            logger.debug("Failed to update tool card label for %s", tool_name, exc_info=True)
 
     def _spawn_background(self, coro: Awaitable[None]) -> None:
         """Schedule a fire-and-forget task with a strong reference to prevent GC."""
@@ -957,6 +1236,30 @@ class ResponseStreamer:
             turn_number=self._current_turn_number,
         )
         self._spawn_background(self._on_file_change(change))
+
+
+def _build_turn_header_blocks(text: str) -> list[dict[str, Any]]:
+    """Build Block Kit blocks for a turn header message with an overflow menu accessory."""
+    return [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": text},
+            "accessory": {
+                "type": "overflow",
+                "action_id": "turn_overflow",
+                "options": [
+                    {
+                        "text": {"type": "plain_text", "text": "Stop Turn"},
+                        "value": "turn_stop",
+                    },
+                    {
+                        "text": {"type": "plain_text", "text": "View Cost"},
+                        "value": "turn_view_cost",
+                    },
+                ],
+            },
+        }
+    ]
 
 
 def _format_tool_result(block: ToolResultBlock) -> tuple[str, list[dict[str, Any]]]:

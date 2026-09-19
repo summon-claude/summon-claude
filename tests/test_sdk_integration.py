@@ -76,24 +76,20 @@ async def test_result_message_has_cost():
 
 async def test_text_block_content():
     """AssistantMessage should contain at least one TextBlock with non-empty text."""
+    text_blocks: list[TextBlock] = []
     with tempfile.TemporaryDirectory() as cwd:
         options = ClaudeAgentOptions(cwd=cwd, max_turns=1, **_COMMON_OPTS)
         async with ClaudeSDKClient(options) as client:
             await client.query("Say hello.")
-            assistant_msgs: list[AssistantMessage] = []
+            got_assistant = False
             async for msg in client.receive_response():
                 if isinstance(msg, AssistantMessage):
-                    assistant_msgs.append(msg)
+                    got_assistant = True
+                    text_blocks.extend(b for b in msg.content if isinstance(b, TextBlock))
 
-    assert assistant_msgs, "Expected at least one AssistantMessage"
-    # Collect all blocks across all AssistantMessages (the SDK may split
-    # ThinkingBlock and TextBlock into separate messages).
-    all_text_blocks = [b for m in assistant_msgs for b in m.content if isinstance(b, TextBlock)]
-    block_summary = [[type(b).__name__ for b in m.content] for m in assistant_msgs]
-    assert len(all_text_blocks) > 0, (
-        f"No TextBlock in any AssistantMessage. Got {len(assistant_msgs)} messages: {block_summary}"
-    )
-    assert any(b.text.strip() for b in all_text_blocks), "TextBlock should have non-empty text"
+    assert got_assistant, "Should receive at least one AssistantMessage"
+    assert len(text_blocks) > 0, "AssistantMessage(s) should have at least one TextBlock"
+    assert any(b.text.strip() for b in text_blocks), "TextBlock should have non-empty text"
 
 
 async def test_can_use_tool_callback():
@@ -189,6 +185,65 @@ async def test_ask_user_question_callback():
     assert "questions" in first
     assert len(first["questions"]) >= 1
     assert "options" in first["questions"][0]
+
+
+async def test_permission_mode_default_forces_can_use_tool_for_write():
+    """permission_mode="default" (as forced by session.py) must route Write through can_use_tool.
+
+    Regression test for the write-gate bypass: when setting_sources includes
+    "user" and permission_mode is left unset, it inherits whatever defaultMode
+    is configured in the operator's own ~/.claude/settings.json — a permissive
+    mode there (acceptEdits, bypassPermissions, dontAsk, auto) resolves Write
+    internally and skips can_use_tool entirely, silently defeating summon's
+    write-gate. Explicitly forcing permission_mode="default" — exactly what
+    session.py now does unconditionally — must make the callback fire
+    regardless of that setting.
+
+    session.py intentionally keeps setting_sources including "user"/"project"
+    (replicating the operator's Claude Code environment is by design — see
+    hack/BUGS.md bug #2) and instead wires a native PreToolUse hook as the
+    actual security boundary, since a hook deny wins unconditionally
+    regardless of permission mode, allow rules, or other hooks. This test
+    isolates the permission-mode property alone, in isolation from the hook.
+
+    Known confound: this only exercises the permission-mode-level bypass. A
+    PreToolUse hook loaded from the operator's ~/.claude/settings.json (e.g.
+    via a personal plugin) resolves the tool call at an earlier step than
+    permission mode and independently skips can_use_tool — no value of
+    permission_mode can prevent that; only a competing PreToolUse hook (like
+    summon's own write-gate hook) can. If this test fails locally, check for
+    hooks matching Write in your own global/plugin settings before assuming
+    a regression.
+    """
+    invoked_tools: list[str] = []
+
+    async def _handle_tools(tool_name: str, input_data: dict, context):
+        from claude_agent_sdk import PermissionResultAllow
+
+        invoked_tools.append(tool_name)
+        return PermissionResultAllow()
+
+    with tempfile.TemporaryDirectory() as cwd:
+        options = ClaudeAgentOptions(
+            cwd=cwd,
+            max_turns=3,
+            permission_mode="default",
+            can_use_tool=_handle_tools,
+            **_COMMON_OPTS,
+        )
+        async with ClaudeSDKClient(options) as client:
+            await client.query(
+                "Use the Write tool to create a file named summon_test.txt "
+                "in the current directory with the content 'hello'."
+            )
+            async for msg in client.receive_response():
+                if isinstance(msg, ResultMessage):
+                    break
+
+    assert "Write" in invoked_tools, (
+        f"Expected can_use_tool to be invoked for Write under permission_mode='default', "
+        f"got: {invoked_tools}"
+    )
 
 
 async def test_passthrough_command_populates_result():
