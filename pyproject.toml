@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-google = ["workspace-mcp==1.25.2"]
+google = ["workspace-mcp==1.26.0"]
 slack-browser = ["playwright==1.62.0"]
 all = ["summon-claude[google,slack-browser]"]
 
@@ -63,10 +63,10 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
-    "pyright==1.1.411",
+    "pyright==1.1.414",
     "pyyaml==6.0.3",
-    "ruff==0.16.6",
-    "workspace-mcp==1.25.2",
+    "ruff==0.16.7",
+    "workspace-mcp==1.26.0",
     "pytest-markdown-docs==0.9.2",
     "python-dotenv==1.2.3",
     "playwright==1.62.0",
