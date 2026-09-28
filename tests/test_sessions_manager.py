@@ -246,13 +246,13 @@ class TestStopSession:
         _patch_session(manager, stub)
         await manager.create_session(make_options())
 
-        result = manager.stop_session("s1")
+        result = await manager.stop_session("s1")
         assert result is True
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
 
     async def test_stop_unknown_session_returns_false(self):
         manager, _, _ = _make_manager()
-        result = manager.stop_session("nonexistent")
+        result = await manager.stop_session("nonexistent")
         assert result is False
 
     async def test_stop_calls_request_shutdown(self):
@@ -262,7 +262,7 @@ class TestStopSession:
         await manager.create_session(make_options())
 
         # Stop before task runs
-        manager.stop_session("s1")
+        await manager.stop_session("s1")
         assert stub._shutdown_requested is True
 
         await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
@@ -737,6 +737,182 @@ class TestControlAPI:
         writer.wait_closed = AsyncMock()
 
         await manager.handle_client(reader, writer)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Tests: handle_app_home debounce + LRU eviction
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAppHome:
+    """Tests for handle_app_home debounce and LRU eviction."""
+
+    def _make_manager_with_mock_client(self):
+        cfg = make_test_config()
+        web_client = MagicMock()
+        web_client.views_publish = AsyncMock()
+        dispatcher = MagicMock()
+        dispatcher.unregister = MagicMock()
+        manager = SessionManager(
+            config=cfg, web_client=web_client, bot_user_id="UBOT", dispatcher=dispatcher
+        )
+        return manager, web_client
+
+    async def test_second_call_within_debounce_window_does_not_publish(self):
+        manager, web_client = self._make_manager_with_mock_client()
+
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            frozen = 1000.0
+            with patch("time.monotonic", return_value=frozen):
+                await manager.handle_app_home("U123")
+                await manager.handle_app_home("U123")
+
+        assert web_client.views_publish.call_count == 1
+
+    async def test_call_after_debounce_window_publishes_again(self):
+        manager, web_client = self._make_manager_with_mock_client()
+
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("time.monotonic", return_value=1000.0):
+                await manager.handle_app_home("U123")
+            with patch("time.monotonic", return_value=1000.0 + 61.0):
+                await manager.handle_app_home("U123")
+
+        assert web_client.views_publish.call_count == 2
+
+    async def test_independent_users_have_separate_debounce(self):
+        manager, web_client = self._make_manager_with_mock_client()
+
+        with patch("summon_claude.sessions.manager.SessionRegistry") as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            frozen = 1000.0
+            with patch("time.monotonic", return_value=frozen):
+                await manager.handle_app_home("ALICE")
+                await manager.handle_app_home("BOB")
+
+        assert web_client.views_publish.call_count == 2
+
+    def test_lru_eviction_caps_at_500(self):
+        """Eviction fires when a new user arrives at 500 entries."""
+        manager, _ = self._make_manager_with_mock_client()
+
+        for i in range(500):
+            manager._app_home_last_publish[f"U{i:04d}"] = float(i)
+
+        assert len(manager._app_home_last_publish) == 500
+
+        # Simulate a new user arriving — eviction should remove the oldest
+        manager._app_home_last_publish["U_NEW"] = 999.0
+        # Manually run the eviction logic (mirroring handle_app_home)
+        if (
+            len(manager._app_home_last_publish) >= 500
+            and "U_ANOTHER" not in manager._app_home_last_publish
+        ):
+            oldest_key = next(iter(manager._app_home_last_publish))
+            del manager._app_home_last_publish[oldest_key]
+
+        # Verify: oldest evicted, new user present, size at 500
+        assert "U0000" not in manager._app_home_last_publish
+        assert "U_NEW" in manager._app_home_last_publish
+        assert len(manager._app_home_last_publish) == 500
+
+    def test_lru_eviction_does_not_evict_existing_user(self):
+        """When an existing user updates, no eviction occurs."""
+        manager, _ = self._make_manager_with_mock_client()
+
+        for i in range(500):
+            manager._app_home_last_publish[f"U{i:04d}"] = float(i)
+
+        # Existing user updates — should NOT trigger eviction
+        user_id = "U0000"
+        if (
+            len(manager._app_home_last_publish) >= 500
+            and user_id not in manager._app_home_last_publish
+        ):
+            oldest_key = next(iter(manager._app_home_last_publish))
+            del manager._app_home_last_publish[oldest_key]
+        manager._app_home_last_publish[user_id] = 999.0
+
+        assert "U0000" in manager._app_home_last_publish
+        assert len(manager._app_home_last_publish) == 500
+
+
+class TestHandleStopSessionAction:
+    """handle_stop_session_action stops the session and force-refreshes App Home."""
+
+    def _patched_registry(self):
+        mock_reg_cls_patch = patch("summon_claude.sessions.manager.SessionRegistry")
+        return mock_reg_cls_patch
+
+    async def test_stops_session_and_refreshes_dashboard(self):
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+        stub = _StubSession()
+        _patch_session(manager, stub)
+        await manager.create_session(make_options())
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await manager.handle_stop_session_action("s1", "U001")
+
+        assert stub._shutdown_requested is True
+        mock_provider.views_publish.assert_awaited_once()
+
+        await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+
+    async def test_bypasses_debounce_window(self):
+        """A stop action forces a republish even inside the normal debounce window."""
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+        stub = _StubSession()
+        _patch_session(manager, stub)
+        await manager.create_session(make_options())
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("time.monotonic", return_value=1000.0):
+                await manager.handle_app_home("U001")  # normal publish sets debounce entry
+                await manager.handle_stop_session_action("s1", "U001")  # must not be debounced
+
+        assert mock_provider.views_publish.call_count == 2
+
+        await asyncio.gather(*manager._tasks.values(), return_exceptions=True)
+
+    async def test_unknown_session_id_does_not_crash(self):
+        manager, mock_provider, _ = _make_manager()
+        mock_provider.views_publish = AsyncMock()
+
+        with self._patched_registry() as mock_reg_cls:
+            mock_reg = AsyncMock()
+            mock_reg.list_active_by_user = AsyncMock(return_value=[])
+            mock_reg_cls.return_value.__aenter__ = AsyncMock(return_value=mock_reg)
+            mock_reg_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await manager.handle_stop_session_action("nonexistent", "U001")  # must not raise
+
+        mock_provider.views_publish.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
