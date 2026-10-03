@@ -21,7 +21,7 @@ dependencies = [
     "packaging==26.3",
     "aiosqlite==0.22.1",
     "click==8.5.0",
-    "claude-agent-sdk==0.2.152",
+    "claude-agent-sdk==0.2.157",
     "pydantic-settings==2.15.0",
     "python-daemon==3.1.2",
     "slack-bolt==1.30.0",
@@ -32,8 +32,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-google = ["workspace-mcp==1.25.2"]
-slack-browser = ["playwright==1.62.0"]
+google = ["workspace-mcp==1.27.1"]
+slack-browser = ["playwright==1.63.0"]
 all = ["summon-claude[google,slack-browser]"]
 
 [project.urls]
@@ -63,13 +63,13 @@ dev = [
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-xdist==3.8.0",
-    "pyright==1.1.411",
+    "pyright==1.1.414",
     "pyyaml==6.0.3",
-    "ruff==0.16.6",
-    "workspace-mcp==1.25.2",
+    "ruff==0.16.8",
+    "workspace-mcp==1.27.1",
     "pytest-markdown-docs==0.9.2",
     "python-dotenv==1.2.3",
-    "playwright==1.62.0",
+    "playwright==1.63.0",
 ]
 docs = [
     "mkdocs-material==9.7.7",
@@ -77,7 +77,7 @@ docs = [
     "mkdocs-click==0.9.0",
     "mkdocstrings[python]==1.0.6",
     "mkdocs-llmstxt==0.5.0",
-    "playwright==1.62.0",
+    "playwright==1.63.0",
 ]
 
 # ============================================================================
