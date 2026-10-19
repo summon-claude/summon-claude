@@ -2907,8 +2907,8 @@ requires-dist = [
     { name = "python-daemon", specifier = "==3.1.2" },
     { name = "slack-bolt", specifier = "==1.30.0" },
     { name = "slack-sdk", specifier = "==3.45.0" },
-    { name = "workspace-mcp", marker = "extra == 'all'", specifier = "==1.25.2" },
-    { name = "workspace-mcp", marker = "extra == 'google'", specifier = "==1.25.2" },
+    { name = "workspace-mcp", marker = "extra == 'all'", specifier = "==2.0.1" },
+    { name = "workspace-mcp", marker = "extra == 'google'", specifier = "==2.0.1" },
 ]
 provides-extras = ["all", "google", "slack-browser"]
 
@@ -2923,7 +2923,7 @@ dev = [
     { name = "python-dotenv", specifier = "==1.2.4" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "ruff", specifier = "==0.16.10" },
-    { name = "workspace-mcp", specifier = "==1.25.2" },
+    { name = "workspace-mcp", specifier = "==2.0.1" },
 ]
 docs = [
     { name = "mike", specifier = "==2.2.0" },
@@ -3265,7 +3265,7 @@ wheels = [
 
 [[package]]
 name = "workspace-mcp"
-version = "1.25.2"
+version = "2.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cryptography" },
@@ -3287,9 +3287,9 @@ dependencies = [
     { name = "tzdata" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/41/2b/f7be2999637fe45f3f4c3b6f1e40236fe99c80e260708845b75a0a38ea46/workspace_mcp-1.25.2.tar.gz", hash = "sha256:303e1c1fc6263f0a8c622f3b9b4fe752f1a49e40cae63707de7b10ec2b223226", size = 428934, upload-time = "2026-08-28T00:39:42.161Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0d/e4/dcf54f31a78a16eb9275e3cdf8a5a357f16dd951c816fabd42b7a3606315/workspace_mcp-2.0.1.tar.gz", hash = "sha256:46263564c7f855f664be7c54cf6ebfe7ae57bd4f488c2475844b95e0348bd233", size = 517236, upload-time = "2026-10-04T17:18:16.542Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5e/2d/55c9b1684e6c3e62dfdfffc82b1db72a9bd0ef454bc0e8363d7c104db2ae/workspace_mcp-1.25.2-py3-none-any.whl", hash = "sha256:f7e9dce9e2c7dfabe0684911e66efb021f2c29f8fd48c04fc8c48fde7e167125", size = 440785, upload-time = "2026-08-28T00:39:40.532Z" },
+    { url = "https://files.pythonhosted.org/packages/81/d4/aa8a93d8d4420e65e0e717eded53614f79265b10bea58d93d0ada525751e/workspace_mcp-2.0.1-py3-none-any.whl", hash = "sha256:fa5e44ed680730a4be8a1a09b2f4e7fcd176fa944773d5a0a4795405eaa1a3fc", size = 522878, upload-time = "2026-10-04T17:18:15.209Z" },
 ]
 
 [[package]]
