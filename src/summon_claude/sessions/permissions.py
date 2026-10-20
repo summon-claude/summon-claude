@@ -5,7 +5,7 @@ Permission check flow (handle() steps):
   0b. Write gate       → enforces read-only default; SDK deny,
                          safe-dir bypass, containment check, CWD containment
   1.  SDK deny         → always honored unconditionally
-  2.  Static allowlist → _AUTO_APPROVE_TOOLS (Read, Grep, Glob, …)
+  2a. Static allowlist → _AUTO_APPROVE_TOOLS (Read, Grep, Glob, …)
   2b. GitHub deny-list → _GITHUB_MCP_REQUIRE_APPROVAL always sent to Slack
   2c. GitHub allowlist → exact names and get_/list_/search_ prefixes
   2d. Google MCP       → workspace-{label}__* read tools auto-approved
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 import logging
 import os
 import uuid
@@ -33,7 +34,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, ToolPermissionContext
+from claude_agent_sdk import (
+    HookContext,
+    HookJSONOutput,
+    HookMatcher,
+    PermissionResultAllow,
+    PermissionResultDeny,
+    PreToolUseHookInput,
+    ToolPermissionContext,
+)
 
 from summon_claude.config import SummonConfig
 from summon_claude.sessions.classifier import extract_classifier_context
@@ -47,6 +56,10 @@ if TYPE_CHECKING:
     from summon_claude.sessions.classifier import SummonAutoClassifier
 
 logger = logging.getLogger(__name__)
+
+# U+2019 RIGHT SINGLE QUOTATION MARK x3 — visually similar to backticks
+# but cannot break a Slack code fence.
+_BACKTICK_FENCE_ESCAPE = "\u2019\u2019\u2019"
 
 _AUTO_APPROVE_TOOLS = frozenset(
     [
@@ -380,8 +393,6 @@ class _AskUserState:
     questions: dict[str, list[dict]] = field(default_factory=dict)
     answers: dict[str, dict[str, str]] = field(default_factory=dict)
     expected: dict[str, int] = field(default_factory=dict)
-    # For "Other" free-text input: (request_id, question_index)
-    pending_other: tuple[str, int] | None = None
     # For multi-select: toggled selections per question keyed by (request_id, question_idx)
     multi_selections: dict[tuple[str, int], list[str]] = field(default_factory=dict)
     # ts of the interactive question message (for deletion on completion)
@@ -415,7 +426,7 @@ class PermissionHandler:
         self._authenticated_user_id = authenticated_user_id
         self._bridge = bridge
         self._debounce_ms = config.permission_debounce_ms
-        # 0 = no timeout → asyncio.timeout(None) disables the deadline
+        # default: 900s (15m) via config.permission_timeout_s; 0 → None (no timeout)
         self._timeout_s: float | None = config.permission_timeout_s or None
 
         # Write gate state
@@ -1008,6 +1019,69 @@ class PermissionHandler:
         # 6. Outside CWD or Bash → fall through to arg cache (step 2f) or HITL (step 4)
         return None
 
+    def build_pretooluse_hooks(self) -> list[HookMatcher]:
+        """Build the native ``PreToolUse`` hook that backstops the write gate.
+
+        Hooks run before every other permission-resolution step (deny/ask
+        rules, permission mode, allow rules, ``canUseTool``) per the Agent
+        SDK's documented evaluation order, and a hook ``deny`` wins
+        unconditionally even when another hook/plugin or the operator's own
+        personal settings would otherwise resolve the call first. Wiring
+        this in closes the bypass mechanisms documented in
+        ``hack/research/roadmap-phase-1-slack-interactivity-1783450456-canusetool-bypass-sdk-config.md``
+        (plugin-loaded hooks, the built-in read-only-Bash fast path, and
+        personal ``permissions.allow`` rules) — everything except OS
+        environment inheritance, which is a deployment-level concern.
+        """
+        return [
+            HookMatcher(
+                matcher="|".join(sorted(_WRITE_GATED_TOOLS)),
+                hooks=[self._pretooluse_write_gate_hook],
+            )
+        ]
+
+    async def _pretooluse_write_gate_hook(
+        self,
+        input_data: PreToolUseHookInput,
+        tool_use_id: str | None,
+        context: HookContext,
+    ) -> HookJSONOutput:
+        """Native PreToolUse hook — fail-closed backstop for the write gate.
+
+        Only re-asserts ``_check_write_gate``'s hard-deny case (no active
+        containment and no safe-dir match). When containment is active this
+        intentionally returns no decision so the call falls through to the
+        normal ``can_use_tool`` -> ``_check_write_gate`` flow for the
+        nuanced HITL/session-cache logic — this hook is a backstop, not a
+        replacement for it. Deliberately reads only this handler's own
+        containment state — no dependency on ``context``, permission mode,
+        or allow rules, which is exactly what makes it immune to the
+        bypass mechanisms those are vulnerable to.
+        """
+        tool_name = input_data.get("tool_name", "")
+        if tool_name not in _WRITE_GATED_TOOLS or self._in_containment:
+            return {}
+
+        tool_input = input_data.get("tool_input") or {}
+        file_path = _extract_file_path(tool_name, tool_input)
+        if file_path and _is_in_safe_dir(file_path, self._safe_dirs, self._project_root):
+            return {}
+
+        reason = (
+            "Write access requires a worktree. Use EnterWorktree to create an isolated copy first."
+            if self._is_git_repo
+            else "Write access requires a supported working directory. "
+            "Start a session in a project directory."
+        )
+        logger.info("PreToolUse write-gate hook: denying %s (no active containment)", tool_name)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
     async def _request_approval(
         self,
         tool_name: str,
@@ -1331,6 +1405,7 @@ class PermissionHandler:
         self,
         value: str,
         user_id: str,
+        trigger_id: str | None = None,
     ) -> None:
         """Handle a Slack button click for an AskUserQuestion option.
 
@@ -1360,20 +1435,101 @@ class PermissionHandler:
         question = questions[q_idx]
 
         if opt_val == "other":
-            await self._handle_ask_other(request_id, q_idx, question)
+            await self._handle_ask_other(request_id, q_idx, question, trigger_id=trigger_id)
         elif opt_val == "done":
             await self._handle_ask_done(request_id, q_idx, question)
         else:
             await self._handle_ask_option(request_id, q_idx, question, opt_val)
 
-    async def _handle_ask_other(self, request_id: str, q_idx: int, question: dict) -> None:
-        """Handle 'Other' button — set pending flag for free-text capture."""
-        self._ask_user.pending_other = (request_id, q_idx)
-        q_text = sanitize_for_mrkdwn(question.get("question", ""))
+    async def _handle_ask_other(
+        self,
+        request_id: str,
+        q_idx: int,
+        question: dict,
+        *,
+        trigger_id: str | None = None,
+    ) -> None:
+        """Handle 'Other' button — open a Slack modal for free-text input."""
+        if not trigger_id:
+            logger.warning("_handle_ask_other: no trigger_id, cannot open modal")
+            return
+
+        q_text = question.get("question", "Custom Answer")
+        channel_id = self._router.client.channel_id
+        private_metadata = json.dumps(
+            {"channel_id": channel_id, "request_id": request_id, "q_idx": q_idx}
+        )
+        view = {
+            "type": "modal",
+            "callback_id": "ask_user_other",
+            "private_metadata": private_metadata,
+            "title": {"type": "plain_text", "text": "Custom Answer"},
+            "submit": {"type": "plain_text", "text": "Submit"},
+            "close": {"type": "plain_text", "text": "Cancel"},
+            "blocks": [
+                {
+                    "type": "input",
+                    "block_id": "other_input",
+                    "label": {
+                        "type": "plain_text",
+                        "text": sanitize_for_mrkdwn(q_text, max_len=150),
+                    },
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "other_value",
+                        "multiline": True,
+                        "placeholder": {"type": "plain_text", "text": "Type your answer..."},
+                    },
+                }
+            ],
+        }
+        await self._router.client.views_open(trigger_id, view)
+
+    async def handle_ask_user_view_submission(self, view: dict, user_id: str) -> None:
+        """Handle modal submission for an 'Other' free-text answer.
+
+        Extracts the answer from the view state and completes the question.
+        Performs its own auth check as defense-in-depth (EventDispatcher also checks).
+        """
+        if user_id != self._authenticated_user_id:
+            logger.warning(
+                "View submission from unauthorized user %s (expected %s)",
+                user_id,
+                self._authenticated_user_id,
+            )
+            return
+        try:
+            meta = json.loads(view.get("private_metadata", "{}"))
+            request_id: str = meta["request_id"]
+            q_idx: int = int(meta["q_idx"])
+        except (KeyError, ValueError, json.JSONDecodeError):
+            logger.warning("handle_ask_user_view_submission: malformed private_metadata")
+            return
+
+        if request_id not in self._ask_user.events:
+            return
+
+        questions = self._ask_user.questions.get(request_id, [])
+        if q_idx >= len(questions):
+            return
+
+        # Extract answer from view state
+        try:
+            text: str = view["state"]["values"]["other_input"]["other_value"]["value"] or ""
+        except (KeyError, TypeError):
+            logger.warning("handle_ask_user_view_submission: could not extract answer from state")
+            return
+
+        question = questions[q_idx]
+        question_text = question.get("question", "")
+        header = sanitize_for_mrkdwn(question.get("header", ""))
+
+        self._ask_user.answers[request_id][question_text] = text
         await _post_quietly(
             self._router,
-            f":pencil: Type your answer for: _{q_text}_",
+            f":white_check_mark: *{header}*: {sanitize_for_mrkdwn(text)}",
         )
+        await self._check_ask_user_complete(request_id)
 
     async def _handle_ask_done(self, request_id: str, q_idx: int, question: dict) -> None:
         """Handle 'Done' button for multi-select — finalize toggled selections."""
@@ -1436,49 +1592,6 @@ class PermissionHandler:
                 f":heavy_plus_sign: *{header}*: selected _{safe_label}_",
             )
 
-    def has_pending_text_input(self) -> bool:
-        """Return True if we're waiting for free-text input from the user (Other)."""
-        return self._ask_user.pending_other is not None
-
-    async def receive_text_input(self, text: str, *, user_id: str) -> None:
-        """Receive free-text input from the user for an 'Other' answer.
-
-        Args:
-            text: The free-text answer.
-            user_id: Slack user ID of the sender. Verified against session owner.
-                     Required — callers must always provide identity context.
-        """
-        if not self._ask_user.pending_other:
-            return
-
-        if user_id != self._authenticated_user_id:
-            logger.warning(
-                "Free-text input from unauthorized user %s (expected %s)",
-                user_id,
-                self._authenticated_user_id,
-            )
-            return
-
-        request_id, q_idx = self._ask_user.pending_other
-        self._ask_user.pending_other = None
-
-        questions = self._ask_user.questions.get(request_id, [])
-        if q_idx >= len(questions):
-            return
-
-        question = questions[q_idx]
-        question_text = question.get("question", "")
-        header = question.get("header", "")
-
-        self._ask_user.answers[request_id][question_text] = text
-        safe_header = sanitize_for_mrkdwn(header)
-        await _post_quietly(
-            self._router,
-            f":white_check_mark: *{safe_header}*: {sanitize_for_mrkdwn(text)}",
-        )
-
-        await self._check_ask_user_complete(request_id)
-
     async def _check_ask_user_complete(self, request_id: str) -> None:
         """If all questions for a request are answered, delete message and signal."""
         answers = self._ask_user.answers.get(request_id, {})
@@ -1488,6 +1601,20 @@ class PermissionHandler:
             msg_ts = self._ask_user.message_ts.get(request_id)
             if msg_ts:
                 await self._router.client.delete_message(msg_ts)
+
+            # Post a persistent summary when multiple questions were asked.
+            # Single-question requests already get a per-answer ack from the
+            # handler — a duplicate summary would be redundant.
+            if expected > 1:
+                questions = self._ask_user.questions.get(request_id, [])
+                lines = [":white_check_mark: *Questions answered:*"]
+                for q in questions:
+                    q_text = q.get("question", "")
+                    header = sanitize_for_mrkdwn(q.get("header", q_text))
+                    answer = sanitize_for_mrkdwn(answers.get(q_text, ""))
+                    lines.append(f"\u2022 *{header}*: {answer}")
+                await _post_quietly(self._router, "\n".join(lines))
+
             event = self._ask_user.events.get(request_id)
             if event:
                 event.set()
@@ -1499,8 +1626,6 @@ class PermissionHandler:
         self._ask_user.answers.pop(request_id, None)
         self._ask_user.expected.pop(request_id, None)
         self._ask_user.message_ts.pop(request_id, None)
-        if self._ask_user.pending_other and self._ask_user.pending_other[0] == request_id:
-            self._ask_user.pending_other = None
         # Clean up multi-select state for all questions in this request
         for i in range(len(questions)):
             self._ask_user.multi_selections.pop((request_id, i), None)
@@ -1592,6 +1717,7 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
     for i, q in enumerate(questions):
         header = q.get("header", "")
         question_text = q.get("question", "")
+        # AskUserQuestion's own schema caps options at 4 — always rendered as buttons.
         options = q.get("options", [])
         multi_select = q.get("multiSelect", False)
 
@@ -1629,7 +1755,13 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
                 }
             )
 
-        # Option buttons
+        other_button = {
+            "type": "button",
+            "text": {"type": "plain_text", "text": "Other"},
+            "action_id": f"ask_user_{i}_other",
+            "value": f"{request_id}|{i}|other",
+        }
+
         elements = []
         for j, opt in enumerate(options):
             label = opt.get("label", f"Option {j + 1}")
@@ -1641,18 +1773,7 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
                     "value": f"{request_id}|{i}|{j}",
                 }
             )
-
-        # "Other" button
-        elements.append(
-            {
-                "type": "button",
-                "text": {"type": "plain_text", "text": "Other"},
-                "action_id": f"ask_user_{i}_other",
-                "value": f"{request_id}|{i}|other",
-            }
-        )
-
-        # "Done" button for multi-select
+        elements.append(other_button)
         if multi_select:
             elements.append(
                 {
@@ -1663,7 +1784,6 @@ def _build_ask_user_blocks(request_id: str, questions: list[dict]) -> list[dict]
                     "value": f"{request_id}|{i}|done",
                 }
             )
-
         blocks.append(
             {
                 "type": "actions",
@@ -1714,8 +1834,7 @@ def _build_diff_preview_blocks(requests: list[PendingRequest]) -> list[dict[str,
     combined = "\n".join(previews)
     if len(combined) > MARKDOWN_BLOCK_LIMIT:
         combined = combined[:MARKDOWN_BLOCK_LIMIT] + "\n... (truncated)"
-    # Escape triple backticks to prevent code fence breakout
-    combined = combined.replace("```", "\u2019\u2019\u2019")
+    combined = combined.replace("```", _BACKTICK_FENCE_ESCAPE)
 
     return [{"type": "markdown", "text": f"```diff\n{combined}\n```"}]
 
