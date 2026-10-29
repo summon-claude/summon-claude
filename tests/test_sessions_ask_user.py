@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from claude_agent_sdk import PermissionResultAllow
 from conftest import make_test_config
@@ -58,6 +59,11 @@ async def _click(handler, request_id, q_idx, opt_val):
 # ------------------------------------------------------------------
 # Block rendering
 # ------------------------------------------------------------------
+
+
+def _make_many_options(n: int) -> list[dict]:
+    """Build a list of n options for testing select-menu threshold."""
+    return [{"label": f"Option {i}", "description": ""} for i in range(n)]
 
 
 class TestBuildAskUserBlocks:
@@ -220,6 +226,45 @@ class TestBuildAskUserBlocks:
         first_btn = actions["elements"][0]
         assert first_btn["value"].startswith("abc-def-123|")
 
+    # ------------------------------------------------------------------
+    # Option count is always rendered as buttons.
+    #
+    # AskUserQuestion's own tool schema caps `options` at 4, so a real tool
+    # call can never carry more. This test exists as a defensive check that
+    # the renderer degrades gracefully (buttons, not a crash) if it's ever
+    # called directly with more options than the schema allows.
+    # ------------------------------------------------------------------
+
+    def test_exactly_four_options_uses_buttons(self):
+        """Boundary: exactly 4 options use the button layout."""
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "H",
+                "options": _make_many_options(4),
+                "multiSelect": False,
+            }
+        ]
+        blocks = _build_ask_user_blocks("req-4", questions)
+        actions = _get_actions_block(blocks)
+        # 4 option buttons + Other button
+        assert len(actions["elements"]) == 5
+
+    def test_more_than_four_options_still_uses_buttons(self):
+        """Defensive: even a malformed call with 5 options still renders buttons."""
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "H",
+                "options": _make_many_options(5),
+                "multiSelect": False,
+            }
+        ]
+        blocks = _build_ask_user_blocks("req-5", questions)
+        actions = _get_actions_block(blocks)
+        # 5 option buttons + Other button
+        assert len(actions["elements"]) == 6
+
 
 # ------------------------------------------------------------------
 # Single-select flow
@@ -283,12 +328,13 @@ class TestSingleSelect:
 
 
 # ------------------------------------------------------------------
-# Other (free-text) flow
+# Other (modal) flow
 # ------------------------------------------------------------------
 
 
-class TestOtherTextInput:
-    async def test_other_sets_pending_flag(self):
+class TestOtherModal:
+    async def test_other_with_trigger_id_opens_modal(self):
+        """'Other' button with trigger_id calls views_open with correct modal structure."""
         handler, provider, _ = _make_handler()
         questions = [
             {
@@ -300,17 +346,161 @@ class TestOtherTextInput:
         ]
         task, req_id = await _start_ask(handler, provider, questions)
 
-        assert not handler.has_pending_text_input()
+        await handler.handle_ask_user_action(
+            value=f"{req_id}|0|other",
+            user_id="U1",
+            trigger_id="trigger-abc",
+        )
 
-        await _click(handler, req_id, 0, "other")
-        assert handler.has_pending_text_input()
+        provider.views_open.assert_awaited_once()
+        call_args = provider.views_open.call_args
+        trigger_id_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("trigger_id")
+        view_arg = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("view")
+        assert trigger_id_arg == "trigger-abc"
+        assert view_arg["callback_id"] == "ask_user_other"
+        assert view_arg["type"] == "modal"
+        # private_metadata contains channel_id, request_id, q_idx
+        import json
 
-        await handler.receive_text_input("My custom answer", user_id="U1")
-        assert not handler.has_pending_text_input()
+        meta = json.loads(view_arg["private_metadata"])
+        assert meta["request_id"] == req_id
+        assert meta["q_idx"] == 0
+        assert "channel_id" in meta
+        # Modal has an input block
+        blocks = view_arg["blocks"]
+        assert any(b["type"] == "input" for b in blocks)
+
+        # Clean up task
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_other_without_trigger_id_logs_warning_no_crash(self):
+        """'Other' button without trigger_id logs a warning and returns cleanly."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "Test",
+                "options": [{"label": "A", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        # No trigger_id — should not crash and should not call views_open
+        await handler.handle_ask_user_action(
+            value=f"{req_id}|0|other",
+            user_id="U1",
+            trigger_id=None,
+        )
+        provider.views_open.assert_not_awaited()
+
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_view_submission_completes_question(self):
+        """handle_ask_user_view_submission extracts answer and completes the request."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "Test",
+                "options": [{"label": "A", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        import json
+
+        view = {
+            "private_metadata": json.dumps(
+                {"channel_id": "C123", "request_id": req_id, "q_idx": 0}
+            ),
+            "state": {"values": {"other_input": {"other_value": {"value": "My custom answer"}}}},
+        }
+        await handler.handle_ask_user_view_submission(view=view, user_id="U1")
 
         result = await asyncio.wait_for(task, timeout=2.0)
         assert isinstance(result, PermissionResultAllow)
         assert result.updated_input["answers"]["Pick one"] == "My custom answer"
+
+    async def test_view_submission_malformed_metadata_no_crash(self):
+        """Malformed private_metadata in view submission returns cleanly."""
+        handler, _, _ = _make_handler()
+
+        view = {"private_metadata": "not-json", "state": {}}
+        await handler.handle_ask_user_view_submission(view=view, user_id="U1")
+        # No exception raised
+
+    async def test_view_submission_missing_request_id_no_crash(self):
+        """Missing request_id in metadata returns cleanly (no matching event)."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "Q?",
+                "header": "H",
+                "options": [{"label": "A", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        import json
+
+        view = {
+            "private_metadata": json.dumps(
+                {"channel_id": "C123", "request_id": "no-such-id", "q_idx": 0}
+            ),
+            "state": {"values": {"other_input": {"other_value": {"value": "answer"}}}},
+        }
+        # Request ID doesn't match any active event — must return without crash
+        await handler.handle_ask_user_view_submission(view=view, user_id="U1")
+        assert not task.done()
+
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_view_submission_missing_state_keys_no_crash(self):
+        """Missing state keys in view submission returns cleanly."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "Q?",
+                "header": "H",
+                "options": [{"label": "A", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        import json
+
+        view = {
+            "private_metadata": json.dumps(
+                {"channel_id": "C123", "request_id": req_id, "q_idx": 0}
+            ),
+            "state": {"values": {}},  # missing other_input block
+        }
+        await handler.handle_ask_user_view_submission(view=view, user_id="U1")
+        assert not task.done()
+
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_old_has_pending_text_input_removed(self):
+        """has_pending_text_input no longer exists on PermissionHandler."""
+        handler, _, _ = _make_handler()
+        assert not hasattr(handler, "has_pending_text_input")
+
+    async def test_old_receive_text_input_removed(self):
+        """receive_text_input no longer exists on PermissionHandler."""
+        handler, _, _ = _make_handler()
+        assert not hasattr(handler, "receive_text_input")
 
 
 # ------------------------------------------------------------------
@@ -388,10 +578,19 @@ class TestEdgeCases:
             user_id="U1",
         )
 
-    async def test_receive_text_without_pending_is_noop(self):
+    async def test_view_submission_stray_request_id_is_noop(self):
+        """View submission for a request_id with no active event is a no-op."""
         handler, _, _ = _make_handler()
-        await handler.receive_text_input("stray text", user_id="U1")
-        assert not handler.has_pending_text_input()
+        import json
+
+        view = {
+            "private_metadata": json.dumps(
+                {"channel_id": "C123", "request_id": "stray-req", "q_idx": 0}
+            ),
+            "state": {"values": {"other_input": {"other_value": {"value": "answer"}}}},
+        }
+        await handler.handle_ask_user_view_submission(view=view, user_id="U1")
+        # No crash, no state changes
 
     async def test_ask_user_not_auto_approved(self):
         """AskUserQuestion should not go through auto-approve flow."""
@@ -422,3 +621,123 @@ class TestEdgeCases:
         # Clean up
         await _click(handler, req_id, 0, 0)
         await asyncio.wait_for(task, timeout=2.0)
+
+
+# ------------------------------------------------------------------
+# comp-6: _check_ask_user_complete — answer summary posting
+# ------------------------------------------------------------------
+
+
+class TestAnswerSummaryPosting:
+    """Tests that _check_ask_user_complete posts a summary of all answers."""
+
+    async def test_summary_posted_on_completion(self):
+        """Completing all questions posts a summary message."""
+        handler, provider, router = _make_handler()
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "My Header",
+                "options": [{"label": "Alpha", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        # Record the post count before answering (the question message itself)
+        posts_before = provider.post.call_count
+
+        await _click(handler, req_id, 0, 0)
+        await asyncio.wait_for(task, timeout=2.0)
+
+        # At least one additional post should have been made (the summary)
+        assert provider.post.call_count > posts_before
+
+    async def test_summary_contains_header_and_answer(self):
+        """The posted summary includes the question header and the chosen answer."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "What framework?",
+                "header": "Framework",
+                "options": [{"label": "FastAPI", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        await _click(handler, req_id, 0, 0)
+        await asyncio.wait_for(task, timeout=2.0)
+
+        # Collect all post() call texts
+        post_texts = [
+            call.args[0] if call.args else call.kwargs.get("text", "")
+            for call in provider.post.call_args_list
+        ]
+        summary_posts = [t for t in post_texts if "Framework" in t or "FastAPI" in t]
+        assert summary_posts, f"No summary post found. Posts: {post_texts}"
+
+    async def test_summary_contains_all_question_answers(self):
+        """Summary includes an entry for every answered question."""
+        handler, provider, _ = _make_handler()
+        questions = [
+            {
+                "question": "Q1?",
+                "header": "H1",
+                "options": [{"label": "Ans1", "description": ""}],
+                "multiSelect": False,
+            },
+            {
+                "question": "Q2?",
+                "header": "H2",
+                "options": [{"label": "Ans2", "description": ""}],
+                "multiSelect": False,
+            },
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        await _click(handler, req_id, 0, 0)
+        await _click(handler, req_id, 1, 0)
+        await asyncio.wait_for(task, timeout=2.0)
+
+        post_texts = [
+            call.args[0] if call.args else call.kwargs.get("text", "")
+            for call in provider.post.call_args_list
+        ]
+        combined = "\n".join(post_texts)
+        assert "H1" in combined
+        assert "H2" in combined
+        assert "Ans1" in combined
+        assert "Ans2" in combined
+
+    async def test_summary_posted_before_event_set(self):
+        """Summary is posted before the event is set (task completes after summary)."""
+        handler, provider, _ = _make_handler()
+        post_order: list[str] = []
+
+        async def track_post(*args, **kwargs):
+            post_order.append("post")
+            from summon_claude.slack.client import MessageRef
+
+            return MessageRef(channel_id="C123", ts="1.0")
+
+        provider.post.side_effect = track_post
+
+        questions = [
+            {
+                "question": "Pick one",
+                "header": "H",
+                "options": [{"label": "A", "description": ""}],
+                "multiSelect": False,
+            }
+        ]
+        task, req_id = await _start_ask(handler, provider, questions)
+
+        # Reset tracker — only care about posts after answering
+        post_order.clear()
+        await _click(handler, req_id, 0, 0)
+        result = await asyncio.wait_for(task, timeout=2.0)
+
+        assert isinstance(result, PermissionResultAllow)
+        # At least one post call made after the click (the summary)
+        assert "post" in post_order
