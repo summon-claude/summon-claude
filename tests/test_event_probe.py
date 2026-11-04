@@ -14,7 +14,7 @@ from tests.conftest import make_test_config
 
 
 def _make_config(**overrides) -> SummonConfig:
-    defaults = {"slack_app_token": "xapp-1-A0123ABCDE-12345-abc"}
+    defaults = {"slack_app_token": "xapp-1-A0123ABCDE-12345-abc"}  # betterleaks:allow
     defaults.update(overrides)
     return make_test_config(**defaults)
 
@@ -527,7 +527,7 @@ class TestFormatAlert:
         return EventProbe(web_client=client, config=config)
 
     def test_format_alert_with_url(self):
-        probe = self._make_probe_with_config("xapp-1-A0123ABCDE-12345-abc")
+        probe = self._make_probe_with_config("xapp-1-A0123ABCDE-12345-abc")  # betterleaks:allow
         result = DiagnosticResult(
             healthy=False,
             reason="events_disabled",
