@@ -46,8 +46,8 @@ hooks = [
 ]
 
 [[repos]]
-repo = "https://github.com/trufflesecurity/trufflehog"
-rev = "v3.99.2"
+repo = "https://github.com/betterleaks/betterleaks"
+rev = "v1.9.0"
 hooks = [
-  { id = "trufflehog", entry = "trufflehog filesystem --no-verification --no-update --force-skip-archives --force-skip-binaries --fail", exclude = 'uv\.lock$', pass_filenames = true, priority = 0 },
+  { id = "betterleaks", name = "Betterleaks secret scan", entry = "betterleaks dir --no-banner --redact --verbose --confidence medium", exclude = 'uv\.lock$', pass_filenames = true, stages = ["pre-commit", "pre-push"], priority = 0 },
 ]
