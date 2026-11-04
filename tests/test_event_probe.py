@@ -14,7 +14,7 @@ from tests.conftest import make_test_config
 
 
 def _make_config(**overrides) -> SummonConfig:
-    defaults = {"slack_app_token": "xapp-1-A0123ABCDE-12345-abc"}  # betterleaks:allow
+    defaults = {"slack_app_token": "xapp-1-A111111111-111111-a"}
     defaults.update(overrides)
     return make_test_config(**defaults)
 
@@ -527,19 +527,19 @@ class TestFormatAlert:
         return EventProbe(web_client=client, config=config)
 
     def test_format_alert_with_url(self):
-        probe = self._make_probe_with_config("xapp-1-A0123ABCDE-12345-abc")  # betterleaks:allow
+        probe = self._make_probe_with_config("xapp-1-A111111111-111111-a")
         result = DiagnosticResult(
             healthy=False,
             reason="events_disabled",
             details="Events are not being delivered.",
-            remediation_url="https://api.slack.com/apps/A0123ABCDE/event-subscriptions",
+            remediation_url="https://api.slack.com/apps/A111111111/event-subscriptions",
         )
         with patch("summon_claude.slack.client.redact_secrets", side_effect=lambda s: s):
             alert = probe.format_alert(result)
 
         assert "Event pipeline failure" in alert
         assert "Events are not being delivered." in alert
-        assert "https://api.slack.com/apps/A0123ABCDE/event-subscriptions" in alert
+        assert "https://api.slack.com/apps/A111111111/event-subscriptions" in alert
 
     def test_format_alert_without_url(self):
         probe = self._make_probe_with_config("xapp-test-token")
