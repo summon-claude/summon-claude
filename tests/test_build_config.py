@@ -311,16 +311,16 @@ class TestPrekToml:
         """Verify fail_fast = true in prek.toml."""
         assert prek_data.get("fail_fast") is True, "prek.toml must have fail_fast = true"
 
-    def test_prek_has_trufflehog_repo(self, prek_data: dict) -> None:
-        """Verify trufflehog repo is configured in prek.toml."""
+    def test_prek_has_betterleaks_repo(self, prek_data: dict) -> None:
+        """Verify betterleaks repo is configured in prek.toml."""
         repos = prek_data.get("repos", [])
         assert isinstance(repos, list), "repos must be a list"
-        trufflehog_found = False
+        betterleaks_found = False
         for repo in repos:
-            if isinstance(repo, dict) and "trufflesecurity/trufflehog" in repo.get("repo", ""):
-                trufflehog_found = True
+            if isinstance(repo, dict) and "betterleaks/betterleaks" in repo.get("repo", ""):
+                betterleaks_found = True
                 break
-        assert trufflehog_found, "trufflehog repo not found in prek.toml"
+        assert betterleaks_found, "betterleaks repo not found in prek.toml"
 
     def test_prek_has_actionlint_repo(self, prek_data: dict) -> None:
         """Verify actionlint repo is configured in prek.toml."""
