@@ -11,14 +11,28 @@ from the same event loop as the dispatch methods.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+import aiohttp
 from slack_sdk.web.async_client import AsyncWebClient
 
+from summon_claude.file_handler import (
+    IMAGE_EXTENSIONS,
+    MAX_FILE_SIZE,
+    TEXT_EXTENSIONS,
+    WARN_FILE_SIZE,
+    classify_file,
+    download_file,
+    prepare_image_content,
+    prepare_text_content,
+    sanitize_filename,
+)
 from summon_claude.slack.client import SlackClient
 
 # Callback type for session resume (injected by daemon to break circular import).
@@ -34,8 +48,23 @@ logger = logging.getLogger(__name__)
 # Arguments: (user_id: str, code: str, respond: Callable)
 CommandHandler = Callable[..., Awaitable[None]]
 
+# Callback for App Home opened events.
+# Arguments: (user_id: str)
+AppHomeHandler = Callable[[str], Awaitable[None]]
+
+# Callback for the App Home "Stop Session" overflow action.
+# Arguments: (session_id: str, user_id: str)
+HomeStopSessionHandler = Callable[[str, str], Awaitable[None]]
+
 # action_id pattern used to recognise AskUserQuestion button clicks
 _ASK_USER_RE = re.compile(r"ask_user_\d+_.+")
+
+_SUPPORTED_TEXT_DISPLAY = ", ".join(sorted(TEXT_EXTENSIONS))
+_SUPPORTED_IMAGE_DISPLAY = ", ".join(sorted(IMAGE_EXTENSIONS))
+
+# How long a file_id is remembered to dedupe Slack's occasional double
+# file_shared delivery for a single upload.
+_FILE_DEDUP_TTL_S = 60.0
 
 
 @dataclass
@@ -57,6 +86,7 @@ class SessionHandle:
     permission_handler: PermissionHandler
     abort_callback: Callable[[], None]
     authenticated_user_id: str
+    pending_turns: asyncio.Queue  # type: ignore[type-arg]  # _PendingTurn queue for direct injection
 
 
 class EventDispatcher:
@@ -75,7 +105,12 @@ class EventDispatcher:
         self._sessions: dict[str, SessionHandle] = {}  # channel_id → handle
         self._command_handler: CommandHandler | None = None
         self._resume_handler: ResumeHandler | None = None
+        self._app_home_handler: AppHomeHandler | None = None
+        self._home_stop_session_handler: HomeStopSessionHandler | None = None
+        self._recent_file_ids: dict[str, float] = {}  # file_id → monotonic timestamp
         self._web_client = web_client
+        self._bot_user_id: str | None = None
+        self._http_session: aiohttp.ClientSession | None = None
 
     # ------------------------------------------------------------------
     # Registry
@@ -108,6 +143,21 @@ class EventDispatcher:
         """Return True if a session is registered for this channel."""
         return channel_id in self._sessions
 
+    def update_pending_turns(self, channel_id: str, queue: asyncio.Queue) -> None:  # type: ignore[type-arg]
+        """Update the pending_turns queue for an existing registered handle.
+
+        Called after compaction restart to point the handle at the new queue.
+        """
+        handle = self._sessions.get(channel_id)
+        if handle is not None:
+            handle.pending_turns = queue
+
+    async def close(self) -> None:
+        """Close the shared HTTP session, if any."""
+        if self._http_session is not None and not self._http_session.closed:
+            await self._http_session.close()
+            self._http_session = None
+
     def has_active_sessions(self) -> bool:
         """Return True if any sessions are currently registered."""
         return bool(self._sessions)
@@ -123,6 +173,204 @@ class EventDispatcher:
     def set_resume_handler(self, handler: ResumeHandler) -> None:
         """Register a callback for ``!summon resume`` in unrouted channels."""
         self._resume_handler = handler
+
+    def set_app_home_handler(self, handler: AppHomeHandler) -> None:
+        """Register a callback for ``app_home_opened`` events."""
+        self._app_home_handler = handler
+
+    def set_home_stop_session_handler(self, handler: HomeStopSessionHandler) -> None:
+        """Register a callback for the App Home "Stop Session" overflow action."""
+        self._home_stop_session_handler = handler
+
+    async def dispatch_app_home(self, user_id: str) -> None:
+        """Route an app_home_opened event to the registered handler."""
+        if self._app_home_handler is not None:
+            try:
+                await self._app_home_handler(user_id)
+            except Exception as e:
+                logger.warning("EventDispatcher: app_home handler error for %s: %s", user_id, e)
+        else:
+            logger.debug("EventDispatcher: app_home_opened received but no handler set")
+
+    def set_bot_user_id(self, bot_user_id: str) -> None:
+        """Set the bot's own Slack user ID (for self-upload filtering)."""
+        self._bot_user_id = bot_user_id
+
+    async def dispatch_file_shared(self, event: dict) -> None:  # type: ignore[type-arg]
+        """Route a file_shared event to the correct session's message queue.
+
+        Security: filters self-uploads and verifies user ownership before
+        delegating to _process_file_shared for download and enqueue.
+        """
+        if not self._web_client:
+            logger.debug("dispatch_file_shared: no web_client, dropping event")
+            return
+
+        user_id: str = event.get("user_id", "")
+        channel_id: str = event.get("channel_id", "")
+        file_id: str = event.get("file_id", "")
+
+        if not file_id or not channel_id:
+            logger.warning("dispatch_file_shared: malformed event — missing file_id or channel_id")
+            return
+
+        # Filter self-uploads (bot-created files: diffs, Write uploads, etc.)
+        if self._bot_user_id and user_id == self._bot_user_id:
+            logger.debug("dispatch_file_shared: dropping bot self-upload %s", file_id)
+            return
+
+        handle = self._sessions.get(channel_id)
+        if handle is None:
+            logger.debug(
+                "dispatch_file_shared: no session for channel %s — file dropped", channel_id
+            )
+            return
+
+        # Security: verify uploader is the authenticated session owner
+        if user_id != handle.authenticated_user_id:
+            logger.warning(
+                "dispatch_file_shared: file from %s rejected — session owned by %s",
+                user_id,
+                handle.authenticated_user_id,
+            )
+            return
+
+        if self._is_duplicate_file_event(file_id):
+            logger.debug("dispatch_file_shared: duplicate delivery for file %s — ignoring", file_id)
+            return
+
+        await self._process_file_shared(file_id, handle)
+
+    def _is_duplicate_file_event(self, file_id: str) -> bool:
+        """Return True if file_id was already processed within the dedup window.
+
+        Slack occasionally delivers file_shared twice for a single upload;
+        without this, a rejected file would double-post its ephemeral notice
+        and an accepted file would be enqueued (and processed) twice.
+        """
+        now = time.monotonic()
+        self._recent_file_ids = {
+            fid: ts for fid, ts in self._recent_file_ids.items() if now - ts < _FILE_DEDUP_TTL_S
+        }
+        if file_id in self._recent_file_ids:
+            return True
+        self._recent_file_ids[file_id] = now
+        return False
+
+    async def _process_file_shared(self, file_id: str, handle: SessionHandle) -> None:  # noqa: PLR0911
+        """Fetch, classify, download, and enqueue a file for the session.
+
+        Security:
+        - File size is checked from files.info metadata BEFORE downloading.
+        - Filenames are sanitized by file_handler.sanitize_filename.
+        - Download URLs are never logged or stored.
+        """
+        if not self._web_client:  # guaranteed by dispatch_file_shared, but guard for safety
+            return
+
+        # Fetch file metadata before downloading
+        try:
+            resp = await self._web_client.files_info(file=file_id)
+            file_info: dict[str, Any] = resp.get("file", {})
+        except Exception as e:
+            logger.warning("dispatch_file_shared: files.info failed for %s: %s", file_id, e)
+            return
+
+        filename: str = file_info.get("name", "unknown")
+        mimetype: str = file_info.get("mimetype", "")
+        file_size: int = file_info.get("size", 0)
+        url_private: str = file_info.get("url_private_download", "") or file_info.get(
+            "url_private", ""
+        )
+
+        if not url_private:
+            logger.warning("dispatch_file_shared: no download URL for file %s", file_id)
+            return
+
+        # Size check BEFORE downloading
+        if file_size > MAX_FILE_SIZE:
+            logger.warning(
+                "dispatch_file_shared: file %s too large (%d > %d bytes), skipping",
+                filename,
+                file_size,
+                MAX_FILE_SIZE,
+            )
+            await self._post_ephemeral(
+                channel_id=handle.channel_id,
+                user_id=handle.authenticated_user_id,
+                text=(
+                    f":warning: *{filename}* is {file_size / (1024 * 1024):.1f} MB — "
+                    f"the upload limit is {MAX_FILE_SIZE // (1024 * 1024)} MB, "
+                    f"so it was not processed."
+                ),
+            )
+            return
+        if file_size > WARN_FILE_SIZE:
+            logger.warning(
+                "dispatch_file_shared: large file %s (%d bytes) — downloading",
+                filename,
+                file_size,
+            )
+
+        kind = classify_file(filename, mimetype)
+        if kind == "unsupported":
+            logger.debug("dispatch_file_shared: unsupported file type %s (%s)", filename, mimetype)
+            await self._post_ephemeral(
+                channel_id=handle.channel_id,
+                user_id=handle.authenticated_user_id,
+                text=(
+                    f":warning: *{filename}* has an unsupported file type and was not "
+                    f"processed.\n"
+                    f"Supported text/code: {_SUPPORTED_TEXT_DISPLAY}\n"
+                    f"Supported images: {_SUPPORTED_IMAGE_DISPLAY}"
+                ),
+            )
+            return
+
+        # Download file content (token from web_client, never logged)
+        token: str = self._web_client.token or ""
+        if not token:
+            logger.warning(
+                "dispatch_file_shared: no auth token — skipping download for %s", filename
+            )
+            return
+        if self._http_session is None:
+            self._http_session = aiohttp.ClientSession()
+        try:
+            content_bytes = await download_file(
+                url_private, token, max_size=MAX_FILE_SIZE, session=self._http_session
+            )
+        except Exception as e:
+            logger.warning(
+                "dispatch_file_shared: download failed for %s: %s", filename, type(e).__name__
+            )
+            return
+
+        # Prepare and enqueue the turn
+        from summon_claude.sessions.session import _PendingTurn  # noqa: PLC0415
+
+        if kind == "text":
+            text_content = prepare_text_content(filename, content_bytes)
+            pending: _PendingTurn = _PendingTurn(message=text_content, pre_sent=False)
+        else:  # image
+            content_blocks = prepare_image_content(filename, content_bytes, mimetype)
+            safe_name = sanitize_filename(filename)
+            pending = _PendingTurn(
+                message=f"User shared image: {safe_name}",
+                pre_sent=False,
+                content_blocks=tuple(content_blocks),
+            )
+
+        try:
+            handle.pending_turns.put_nowait(pending)
+            logger.info(
+                "dispatch_file_shared: enqueued %s file %s for session %s",
+                kind,
+                filename,
+                handle.session_id,
+            )
+        except Exception:
+            logger.warning("dispatch_file_shared: queue full for session %s", handle.session_id)
 
     async def dispatch_command(
         self, user_id: str, code: str, respond: Callable[..., Awaitable[None]]
@@ -212,33 +460,172 @@ class EventDispatcher:
         """Route a Slack interactive action to the session's permission handler.
 
         Distinguishes between:
+        - ``home_stop_session`` → App Home dashboard action (no channel context)
+        - ``turn_overflow`` → turn-level actions (stop, copy session ID, view cost)
         - ``permission_approve`` / ``permission_deny`` → ``handle_action``
         - ``ask_user_*`` → ``handle_ask_user_action``
 
         The channel is extracted from ``body["channel"]["id"]``.  Actions for
         unknown channels are silently ignored.
         """
+        action_id: str = action.get("action_id", "")
+        user_id: str = body.get("user", {}).get("id", "")
+
+        if action_id == "home_stop_session":
+            # Home tab interactions carry no channel — this is the one action
+            # that can't be routed through the channel-keyed _sessions map.
+            await self._dispatch_home_stop_session(action, user_id)
+            return
+
         channel_id = body.get("channel", {}).get("id", "")
         handle = self._sessions.get(channel_id)
         if handle is None:
             logger.debug("EventDispatcher: no session for channel %s — action dropped", channel_id)
             return
 
-        action_id: str = action.get("action_id", "")
-        value: str = action.get("value", "")
-        user_id: str = body.get("user", {}).get("id", "")
+        trigger_id: str | None = body.get("trigger_id")
 
-        if _ASK_USER_RE.fullmatch(action_id):
+        if action_id == "turn_overflow":
+            await self._dispatch_turn_overflow(action, handle, channel_id, user_id)
+        elif _ASK_USER_RE.fullmatch(action_id):
+            # AskUserQuestion always renders as buttons — its own tool schema caps
+            # options at 4, so select-menu payloads never occur.
+            value = action.get("value", "")
             await handle.permission_handler.handle_ask_user_action(
                 value=value,
                 user_id=user_id,
+                trigger_id=trigger_id,
             )
         else:
             # permission_approve / permission_approve_session / permission_deny
+            value = action.get("value", "")
             await handle.permission_handler.handle_action(
                 value=value,
                 user_id=user_id,
             )
+
+    async def _dispatch_turn_overflow(
+        self,
+        action: dict,
+        handle: SessionHandle,
+        channel_id: str,
+        user_id: str,
+    ) -> None:
+        """Handle turn overflow menu actions.
+
+        Security: only the authenticated session owner may trigger these actions.
+        """
+        if user_id != handle.authenticated_user_id:
+            logger.warning(
+                "EventDispatcher: turn_overflow from %s rejected — session owned by %s",
+                user_id,
+                handle.authenticated_user_id,
+            )
+            return
+
+        value: str = action.get("selected_option", {}).get("value", "")
+
+        if value == "turn_stop":
+            handle.abort_callback()
+        elif value == "turn_view_cost":
+            await self._post_cost_ephemeral(
+                channel_id=channel_id,
+                user_id=user_id,
+                session_id=handle.session_id,
+            )
+        else:
+            logger.warning("EventDispatcher: unknown turn_overflow value %r", value)
+
+    async def _dispatch_home_stop_session(self, action: dict, user_id: str) -> None:
+        """Handle the App Home "Stop Session" overflow action.
+
+        Home tab interactions carry no channel, so there's no per-channel
+        SessionHandle to check ownership against — the target session_id is
+        parsed from the action value and ownership is verified directly
+        against the registry instead.
+        """
+        value: str = action.get("selected_option", {}).get("value", "")
+        prefix, _, session_id = value.partition(":")
+        if prefix != "stop" or not session_id:
+            logger.warning("EventDispatcher: malformed home_stop_session value %r", value)
+            return
+
+        if self._home_stop_session_handler is None:
+            logger.debug("EventDispatcher: home_stop_session received but no handler set")
+            return
+
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        session: dict | None = None
+        try:
+            async with SessionRegistry() as registry:
+                session = await registry.get_session(session_id)
+        except Exception:
+            logger.warning(
+                "EventDispatcher: registry query failed for home_stop_session %s",
+                session_id,
+                exc_info=True,
+            )
+            return
+
+        if session is None:
+            logger.debug("EventDispatcher: home_stop_session for unknown session %s", session_id)
+            return
+
+        if session.get("authenticated_user_id") != user_id:
+            logger.warning(
+                "EventDispatcher: home_stop_session from %s rejected — session %s owned by %s",
+                user_id,
+                session_id,
+                session.get("authenticated_user_id"),
+            )
+            return
+
+        await self._home_stop_session_handler(session_id, user_id)
+
+    async def _post_cost_ephemeral(
+        self,
+        channel_id: str,
+        user_id: str,
+        session_id: str,
+    ) -> None:
+        """Query the registry for session cost data and post it as an ephemeral."""
+        from summon_claude.sessions.registry import SessionRegistry  # noqa: PLC0415
+
+        text = f"Session `{session_id[:8]}` — cost data unavailable."
+        session: dict | None = None
+        try:
+            async with SessionRegistry() as registry:
+                session = await registry.get_session(session_id)
+        except Exception:
+            logger.warning("Failed to query registry for cost ephemeral", exc_info=True)
+        if session:
+            cost = session.get("total_cost_usd", 0.0) or 0.0
+            turns = session.get("total_turns", 0) or 0
+            model = session.get("model", "unknown") or "unknown"
+            context_pct = session.get("context_pct")
+            ctx = f" | context: {context_pct:.0f}%" if context_pct else ""
+            text = f"*{model}* | {turns} turns | ${cost:.4f}{ctx}"
+
+        await self._post_ephemeral(
+            channel_id=channel_id,
+            user_id=user_id,
+            text=text,
+        )
+
+    async def _post_ephemeral(self, channel_id: str, user_id: str, text: str) -> None:
+        """Post an ephemeral message to a user in a channel (best-effort)."""
+        if not self._web_client:
+            logger.warning("Cannot post ephemeral to %s: no web_client", channel_id)
+            return
+        try:
+            await self._web_client.chat_postEphemeral(
+                channel=channel_id,
+                user=user_id,
+                text=text,
+            )
+        except Exception as e:
+            logger.warning("Failed to post ephemeral to %s: %s", channel_id, e)
 
     async def dispatch_reaction(self, event: dict) -> None:  # type: ignore[type-arg]
         """Route a ``reaction_added`` event to the session's abort callback.
@@ -265,3 +652,36 @@ class EventDispatcher:
                 "EventDispatcher: no session for channel %s — reaction dropped",
                 channel_id,
             )
+
+    async def dispatch_view_submission(self, view: dict, body: dict) -> None:  # type: ignore[type-arg]
+        """Route a modal view submission to the correct session's permission handler.
+
+        Extracts the channel_id from view private_metadata, looks up the session,
+        verifies the submitting user, and delegates to handle_ask_user_view_submission.
+        """
+        user_id: str = body.get("user", {}).get("id", "")
+
+        try:
+            meta = json.loads(view.get("private_metadata", "{}"))
+            channel_id: str = meta["channel_id"]
+        except (KeyError, ValueError, json.JSONDecodeError):
+            logger.warning("dispatch_view_submission: malformed private_metadata — dropped")
+            return
+
+        handle = self._sessions.get(channel_id)
+        if handle is None:
+            logger.debug(
+                "EventDispatcher: no session for channel %s — view submission dropped", channel_id
+            )
+            return
+
+        # Security: verify user is the authenticated session owner before processing
+        if user_id != handle.authenticated_user_id:
+            logger.warning(
+                "EventDispatcher: view submission from %s rejected — session owned by %s",
+                user_id,
+                handle.authenticated_user_id,
+            )
+            return
+
+        await handle.permission_handler.handle_ask_user_view_submission(view=view, user_id=user_id)

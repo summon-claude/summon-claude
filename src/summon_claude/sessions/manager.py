@@ -44,6 +44,7 @@ from summon_claude.sessions.prompts import format_pm_topic
 from summon_claude.sessions.registry import MAX_SPAWN_CHILDREN_PM, SessionRegistry
 from summon_claude.sessions.session import SessionOptions, SummonSession
 from summon_claude.slack.client import redact_secrets, sanitize_for_slack
+from summon_claude.slack.formatting import build_home_view
 from summon_claude.summon_cli_mcp import MAX_PROMPT_CHARS
 
 if TYPE_CHECKING:
@@ -55,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 _GRACE_SECONDS = 60.0
 _SHUTDOWN_WAIT_TIMEOUT = 30.0
+_STOP_FORCE_TIMEOUT_S = 300.0  # 5 minutes: force-cancel a session that won't stop
 _MAX_QUEUED_SESSIONS = 50
 
 
@@ -85,6 +87,8 @@ class SessionManager:
         web_client: AsyncWebClient,
         bot_user_id: str,
         dispatcher: EventDispatcher,
+        *,
+        bot_team_id: str | None = None,
         event_probe: EventProbe | None = None,
         jira_proxy_port: int | None = None,
         jira_proxy_token: str | None = None,
@@ -92,6 +96,7 @@ class SessionManager:
         self._config = config
         self._web_client = web_client
         self._bot_user_id = bot_user_id
+        self._bot_team_id = bot_team_id
         self._dispatcher = dispatcher
         self._event_probe = event_probe
         self._jira_proxy_port = jira_proxy_port
@@ -105,6 +110,7 @@ class SessionManager:
         self._resuming_channels: set[str] = set()  # guard against concurrent resume
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._pm_topic_cache: dict[str, str] = {}  # project_id → last-set topic
+        self._app_home_last_publish: dict[str, float] = {}  # user_id → ts; FIFO cap 500
         self._suspend_on_shutdown: bool = False  # set by health monitor on event pipeline failure
         # FIFO queue: project_id → deque of _QueuedSession
         self._session_queue: dict[str, collections.deque[_QueuedSession]] = {}
@@ -182,6 +188,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -266,6 +273,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             parent_session_id=spawn_auth.parent_session_id,
             parent_channel_id=spawn_auth.parent_channel_id,
             ipc_spawn=self.create_session_with_spawn_token,
@@ -289,15 +297,44 @@ class SessionManager:
 
         return session_id
 
-    def stop_session(self, session_id: str) -> bool:
+    async def stop_session(self, session_id: str) -> bool:
         """Signal a specific session to shut down.  Returns ``True`` if found."""
         session = self._sessions.get(session_id)
         if session is not None:
             session.request_shutdown()
             logger.info("SessionManager: stop requested for %s", session_id)
+            # Set DB status so CLI shows "stopping" immediately
+            try:
+                async with SessionRegistry() as registry:
+                    await registry.update_status(session_id, "stopping")
+            except Exception:
+                logger.debug("SessionManager: failed to set stopping status for %s", session_id)
+            # Schedule forced cancellation if session doesn't exit in time
+            self._schedule_force_stop(session_id)
             return True
         logger.debug("SessionManager: stop_session — session %s not found", session_id)
         return False
+
+    def _schedule_force_stop(self, session_id: str) -> None:
+        """Schedule a forced task cancellation after ``_STOP_FORCE_TIMEOUT_S``."""
+        task = self._tasks.get(session_id)
+        if task is None or task.done():
+            return
+        loop = asyncio.get_running_loop()
+
+        def _force_cancel() -> None:
+            t = self._tasks.get(session_id)
+            if t is not None and not t.done():
+                logger.warning(
+                    "SessionManager: force-cancelling session %s after %.0fs",
+                    session_id,
+                    _STOP_FORCE_TIMEOUT_S,
+                )
+                t.cancel()
+
+        handle = loop.call_later(_STOP_FORCE_TIMEOUT_S, _force_cancel)
+        # If the task finishes before the timer, cancel the timer
+        task.add_done_callback(lambda _t: handle.cancel())
 
     def authenticate_session(self, session_id: str, user_id: str) -> bool:
         """Authenticate the session with *user_id*.  Returns ``True`` if found."""
@@ -490,6 +527,48 @@ class SessionManager:
             response_type="ephemeral",
         )
 
+    _APP_HOME_DEBOUNCE_S = 60.0
+
+    async def handle_app_home(self, user_id: str) -> None:
+        """Publish the App Home dashboard for a user.
+
+        Queries active sessions scoped to user_id (SQL-level scoping),
+        builds the home view, and publishes via views.publish.
+        Debounces per-user to avoid redundant DB+API calls on rapid tab switches.
+        """
+        now = time.monotonic()
+        last = self._app_home_last_publish.get(user_id, 0.0)
+        if now - last < self._APP_HOME_DEBOUNCE_S:
+            return
+        if len(self._app_home_last_publish) >= 500 and user_id not in self._app_home_last_publish:
+            oldest_key = next(iter(self._app_home_last_publish))
+            del self._app_home_last_publish[oldest_key]
+        self._app_home_last_publish[user_id] = now
+
+        sessions: list[dict] = []
+        try:
+            async with SessionRegistry() as registry:
+                sessions = await registry.list_active_by_user(user_id)
+        except Exception:
+            logger.exception("SessionManager: registry query failed for app_home user %s", user_id)
+
+        home_view = build_home_view(sessions)
+        try:
+            await self._web_client.views_publish(user_id=user_id, view=home_view)
+        except Exception as e:
+            logger.warning("SessionManager: views_publish failed for user %s: %s", user_id, e)
+
+    async def handle_stop_session_action(self, session_id: str, user_id: str) -> None:
+        """Stop *session_id* via the App Home "Stop Session" action.
+
+        Ownership is already verified by the dispatcher before this is called.
+        Forces an immediate dashboard refresh so *user_id* sees the "stopping"
+        status without waiting out the debounce window.
+        """
+        await self.stop_session(session_id)
+        self._app_home_last_publish.pop(user_id, None)
+        await self.handle_app_home(user_id)
+
     # ------------------------------------------------------------------
     # Unix socket control API
     # ------------------------------------------------------------------
@@ -550,14 +629,14 @@ class SessionManager:
                 session_id = msg.get("session_id")
                 if not session_id:
                     return {"type": "error", "message": "Missing session_id"}
-                found = self.stop_session(session_id)
+                found = await self.stop_session(session_id)
                 return {"type": "session_stopped", "found": found}
 
             case "stop_all":
-                results = [
-                    {"session_id": sid, "found": self.stop_session(sid)}
-                    for sid in list(self._sessions)
-                ]
+                results = []
+                for sid in list(self._sessions):
+                    found = await self.stop_session(sid)
+                    results.append({"session_id": sid, "found": found})
                 return {"type": "all_stopped", "results": results}
 
             case "status":
@@ -888,6 +967,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             parent_session_id=parent_session_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
@@ -979,6 +1059,7 @@ class SessionManager:
                 web_client=self._web_client,
                 dispatcher=self._dispatcher,
                 bot_user_id=self._bot_user_id,
+                bot_team_id=self._bot_team_id,
                 ipc_spawn=self.create_session_with_spawn_token,
                 ipc_resume=self._ipc_resume,
                 ipc_queue=self.queue_session,
@@ -1188,6 +1269,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1359,6 +1441,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1486,6 +1569,7 @@ class SessionManager:
             web_client=self._web_client,
             dispatcher=self._dispatcher,
             bot_user_id=self._bot_user_id,
+            bot_team_id=self._bot_team_id,
             ipc_spawn=self.create_session_with_spawn_token,
             ipc_resume=self._ipc_resume,
             ipc_queue=self.queue_session,
@@ -1517,6 +1601,9 @@ class SessionManager:
 
     def _on_task_done(self, task: asyncio.Task, session_id: str) -> None:  # type: ignore[type-arg]
         """Cleanup callback fired when a session task finishes (any outcome)."""
+        exc = task.exception() if not task.cancelled() else None
+        outcome = "cancelled" if task.cancelled() else ("error" if exc else "clean")
+        logger.info("SessionManager: session %s task done (%s)", session_id, outcome)
         session = self._sessions.pop(session_id, None)
         self._tasks.pop(session_id, None)
 
@@ -1710,6 +1797,7 @@ class SessionManager:
                     web_client=self._web_client,
                     dispatcher=self._dispatcher,
                     bot_user_id=self._bot_user_id,
+                    bot_team_id=self._bot_team_id,
                     parent_session_id=live_pm_sid,
                     parent_channel_id=entry.parent_channel_id,
                     ipc_spawn=self.create_session_with_spawn_token,
@@ -1737,11 +1825,13 @@ class SessionManager:
             task.add_done_callback(partial(self._on_task_done, session_id=new_session_id))
             self._tasks[new_session_id] = task
 
+        wait_s = time.monotonic() - entry.queued_at
         logger.info(
-            "SessionManager: dequeued and started session '%s' (%s) for project %s",
+            "SessionManager: dequeued session '%s' (%s) for project %s (waited %.1fs)",
             entry.options.name,
             new_session_id,
             project_id,
+            wait_s,
         )
 
         # Fire-and-forget notifications (outside lock — non-critical)

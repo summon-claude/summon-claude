@@ -17,7 +17,8 @@ import queue
 import re
 import secrets
 import sys
-from collections.abc import Awaitable, Callable
+import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    ResultMessage,
     TextBlock,
     ThinkingConfigAdaptive,
     ThinkingConfigDisabled,
@@ -549,6 +551,36 @@ class _PendingTurn:
     clear: bool = False  # If True, consumer runs _execute_clear instead of normal turn
     clear_done: asyncio.Event | None = None  # Signalled when clear completes
     clear_ok: list[bool] | None = None  # Mutable [bool] container — set by _execute_clear
+    content_blocks: tuple[dict, ...] | None = None
+
+
+# CLI (2.1.201 at the time of writing) mistranslates ThinkingConfigAdaptive into
+# the legacy thinking.type="enabled" wire format specifically for Sonnet 5, which
+# has dropped support for it. See hack/BUGS.md bug #9 for the full repro.
+# Not anchored on quote characters — the API's raw JSON error text may reach us
+# with escaped ("\"thinking.type.enabled\"") or unescaped quotes depending on
+# how many layers of string-encoding the CLI applies before surfacing it.
+_THINKING_TYPE_UNSUPPORTED_MARKER = "thinking.type.enabled"
+_THINKING_TYPE_UNSUPPORTED_SUFFIX = "is not supported"
+
+
+def _is_thinking_type_unsupported_error(result: ResultMessage) -> bool:
+    """Detect the Sonnet-5 adaptive-thinking mistranslation 400 error.
+
+    The CLI doesn't raise a Python exception for this — it surfaces as a
+    successful-looking turn with ``is_error=True`` and the API's error text
+    standing in for the assistant's response (in ``errors`` and/or ``result``,
+    depending on CLI version).
+    """
+    if not result.is_error:
+        return False
+    haystack = list(result.errors or [])
+    if result.result:
+        haystack.append(result.result)
+    return any(
+        _THINKING_TYPE_UNSUPPORTED_MARKER in part and _THINKING_TYPE_UNSUPPORTED_SUFFIX in part
+        for part in haystack
+    )
 
 
 class _SessionRestartError(Exception):
@@ -556,11 +588,22 @@ class _SessionRestartError(Exception):
 
     Raised by ``_execute_compact`` when compaction succeeds (summary captured)
     or when context overflow requires a fresh client with history recovery.
+    Also raised by ``_do_turn`` when the resolved model rejects
+    ``ThinkingConfigAdaptive`` (see ``disable_thinking`` and hack/BUGS.md bug #9).
     """
 
-    def __init__(self, *, summary: str | None = None, recovery_mode: bool = False):
+    def __init__(
+        self,
+        *,
+        summary: str | None = None,
+        recovery_mode: bool = False,
+        disable_thinking: bool = False,
+        retry_pending: _PendingTurn | None = None,
+    ):
         self.summary = summary
         self.recovery_mode = recovery_mode
+        self.disable_thinking = disable_thinking
+        self.retry_pending = retry_pending
         super().__init__("session restart requested")
 
 
@@ -679,6 +722,7 @@ class SummonSession:
         web_client: AsyncWebClient | None = None,
         dispatcher: EventDispatcher | None = None,
         bot_user_id: str | None = None,
+        bot_team_id: str | None = None,
         parent_session_id: str | None = None,
         parent_channel_id: str | None = None,
         ipc_spawn: Callable[[SessionOptions, str], Awaitable[str]] | None = None,
@@ -705,6 +749,10 @@ class SummonSession:
         self._effort = options.effort
         self._resume = options.resume
         self._resume_from_session_id = options.resume_from_session_id
+        # Set on a thinking-config restart (see _SessionRestartError.disable_thinking) —
+        # sticky for the session's lifetime once the resolved model has proven it
+        # mistranslates ThinkingConfigAdaptive. See hack/BUGS.md bug #9.
+        self._thinking_unsupported = False
         self._channel_id_option = options.channel_id
         self._jira_proxy_port = options.jira_proxy_port
         self._jira_proxy_token = options.jira_proxy_token
@@ -716,8 +764,9 @@ class SummonSession:
         # Shared web_client and dispatcher from the daemon (None for standalone/test use)
         self._web_client = web_client
         self._dispatcher = dispatcher
-        # Pre-cached bot user ID from BoltRouter.start() — avoids a per-session auth_test() call
+        # Pre-cached bot user/team ID from BoltRouter.start() — avoids per-session auth_test()
         self._bot_user_id = bot_user_id
+        self._bot_team_id = bot_team_id
         # Daemon IPC callbacks (injected to avoid circular imports with cli.daemon_client)
         self._ipc_spawn = ipc_spawn
         self._ipc_resume = ipc_resume
@@ -735,6 +784,7 @@ class SummonSession:
         # Shutdown signal
         self._shutdown_event = asyncio.Event()
         self._external_shutdown = False  # True when stopped via request_shutdown()
+        self._shutdown_requested_at: float = 0.0  # monotonic time of shutdown request
         self._authenticated_event = asyncio.Event()
         self._authenticated_user_id: str | None = None
         self._parent_session_id: str | None = parent_session_id
@@ -758,6 +808,17 @@ class SummonSession:
         self._current_turn_task: asyncio.Task | None = None
         self._abort_event = asyncio.Event()
         self._context_warned_threshold: float = 0.0
+
+        # Serializes query()/receive_response() pairs on the shared SDK client.
+        # receive_response() has no correlation to which query() call triggered
+        # it — it just drains the shared message stream until the next
+        # ResultMessage. Without this, a query() sent while a prior turn's
+        # receive_response() is still in flight can get folded into that
+        # turn's response instead of starting an independent one, producing a
+        # phantom turn whose label and content refer to different messages.
+        self._turn_lock: asyncio.Lock = asyncio.Lock()
+        # Strong references to fire-and-forget tasks (prevent GC mid-flight)
+        self._background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
         # Session state
         self._last_heartbeat_time: float = 0.0
@@ -818,7 +879,15 @@ class SummonSession:
         running tool calls (e.g. ``session_stop``) until the turn finishes.
         """
         if not self._shutdown_event.is_set():
-            logger.info("Session %s: shutdown requested", self._session_id)
+            self._shutdown_requested_at = time.monotonic()
+            has_turn = self._current_turn_task is not None and not self._current_turn_task.done()
+            pending_count = self._pending_turns.qsize()
+            logger.info(
+                "Session %s: shutdown requested (in_flight_turn=%s, pending_turns=%d)",
+                self._session_id,
+                has_turn,
+                pending_count,
+            )
             self._external_shutdown = True
             self._shutdown_event.set()
             self._abort_current_turn()
@@ -827,6 +896,11 @@ class SummonSession:
                 self._raw_event_queue.put_nowait(None)
             except asyncio.QueueFull:
                 logger.debug("Shutdown sentinel dropped (queue full); shutdown_event is set")
+        else:
+            logger.info(
+                "Session %s: duplicate shutdown request ignored (already stopping)",
+                self._session_id,
+            )
 
     def authenticate(self, user_id: str) -> None:
         """Authenticate the session for *user_id* (called by SessionManager).
@@ -996,10 +1070,15 @@ class SummonSession:
                 self._remove_session_log_handler(session_log_handler)
                 if not self._shutdown_completed:
                     try:
-                        # Don't overwrite "suspended" (set by project down)
+                        # Don't overwrite "suspended" (set by project down) or
+                        # "stopping" → "completed" (clean stop in progress)
                         current = await registry.get_session(self._session_id)
-                        if current and current.get("status") == "suspended":
+                        current_status = current.get("status") if current else None
+                        if current_status == "suspended":
                             final = "suspended"
+                            err_msg = None
+                        elif current_status == "stopping":
+                            final = "completed"
                             err_msg = None
                         else:
                             final = "errored"
@@ -1375,6 +1454,7 @@ class SummonSession:
                 permission_handler=permission_handler,
                 abort_callback=self._abort_current_turn,
                 authenticated_user_id=self._authenticated_user_id,
+                pending_turns=self._pending_turns,
             )
             self._dispatcher.register(channel_id, handle)
 
@@ -1847,7 +1927,11 @@ class SummonSession:
         else:
             profile = "agent"
         template = get_canvas_template(profile, jira_enabled=self._config.jira_enabled)
-        markdown = template.replace("{model}", self._model or "unknown").replace("{cwd}", self._cwd)
+        markdown = (
+            template.replace("{model}", self._model or "unknown")
+            .replace("{cwd}", self._cwd)
+            .replace("{session_id}", self._session_id)
+        )
 
         canvas_id = await client.canvas_create(markdown, title=f"{self._name} — Session Canvas")
         if not canvas_id:
@@ -2152,6 +2236,14 @@ class SummonSession:
             ext_slack_mcp = self._create_external_slack_mcp()
             mcp_servers["external-slack"] = ext_slack_mcp
 
+        # Intentionally replicates the operator's own Claude Code environment
+        # (personal plugins, ~/.claude/settings.json) rather than sandboxing
+        # summon sessions away from it — that's the product's intended
+        # behavior. The native PreToolUse write-gate hook (below) is the
+        # actual security boundary and wins unconditionally regardless of
+        # what any of this loads, per Anthropic's documented hook precedence
+        # (hooks run before deny/ask rules, permission mode, and allow
+        # rules) — see hack/BUGS.md bug #2.
         setting_sources = ["user"] if (is_pm or is_scribe) else ["user", "project"]
 
         # MCP health tracker — detects auth failures and notifies via inject_message
@@ -2165,8 +2257,10 @@ class SummonSession:
                 task.add_done_callback(bg_tasks.discard)
 
         from summon_claude.sessions.mcp_health import McpHealthTracker  # noqa: PLC0415
+        from summon_claude.sessions.transcript import TranscriptReconciler  # noqa: PLC0415
 
         mcp_health_tracker = McpHealthTracker(on_degraded=_on_mcp_degraded)
+        transcript_reconciler = TranscriptReconciler(self._cwd)
 
         async def _verify_subagent_return(agent_input: dict, agent_result: str) -> None:
             await verify_subagent_return(agent_input, agent_result, rt.permission_handler, router)
@@ -2174,16 +2268,15 @@ class SummonSession:
         streamer = ResponseStreamer(
             router=router,
             user_id=self._authenticated_user_id,
+            team_id=self._bot_team_id,
             show_thinking=self._config.show_thinking,
             max_inline_chars=self._config.max_inline_chars,
             on_file_change=self._on_file_change,
             on_worktree_entered=rt.permission_handler.notify_entered_worktree,
             mcp_health=mcp_health_tracker,
             bridge=rt.bridge,
-            bridge_timeout_s=(self._config.permission_timeout_s + 60)
-            if self._config.permission_timeout_s
-            else 0,
             on_subagent_return=_verify_subagent_return,
+            transcript=transcript_reconciler,
         )
 
         # Disable auto-compaction — we handle compaction via !compact
@@ -2347,8 +2440,21 @@ class SummonSession:
                 resume=self._resume,
                 system_prompt=system_prompt,
                 include_partial_messages=True,
+                # Replicates the operator's Claude Code environment by design
+                # (personal plugins, ~/.claude/settings.json env/model/proxy
+                # config) — see setting_sources comment above.
                 setting_sources=setting_sources,
+                # Force the CLI's own permission resolution to "default" —
+                # belt-and-suspenders alongside the native PreToolUse hook
+                # below, which is the layer that actually can't be bypassed
+                # by permission mode/allow rules.
+                permission_mode="default",
                 plugins=discover_installed_plugins(),
+                # Native PreToolUse write-gate hook — see hack/BUGS.md bug #2.
+                # A hook deny wins unconditionally regardless of plugin
+                # hooks, permission mode, or allow rules loaded above, per
+                # Anthropic's documented evaluation order (hooks run first).
+                hooks={"PreToolUse": rt.permission_handler.build_pretooluse_hooks()},
                 can_use_tool=rt.permission_handler.handle,
                 mcp_servers=mcp_servers,
                 model=self._model,
@@ -2356,9 +2462,9 @@ class SummonSession:
                 # ThinkingConfigEnabled(budget_tokens=N) when enable_thinking
                 # is True + budget set; adaptive remains the default.
                 thinking=(
-                    ThinkingConfigAdaptive(type="adaptive")
-                    if self._config.enable_thinking
-                    else ThinkingConfigDisabled(type="disabled")
+                    ThinkingConfigDisabled(type="disabled")
+                    if not self._config.enable_thinking or self._thinking_unsupported
+                    else ThinkingConfigAdaptive(type="adaptive")
                 ),
                 effort=self._effort,
                 disallowed_tools=list(self._compute_disallowed_tools(is_scribe)),
@@ -2426,6 +2532,9 @@ class SummonSession:
                         async with asyncio.TaskGroup() as tg:
                             tg.create_task(self._run_preprocessor(rt, claude))
                             tg.create_task(self._run_response_consumer(rt, claude, streamer))
+                        logger.info(
+                            "Session %s: session TaskGroup exited cleanly", self._session_id
+                        )
                     except ExceptionGroup as eg:
                         restart_exc = next(
                             (e for e in eg.exceptions if isinstance(e, _SessionRestartError)),
@@ -2462,28 +2571,65 @@ class SummonSession:
                     system_prompt_append = base_prompt + _COMPACT_SUMMARY_PREFIX + restart.summary
                 elif restart.recovery_mode:
                     system_prompt_append = base_prompt + _OVERFLOW_RECOVERY_PROMPT
+                if restart.disable_thinking:
+                    self._thinking_unsupported = True
                 restart_count += 1
                 if restart_count > _MAX_SESSION_RESTARTS:
                     logger.warning("Max restart count (%d) exceeded", _MAX_SESSION_RESTARTS)
                     break
                 self._pending_turns = asyncio.Queue(maxsize=_MAX_PENDING_TURNS)
+                # Re-register the handle so the dispatcher's reference points
+                # to the new queue (not the old one with the sentinel).
+                if self._dispatcher is not None and self._channel_id:
+                    self._dispatcher.update_pending_turns(self._channel_id, self._pending_turns)
                 self._context_warned_threshold = 0.0
                 self._last_context = None
                 self._claude_session_id = None
                 self._resume = None
+                if restart.retry_pending is not None:
+                    try:
+                        self._pending_turns.put_nowait(restart.retry_pending)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Session %s: could not re-enqueue turn after "
+                            "thinking-config restart — queue full",
+                            self._session_id,
+                        )
                 logger.info(
-                    "Session restarting (%d/%d, recovery_mode=%s)",
+                    "Session restarting (%d/%d, recovery_mode=%s, disable_thinking=%s)",
                     restart_count,
                     _MAX_SESSION_RESTARTS,
                     restart.recovery_mode,
+                    restart.disable_thinking,
                 )
                 continue
 
             break  # Normal exit
 
-    async def _run_preprocessor(  # noqa: PLR0912
-        self, rt: _SessionRuntime, claude: ClaudeSDKClient
-    ) -> None:
+    async def _try_pre_send(self, claude: ClaudeSDKClient, prompt: str, label: str) -> bool:
+        """Attempt to send *prompt* now via ``query()`` if no turn is in flight.
+
+        On success, ``_turn_lock`` is acquired and stays held — the eventual
+        consumer-side processing of the resulting ``_PendingTurn(pre_sent=True)``
+        is responsible for releasing it once its ``receive_response()`` cycle
+        completes. Returns False (lock left untouched) if another turn's
+        response is still being consumed; the caller should enqueue with
+        ``pre_sent=False`` and let the consumer send + hold the lock itself.
+        """
+        if self._turn_lock.locked():
+            return False
+        await self._turn_lock.acquire()
+        try:
+            await claude.query(prompt)
+            return True
+        except Exception as e:
+            logger.warning(
+                "Pre-send %s failed: %s — consumer will retry", label, redact_secrets(str(e))
+            )
+            self._turn_lock.release()
+            return False
+
+    async def _run_preprocessor(self, rt: _SessionRuntime, claude: ClaudeSDKClient) -> None:
         """Dequeue raw Slack events, preprocess, call query(), enqueue _PendingTurn.
 
         Runs concurrently with ``_run_response_consumer``. Calling ``query()``
@@ -2543,15 +2689,7 @@ class SummonSession:
                     if any(t in text_lower for t in _THINKING_TRIGGERS):
                         await rt.client.react(message_ts, "brain")
 
-                pre_sent = False
-                try:
-                    await claude.query(user_message)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning(
-                        "Pre-send query() failed: %s — consumer will retry",
-                        redact_secrets(str(e)),
-                    )
+                pre_sent = await self._try_pre_send(claude, user_message, "query()")
 
                 pending = _PendingTurn(
                     message=user_message,
@@ -2561,6 +2699,8 @@ class SummonSession:
                 )
                 await self._pending_turns.put(pending)
         finally:
+            reason = "shutdown" if self._shutdown_event.is_set() else "event loop exit"
+            logger.info("Session %s: preprocessor exiting (%s)", self._session_id, reason)
             # Always unblock consumer — even on crash
             with contextlib.suppress(Exception):
                 self._pending_turns.put_nowait(None)
@@ -2584,6 +2724,12 @@ class SummonSession:
             if pending is None:
                 return
 
+            # Drain queued turns when shutdown is in progress — don't start
+            # new work that will just hit the 15-min approval bridge timeout.
+            if self._shutdown_event.is_set():
+                self._drain_pending_turns()
+                return
+
             if pending.compact:
                 instructions = pending.message if pending.message else None
                 await self._execute_compact(
@@ -2593,6 +2739,25 @@ class SummonSession:
                 await self._execute_clear(rt, pending.clear_done, pending.clear_ok)
             else:
                 await self._handle_user_message(rt, claude, streamer, pending)
+
+    def _drain_pending_turns(self) -> None:
+        """Discard all queued turns on shutdown, cleaning up emoji state."""
+        drained = 0
+        while not self._pending_turns.empty():
+            try:
+                item = self._pending_turns.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item is None:
+                continue
+            drained += 1
+        if drained:
+            logger.info(
+                "Session %s: drained %d pending turn(s) on shutdown",
+                self._session_id,
+                drained,
+            )
+        logger.info("Session %s: response consumer exiting (shutdown)", self._session_id)
 
     async def _handle_user_message(  # noqa: PLR0912, PLR0915
         self,
@@ -2631,12 +2796,45 @@ class SummonSession:
                 await rt.client.react(pending.message_ts, "gear")
 
             await streamer.start_turn(self._total_turns, user_snippet=pending.message)
-            # If preprocessor couldn't pre-send, call query() now
+            # If preprocessor couldn't pre-send (another turn's receive_response()
+            # was still draining the shared stream), acquire the lock and send now.
+            # If it did pre-send, the lock is already held from that point.
             if not pending.pre_sent:
-                await claude.query(pending.message)
-            stream_result = await streamer.stream_with_flush(claude.receive_response())
-            if stream_result:
-                await self._finalize_turn_result(rt, streamer, stream_result)
+                await self._turn_lock.acquire()
+            try:
+                if not pending.pre_sent:
+                    if pending.content_blocks:
+                        # Multimodal content: send via AsyncIterable message envelope
+                        async def _multimodal_iter() -> AsyncIterator[dict]:  # type: ignore[type-arg]
+                            yield {
+                                "type": "user",
+                                "message": {
+                                    "role": "user",
+                                    "content": list(pending.content_blocks),
+                                },
+                            }
+
+                        await claude.query(_multimodal_iter())
+                    else:
+                        await claude.query(pending.message)
+                stream_result = await streamer.stream_with_flush(claude.receive_response())
+                if stream_result and _is_thinking_type_unsupported_error(stream_result.result):
+                    logger.warning(
+                        "Session %s: resolved model rejects adaptive thinking — "
+                        "restarting with thinking disabled and retrying turn",
+                        self._session_id,
+                    )
+                    with contextlib.suppress(Exception):
+                        await streamer.update_turn_summary(
+                            ":gear: Extended thinking isn't supported for this model — "
+                            "retrying without it..."
+                        )
+                    retry_pending = dataclasses.replace(pending, pre_sent=False)
+                    raise _SessionRestartError(disable_thinking=True, retry_pending=retry_pending)
+                if stream_result:
+                    await self._finalize_turn_result(rt, streamer, stream_result)
+            finally:
+                self._turn_lock.release()
 
             # Emoji lifecycle: gear -> white_check_mark (success)
             if pending.message_ts:
@@ -2669,6 +2867,12 @@ class SummonSession:
                     await rt.client.unreact(pending.message_ts, "gear")
                     await rt.client.react(pending.message_ts, "octagonal_sign")
                     emoji_finalized = True
+                # The turn card itself never reflected a terminal state before —
+                # only success (_finalize_turn_result) touched it.
+                with contextlib.suppress(Exception):
+                    await streamer.update_turn_summary(":octagonal_sign: Cancelled")
+                with contextlib.suppress(Exception):
+                    await streamer.clear_status()
         except asyncio.CancelledError:
             if self._current_turn_task and not self._current_turn_task.done():
                 self._current_turn_task.cancel()
@@ -2903,8 +3107,16 @@ class SummonSession:
 
     async def _shutdown(self, rt: _SessionRuntime) -> None:
         """Gracefully shut down the session."""
+        elapsed = ""
+        if self._shutdown_requested_at:
+            dt = time.monotonic() - self._shutdown_requested_at
+            elapsed = f", shutdown latency: {dt:.1f}s"
         logger.info(
-            "Session ended. Turns: %d, Total cost: $%.4f", self._total_turns, self._total_cost
+            "Session %s: _shutdown started (turns=%d, cost=$%.4f%s)",
+            self._session_id,
+            self._total_turns,
+            self._total_cost,
+            elapsed,
         )
 
         # Post change summary before disconnect (Task 6)
@@ -2937,9 +3149,8 @@ class SummonSession:
         # Update registry — don't overwrite "suspended" (set by project down)
         try:
             current = await rt.registry.get_session(self._session_id)
-            final_status = (
-                "suspended" if current and current.get("status") == "suspended" else "completed"
-            )
+            current_status = current.get("status") if current else None
+            final_status = "suspended" if current_status == "suspended" else "completed"
             await asyncio.wait_for(
                 rt.registry.update_status(
                     self._session_id,
@@ -2963,6 +3174,7 @@ class SummonSession:
             )
         except Exception as e:
             logger.warning("Failed to update registry on shutdown: %s", redact_secrets(str(e)))
+        logger.info("Session %s: _shutdown completed", self._session_id)
         # Socket Mode is now managed by BoltRouter — no per-session cleanup needed
 
     async def _post_disconnect_message(self, rt: _SessionRuntime) -> None:
@@ -3618,6 +3830,10 @@ class SummonSession:
             if clear_done:
                 clear_done.set()
             return
+        # No pre-send variant for /clear — always acquire, since a concurrent
+        # pre-sent query() from the preprocessor would otherwise be able to
+        # fold into this receive_response() drain (or vice versa).
+        await self._turn_lock.acquire()
         try:
             await self._claude.query("/clear")
             async for _ in self._claude.receive_response():
@@ -3627,6 +3843,7 @@ class SummonSession:
         except Exception:
             logger.warning("clear drain failed for session %s", self._session_id)
         finally:
+            self._turn_lock.release()
             if clear_done:
                 clear_done.set()
 
@@ -3648,6 +3865,9 @@ class SummonSession:
         ``_SessionRestartError(recovery_mode=True)`` to restart with instructions for
         the fresh agent to use ``slack_read_history`` MCP tools.
         """
+        # If pre-sent, _turn_lock is already held from that point — this call
+        # owns releasing it once the receive_response() drain below completes.
+        lock_acquired = pre_sent
         try:
             if not self._claude:
                 await rt.client.post(
@@ -3662,6 +3882,8 @@ class SummonSession:
                 compact_prompt += f"\n\nAdditional focus: {instructions}"
 
             if not pre_sent:
+                await self._turn_lock.acquire()
+                lock_acquired = True
                 await self._claude.query(compact_prompt)
 
             # Capture summary text from Claude's response
@@ -3720,14 +3942,26 @@ class SummonSession:
                 await rt.client.post(msg, thread_ts=thread_ts)
             except Exception:
                 logger.debug("Failed to post compact error", exc_info=True)
+        finally:
+            if lock_acquired:
+                self._turn_lock.release()
 
     async def _execute_effort(self, rt: _SessionRuntime, level: str, thread_ts: str | None) -> None:
-        """Execute /effort via SDK to change effort mid-session."""
+        """Execute /effort via SDK to change effort mid-session.
+
+        Called synchronously from the preprocessor (not routed through
+        _pending_turns), so it needs its own _turn_lock protection against
+        the concurrently-running consumer's in-flight receive_response().
+        """
         try:
             if self._claude:
-                await self._claude.query(f"/effort {level}")
-                async for _ in self._claude.receive_response():
-                    pass  # drain silent command response
+                await self._turn_lock.acquire()
+                try:
+                    await self._claude.query(f"/effort {level}")
+                    async for _ in self._claude.receive_response():
+                        pass  # drain silent command response
+                finally:
+                    self._turn_lock.release()
                 self._effort = level
                 await rt.client.post(
                     f":zap: Effort set to `{level}`.",
@@ -3866,13 +4100,11 @@ class SummonSession:
             compact_prompt = _COMPACT_PROMPT
             if instructions:
                 compact_prompt += f"\n\nAdditional focus: {instructions}"
-            pre_sent = False
-            if claude:
-                try:
-                    await claude.query(compact_prompt)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning("Pre-send compact prompt failed: %s", redact_secrets(str(e)))
+            pre_sent = (
+                await self._try_pre_send(claude, compact_prompt, "compact prompt")
+                if claude
+                else False
+            )
             await self._pending_turns.put(
                 _PendingTurn(
                     message=instructions,
@@ -3932,16 +4164,11 @@ class SummonSession:
             except Exception as e:
                 logger.warning("Failed to post passthrough ack: %s", redact_secrets(str(e)))
             # Pre-send: call query() and enqueue as _PendingTurn
-            pre_sent = False
-            if claude:
-                try:
-                    await claude.query(slash_message)
-                    pre_sent = True
-                except Exception as e:
-                    logger.warning(
-                        "Pre-send query() for passthrough failed: %s",
-                        redact_secrets(str(e)),
-                    )
+            pre_sent = (
+                await self._try_pre_send(claude, slash_message, "passthrough query()")
+                if claude
+                else False
+            )
             await self._pending_turns.put(_PendingTurn(message=slash_message, pre_sent=pre_sent))
             return
 
@@ -4163,7 +4390,27 @@ class SummonSession:
         """Signal the current Claude turn to abort."""
         self._abort_event.set()
         if self._current_turn_task and not self._current_turn_task.done():
+            logger.info("Session %s: cancelling in-flight turn task", self._session_id)
             self._current_turn_task.cancel()
+            if self._claude is not None:
+                # Cancelling our own task only stops us from consuming
+                # receive_response() — the CLI subprocess keeps running until
+                # this reaches it, otherwise its output keeps flowing into the
+                # SDK's shared reader stream and gets misattributed to the
+                # next turn. Fire-and-forget since this is a sync callback.
+                task = asyncio.create_task(self._interrupt_claude_best_effort())
+                self._background_tasks.add(task)
+                task.add_done_callback(self._background_tasks.discard)
+        else:
+            logger.debug("Session %s: no in-flight turn to cancel", self._session_id)
+
+    async def _interrupt_claude_best_effort(self) -> None:
+        """Best-effort interrupt of the CLI subprocess."""
+        try:
+            if self._claude is not None:
+                await self._claude.interrupt()
+        except Exception as e:
+            logger.debug("Session %s: interrupt() failed: %s", self._session_id, e)
 
     # ------------------------------------------------------------------
     # Per-session logging
@@ -4240,8 +4487,7 @@ class SummonSession:
         3. Identity verification — non-owner users are rejected.
         4. Message truncation at ``_MAX_USER_MESSAGE_CHARS``.
         5. File reference extraction via ``format_file_references``.
-        6. AskUserQuestion free-text capture via ``permission_handler``.
-        7. Command detection via ``find_commands`` (standalone and mid-message).
+        6. Command detection via ``find_commands`` (standalone and mid-message).
 
         Returns ``(full_text, thread_ts)`` when the message should be forwarded
         to Claude, or ``None`` when it has been handled/filtered internally.
@@ -4285,11 +4531,6 @@ class SummonSession:
                 full_text = f"{text}\n\n{file_context}"
 
         thread_ts: str | None = event.get("ts")
-
-        # 6: Route to permission handler's pending free-text input if waiting
-        if rt.permission_handler.has_pending_text_input():
-            await rt.permission_handler.receive_text_input(text, user_id=user_id)
-            return None
 
         # 7: Detect !cmd commands anywhere in the message
         # Fast path: skip regex scan if no command prefix present
