@@ -33,6 +33,7 @@ AGENT_CANVAS_TEMPLATE = (
 | Status | Starting... |
 | Model | {model} |
 | Directory | `{cwd}` |
+| Session ID | `{session_id}` |
 """
     + _SCHED_JOBS_SECTION
     + _TASKS_SECTION
@@ -64,6 +65,7 @@ PM_CANVAS_TEMPLATE = (
 | Status | Starting... |
 | Model | {model} |
 | Directory | `{cwd}` |
+| Session ID | `{session_id}` |
 """
     + _SCHED_JOBS_SECTION
     + _WORK_ITEMS_SECTION
@@ -94,6 +96,7 @@ GLOBAL_PM_CANVAS_TEMPLATE = (
 |-------|-------|
 | Status | Starting... |
 | Model | {model} |
+| Session ID | `{session_id}` |
 """
     + _SCHED_JOBS_SECTION
     + _TASKS_SECTION
@@ -121,6 +124,7 @@ SCRIBE_CANVAS_TEMPLATE = (
 | Status | Starting... |
 | Model | {model} |
 | Directory | `{cwd}` |
+| Session ID | `{session_id}` |
 """
     + _SCHED_JOBS_SECTION
     + _TASKS_SECTION

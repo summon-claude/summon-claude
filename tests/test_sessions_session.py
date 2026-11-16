@@ -10,7 +10,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from claude_agent_sdk import AssistantMessage, TextBlock
+from claude_agent_sdk import AssistantMessage, ResultMessage, TextBlock
 from conftest import make_test_config
 
 from summon_claude.config import SummonConfig
@@ -27,11 +27,13 @@ from summon_claude.sessions.registry import (
     MAX_SPAWN_CHILDREN_PM,
     MAX_SPAWN_DEPTH,
 )
+from summon_claude.sessions.response import StreamResult
 from summon_claude.sessions.session import (
     SessionOptions,
     SummonSession,
     _format_file_references,
     _format_topic,
+    _is_thinking_type_unsupported_error,
     _PendingTurn,
     _SessionRestartError,
     _SessionRuntime,
@@ -113,10 +115,15 @@ def make_rt(
     """Create a minimal _SessionRuntime with mocked client."""
     if client is None:
         client = make_mock_client(channel_id)
+    permission_handler = AsyncMock()
+    # build_pretooluse_hooks() is synchronous on the real PermissionHandler —
+    # override the AsyncMock's auto-propagated async child so ClaudeAgentOptions
+    # construction gets a plain list, not an unawaited coroutine.
+    permission_handler.build_pretooluse_hooks = MagicMock(return_value=[])
     return _SessionRuntime(
         registry=registry,
         client=client,
-        permission_handler=AsyncMock(),
+        permission_handler=permission_handler,
         bridge=ApprovalBridge(),
     )
 
@@ -1136,12 +1143,7 @@ class TestProcessIncomingEvent:
 
     def _make_rt(self, permission_handler=None):
         """Build a minimal mock _SessionRuntime."""
-        if permission_handler is None:
-            mock_permission_handler = AsyncMock()
-            mock_permission_handler.has_pending_text_input = MagicMock(return_value=False)
-            mock_permission_handler.receive_text_input = AsyncMock()
-        else:
-            mock_permission_handler = permission_handler
+        mock_permission_handler = AsyncMock() if permission_handler is None else permission_handler
         return _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -1265,21 +1267,6 @@ class TestProcessIncomingEvent:
         text, _ = result
         assert "report.pdf" in text
         assert "See attached" in text
-
-    async def test_pending_text_input_consumed(self):
-        """When permission handler is waiting for free-text, message is consumed."""
-        session = self._make_session()
-
-        mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=True)
-        mock_ph.receive_text_input = AsyncMock()
-        rt = self._make_rt(permission_handler=mock_ph)
-
-        event = {"user": "U001", "text": "My free-text answer", "ts": "1"}
-        result = await session._process_incoming_event(event, rt)
-
-        assert result is None
-        mock_ph.receive_text_input.assert_awaited_once_with("My free-text answer", user_id="U001")
 
     async def test_command_prefix_dispatched(self):
         """Messages with ! prefix are dispatched as commands and return None."""
@@ -1474,12 +1461,7 @@ class TestIdentityVerification:
     """Security tests: non-owner messages are rejected at the centralized gate."""
 
     def _make_rt(self, permission_handler=None):
-        if permission_handler is None:
-            mock_ph = AsyncMock()
-            mock_ph.has_pending_text_input = MagicMock(return_value=False)
-            mock_ph.receive_text_input = AsyncMock()
-        else:
-            mock_ph = permission_handler
+        mock_ph = AsyncMock() if permission_handler is None else permission_handler
         return _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -1516,8 +1498,6 @@ class TestIdentityVerification:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=True)
-        mock_ph.receive_text_input = AsyncMock()
         rt = self._make_rt(permission_handler=mock_ph)
 
         event = {"user": "U_INTRUDER", "text": "my answer", "ts": "1"}
@@ -1586,6 +1566,454 @@ class TestPendingTurn:
         pt = _PendingTurn(message="hello")
         with pytest.raises(FrozenInstanceError):
             pt.message = "other"  # type: ignore[misc]
+
+    async def test_content_blocks_multimodal_envelope(self):
+        """content_blocks produces the correct multimodal AsyncIterator envelope."""
+        from summon_claude.sessions.session import _PendingTurn
+
+        image_block = {
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/png", "data": "abc"},
+        }
+        text_block = {"type": "text", "text": "what is this?"}
+        pending = _PendingTurn(
+            message="what is this?",
+            pre_sent=False,
+            content_blocks=(image_block, text_block),
+        )
+
+        async def _multimodal_iter():
+            yield {
+                "type": "user",
+                "message": {"role": "user", "content": list(pending.content_blocks)},
+            }
+
+        items = [item async for item in _multimodal_iter()]
+        assert len(items) == 1
+        envelope = items[0]
+        assert envelope["type"] == "user"
+        assert envelope["message"]["role"] == "user"
+        assert envelope["message"]["content"] == [image_block, text_block]
+
+
+class TestTryPreSend:
+    """Tests for _try_pre_send() — the shared pre-send-with-lock helper (bug #4).
+
+    receive_response() has no correlation to which query() call triggered it —
+    it just drains the shared message stream until the next ResultMessage. A
+    query() sent while a prior turn's receive_response() is still in flight
+    can get folded into that turn's response instead of starting an
+    independent one. _turn_lock prevents a second query() from ever being
+    sent while an earlier one's response hasn't been fully consumed yet.
+    """
+
+    async def test_succeeds_and_holds_lock_when_unlocked(self):
+        session = make_session()
+        claude = AsyncMock()
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is True
+        claude.query.assert_awaited_once_with("hello")
+        assert session._turn_lock.locked()
+
+    async def test_returns_false_without_sending_when_locked(self):
+        session = make_session()
+        claude = AsyncMock()
+        await session._turn_lock.acquire()  # simulate an in-flight turn
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is False
+        claude.query.assert_not_awaited()
+
+    async def test_releases_lock_and_returns_false_on_query_failure(self):
+        session = make_session()
+        claude = AsyncMock()
+        claude.query = AsyncMock(side_effect=RuntimeError("disconnected"))
+
+        result = await session._try_pre_send(claude, "hello", "query()")
+
+        assert result is False
+        assert not session._turn_lock.locked()
+
+
+class TestTurnLockSerialization:
+    """Tests for _turn_lock protecting _do_turn's query()/receive_response() pairing (bug #4)."""
+
+    def _make_rt(self):
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        return rt
+
+    def _make_streamer(self, stream_result=None):
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = AsyncMock(return_value=stream_result)
+        return streamer
+
+    async def test_pre_sent_false_acquires_sends_and_releases(self):
+        """When pre_sent=False, _do_turn acquires the lock, sends, and releases when done."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        claude.query.assert_awaited_once_with("hello")
+        assert not session._turn_lock.locked()
+
+    async def test_pre_sent_true_does_not_resend_and_releases_lock(self):
+        """When pre_sent=True, the lock is already held by the pre-sender — _do_turn
+        must not call query() again, and must release the lock it inherited."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        pending = _PendingTurn(message="hello", pre_sent=True)
+
+        await session._turn_lock.acquire()  # simulate the pre-sender's acquire
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        claude.query.assert_not_awaited()
+        assert not session._turn_lock.locked()
+
+    async def test_lock_released_even_when_stream_raises(self):
+        """A failure inside stream_with_flush must still release the lock."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        streamer = self._make_streamer()
+        streamer.stream_with_flush = AsyncMock(side_effect=RuntimeError("boom"))
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)
+
+        assert not session._turn_lock.locked()
+
+    async def test_second_message_cannot_presend_while_first_turn_in_flight(self):
+        """End-to-end: a message arriving while a turn is mid-flight must not be
+        able to pre-send — it gets enqueued with pre_sent=False instead, closing
+        the exact race that caused bug #4's phantom turn (a query() sent while
+        an earlier turn's receive_response() was still draining the shared
+        stream, getting folded into that turn's response)."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+
+        turn_started = asyncio.Event()
+        release_turn = asyncio.Event()
+
+        async def slow_stream_with_flush(*_a, **_kw):
+            turn_started.set()
+            await release_turn.wait()
+
+        streamer = self._make_streamer()
+        streamer.stream_with_flush = slow_stream_with_flush
+
+        pending_a = _PendingTurn(message="first", pre_sent=False)
+        turn_a_task = asyncio.create_task(
+            session._handle_user_message(rt, claude, streamer, pending_a)
+        )
+        await asyncio.wait_for(turn_started.wait(), timeout=1.0)
+
+        # Second message arrives while turn A is still mid-flight
+        pre_sent_b = await session._try_pre_send(claude, "second", "query()")
+        assert pre_sent_b is False  # must not fold into turn A's response
+
+        release_turn.set()
+        await turn_a_task
+        assert not session._turn_lock.locked()
+
+
+def _make_result_message(
+    *, is_error: bool = False, errors: list[str] | None = None, result: str | None = None
+) -> ResultMessage:
+    return ResultMessage(
+        subtype="success",
+        duration_ms=1,
+        duration_api_ms=1,
+        is_error=is_error,
+        num_turns=1,
+        session_id="sid",
+        errors=errors,
+        result=result,
+    )
+
+
+_THINKING_TYPE_ERROR_TEXT = (
+    'API Error: 400 {"type":"invalid_request_error","message":"'
+    '\\"thinking.type.enabled\\" is not supported for this model. '
+    'Use \\"thinking.type.adaptive\\" and \\"output_config.effort\\" '
+    'to control thinking behavior."}'
+)
+
+
+class TestThinkingTypeUnsupportedDetection:
+    """Unit tests for _is_thinking_type_unsupported_error (bug #9)."""
+
+    def test_detects_marker_in_errors(self):
+        result = _make_result_message(is_error=True, errors=[_THINKING_TYPE_ERROR_TEXT])
+        assert _is_thinking_type_unsupported_error(result) is True
+
+    def test_detects_marker_in_result_text(self):
+        """Some CLI versions may surface the error via `result` instead of `errors`."""
+        result = _make_result_message(is_error=True, result=_THINKING_TYPE_ERROR_TEXT)
+        assert _is_thinking_type_unsupported_error(result) is True
+
+    def test_ignores_successful_result(self):
+        result = _make_result_message(is_error=False, result="42")
+        assert _is_thinking_type_unsupported_error(result) is False
+
+    def test_ignores_unrelated_error(self):
+        result = _make_result_message(is_error=True, errors=["some other API error"])
+        assert _is_thinking_type_unsupported_error(result) is False
+
+    def test_ignores_error_with_no_errors_or_result(self):
+        result = _make_result_message(is_error=True)
+        assert _is_thinking_type_unsupported_error(result) is False
+
+
+class TestThinkingUnsupportedRetry:
+    """Tests for the bug #9 graceful-retry path — a turn must never surface the
+    raw Sonnet-5 adaptive-thinking mistranslation error as the assistant's response.
+    """
+
+    def _make_rt(self):
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        return rt
+
+    def _make_streamer(self, stream_result=None):
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = AsyncMock(return_value=stream_result)
+        streamer.update_turn_summary = AsyncMock()
+        return streamer
+
+    async def test_thinking_unsupported_error_raises_restart_with_retry(self):
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        result = _make_result_message(is_error=True, errors=[_THINKING_TYPE_ERROR_TEXT])
+        streamer = self._make_streamer(StreamResult(result=result, model="claude-sonnet-5"))
+        pending = _PendingTurn(message="hello", pre_sent=False, message_ts="123.456")
+
+        with pytest.raises(_SessionRestartError) as exc_info:
+            await session._handle_user_message(rt, claude, streamer, pending)
+
+        exc = exc_info.value
+        assert exc.disable_thinking is True
+        assert exc.retry_pending is not None
+        assert exc.retry_pending.message == "hello"
+        assert exc.retry_pending.message_ts == "123.456"
+        assert exc.retry_pending.pre_sent is False
+        assert not session._turn_lock.locked()  # lock released despite the raise
+        streamer.update_turn_summary.assert_awaited_once()
+
+    async def test_normal_result_does_not_trigger_restart(self):
+        """A successful turn must not be mistaken for the thinking-unsupported case."""
+        session = make_session()
+        rt = self._make_rt()
+        claude = AsyncMock()
+        result = _make_result_message(is_error=False, result="42")
+        streamer = self._make_streamer(StreamResult(result=result, model="claude-sonnet-5"))
+        pending = _PendingTurn(message="hello", pre_sent=False)
+
+        await session._handle_user_message(rt, claude, streamer, pending)  # must not raise
+
+        assert not session._turn_lock.locked()
+
+    async def test_restart_loop_sets_thinking_unsupported_and_reenqueues(self, registry):
+        """End-to-end: _run_session_tasks sets _thinking_unsupported and re-delivers
+        the failed message on the fresh queue after the restart."""
+        consumer_call = 0
+        retry_pending = _PendingTurn(message="original message", pre_sent=False)
+
+        class _FakeSDKClient:
+            def __init__(self, options):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_):
+                pass
+
+            async def get_server_info(self):
+                return None
+
+        async def fake_consumer(_rt, _claude, _streamer):
+            nonlocal consumer_call
+            consumer_call += 1
+            if consumer_call == 1:
+                raise _SessionRestartError(disable_thinking=True, retry_pending=retry_pending)
+            raise RuntimeError("stop-second-run")
+
+        async def fake_preprocessor(_rt, _claude):
+            await asyncio.sleep(999)
+
+        session = make_session()
+        assert session._thinking_unsupported is False
+        rt = make_rt(registry)
+        router = AsyncMock()
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
+            patch.object(session, "_run_preprocessor", fake_preprocessor),
+            patch.object(session, "_run_response_consumer", fake_consumer),
+            contextlib.suppress(RuntimeError),
+        ):
+            await session._run_session_tasks(rt, router)
+
+        assert session._thinking_unsupported is True
+        requeued = session._pending_turns.get_nowait()
+        assert requeued is retry_pending
+
+    async def test_thinking_disabled_once_unsupported_flag_set(self, registry):
+        """Once _thinking_unsupported is set, ClaudeAgentOptions must request
+        ThinkingConfigDisabled even though enable_thinking defaults to True."""
+        from claude_agent_sdk import ThinkingConfigDisabled
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["thinking"] = options.thinking
+            raise _CaptureError("captured")
+
+        session = make_session()
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+        session._thinking_unsupported = True
+        rt = make_rt(registry)
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        assert captured["thinking"] == ThinkingConfigDisabled(type="disabled")
+
+
+class TestAbortCurrentTurnInterrupt:
+    """Tests for _abort_current_turn()'s interrupt() call (bug #5).
+
+    Cancelling our own asyncio task only stops us from consuming
+    receive_response() — the CLI subprocess itself keeps running until a real
+    interrupt request reaches it, otherwise its output keeps flowing into the
+    shared reader stream and gets misattributed to the next turn.
+    """
+
+    async def _await_background_tasks(self, session):
+        await asyncio.sleep(0)
+        for task in list(session._background_tasks):
+            await task
+
+    async def test_interrupt_called_when_turn_in_flight(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()
+        await self._await_background_tasks(session)
+
+        session._claude.interrupt.assert_awaited_once()
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+    async def test_interrupt_not_called_when_no_turn_in_flight(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._current_turn_task = None
+
+        session._abort_current_turn()
+        await self._await_background_tasks(session)
+
+        session._claude.interrupt.assert_not_called()
+
+    async def test_interrupt_failure_is_swallowed(self):
+        session = make_session()
+        session._claude = AsyncMock()
+        session._claude.interrupt = AsyncMock(side_effect=RuntimeError("subprocess gone"))
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()  # must not raise
+        await self._await_background_tasks(session)  # must not raise
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+    async def test_no_interrupt_task_when_claude_is_none(self):
+        session = make_session()
+        session._claude = None
+        session._current_turn_task = asyncio.ensure_future(asyncio.sleep(999))
+
+        session._abort_current_turn()  # must not raise
+        await asyncio.sleep(0)
+        assert len(session._background_tasks) == 0
+
+        session._current_turn_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await session._current_turn_task
+
+
+class TestAbortUpdatesTurnCard:
+    """Tests for the turn card reflecting a cancelled state on abort (bug #5).
+
+    Before this fix, only _finalize_turn_result (success path) ever touched
+    the turn's starter card — an aborted turn left it frozen on "Processing..."
+    forever, with no octagonal-sign/"Cancelled" text anywhere on the card
+    itself, and the native thread status indicator kept cycling.
+    """
+
+    async def test_abort_updates_turn_summary_and_clears_status(self):
+        session = make_session()
+        rt = MagicMock(spec=_SessionRuntime)
+        rt.client = AsyncMock()
+        rt.registry = AsyncMock()
+        claude = AsyncMock()
+
+        turn_started = asyncio.Event()
+        hang_event = asyncio.Event()
+
+        async def hanging_stream_with_flush(*_a, **_kw):
+            turn_started.set()
+            await hang_event.wait()
+
+        streamer = AsyncMock()
+        streamer.start_turn = AsyncMock()
+        streamer.stream_with_flush = hanging_stream_with_flush
+
+        pending = _PendingTurn(message="hello", message_ts="1234.5", pre_sent=False)
+
+        async def trigger_abort():
+            await turn_started.wait()
+            session._abort_event.set()
+
+        await asyncio.gather(
+            session._handle_user_message(rt, claude, streamer, pending),
+            trigger_abort(),
+        )
+
+        streamer.update_turn_summary.assert_awaited_once_with(":octagonal_sign: Cancelled")
+        streamer.clear_status.assert_awaited_once()
+        rt.client.react.assert_any_call("1234.5", "octagonal_sign")
+        assert not session._turn_lock.locked()
 
 
 class TestClearContext:
@@ -2044,10 +2472,6 @@ class TestMCPRegistration:
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
             patch(
-                "summon_claude.sessions.session.discover_installed_plugins",
-                return_value=[],
-            ),
-            patch(
                 "summon_claude.sessions.session.discover_plugin_skills",
                 return_value=[],
             ),
@@ -2204,6 +2628,119 @@ class TestWorktreeDisallowedTools:
                 f"Triage session name '{name}' missing from PM system prompt. "
                 f"Update _PM_SYSTEM_PROMPT_APPEND to match _TRIAGE_SESSION_NAMES."
             )
+
+
+class TestPermissionModeForced:
+    """Guard: permission_mode must always be forced to "default" on ClaudeAgentOptions.
+
+    Belt-and-suspenders alongside the native PreToolUse hook
+    (TestWriteGateHookWiring): an unset permission_mode would otherwise
+    resolve tool approval internally and skip can_use_tool entirely, silently
+    defeating the write-gate/containment checks in permissions.py for every
+    autonomous, headless session.
+    """
+
+    async def _capture_permission_mode(self, *, pm_profile: bool = False) -> str | None:
+        session = make_session(pm_profile=pm_profile)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["permission_mode"] = options.permission_mode
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured["permission_mode"]
+
+    async def test_regular_session_forces_default_permission_mode(self):
+        assert await self._capture_permission_mode(pm_profile=False) == "default"
+
+    async def test_pm_session_forces_default_permission_mode(self):
+        """The forced permission_mode applies to PM sessions too, not just regular ones."""
+        assert await self._capture_permission_mode(pm_profile=True) == "default"
+
+
+class TestWriteGateHookWiring:
+    """Guard: setting_sources/plugins replicate the operator's Claude Code
+    environment by design, and the native PreToolUse write-gate hook is wired
+    into ClaudeAgentOptions regardless.
+
+    Per hack/BUGS.md bug #2: replicating the operator's environment (personal
+    plugins, ~/.claude/settings.json) is intended product behavior, not a
+    liability — the native hook alone is the security boundary, since a hook
+    deny wins unconditionally regardless of what plugins/settings/allow-rules
+    load, per Anthropic's documented evaluation order (hooks run first). See
+    hack/research/roadmap-phase-1-slack-interactivity-1783450456-canusetool-
+    bypass-sdk-config.md for the full investigation.
+    """
+
+    async def _capture_options(self, *, pm_profile: bool = False):
+        session = make_session(pm_profile=pm_profile)
+        session._authenticated_user_id = "U_TEST"
+        session._shutdown_event.set()
+
+        mock_registry = AsyncMock()
+        rt = make_rt(mock_registry)
+        sentinel_hooks = [MagicMock()]
+        rt.permission_handler.build_pretooluse_hooks = MagicMock(return_value=sentinel_hooks)
+
+        captured = {}
+
+        class _CaptureError(Exception):
+            pass
+
+        def spy_init(self_sdk, options):
+            captured["options"] = options
+            raise _CaptureError("captured")
+
+        with (
+            patch("summon_claude.sessions.session.ClaudeSDKClient.__init__", spy_init),
+            patch(
+                "summon_claude.sessions.session.discover_installed_plugins",
+                return_value=[{"type": "local", "path": "/fake/plugin"}],
+            ) as mock_discover,
+            patch("summon_claude.sessions.session.discover_plugin_skills", return_value=[]),
+            pytest.raises(_CaptureError),
+        ):
+            await session._run_session_tasks(rt, AsyncMock())
+
+        return captured["options"], sentinel_hooks, mock_discover
+
+    async def test_setting_sources_user_project_for_regular_session(self):
+        options, _, _ = await self._capture_options(pm_profile=False)
+        assert options.setting_sources == ["user", "project"]
+
+    async def test_setting_sources_user_only_for_pm_session(self):
+        """PM/scribe sessions get ["user"] only, not ["user", "project"]."""
+        options, _, _ = await self._capture_options(pm_profile=True)
+        assert options.setting_sources == ["user"]
+
+    async def test_plugins_loaded_from_discover_installed_plugins(self):
+        """options.plugins is populated from discover_installed_plugins() —
+        replicating the operator's personal plugins is intended behavior."""
+        options, _, mock_discover = await self._capture_options(pm_profile=False)
+        mock_discover.assert_called_once()
+        assert options.plugins == [{"type": "local", "path": "/fake/plugin"}]
+
+    async def test_pretooluse_hook_wired_from_permission_handler(self):
+        """The hooks= dict is populated from PermissionHandler.build_pretooluse_hooks()."""
+        options, sentinel_hooks, _ = await self._capture_options(pm_profile=False)
+        assert options.hooks == {"PreToolUse": sentinel_hooks}
 
 
 class TestHeadlessBoilerplate:
@@ -2399,8 +2936,8 @@ class TestSystemPromptAppendRestart:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2448,8 +2985,8 @@ class TestSystemPromptAppendRestart:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2501,8 +3038,8 @@ class TestSystemPromptAppendRestart:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch(
                 "summon_claude.sessions.session.discover_plugin_skills",
                 return_value=[],
@@ -2558,8 +3095,8 @@ class TestSystemPromptAppendRestart:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -2925,7 +3462,6 @@ class TestHandleSpawn:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=False)
         rt = _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -3234,8 +3770,8 @@ class TestAutoCompactionDisabled:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
         ):
             try:
                 await session._run_session_tasks(rt, router)
@@ -3458,10 +3994,14 @@ class TestExecuteCompact:
         rt = make_rt(registry)
         session._claude = self._make_mock_claude_with_summary("summary")
 
+        # pre_sent=True means the pre-sender already holds _turn_lock —
+        # _execute_compact is responsible for releasing it, not acquiring it.
+        await session._turn_lock.acquire()
         with pytest.raises(_SessionRestartError):
             await session._execute_compact(rt, instructions=None, thread_ts=None, pre_sent=True)
 
         session._claude.query.assert_not_awaited()
+        assert not session._turn_lock.locked()
 
     async def test_summary_truncated_when_too_long(self, registry):
         """Summaries exceeding _MAX_COMPACT_SUMMARY_CHARS are truncated."""
@@ -3527,8 +4067,8 @@ class TestSessionRestartLoop:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3576,8 +4116,8 @@ class TestSessionRestartLoop:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3632,8 +4172,8 @@ class TestSessionRestartLoop:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             contextlib.suppress(RuntimeError),
@@ -3680,8 +4220,8 @@ class TestSessionRestartLoop:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
         ):
@@ -3783,7 +4323,6 @@ class TestCompactMidMessageBlocked:
         session = make_session()
         session._authenticated_user_id = "U_OWNER"
         mock_ph = AsyncMock()
-        mock_ph.has_pending_text_input = MagicMock(return_value=False)
         rt = _SessionRuntime(
             registry=AsyncMock(),
             client=make_mock_client("C_TEST"),
@@ -5215,8 +5754,8 @@ class TestServerInfoModelCacheWiring:
 
         with (
             patch("summon_claude.sessions.session.ClaudeSDKClient", _FakeSDKClient),
-            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch("summon_claude.sessions.session.discover_installed_plugins", return_value=[]),
+            patch("summon_claude.sessions.session.create_summon_mcp_server", return_value={}),
             patch.object(session, "_run_preprocessor", fake_preprocessor),
             patch.object(session, "_run_response_consumer", fake_consumer),
             patch("summon_claude.cli.model_cache.cache_sdk_models") as mock_cache,
